@@ -44,7 +44,7 @@ import java.util.stream.Collectors;
 
 
 /*
-Given a number of types, compose one annotated API "file" per package, in the style of the JavaUtil, JavaLang classes.
+Given a number of types, compose one analysis hints "file" per package, in the style of the JavaUtil, JavaLang classes.
 The file is generated in the form of a TypeInfo object, which can be output.
 
 The general structure is
@@ -73,17 +73,17 @@ public class NameOfPackageWithoutDots {
 - Only public methods, types and fields will be shown.
 
  */
-public class Composer {
-    private static final Logger LOGGER = LoggerFactory.getLogger(Composer.class);
+public class AnalysisHintsComposer {
+    private static final Logger LOGGER = LoggerFactory.getLogger(AnalysisHintsComposer.class);
     private final Runtime runtime;
     private final JavaInspector javaInspector;
     private final Function<SourceSet, String> destinationPackage;
     private final Predicate<Info> predicate;
     private final Map<Element, Element> translateFromDollarToReal = new HashMap<>();
 
-    public Composer(JavaInspector javaInspector,
-                    Function<SourceSet, String> destinationPackage,
-                    Predicate<Info> predicate) {
+    public AnalysisHintsComposer(JavaInspector javaInspector,
+                                 Function<SourceSet, String> destinationPackage,
+                                 Predicate<Info> predicate) {
         this.runtime = javaInspector.runtime();
         this.javaInspector = javaInspector;
         this.destinationPackage = destinationPackage;

@@ -15,20 +15,16 @@
 package org.e2immu.analyzer.aapi.parser;
 
 import org.e2immu.analyzer.modification.common.defaults.AnnotationProvider;
-import org.e2immu.analyzer.modification.prepwork.io.LoadAnalyzedPackageFiles;
+import org.e2immu.analyzer.modification.prepwork.io.LoadAnalysisResults;
 import org.e2immu.language.cst.api.element.*;
 import org.e2immu.language.cst.api.expression.AnnotationExpression;
 import org.e2immu.language.cst.api.expression.StringConstant;
 import org.e2immu.language.cst.api.info.*;
-import org.e2immu.language.cst.api.runtime.Runtime;
 import org.e2immu.language.cst.api.type.ParameterizedType;
-import org.e2immu.language.cst.api.info.TypeParameter;
 import org.e2immu.language.inspection.api.integration.JavaInspector;
+import org.e2immu.language.inspection.api.integration.JavaInspectorFactory;
 import org.e2immu.language.inspection.api.parser.ParseResult;
-import org.e2immu.language.inspection.api.resource.InputConfiguration;
-import org.e2immu.language.inspection.api.resource.SourceFile;
-import org.e2immu.language.inspection.integration.JavaInspectorImpl;
-import org.e2immu.language.inspection.resource.InputConfigurationImpl;
+import org.e2immu.language.inspection.api.resource.CompiledTypesManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -37,63 +33,50 @@ import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-public class AnnotatedApiParser implements AnnotationProvider {
-    private static final Logger LOGGER = LoggerFactory.getLogger(AnnotatedApiParser.class);
+/*
+Read the analysis hints of a library/JDK.
+ */
+public class AnalysisHintsParser implements AnnotationProvider {
+    private static final Logger LOGGER = LoggerFactory.getLogger(AnalysisHintsParser.class);
 
     public record Data(List<AnnotationExpression> annotations,
                        List<Comment> comments,
                        boolean explainAnnotationInComment,
-                       Integer frequency, Integer overrideHasFrequency) {
+                       Integer frequency,
+                       Integer overrideHasFrequency) {
     }
 
     private final List<TypeInfo> typesParsed = new ArrayList<>();
     private final Map<Element, Data> infoMap = new LinkedHashMap<>();
-    private final JavaInspector javaInspector;
+    private final List<String> analysisResultDirectories;
+    private final JavaInspectorFactory javaInspectorFactory;
     private int warnings;
     private int annotatedTypes;
     private int annotations;
 
-    public AnnotatedApiParser() {
-        javaInspector = new JavaInspectorImpl();
+    public AnalysisHintsParser(JavaInspectorFactory javaInspectorFactory, List<String> analysisResultDirectories) {
+        this.javaInspectorFactory = javaInspectorFactory;
+        this.analysisResultDirectories = analysisResultDirectories;
     }
 
-    public void initialize(InputConfiguration inputConfiguration, AnnotatedAPIConfiguration annotatedAPIConfiguration) throws IOException {
-        javaInspector.initialize(inputConfiguration);
+    public void go(AnalysisHints analysisHints) throws IOException {
+        // construct a java inspector
+        SourceSet sourceSet = analysisHints.toSourceSet(javaInspectorFactory.dependencies());
+        JavaInspector javaInspector = javaInspectorFactory.withSources(sourceSet);
 
-        // why the following? new annotated source types will be created from the classpath (e.g. java.security.XYZ);
-        // they have the sourceSet of the jdk module. These will later be stored in a compiled types manager as SOURCES
-        // and then the class path parts will need to act as source source sets; they need dependencies computed;
-        // if only formally.
-        inputConfiguration.classPathParts().forEach(SourceSet::computePriorityDependencies);
+        // parse the analysis hint files
+        ParseResult parseResult = javaInspector.parse(new JavaInspector.ParseOptions.Builder().build()).parseResult();
 
-        new LoadAnalyzedPackageFiles(javaInspector().mainSources())
-                .go(javaInspector, annotatedAPIConfiguration.analyzedAnnotatedApiDirs());
-        javaInspector.sourceFiles().forEach(sf -> {
-            LOGGER.info("Loading {}", sf.uri());
-            load(sf);
-        });
+        // load the analysis results on all (relevant/loaded) library and JDK types
+        new LoadAnalysisResults(javaInspector.runtime(), javaInspector.mainSources()).go(analysisResultDirectories);
+
+        // then process the hint files
+        parseResult.primaryTypes().forEach(pt -> process(javaInspector.compiledTypesManager(), pt));
         LOGGER.info("Finished parsing, annotated {} types, counted {} annotations, issued {} warning(s)",
                 annotatedTypes, annotations, warnings);
     }
 
-    public void initialize(String alternativeJreOrNull,
-                           List<String> addToClasspath,
-                           List<String> sourceDirs,
-                           List<String> packageList) throws IOException {
-        InputConfigurationImpl.Builder builder = new InputConfigurationImpl.Builder()
-                .setAlternativeJREDirectory(alternativeJreOrNull)
-                .addClassPath(InputConfigurationImpl.DEFAULT_MODULES);
-        sourceDirs.forEach(builder::addSources);
-        packageList.forEach(builder::addRestrictSourceToPackages);
-        addToClasspath.forEach(builder::addClassPath);
-        InputConfiguration inputConfiguration = builder.build();
-        initialize(inputConfiguration, new AnnotatedAPIConfigurationImpl.Builder().build());
-    }
-
-    private void load(SourceFile sourceFile) {
-        ParseResult parseResult = javaInspector.parse(sourceFile.uri(), sourceFile.sourceSet(),
-                JavaInspectorImpl.FAIL_FAST).parseResult();
-        TypeInfo typeInfo = parseResult.firstType();
+    private void process(CompiledTypesManager compiledTypesManager, TypeInfo typeInfo) {
         typesParsed.add(typeInfo);
         FieldInfo packageName = typeInfo.getFieldByName("PACKAGE_NAME", false);
         if (packageName == null) {
@@ -108,14 +91,14 @@ public class AnnotatedApiParser implements AnnotationProvider {
             return;
         }
         LOGGER.debug("Starting AAPI inspection of {}, in API package {}", typeInfo, apiPackage);
-        typeInfo.subTypes().forEach(st -> inspect(apiPackage, st));
+        typeInfo.subTypes().forEach(st -> inspect(compiledTypesManager, apiPackage, st));
     }
 
-    private void inspect(String apiPackage, TypeInfo typeInfo) {
+    private void inspect(CompiledTypesManager compiledTypesManager, String apiPackage, TypeInfo typeInfo) {
         if (typeInfo.simpleName().endsWith("$")) {
             String simpleNameWithoutDollar = typeInfo.simpleName().substring(0, typeInfo.simpleName().length() - 1);
             String fqn = apiPackage + "." + simpleNameWithoutDollar;
-            TypeInfo targetType = javaInspector.compiledTypesManager().getOrLoad(fqn, typeInfo.compilationUnit().sourceSet());
+            TypeInfo targetType = compiledTypesManager.getOrLoad(fqn, typeInfo.compilationUnit().sourceSet());
             if (targetType != null) {
                 annotatedTypes++;
                 transferAnnotations(typeInfo, targetType);
@@ -297,11 +280,6 @@ public class AnnotatedApiParser implements AnnotationProvider {
         return (pt1.typeParameter() == null) == (pt2.typeParameter() == null);
     }
 
-    // for testing
-    public Runtime runtime() {
-        return javaInspector.runtime();
-    }
-
     @Override
     public List<AnnotationExpression> annotations(Element element) {
         Data data = infoMap.get(element);
@@ -319,10 +297,6 @@ public class AnnotatedApiParser implements AnnotationProvider {
 
     public Set<Element> infos() {
         return infoMap.keySet();
-    }
-
-    public JavaInspector javaInspector() {
-        return javaInspector;
     }
 
     public List<TypeInfo> typesParsed() {

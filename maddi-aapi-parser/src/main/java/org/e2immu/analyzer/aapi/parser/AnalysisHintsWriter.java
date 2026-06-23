@@ -31,15 +31,15 @@ import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-public class WriteDecoratedAAPI {
-    private static final Logger LOGGER = LoggerFactory.getLogger(WriteDecoratedAAPI.class);
+public class AnalysisHintsWriter {
+    private static final Logger LOGGER = LoggerFactory.getLogger(AnalysisHintsWriter.class);
     private final JavaInspector javaInspector;
-    private final Function<Element, AnnotatedApiParser.Data> dataProvider;
+    private final Function<Element, AnalysisHintsParser.Data> dataProvider;
     private final Function<Element, ShallowAnalyzer.InfoData> infoDataProvider;
 
-    public WriteDecoratedAAPI(JavaInspector javaInspector,
-                              Function<Element, AnnotatedApiParser.Data> dataProvider,
-                              Function<Element, ShallowAnalyzer.InfoData> infoDataProvider) {
+    public AnalysisHintsWriter(JavaInspector javaInspector,
+                               Function<Element, AnalysisHintsParser.Data> dataProvider,
+                               Function<Element, ShallowAnalyzer.InfoData> infoDataProvider) {
         this.javaInspector = javaInspector;
         this.dataProvider = dataProvider;
         this.infoDataProvider = infoDataProvider;
@@ -63,15 +63,15 @@ public class WriteDecoratedAAPI {
 
     private void write(File directory, String[] packageParts, List<TypeInfo> list, String destinationPackage) throws IOException {
         if (list.isEmpty()) return;
-        String compressedPackages = Arrays.stream(packageParts).map(WriteDecoratedAAPI::capitalize)
+        String compressedPackages = Arrays.stream(packageParts).map(AnalysisHintsWriter::capitalize)
                 .collect(Collectors.joining());
         File outputFile = new File(directory, compressedPackages + ".json");
         LOGGER.info("Writing {} type(s) to {}", list.size(), outputFile.getAbsolutePath());
-        Composer composer = new Composer(javaInspector, set -> destinationPackage, w -> true);
-        Collection<TypeInfo> apiTypes = composer.compose(list);
+        AnalysisHintsComposer analysisHintsComposer = new AnalysisHintsComposer(javaInspector, set -> destinationPackage, w -> true);
+        Collection<TypeInfo> apiTypes = analysisHintsComposer.compose(list);
 
-        Map<Element, Element> dollarMap = composer.translateFromDollarToReal();
-        composer.write(apiTypes, directory, new DecoratorWithComments(javaInspector.runtime(),
+        Map<Element, Element> dollarMap = analysisHintsComposer.translateFromDollarToReal();
+        analysisHintsComposer.write(apiTypes, directory, new DecoratorWithComments(javaInspector.runtime(),
                 javaInspector.mainSources(), dollarMap, infoDataProvider, dataProvider));
 
     }

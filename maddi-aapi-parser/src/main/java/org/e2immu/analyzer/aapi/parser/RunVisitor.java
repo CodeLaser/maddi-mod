@@ -26,7 +26,7 @@ public interface RunVisitor {
     default void afterAnnotatedApiParsing(JavaInspector javaInspector) {
     }
 
-    default void setContext(String libIn, String libOut, ToolChain.JRE jre) {
+    default void setContext(AnalysisHints analysisHints) {
     }
 
     default DebugVisitor debugVisitor() {

@@ -17,9 +17,9 @@ package org.e2immu.analyzer.modification.prepwork.io;
 import org.e2immu.language.cst.api.analysis.Codec;
 import org.e2immu.language.cst.api.element.SourceSet;
 import org.e2immu.language.cst.api.info.Info;
+import org.e2immu.language.cst.api.runtime.Runtime;
 import org.e2immu.language.cst.io.CodecImpl;
 import org.e2immu.language.inspection.api.integration.JavaInspector;
-import org.e2immu.language.inspection.integration.ToolChain;
 import org.parsers.json.JSONParser;
 import org.parsers.json.Node;
 import org.parsers.json.ast.Array;
@@ -39,23 +39,25 @@ import java.util.jar.JarEntry;
 import java.util.jar.JarInputStream;
 import java.util.stream.Stream;
 
-public class LoadAnalyzedPackageFiles {
-    private static final Logger LOGGER = LoggerFactory.getLogger(LoadAnalyzedPackageFiles.class);
+public class LoadAnalysisResults {
+    private static final Logger LOGGER = LoggerFactory.getLogger(LoadAnalysisResults.class);
     private final SourceSet sourceSetOfRequest; // for loading types
+    private final Runtime runtime;
 
-    public LoadAnalyzedPackageFiles(SourceSet sourceSetOfRequest) {
+    public LoadAnalysisResults(Runtime runtime, SourceSet sourceSetOfRequest) {
+        this.runtime = runtime;
         this.sourceSetOfRequest = Objects.requireNonNull(sourceSetOfRequest);
     }
 
-    public int go(JavaInspector javaInspector, List<String> directories) throws IOException {
-        Codec codec = new PrepWorkCodec(javaInspector.runtime(), sourceSetOfRequest).codec();
+    public int go(List<String> directories) throws IOException {
+        Codec codec = new PrepWorkCodec(runtime, sourceSetOfRequest).codec();
         return go(codec, directories);
     }
 
     public int go(Codec codec, List<String> directories) throws IOException {
         int countPrimaryTypes = 0;
         for (String dir : directories) {
-            if (dir.startsWith(ToolChain.RESOURCE_PROTOCOL)) {
+            if (dir.startsWith("resource:")) {
                 String path = dir.substring(9);
                 URL jarUrl = getClass().getResource(path);
                 if (jarUrl == null) {
@@ -65,7 +67,6 @@ public class LoadAnalyzedPackageFiles {
                         countPrimaryTypes += processJsonJar(codec, jarUrl);
                     } catch (Throwable t) {
                         LOGGER.error("Caught an exception processing {}", jarUrl);
-                        LOGGER.error("Current jdk: {}", ToolChain.currentJre());
                         throw t;
                     }
                 }
@@ -138,7 +139,7 @@ public class LoadAnalyzedPackageFiles {
         parser.Root();
         Node root = parser.rootNode();
         int countPrimaryTypes = 0;
-        for (JSONObject jo : root.get(0).childrenOfType(JSONObject.class)) {
+        for (JSONObject jo : root.getFirst().childrenOfType(JSONObject.class)) {
             processPrimaryType(codec, jo);
             ++countPrimaryTypes;
         }
