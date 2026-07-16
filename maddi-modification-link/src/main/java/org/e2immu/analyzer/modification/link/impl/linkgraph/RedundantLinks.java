@@ -1,41 +1,42 @@
-package org.e2immu.analyzer.modification.link.impl.graph;
+package org.e2immu.analyzer.modification.link.impl.linkgraph;
 
 import org.e2immu.analyzer.modification.link.impl.localvar.AppliedFunctionalInterfaceVariable;
 import org.e2immu.analyzer.modification.link.impl.localvar.FunctionalInterfaceVariable;
-import org.e2immu.analyzer.modification.prepwork.Util;
 import org.e2immu.analyzer.modification.prepwork.variable.LinkNature;
 import org.e2immu.analyzer.modification.prepwork.variable.Links;
-import org.e2immu.language.cst.api.info.MethodInfo;
 import org.e2immu.language.cst.api.variable.Variable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.*;
-import java.util.stream.Collectors;
 
 import static org.e2immu.analyzer.modification.link.impl.LinkNatureImpl.*;
 
+/*
+ Ported from the pre-sv engine (openjdk branch, graph/RedundantLinks): a cross-variable, per-statement
+ transitive-redundancy suppressor that did not survive the sv big-bang port. One instance lives for the duration
+ of one WriteLinksAndModification.go() call (one statement); the guards accumulate over the per-variable
+ extraction loop.
+
+ For each nature GROUP (⊆/⊇/~ together, ← alone, → alone, ∈, ∋, ∩/≤/≥, ≺/≻/≈), a guard maps from → {to} of links
+ already emitted for earlier variables in this statement. When a later variable's builder links to a target that
+ is transitively REACHABLE through the guard from one of its other link targets, that link is redundant: keep the
+ nearest hop, drop the origin. E.g. once 'stream.§xs ⊆ 0:in.§xs' has been emitted, 'stream1' keeps
+ 'stream1.§xs ⊆ stream.§xs' and drops the transitive 'stream1.§xs ⊆ 0:in.§xs'.
+ */
 public class RedundantLinks {
     private static final Logger LOGGER = LoggerFactory.getLogger(RedundantLinks.class);
 
-    // the guards are filled up as more calls to redundant(Modification)Links follow
-    private final Map<Variable, Set<Variable>> modificationCompletionGuard = new LinkedHashMap<>();
+    // the guards are filled up as more calls to redundantLinks follow
     private final Map<LinkNature, Map<Variable, Set<Variable>>> completionGuard = new HashMap<>();
-    private final Timer timer;
-
-    public RedundantLinks(Timer timer) {
-        this.timer = timer;
-    }
 
     /*
-    FIXME
+    FIXME (inherited from the original)
         this algorithm is not "stable" in the sense that the 'completions' map is overwritten for certain
         variables. Removing this overwrite (change it into a merge) produces wrong results (too many redundant vars)
         see TestStream,1
      */
-    // concept copied from computeRedundantModificationLinks, but now for groups of links
     public void redundantLinks(Links.Builder builder) {
-        timer.start("redundant1");
         Map<Variable, Set<Variable>> completions = new HashMap<>();
         builder.forEach(link -> {
             LinkNature key = key(link.linkNature());
@@ -49,7 +50,6 @@ public class RedundantLinks {
                 }
             }
         });
-        timer.end("redundant1");
         Set<Variable> redundantTo = new HashSet<>();
         for (Map.Entry<Variable, Set<Variable>> entry : completions.entrySet()) {
             redundantTo.addAll(entry.getValue());
@@ -72,45 +72,6 @@ public class RedundantLinks {
                                  // see TestModificationFunctional,2b
                                  && !(link.to() instanceof FunctionalInterfaceVariable)
                                  && !(link.to() instanceof AppliedFunctionalInterfaceVariable));
-    }
-
-    // we already have v2.§m -> {v1.§m}, v3.§m->{v1.§m, v2.§m}, and now we want to add
-    // v4.§m -> v3.§m, -> v1.§m, -> v2.§m.
-    // we only need keep add the first link.
-    public Set<Variable> modificationLinks(Links.Builder builder,
-                                           Map<Variable, Set<MethodInfo>> modifiedVariablesAndTheirCause) {
-        Map<Variable, Set<Variable>> completions = new HashMap<>();
-        builder.forEach(link -> {
-            LinkNature ln = link.linkNature();
-            if (Util.isVirtualModification(link.to()) && ln.isIdenticalTo()) {
-                boolean accept;
-                if (ln.pass().isEmpty()) {
-                    accept = true;
-                } else {
-                    Variable toReal = Util.firstRealVariable(link.to());
-                    Set<MethodInfo> causesOfModification = modifiedVariablesAndTheirCause.get(toReal);
-                    accept = causesOfModification == null || !Collections.disjoint(ln.pass(), causesOfModification);
-                }
-                if (accept) {
-                    completions.put(link.to(), completion(modificationCompletionGuard, link.to()));
-                }
-            }
-        });
-        Set<Variable> redundantTo = new HashSet<>();
-        for (Map.Entry<Variable, Set<Variable>> entry : completions.entrySet()) {
-            redundantTo.addAll(entry.getValue());
-        }
-        builder.forEach(link -> {
-            if (completions.containsKey(link.to())) {
-                Set<Variable> toSet = modificationCompletionGuard.get(link.to());
-                if (toSet == null || !toSet.contains(link.from())) {
-                    modificationCompletionGuard.computeIfAbsent(link.from(), _ -> new HashSet<>())
-                            .add(link.to());
-                }
-            }
-        });
-        builder.removeIf(link -> redundantTo.contains(link.to()));
-        return redundantTo.stream().map(Util::firstRealVariable).collect(Collectors.toUnmodifiableSet());
     }
 
     private static Set<Variable> completion(Map<Variable, Set<Variable>> graph, Variable start) {

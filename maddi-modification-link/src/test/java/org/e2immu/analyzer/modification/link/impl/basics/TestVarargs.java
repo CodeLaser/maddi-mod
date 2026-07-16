@@ -12,11 +12,12 @@
  * License along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-package org.e2immu.analyzer.modification.link.impl;
+package org.e2immu.analyzer.modification.link.impl.basics;
 
 
 import org.e2immu.analyzer.modification.link.CommonTest;
 import org.e2immu.analyzer.modification.link.LinkComputer;
+import org.e2immu.analyzer.modification.link.impl.LinkComputerImpl;
 import org.e2immu.analyzer.modification.prepwork.PrepAnalyzer;
 import org.e2immu.analyzer.modification.prepwork.variable.MethodLinkedVariables;
 import org.e2immu.analyzer.modification.prepwork.variable.Stage;
@@ -64,10 +65,9 @@ public class TestVarargs extends CommonTest {
 
     @Language("java")
     private static final String INPUT2 = """
-            package a.b;
             import java.util.Map;
             import java.util.Vector;
-
+            
             public class X {
             
                 public Map<String, Comparable<?>> executeAutoitFile(String fullPath, String workDir,
@@ -89,7 +89,7 @@ public class TestVarargs extends CommonTest {
     @DisplayName("varargs 2")
     @Test
     public void test2() {
-        TypeInfo B = javaInspector.parse("a.b.X", INPUT2);
+        TypeInfo B = javaInspector.parse("X", INPUT2);
         PrepAnalyzer analyzer = new PrepAnalyzer(runtime, new PrepAnalyzer.Options.Builder().build());
         analyzer.doPrimaryType(B);
         LinkComputer tlc = new LinkComputerImpl(javaInspector);
@@ -139,8 +139,7 @@ public class TestVarargs extends CommonTest {
                 viTargetM.linkedVariables().toString());
 
         assertEquals("""
-                [0:target*.§is∩1:collections.§iss, 1:collections.§iss∩0:target*.§is] --> \
-                combine.§is←0:target*.§is,combine.§is∩1:collections.§iss,combine←0:target*\
+                [0:target*.§is∩1:collections.§iss, 1:collections.§iss∩0:target*.§is] --> combine←0:target*,combine.§is←0:target*.§is,combine.§is∩1:collections.§iss\
                 """, mlv.toString());
     }
 
@@ -185,8 +184,7 @@ public class TestVarargs extends CommonTest {
                 viTargetM.linkedVariables().toString());
 
         assertEquals("""
-                [0:target*.§is∩1:collections.§iss, 1:collections.§iss∩0:target*.§is] --> \
-                combine.§is←0:target*.§is,combine.§is∩1:collections.§iss,combine←0:target*\
+                [0:target*.§is∩1:collections.§iss, 1:collections.§iss∩0:target*.§is] --> combine←0:target*,combine.§is←0:target*.§is,combine.§is∩1:collections.§iss\
                 """, mlv.toString());
     }
 
@@ -232,8 +230,7 @@ public class TestVarargs extends CommonTest {
                 """, viTargetM.linkedVariables().toString());
 
         assertEquals("""
-                [0:target*.§is∩1:collections.§iss, 1:collections.§iss∩0:target*.§is] --> \
-                combine.§is←0:target*.§is,combine.§is∩1:collections.§iss,combine←0:target*\
+                [0:target*.§is∩1:collections.§iss, 1:collections.§iss∩0:target*.§is] --> combine←0:target*,combine.§is←0:target*.§is,combine.§is∩1:collections.§iss\
                 """, mlv.toString());
     }
 
@@ -291,8 +288,7 @@ public class TestVarargs extends CommonTest {
                 viTargetM.linkedVariables().toString());
 
         assertEquals("""
-                [0:target*.§es∩1:collections.§iss, 1:collections.§iss∩0:target*.§es] --> \
-                combine.§es←0:target*.§es,combine.§es∩1:collections.§iss,combine←0:target*\
+                [0:target*.§es∩1:collections.§iss, 1:collections.§iss∩0:target*.§es] --> combine←0:target*,combine.§es←0:target*.§es,combine.§es∩1:collections.§iss\
                 """, mlv.toString());
     }
 }
