@@ -61,7 +61,7 @@ dependencies {
     testImplementation("io.codelaser:maddi-cst-analysis:$maddiVersion")
     testImplementation("io.codelaser:maddi-graph:$maddiVersion")
     testImplementation("io.codelaser:maddi-util:$maddiVersion")
-    testImplementation(testFixtures("io.codelaser:maddi-run-openjdk:$maddiVersion"))    // TestOssCorpus
+    testImplementation(testFixtures("io.codelaser:maddi-util:$maddiVersion"))  // Corpora, the corpus locator
     testImplementation("org.junit.platform:junit-platform-launcher")   // K2RealmTestBootstrap
     testImplementation("com.fasterxml.jackson.core:jackson-databind")
     testImplementation("commons-cli:commons-cli")

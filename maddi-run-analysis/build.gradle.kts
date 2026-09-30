@@ -44,7 +44,7 @@ dependencies {
     // maddi-run-main and maddi-run-config, which are base and cannot have this module on even their test class
     // path; they keep their packages. The class path below is what they had there, plus this module.
     testImplementation("io.codelaser:maddi-run-openjdk:$maddiVersion")
-    testImplementation(testFixtures("io.codelaser:maddi-run-openjdk:$maddiVersion"))  // TestOssCorpus
+    testImplementation(testFixtures("io.codelaser:maddi-util:$maddiVersion"))  // Corpora, the corpus locator
     testImplementation("io.codelaser:maddi-run-main:$maddiVersion")
     testImplementation("io.codelaser:maddi-run-config:$maddiVersion")
     testImplementation("io.codelaser:maddi-run-rewire:$maddiVersion")
