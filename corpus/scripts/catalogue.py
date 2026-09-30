@@ -592,7 +592,7 @@ def plugin_version():
     v = os.environ.get('MADDI_PLUGIN_VERSION')
     if v:
         return v
-    props = Path(os.environ.get('MADDI_REPO') or HERE.parent.parent) / 'gradle.properties'
+    props = _dist_repo() / 'gradle.properties'  # the plugins' version is maddi-dist's
     m = re.search(r'^version=(\S+)', props.read_text(), re.M) if props.is_file() else None
     if not m:
         sys.exit(f'no MADDI_PLUGIN_VERSION and no version= in {props}')
@@ -608,6 +608,13 @@ def _mvn_exclusions(cfg):
 # find the modification analysis as a service; the launchers that carry it (`run`) are maddi-cli and
 # maddi-cli-kotlin, and the corpus tests (`slowTest`) live beside the engine. run-main has no such launcher: its
 # `run` parses, and refuses any analysis step.
+def _dist_repo():
+    """The maddi-dist checkout: the CLI launchers and the build plugins live there since the split. MADDI_DIST_REPO,
+    else the sibling of this maddi-mod checkout."""
+    mod = Path(os.environ.get('MADDI_REPO') or HERE.parent.parent).resolve()
+    return Path(os.environ.get('MADDI_DIST_REPO') or mod.parent / 'maddi-dist').resolve()
+
+
 def _runner(entry):
     return (entry.get('parse') or {}).get('runner', 'openjdk')
 
@@ -624,7 +631,7 @@ def _corpus_test_module(entry):
 
 
 def _run_maddi(entry, steps):
-    maddi = Path(os.environ.get('MADDI_REPO') or HERE.parent.parent).resolve()
+    maddi = _dist_repo()
     return (f'{maddi}/gradlew -q -p {maddi} :{_runner_module(entry)}:run '
             f'--args="--input-configuration={parse_config_path(entry)} --analysis-steps={steps}"')
 
@@ -663,6 +670,7 @@ def _route_cmd(entry, c, route):
     name = entry['name']
     d = project_dir(entry)
     maddi = Path(os.environ.get('MADDI_REPO') or HERE.parent.parent).resolve()
+    dist = _dist_repo()  # the CLI launchers (maddi-cli, maddi-cli-kotlin)
     # A corpus project's config sits beside its sources, where TestOssCorpus.config() looks.
     # A private project's belongs in the refactor server's work dir, which is what
     # ProjectServiceImpl.load reads -- so `config.output` overrides.
@@ -755,7 +763,7 @@ def _route_cmd(entry, c, route):
                 # Equivalent input, not a shortcut -- these are exactly the lines it keeps.
                 f"grep -aE '^\\[DEBUG] -d ' compile.log > compile.javac.log && "
                 + (_REWRITE_REACTOR_JARS if c.get('rewrite_reactor_jars') else '')
-                + f'{maddi}/gradlew -p {maddi} :maddi-cli:run '
+                + f'{dist}/gradlew -p {dist} :maddi-cli:run '
                 f'--args="--compile-log {d}/compile.javac.log{jmods}{margs} '
                 f'--write-input-configuration {out}"')
     if route in ('gradle-log', 'gradle-log-kotlin'):
@@ -768,7 +776,7 @@ def _route_cmd(entry, c, route):
         extra = ' --no-configuration-cache -Dorg.gradle.warning.mode=summary' if route.endswith('kotlin') else ''
         return mk + (f'./gradlew --no-build-cache --rerun-tasks {c["tasks"]}{extra} --debug 2>&1 | '
                 f'{grep} > compile.log; '
-                f'{maddi}/gradlew -p {maddi} :{target}:run '
+                f'{dist}/gradlew -p {dist} :{target}:run '
                 f'--args="--compile-log {d}/compile.log{jmods} '
                 f'--write-input-configuration {out}"')
     if route == 'script':

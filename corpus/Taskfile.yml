@@ -44,6 +44,8 @@ vars:
   # consumer below handles that fine.
   # The maddi checkout this Taskfile lives in (<repo>/corpus/Taskfile.yml).
   MADDI_REPO: '{{.TASKFILE_DIR}}/..'
+  # The maddi-dist checkout: the CLI launchers and the build plugins (split stage 5). Sibling by default.
+  MADDI_DIST_REPO: '{{.MADDI_DIST_REPO | default (print .TASKFILE_DIR "/../../maddi-dist")}}'
   # Root under which every corpus project is cloned. Resolution order:
   #   1. TEST_OSS_ROOT from the environment / .env / CLI (`task X TEST_OSS_ROOT=…`)
   #   2. fallback: `test-oss` next to the maddi checkout (created on first clone)
@@ -53,7 +55,7 @@ vars:
   # (gradle.properties) — the version `task config:plugin` publishes to ~/.m2. The `|| true`
   # guards the throwaway first pass described above.
   DEFAULT_PLUGIN_VERSION:
-    sh: sed -n 's/^version=//p' "{{.TASKFILE_DIR}}/../gradle.properties" 2>/dev/null || true
+    sh: sed -n 's/^version=//p' "{{.TASKFILE_DIR}}/../../maddi-dist/gradle.properties" 2>/dev/null || true
   MADDI_PLUGIN_VERSION: '{{.MADDI_PLUGIN_VERSION | default .DEFAULT_PLUGIN_VERSION}}'
   # JDK 21 home, used ONLY by projects that cannot build on JDK 26 (sonarqube). macOS default;
   # override in .env for other platforms. Empty if no JDK 21 is installed.
@@ -296,7 +298,7 @@ tasks:
 
   config:plugin:
     desc: 'Publish both maddi build plugins to ~/.m2 (needed by the plugin config:* routes)'
-    dir: '{{.MADDI_REPO}}'
+    dir: '{{.MADDI_DIST_REPO}}'
     cmds:
       # BOTH, deliberately: the two are one option surface with one shared implementation, and a
       # task that published only one is how a route comes to run last week's plugin.
@@ -456,7 +458,7 @@ tasks:
       - 'echo ">>> {{.NAME}}: $(wc -l < compile.javac.log) compile invocations captured"'
       - 'echo ">>> {{.NAME}}: maddi --compile-log -> inputConfiguration.json"'
       # MADDI_ARGS: extra maddi options for this project's configuration, e.g. ignite-core's `--jre <JDK 17>`.
-      - '{{.MADDI_REPO}}/gradlew -p {{.MADDI_REPO}} :maddi-cli:run --args="--compile-log {{.TEST_OSS_ROOT}}/{{.NAME}}/compile.javac.log --write-input-configuration {{.TEST_OSS_ROOT}}/{{.NAME}}/inputConfiguration.json{{if .MADDI_ARGS}} {{.MADDI_ARGS}}{{end}}"'
+      - '{{.MADDI_DIST_REPO}}/gradlew -p {{.MADDI_DIST_REPO}} :maddi-cli:run --args="--compile-log {{.TEST_OSS_ROOT}}/{{.NAME}}/compile.javac.log --write-input-configuration {{.TEST_OSS_ROOT}}/{{.NAME}}/inputConfiguration.json{{if .MADDI_ARGS}} {{.MADDI_ARGS}}{{end}}"'
       - 'echo "Wrote {{.TEST_OSS_ROOT}}/{{.NAME}}/inputConfiguration.json"'
       - task: _vendor
         vars: { CONFIG: '{{.TEST_OSS_ROOT}}/{{.NAME}}/inputConfiguration.json' }
@@ -498,7 +500,7 @@ tasks:
 
   run:prep:
     desc: 'Analyse one input configuration: task run:prep PROJECT=<corpus dir> | CONFIG=/path/to/inputConfiguration.json  [STEPS=prep] [XMX=24G]'
-    dir: '{{.MADDI_REPO}}'
+    dir: '{{.MADDI_DIST_REPO}}'
     vars:
       CONFIG: '{{.CONFIG | default (printf "%s/%s/inputConfiguration.json" .TEST_OSS_ROOT (default "<project>" .PROJECT))}}'
     preconditions:

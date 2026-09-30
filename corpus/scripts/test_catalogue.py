@@ -449,7 +449,7 @@ class TestPhases(CatalogueTest):
         saved = os.environ.pop('MADDI_PLUGIN_VERSION', None)
         try:
             self.entry(self.public, 'g', 'config:\n  route: gradle-plugin\n')
-            want = re.search(r'^version=(\S+)', (HERE.parent.parent / 'gradle.properties').read_text(),
+            want = re.search(r'^version=(\S+)', (catalogue._dist_repo() / 'gradle.properties').read_text(),
                              re.M).group(1)
             self.assertIn(f'-Dmaddi.pluginVersion={want} ', catalogue.plan(catalogue.load_one('g'), 'config'))
             os.environ['MADDI_PLUGIN_VERSION'] = '9.9'
@@ -461,7 +461,7 @@ class TestPhases(CatalogueTest):
 
     def test_the_kotlin_route_greps_for_what_ParseKotlincList_parses(self):
         """The route once grepped `[KOTLIN] compiler arguments:`, which no Gradle log contains."""
-        java = (HERE.parent.parent / 'maddi-run-kotlin/src/main/java/io/codelaser/maddi/run/kotlinmain'
+        java = (HERE.parent.parent.parent / 'maddi' / 'maddi-run-kotlin/src/main/java/io/codelaser/maddi/run/kotlinmain'
                 / 'kotlinc/ParseKotlincList.java').read_text()
         pattern = re.search(r'GRADLE_PATTERN = "\.\*(.+?)\\\\s\*', java).group(1)
         self.entry(self.public, 'k', 'config:\n  route: gradle-log-kotlin\n  tasks: classes\n')
