@@ -2,7 +2,7 @@
 """
 Tests for vendor-libraries.py. No network: downloads go through an injected fetch.
 
-    python3 -m unittest discover -s corpus/scripts -p 'test_*.py'
+    python3 corpus/scripts/test_vendor_libraries.py
 """
 import hashlib
 import importlib.util

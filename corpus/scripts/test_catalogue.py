@@ -1,8 +1,13 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.9"
+# dependencies = ["pyyaml>=6,<7"]
+# ///
 """
 Tests for catalogue.py. No network, no build: catalogues and checkouts are made in a temp dir.
+catalogue.py needs PyYAML, so run this through uv (its #! line does):
 
-    python3 -m unittest discover -s corpus/scripts -p 'test_*.py'
+    corpus/scripts/test_catalogue.py
 """
 import argparse
 import contextlib

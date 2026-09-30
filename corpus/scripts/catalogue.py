@@ -1,4 +1,8 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.9"
+# dependencies = ["pyyaml>=6,<7"]
+# ///
 """
 The corpus catalogue: read the per-corpus YAML entries and act on them.
 
@@ -75,27 +79,23 @@ import subprocess
 import sys
 from pathlib import Path
 
-# PyYAML when it is importable, the strict stdlib subset reader otherwise. Nothing else in this
-# repo's scripts needs a third-party package, and on a PEP 668 machine `pip3 install pyyaml` simply
-# fails -- so requiring it would put an install step in front of the catalogue we moved here
-# precisely so contributors could use it. See miniyaml.py.
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+# PyYAML, and only PyYAML. The #! line runs this script through uv, which provides the dependency
+# declared in the `/// script` block above -- no pip, so a PEP 668 machine is no obstacle. There
+# used to be a stdlib subset reader as a fallback; two readers gave one catalogue two verdicts, and
+# the subset could not read the project.yml this script writes itself.
 try:
     import yaml as _yaml
-
-    def parse_yaml(text, name):
-        return _yaml.safe_load(text)
-
-    def dump_yaml(obj):
-        return _yaml.safe_dump(obj, sort_keys=False, allow_unicode=True)
 except ImportError:
-    import miniyaml
+    sys.exit('catalogue.py needs PyYAML: run it through `task corpus:...` or as ./catalogue.py, whose '
+             '#! line runs it with uv (brew install uv), not with a bare python3.')
 
-    def parse_yaml(text, name):
-        return miniyaml.load(text, name)
 
-    def dump_yaml(obj):
-        return json.dumps(obj, indent=2, ensure_ascii=False)   # readable enough for `show`
+def parse_yaml(text, name):
+    return _yaml.safe_load(text)
+
+
+def dump_yaml(obj):
+    return _yaml.safe_dump(obj, sort_keys=False, allow_unicode=True)
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_CATALOGUE = HERE.parent / 'catalogue'
@@ -243,7 +243,7 @@ def machine_profile():
         test_oss_root: ~/git/test-oss     # checked against the effective TEST_OSS_ROOT
         jdks:                             # build.jdk.version picks one. A list, not a mapping
           - {version: 21, home: /usr/lib/jvm/java-21-openjdk-amd64}   # keyed by version: YAML reads
-          - {version: 26, home: /usr/lib/jvm/java-26-openjdk-amd64}   # `21:` as an int, miniyaml not at all
+          - {version: 26, home: /usr/lib/jvm/java-26-openjdk-amd64}   # `21:` as an int
         holds: active                     # every `status: active` entry, or a list of names
         skip:                             # exceptions to `holds`, each with its reason
           vavr: not checked out here yet
