@@ -48,9 +48,9 @@ import static io.codelaser.maddi.modification.common.CommonTest.javaInspectorFac
 public class CompileAnalysisHints {
     private static final Logger LOGGER = LoggerFactory.getLogger(CompileAnalysisHints.class);
 
-    static final String HINTS_PATH = "../maddi-aapi-archive/src/main/java";
+    static final String HINTS_PATH = "../../maddi/maddi-aapi-archive/src/main/java";
     static final String RESULTS_BASE =
-            "../maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles/";
+            "../../maddi/maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles/";
     // libs/support is deliberately absent, and has been: its OrgE2immuSupport.json is a generated file that
     // nothing regenerates and nothing loads (it is not in LoadAnalysisResults.ANALYZED_RESULTS either). The
     // pre-rename file name is the giveaway.

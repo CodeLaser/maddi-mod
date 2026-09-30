@@ -23,21 +23,24 @@ plugins {
     kotlin("jvm") version "2.4.0"
 }
 
+// maddi (base) and maddi-mod modules are reached by coordinate; settings.gradle.kts includes their builds
+val maddiVersion: String by project
+
 group = "io.codelaser"
 
 dependencies {
-    testImplementation(project(":maddi-inspection-kotlin"))
-    testImplementation(project(":maddi-inspection-api"))
-    testImplementation(project(":maddi-inspection-resource"))
-    testImplementation(project(":maddi-kotlin-api"))
-    testImplementation(project(":maddi-kotlin-k2"))
-    testImplementation(project(":maddi-cst-api"))
-    testImplementation(project(":maddi-cst-impl"))
-    testImplementation(project(":maddi-cst-analysis"))
-    testImplementation(project(":maddi-cst-print"))
-    testImplementation(project(":maddi-cst-print-kotlin"))
-    testImplementation(project(":maddi-inspection-openjdk"))
-    testImplementation(project(":maddi-callgraph"))
+    testImplementation("io.codelaser:maddi-inspection-kotlin:$maddiVersion")
+    testImplementation("io.codelaser:maddi-inspection-api:$maddiVersion")
+    testImplementation("io.codelaser:maddi-inspection-resource:$maddiVersion")
+    testImplementation("io.codelaser:maddi-kotlin-api:$maddiVersion")
+    testImplementation("io.codelaser:maddi-kotlin-k2:$maddiVersion")
+    testImplementation("io.codelaser:maddi-cst-api:$maddiVersion")
+    testImplementation("io.codelaser:maddi-cst-impl:$maddiVersion")
+    testImplementation("io.codelaser:maddi-cst-analysis:$maddiVersion")
+    testImplementation("io.codelaser:maddi-cst-print:$maddiVersion")
+    testImplementation("io.codelaser:maddi-cst-print-kotlin:$maddiVersion")
+    testImplementation("io.codelaser:maddi-inspection-openjdk:$maddiVersion")
+    testImplementation("io.codelaser:maddi-callgraph:$maddiVersion")
     testImplementation(project(":maddi-modification-prepwork"))
     testImplementation("org.junit.jupiter:junit-jupiter-api:6.0.3")
     testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:6.0.3")

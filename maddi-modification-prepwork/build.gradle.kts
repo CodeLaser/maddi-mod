@@ -16,20 +16,23 @@
 plugins {
     id("java-library-conventions")
 }
+
+// maddi (base) and maddi-mod modules are reached by coordinate; settings.gradle.kts includes their builds
+val maddiVersion: String by project
 java {
     sourceCompatibility = JavaVersion.VERSION_25
     targetCompatibility = JavaVersion.VERSION_25
 }
 dependencies {
-    api(project(":maddi-callgraph"))  // ComputeCallGraph & co., moved out of prepwork (split stage 2)
-    api(project(":maddi-inspection-api"))
+    api("io.codelaser:maddi-callgraph:$maddiVersion")  // ComputeCallGraph & co., moved out of prepwork (split stage 2)
+    api("io.codelaser:maddi-inspection-api:$maddiVersion")
     implementation(project(":maddi-modification-common"))
-    implementation(project(":maddi-graph"))
-    implementation(project(":maddi-util"))
-    implementation(project(":maddi-cst-analysis"))
+    implementation("io.codelaser:maddi-graph:$maddiVersion")
+    implementation("io.codelaser:maddi-util:$maddiVersion")
+    implementation("io.codelaser:maddi-cst-analysis:$maddiVersion")
 
-    implementation(project(":maddi-cst-impl"))
-    implementation(project(":maddi-cst-io"))
+    implementation("io.codelaser:maddi-cst-impl:$maddiVersion")
+    implementation("io.codelaser:maddi-cst-io:$maddiVersion")
 
     /*
     Parsing is a test-only concern here: prepwork's main analyses a CST, it does not build one. Everything below
@@ -40,15 +43,15 @@ dependencies {
     in principle -- main is compiled in module mode, where 'requires' is the whole of the visible world.
      */
     testImplementation(testFixtures(project(":maddi-modification-common")))  // CloneBenchCorpus
-    testImplementation(project(":maddi-inspection-integration"))
-    testImplementation(project(":maddi-inspection-resource"))
-    testImplementation(project(":maddi-inspection-openjdk"))
-    testImplementation(project(":maddi-java-openjdk"))
+    testImplementation("io.codelaser:maddi-inspection-integration:$maddiVersion")
+    testImplementation("io.codelaser:maddi-inspection-resource:$maddiVersion")
+    testImplementation("io.codelaser:maddi-inspection-openjdk:$maddiVersion")
+    testImplementation("io.codelaser:maddi-java-openjdk:$maddiVersion")
     // the Kotlin front end, flat on the test class path, and the mixed parse that feeds it the JDK: package
     // `kotlin` runs prep on Kotlin input and compares it with the Java twin of each fixture. Test-only, like
     // every other parser above.
-    testImplementation(project(":maddi-kotlin-k2"))
-    testImplementation(project(":maddi-inspection-mixed"))
+    testImplementation("io.codelaser:maddi-kotlin-k2:$maddiVersion")
+    testImplementation("io.codelaser:maddi-inspection-mixed:$maddiVersion")
     testImplementation("ch.qos.logback:logback-classic")
 }
 

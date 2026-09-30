@@ -65,7 +65,7 @@ public class TestCorpusSweep {
                     exitValue = Main.execute(new String[]{
                             "--input-configuration=" + config,
                             "--analysis-steps=modification",
-                            "--preload-analysis-results-dirs=../maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles/jdk"
+                            "--preload-analysis-results-dirs=../../maddi/maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles/jdk"
                     });
                 } catch (Throwable t) {
                     exitValue = -1;

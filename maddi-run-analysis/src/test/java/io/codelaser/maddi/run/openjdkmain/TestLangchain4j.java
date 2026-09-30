@@ -34,7 +34,7 @@ public class TestLangchain4j {
                 "--input-configuration=" + TestOssCorpus.config("langchain4j")
                 //,"--parallel"
                 , "--analysis-steps=modification"
-                , "--preload-analysis-results-dirs=../maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles/jdk"
+                , "--preload-analysis-results-dirs=../../maddi/maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles/jdk"
                 //,"--debug=memory",
         });
         assertEquals(Main.EXIT_OK, exitValue);

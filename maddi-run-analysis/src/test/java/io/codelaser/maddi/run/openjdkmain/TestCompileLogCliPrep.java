@@ -56,7 +56,7 @@ public class TestCompileLogCliPrep {
      */
     @Test
     public void prepAnalyzeMaddiCstApiViaCompileLog(@TempDir Path tempDir) throws Exception {
-        Path src = Path.of("..", "maddi-cst-api", "src", "main", "java");
+        Path src = Path.of("..", "..", "maddi", "maddi-cst-api", "src", "main", "java");
         assumeTrue(Files.isDirectory(src), "maddi-cst-api sources not on disk");
 
         List<Path> javaFiles;

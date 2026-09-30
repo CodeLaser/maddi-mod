@@ -18,27 +18,30 @@ plugins {
     `java-test-fixtures`
 }
 
+// maddi (base) and maddi-mod modules are reached by coordinate; settings.gradle.kts includes their builds
+val maddiVersion: String by project
+
 java {
     sourceCompatibility = JavaVersion.VERSION_25
     targetCompatibility = JavaVersion.VERSION_25
 }
 dependencies {
-    api(project(":maddi-inspection-api"))
-    implementation(project(":maddi-graph"))
-    implementation(project(":maddi-util"))
-    implementation(project(":maddi-cst-analysis"))
-    implementation(project(":maddi-cst-print"))
+    api("io.codelaser:maddi-inspection-api:$maddiVersion")
+    implementation("io.codelaser:maddi-graph:$maddiVersion")
+    implementation("io.codelaser:maddi-util:$maddiVersion")
+    implementation("io.codelaser:maddi-cst-analysis:$maddiVersion")
+    implementation("io.codelaser:maddi-cst-print:$maddiVersion")
 
-    testImplementation(project(":maddi-java-openjdk"))
-    testImplementation(project(":maddi-inspection-resource"))
-    testImplementation(project(":maddi-inspection-openjdk"))
+    testImplementation("io.codelaser:maddi-java-openjdk:$maddiVersion")
+    testImplementation("io.codelaser:maddi-inspection-resource:$maddiVersion")
+    testImplementation("io.codelaser:maddi-inspection-openjdk:$maddiVersion")
     testImplementation("org.slf4j:slf4j-api")
     testImplementation("org.jetbrains:annotations")
     testImplementation("org.junit.jupiter:junit-jupiter-api")
 
-    testFixturesImplementation(project(":maddi-java-openjdk"))
-    testFixturesImplementation(project(":maddi-inspection-resource"))
-    testFixturesImplementation(project(":maddi-inspection-openjdk"))
+    testFixturesImplementation("io.codelaser:maddi-java-openjdk:$maddiVersion")
+    testFixturesImplementation("io.codelaser:maddi-inspection-resource:$maddiVersion")
+    testFixturesImplementation("io.codelaser:maddi-inspection-openjdk:$maddiVersion")
     testFixturesImplementation("org.slf4j:slf4j-api")
     testFixturesImplementation("org.jetbrains:annotations")
     testFixturesImplementation("org.junit.jupiter:junit-jupiter-api")

@@ -21,6 +21,9 @@ plugins {
     id("java-library-conventions")
 }
 
+// maddi (base) and maddi-mod modules are reached by coordinate; settings.gradle.kts includes their builds
+val maddiVersion: String by project
+
 java {
     // 26, like maddi-run-kotlin: the Kotlin front-end modules are compiled to the daemon JDK's bytecode version
     sourceCompatibility = JavaVersion.VERSION_26
@@ -34,31 +37,31 @@ val k2Runtime: Configuration by configurations.creating {
 }
 
 dependencies {
-    k2Runtime(project(":maddi-kotlin-k2"))
+    k2Runtime("io.codelaser:maddi-kotlin-k2:$maddiVersion")
 
-    testImplementation(project(":maddi-run-kotlin"))
+    testImplementation("io.codelaser:maddi-run-kotlin:$maddiVersion")
     testImplementation(project(":maddi-run-analysis"))
-    testImplementation(project(":maddi-analysis-api"))
-    testImplementation(project(":maddi-callgraph"))
+    testImplementation("io.codelaser:maddi-analysis-api:$maddiVersion")
+    testImplementation("io.codelaser:maddi-callgraph:$maddiVersion")
     // the moved tests name these directly (the verdicts they compare, the codecs they round-trip)
     testImplementation(project(":maddi-modification-common"))
     testImplementation(project(":maddi-modification-prepwork"))
     testImplementation(project(":maddi-modification-analyzer"))
     testImplementation(project(":maddi-modification-link"))
-    testImplementation(project(":maddi-run-openjdk"))
-    testImplementation(project(":maddi-run-config"))
-    testImplementation(project(":maddi-inspection-api"))
-    testImplementation(project(":maddi-inspection-resource"))
-    testImplementation(project(":maddi-inspection-mixed"))
-    testImplementation(project(":maddi-inspection-kotlin"))
-    testImplementation(project(":maddi-kotlin-api"))
-    testImplementation(project(":maddi-kotlin-realm"))
-    testImplementation(project(":maddi-cst-api"))
-    testImplementation(project(":maddi-cst-impl"))
-    testImplementation(project(":maddi-cst-analysis"))
-    testImplementation(project(":maddi-graph"))
-    testImplementation(project(":maddi-util"))
-    testImplementation(testFixtures(project(":maddi-run-openjdk")))    // TestOssCorpus
+    testImplementation("io.codelaser:maddi-run-openjdk:$maddiVersion")
+    testImplementation("io.codelaser:maddi-run-config:$maddiVersion")
+    testImplementation("io.codelaser:maddi-inspection-api:$maddiVersion")
+    testImplementation("io.codelaser:maddi-inspection-resource:$maddiVersion")
+    testImplementation("io.codelaser:maddi-inspection-mixed:$maddiVersion")
+    testImplementation("io.codelaser:maddi-inspection-kotlin:$maddiVersion")
+    testImplementation("io.codelaser:maddi-kotlin-api:$maddiVersion")
+    testImplementation("io.codelaser:maddi-kotlin-realm:$maddiVersion")
+    testImplementation("io.codelaser:maddi-cst-api:$maddiVersion")
+    testImplementation("io.codelaser:maddi-cst-impl:$maddiVersion")
+    testImplementation("io.codelaser:maddi-cst-analysis:$maddiVersion")
+    testImplementation("io.codelaser:maddi-graph:$maddiVersion")
+    testImplementation("io.codelaser:maddi-util:$maddiVersion")
+    testImplementation(testFixtures("io.codelaser:maddi-run-openjdk:$maddiVersion"))    // TestOssCorpus
     testImplementation("org.junit.platform:junit-platform-launcher")   // K2RealmTestBootstrap
     testImplementation("com.fasterxml.jackson.core:jackson-databind")
     testImplementation("commons-cli:commons-cli")

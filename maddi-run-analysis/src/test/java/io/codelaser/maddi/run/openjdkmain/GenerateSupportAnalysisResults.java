@@ -29,11 +29,11 @@ public class GenerateSupportAnalysisResults {
     @Disabled("manual: regenerates analyzedPackageFiles/libs/support from the curated hints")
     @Test
     public void generate() throws Exception {
-        Path target = Path.of("../maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles/libs/support");
+        Path target = Path.of("../../maddi/maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles/libs/support");
         Files.createDirectories(target);
         SourceSet aapiSource = new SourceSetImpl.Builder()
                 .setName("archive")
-                .setSourceDirectories(List.of(Path.of("../maddi-aapi-archive/src/main/java")))
+                .setSourceDirectories(List.of(Path.of("../../maddi/maddi-aapi-archive/src/main/java")))
                 .setUri(URI.create("file:./"))
                 .build();
         InputConfiguration inputConfiguration = new InputConfigurationImpl.Builder()

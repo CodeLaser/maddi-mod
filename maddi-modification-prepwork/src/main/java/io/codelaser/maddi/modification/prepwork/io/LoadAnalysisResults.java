@@ -57,8 +57,8 @@ import java.util.stream.Stream;
  * </ul>
  */
 public class LoadAnalysisResults {
-    public static final String ANALYZED_RESULTS_JDK = "../maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles/jdk";
-    public static final String ANALYZED_RESULTS_LIBS = "../maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles/libs";
+    public static final String ANALYZED_RESULTS_JDK = "../../maddi/maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles/jdk";
+    public static final String ANALYZED_RESULTS_LIBS = "../../maddi/maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles/libs";
     // Keep in step with CompileAnalysisHints.LIBRARIES, which generates these directories: a library compiled
     // but not listed here is a file nobody reads (libs/support is exactly that).
     public static final List<String> ANALYZED_RESULTS = List.of(ANALYZED_RESULTS_JDK, ANALYZED_RESULTS_LIBS + "/test",

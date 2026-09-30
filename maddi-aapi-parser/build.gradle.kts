@@ -17,36 +17,39 @@ plugins {
     id("java-library-conventions")
 }
 
+// maddi (base) and maddi-mod modules are reached by coordinate; settings.gradle.kts includes their builds
+val maddiVersion: String by project
+
 java {
     sourceCompatibility = JavaVersion.VERSION_25
     targetCompatibility = JavaVersion.VERSION_25
 }
 
 dependencies {
-    implementation(project(":maddi-analysis-api"))  // AnalysisHintsShadows (split stage 3)
-    api(project(":maddi-support"))
-    api(project(":maddi-inspection-api"))
+    implementation("io.codelaser:maddi-analysis-api:$maddiVersion")  // AnalysisHintsShadows (split stage 3)
+    api("io.codelaser:maddi-support:$maddiVersion")
+    api("io.codelaser:maddi-inspection-api:$maddiVersion")
     implementation(project(":maddi-modification-common"))
     implementation(project(":maddi-modification-prepwork"))
-    implementation(project(":maddi-graph"))
-    implementation(project(":maddi-util"))
-    implementation(project(":maddi-cst-analysis"))
+    implementation("io.codelaser:maddi-graph:$maddiVersion")
+    implementation("io.codelaser:maddi-util:$maddiVersion")
+    implementation("io.codelaser:maddi-cst-analysis:$maddiVersion")
 
-    implementation(project(":maddi-cst-impl"))
-    implementation(project(":maddi-cst-io"))
-    implementation(project(":maddi-cst-print"))
-    implementation(project(":maddi-inspection-parser"))
-    implementation(project(":maddi-inspection-resource"))
+    implementation("io.codelaser:maddi-cst-impl:$maddiVersion")
+    implementation("io.codelaser:maddi-cst-io:$maddiVersion")
+    implementation("io.codelaser:maddi-cst-print:$maddiVersion")
+    implementation("io.codelaser:maddi-inspection-parser:$maddiVersion")
+    implementation("io.codelaser:maddi-inspection-resource:$maddiVersion")
 
     // test-only: aapi-parser's main has no reference to the in-house inspector; only module-info
     // required it, which put it on the runtime class path of every consumer (notably maddi-run-openjdk,
     // which has its own inspector).
-    testImplementation(project(":maddi-inspection-integration"))
-    testImplementation(project(":maddi-java-bytecode"))
-    testImplementation(project(":maddi-java-parser"))
+    testImplementation("io.codelaser:maddi-inspection-integration:$maddiVersion")
+    testImplementation("io.codelaser:maddi-java-bytecode:$maddiVersion")
+    testImplementation("io.codelaser:maddi-java-parser:$maddiVersion")
 
-    testImplementation(project(":maddi-inspection-openjdk"))
-    testImplementation(project(":maddi-java-openjdk"))
+    testImplementation("io.codelaser:maddi-inspection-openjdk:$maddiVersion")
+    testImplementation("io.codelaser:maddi-java-openjdk:$maddiVersion")
     testImplementation(testFixtures(project(":maddi-modification-common")))
 
     implementation("ch.qos.logback:logback-classic")
@@ -133,11 +136,11 @@ tasks.withType<Test> {
     // test task reports UP-TO-DATE after exactly the change the test exists to catch: measured 2026-09-20,
     // perturbing a committed .json left `gradle test` green, and only --rerun-tasks turned it red. A staleness
     // gate that does not run is worse than none, because it reads as a passing check.
-    inputs.dir(layout.projectDirectory.dir("../maddi-aapi-archive/src/main/java"))
+    inputs.dir(layout.projectDirectory.dir("../../maddi/maddi-aapi-archive/src/main/java"))
         .withPropertyName("analysisHints")
         .withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.dir(layout.projectDirectory
-        .dir("../maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles"))
+        .dir("../../maddi/maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles"))
         .withPropertyName("committedAnalysisResults")
         .withPathSensitivity(PathSensitivity.RELATIVE)
 }

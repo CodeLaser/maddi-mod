@@ -39,7 +39,7 @@ public class TestRunAnalyzer {
 
     @Test
     public void test() throws IOException {
-        Path cstApiPath = Path.of("../maddi-cst-api/src/main/java").toRealPath();
+        Path cstApiPath = Path.of("../../maddi/maddi-cst-api/src/main/java").toRealPath();
         assertTrue(Files.isDirectory(cstApiPath));
 
         // located by glob rather than by version: a hard-coded "maddi-support-<version>.jar" breaks on
@@ -56,7 +56,7 @@ public class TestRunAnalyzer {
     }
 
     private static Path findMaddiSupportJar() throws IOException {
-        Path libs = Path.of("../maddi-support/build/libs").toRealPath();
+        Path libs = Path.of("../../maddi/maddi-support/build/libs").toRealPath();
         try (Stream<Path> stream = Files.list(libs)) {
             return stream
                     .filter(p -> {

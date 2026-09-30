@@ -65,7 +65,7 @@ public class TestSealedErrorHierarchy {
             """;
 
     private static final List<String> JDK_ANNOTATED_APIS = List.of(
-            "../maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles/jdk");
+            "../../maddi/maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles/jdk");
 
     @Test
     public void aFinalFieldsParentCapsItsSubclassesAndAMutableOneSinksThem(@TempDir Path tmp) throws Exception {

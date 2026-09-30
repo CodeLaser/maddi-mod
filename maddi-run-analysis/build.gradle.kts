@@ -22,15 +22,18 @@ plugins {
     id("java-library-conventions")
 }
 
+// maddi (base) and maddi-mod modules are reached by coordinate; settings.gradle.kts includes their builds
+val maddiVersion: String by project
+
 java {
     sourceCompatibility = JavaVersion.VERSION_25
     targetCompatibility = JavaVersion.VERSION_25
 }
 
 dependencies {
-    api(project(":maddi-analysis-api"))
-    implementation(project(":maddi-callgraph"))
-    implementation(project(":maddi-cst-analysis"))
+    api("io.codelaser:maddi-analysis-api:$maddiVersion")
+    implementation("io.codelaser:maddi-callgraph:$maddiVersion")
+    implementation("io.codelaser:maddi-cst-analysis:$maddiVersion")
     implementation(project(":maddi-modification-common"))
     implementation(project(":maddi-modification-prepwork"))
     implementation(project(":maddi-modification-link"))
@@ -40,23 +43,23 @@ dependencies {
     // ---- tests: every driver test that RUNS the analysis (split stage 3). They moved here from maddi-run-openjdk,
     // maddi-run-main and maddi-run-config, which are base and cannot have this module on even their test class
     // path; they keep their packages. The class path below is what they had there, plus this module.
-    testImplementation(project(":maddi-run-openjdk"))
-    testImplementation(testFixtures(project(":maddi-run-openjdk")))  // TestOssCorpus
-    testImplementation(project(":maddi-run-main"))
-    testImplementation(project(":maddi-run-config"))
-    testImplementation(project(":maddi-run-rewire"))
-    testImplementation(project(":maddi-graph"))
-    testImplementation(project(":maddi-util"))
-    testImplementation(project(":maddi-cst-impl"))
-    testImplementation(project(":maddi-cst-io"))
-    testImplementation(project(":maddi-cst-print"))
-    testImplementation(project(":maddi-inspection-api"))
-    testImplementation(project(":maddi-inspection-openjdk"))
-    testImplementation(project(":maddi-inspection-resource"))
-    testImplementation(project(":maddi-inspection-integration"))
-    testImplementation(project(":maddi-java-openjdk"))
-    testImplementation(project(":maddi-java-parser"))
-    testRuntimeOnly(project(":maddi-aapi-archive"))
+    testImplementation("io.codelaser:maddi-run-openjdk:$maddiVersion")
+    testImplementation(testFixtures("io.codelaser:maddi-run-openjdk:$maddiVersion"))  // TestOssCorpus
+    testImplementation("io.codelaser:maddi-run-main:$maddiVersion")
+    testImplementation("io.codelaser:maddi-run-config:$maddiVersion")
+    testImplementation("io.codelaser:maddi-run-rewire:$maddiVersion")
+    testImplementation("io.codelaser:maddi-graph:$maddiVersion")
+    testImplementation("io.codelaser:maddi-util:$maddiVersion")
+    testImplementation("io.codelaser:maddi-cst-impl:$maddiVersion")
+    testImplementation("io.codelaser:maddi-cst-io:$maddiVersion")
+    testImplementation("io.codelaser:maddi-cst-print:$maddiVersion")
+    testImplementation("io.codelaser:maddi-inspection-api:$maddiVersion")
+    testImplementation("io.codelaser:maddi-inspection-openjdk:$maddiVersion")
+    testImplementation("io.codelaser:maddi-inspection-resource:$maddiVersion")
+    testImplementation("io.codelaser:maddi-inspection-integration:$maddiVersion")
+    testImplementation("io.codelaser:maddi-java-openjdk:$maddiVersion")
+    testImplementation("io.codelaser:maddi-java-parser:$maddiVersion")
+    testRuntimeOnly("io.codelaser:maddi-aapi-archive:$maddiVersion")
     testImplementation("commons-cli:commons-cli")
     testImplementation("ch.qos.logback:logback-classic")
     testImplementation("com.fasterxml.jackson.core:jackson-databind")

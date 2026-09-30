@@ -40,7 +40,7 @@ public class TestRunShallowAnalyzer {
     @Disabled
     @Test
     public void test() {
-        File aapiSources = new File("../maddi-aapi-archive/src/main/java");
+        File aapiSources = new File("../../maddi/maddi-aapi-archive/src/main/java");
         assertTrue(aapiSources.isDirectory(), "Absolute = " + aapiSources.getAbsolutePath());
 
         File file = new File("build/test-shallow-analyzer");

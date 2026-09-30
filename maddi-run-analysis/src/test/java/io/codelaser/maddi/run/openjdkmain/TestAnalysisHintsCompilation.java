@@ -25,7 +25,7 @@ public class TestAnalysisHintsCompilation {
     public void useCases2And3(@TempDir Path resultsDir, @TempDir Path hintsDir) throws Exception {
         SourceSet aapiSource = new SourceSetImpl.Builder()
                 .setName("archive")
-                .setSourceDirectories(List.of(Path.of("../maddi-aapi-archive/src/main/java")))
+                .setSourceDirectories(List.of(Path.of("../../maddi/maddi-aapi-archive/src/main/java")))
                 .setUri(URI.create("file:./"))
                 .build();
         InputConfiguration inputConfiguration = new InputConfigurationImpl.Builder()

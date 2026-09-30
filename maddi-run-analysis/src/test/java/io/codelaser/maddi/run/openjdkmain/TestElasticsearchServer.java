@@ -181,7 +181,7 @@ public class TestElasticsearchServer {
         int exitValue = Main.execute(new String[]{
                 "--input-configuration=" + resolve(tempDir)
                 , "--analysis-steps=modification"
-                , "--preload-analysis-results-dirs=../maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles/jdk"
+                , "--preload-analysis-results-dirs=../../maddi/maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles/jdk"
         });
         // EXIT_ANALYZER_ERROR stays tolerated, as it was for the whole-reactor configuration: this
         // corpus is a capacity driver, not a verdict baseline. Crash-class exits (internal exception,

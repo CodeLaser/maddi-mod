@@ -16,40 +16,43 @@
 plugins {
     id("java-library-conventions")
 }
+
+// maddi (base) and maddi-mod modules are reached by coordinate; settings.gradle.kts includes their builds
+val maddiVersion: String by project
 java {
     sourceCompatibility = JavaVersion.VERSION_25
     targetCompatibility = JavaVersion.VERSION_25
 }
 dependencies {
-    api(project(":maddi-analysis-api"))  // AnalysisValueFeed, in IteratingAnalyzer's signature (split stage 3)
-    implementation(project(":maddi-callgraph"))  // ComputeCallGraph & co., moved out of prepwork (split stage 2)
-    api(project(":maddi-inspection-api"))
-    implementation(project(":maddi-graph"))
-    implementation(project(":maddi-util"))
-    implementation(project(":maddi-cst-analysis"))
+    api("io.codelaser:maddi-analysis-api:$maddiVersion")  // AnalysisValueFeed, in IteratingAnalyzer's signature (split stage 3)
+    implementation("io.codelaser:maddi-callgraph:$maddiVersion")  // ComputeCallGraph & co., moved out of prepwork (split stage 2)
+    api("io.codelaser:maddi-inspection-api:$maddiVersion")
+    implementation("io.codelaser:maddi-graph:$maddiVersion")
+    implementation("io.codelaser:maddi-util:$maddiVersion")
+    implementation("io.codelaser:maddi-cst-analysis:$maddiVersion")
     implementation(project(":maddi-modification-common"))
     implementation(project(":maddi-modification-prepwork"))
     implementation(project(":maddi-modification-link"))
 
-    testImplementation(project(":maddi-cst-impl"))
-    testImplementation(project(":maddi-cst-io"))
-    testImplementation(project(":maddi-cst-print"))
-    testImplementation(project(":maddi-inspection-parser"))
-    testImplementation(project(":maddi-inspection-integration"))
-    testImplementation(project(":maddi-inspection-resource"))
-    testImplementation(project(":maddi-java-bytecode"))
-    testImplementation(project(":maddi-java-parser"))
+    testImplementation("io.codelaser:maddi-cst-impl:$maddiVersion")
+    testImplementation("io.codelaser:maddi-cst-io:$maddiVersion")
+    testImplementation("io.codelaser:maddi-cst-print:$maddiVersion")
+    testImplementation("io.codelaser:maddi-inspection-parser:$maddiVersion")
+    testImplementation("io.codelaser:maddi-inspection-integration:$maddiVersion")
+    testImplementation("io.codelaser:maddi-inspection-resource:$maddiVersion")
+    testImplementation("io.codelaser:maddi-java-bytecode:$maddiVersion")
+    testImplementation("io.codelaser:maddi-java-parser:$maddiVersion")
 
-    testImplementation(project(":maddi-inspection-openjdk"))
-    testImplementation(project(":maddi-java-openjdk"))
+    testImplementation("io.codelaser:maddi-inspection-openjdk:$maddiVersion")
+    testImplementation("io.codelaser:maddi-java-openjdk:$maddiVersion")
 
     testImplementation(testFixtures(project(":maddi-modification-common")))
 
-    testRuntimeOnly(project(":maddi-aapi-archive"))
+    testRuntimeOnly("io.codelaser:maddi-aapi-archive:$maddiVersion")
     // the Kotlin front end, flat on the test class path, and the mixed parse that feeds it the JDK: package
     // `kotlin` analyzes Kotlin input and compares its verdicts with the Java twin of each fixture. Test-only.
-    testImplementation(project(":maddi-kotlin-k2"))
-    testImplementation(project(":maddi-inspection-mixed"))
+    testImplementation("io.codelaser:maddi-kotlin-k2:$maddiVersion")
+    testImplementation("io.codelaser:maddi-inspection-mixed:$maddiVersion")
 }
 tasks.withType<Test> {
     // pass the clone-bench corpus location through to the test JVM, as run-openjdk does for test.oss.root

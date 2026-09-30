@@ -55,11 +55,11 @@ import java.util.Map;
  *     is three quarters generated primitive specialisations of the object pattern; the hints cover the object
  *     API;</li>
  *     <li>{@code -Pmaddi.compose.target=io.codelaser.maddi.aapi.archive.libs.vavr} -- the hints package;</li>
- *     <li>{@code -Pmaddi.compose.out=../maddi-aapi-archive/src/main/java} -- the source root to write into;</li>
+ *     <li>{@code -Pmaddi.compose.out=../../maddi/maddi-aapi-archive/src/main/java} -- the source root to write into;</li>
  *     <li>optionally {@code -Pmaddi.compose.preload=dir1,dir2} -- analysis results (e.g. from a SOURCE run of the
  *     library, {@code --analysis-results-dir}) to load onto the jar's types first, so that the shadows carry the
  *     COMPUTED verdicts as their starting annotations;</li>
- *     <li>optionally {@code -Pmaddi.compose.notes=../maddi-aapi-archive/.../libs/vavr/VAVR.md} -- the library report,
+ *     <li>optionally {@code -Pmaddi.compose.notes=../../maddi/maddi-aapi-archive/.../libs/vavr/VAVR.md} -- the library report,
  *     whose tables ({@code | `type` | computed | expected | gap |}, and {@code `type#method`} member rows) state the
  *     library's SEMANTIC verdicts. Where an expected cell is nothing but annotations, it overwrites the computed
  *     verdict before printing (see {@link #applyExpected}): hints exist so that a client's analysis sees what the

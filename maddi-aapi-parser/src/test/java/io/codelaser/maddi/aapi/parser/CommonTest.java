@@ -76,7 +76,7 @@ public class CommonTest {
         AnalysisHints test = new AnalysisHints.Builder()
                 .setLibraryName("test")
                 .setAnalysisResultsDir(Path.of("build/"))
-                .setHintsPath(Path.of("../maddi-aapi-archive/src/main/java"))
+                .setHintsPath(Path.of("../../maddi/maddi-aapi-archive/src/main/java"))
                 .setPackagePrefix("io.codelaser.maddi.aapi.archive")
                 .build();
 
