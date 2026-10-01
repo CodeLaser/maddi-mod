@@ -393,6 +393,37 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
     private static final String WORK_DUMP = System.getProperty("maddi.workDump");
 
     private static final boolean KEEP_OC_FACES = Gate.isSet("KEEPOCFACES");
+    /*
+     A summary does not export a variable whose scope chain goes round a RECURSIVE STRUCTURE: the same field read
+     twice on a scope of the same type. Jenkins' ANTLR-generated LabelExpressionParser is the shape: the grammar is
+     recursive, so its rule contexts point at each other in a ring (Term1Context.term2 : Term2Context, ...,
+     Term6Context.term1 : Term1Context), and the summaries of the mutually recursive rule methods, re-imported and
+     re-exported by one another, grew '_localctx.term6.term1.term2...term6.term1' one lap per round -- 28 fields
+     deep, each FieldReference's fqn embedding its scope's, until 12 G were FieldReference names (TestJenkinsCore
+     OOM, 2026-10-01). ListView's 'columns.owner.columns.owner' (PersistedList.owner points back at the view) is
+     the same ring of length two. Nothing bounded the lap count: #91's prune of created-object faces only stopped
+     masking it (KEEPOCFACES passes at 184 s; this rule passes with the prune kept, 166 s).
+
+     The bound is a pair, never the field alone: 'bb.t.t' on a Box<Box<X>> reads Box.t twice, on Box<Box<X>> and
+     on Box<X> -- two objects, both nameable by a caller (TestLinkMethodCall, nested holders). A second lap on the
+     same type names nothing a caller can distinguish from the first. Gate NOFIELDCYCLE exports them, for A/B.
+     */
+    private static final boolean EXPORT_FIELD_CYCLES = Gate.isSet("NOFIELDCYCLE");
+
+    static boolean goesRoundAFieldCycle(Variable v) {
+        Set<List<Object>> seen = new HashSet<>();
+        Variable w = v;
+        while (w instanceof FieldReference fr && fr.scopeVariable() != null) {
+            if (!seen.add(List.of(fr.fieldInfo(), fr.scopeVariable().parameterizedType()))) return true;
+            w = fr.scopeVariable();
+        }
+        return false;
+    }
+
+    private static Links withoutFieldCycles(Links links) {
+        return EXPORT_FIELD_CYCLES || links.primary() == null ? links
+                : links.removeIfFromTo(LinkComputerImpl::goesRoundAFieldCycle);
+    }
 
     // 'oc:N.f', 'oc:N.§$s', 'oc:N.f.g': a field or virtual-field face rooted at an object-creation marker; the
     // bare marker 'oc:N' is not a face
@@ -562,6 +593,7 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
             if (!KEEP_OC_FACES && ofReturnValue.primary() != null) {
                 ofReturnValue = ofReturnValue.removeIfFromTo(LinkComputerImpl::isFaceOfObjectCreation);
             }
+            ofReturnValue = withoutFieldCycles(ofReturnValue);
             Set<ParameterInfo> paramsInOfReturnValue = ofReturnValue.stream()
                     .flatMap(Link::parameterStream)
                     .collect(Collectors.toUnmodifiableSet());
@@ -570,7 +602,7 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                     .filter(VariableInfo::isVariableInClosure)
                     .map(VariableInfo::variable).collect(Collectors.toUnmodifiableSet());
             List<Links> ofParameters = methodInfo.parameters().stream()
-                    .map(pi -> filteredPi(pi, paramsInOfReturnValue, vd, inClosure)).toList();
+                    .map(pi -> withoutFieldCycles(filteredPi(pi, paramsInOfReturnValue, vd, inClosure))).toList();
             Set<Variable> modified = vd == null ? Set.of()
                     : vd.variableInfoStream()
                     .filter(vi -> !vi.variable().equals(returnVariable)
@@ -591,6 +623,7 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
             // call site the SAM modifies, TestStaticValuesRecord 'interface in between').
             Set<Variable> summaryModified = allModified.stream()
                     .filter(v -> !(Util.primary(v) instanceof IntermediateVariable))
+                    .filter(v -> EXPORT_FIELD_CYCLES || !goesRoundAFieldCycle(v))
                     .collect(Collectors.toUnmodifiableSet());
             // own-field SLOT writes, orthogonal to the object-modification set above: prepwork's
             // per-variable assignment record is the source of truth for this method's body; callee
