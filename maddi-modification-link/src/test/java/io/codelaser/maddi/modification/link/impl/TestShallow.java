@@ -443,7 +443,7 @@ public class TestShallow extends CommonTest {
                 sort.fullyQualifiedName());
         MethodLinkedVariables mlvC1 = sort.analysis().getOrCreate(METHOD_LINKS, () -> linkComputer.doMethod(sort));
         // the comparator is applied to the list's elements, as Stream.filter's predicate is to the stream's: a static
-        // method's first parameter plays 'this' (#94)
+        // method's first parameter plays 'this' (CodeLaser/maddi#94)
         assertEquals("[-, 0:list*.§ts⊇Λ1:c] --> -", mlvC1.toString());
     }
 

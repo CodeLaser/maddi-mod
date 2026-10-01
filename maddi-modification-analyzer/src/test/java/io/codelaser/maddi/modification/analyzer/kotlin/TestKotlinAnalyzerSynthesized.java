@@ -95,10 +95,10 @@ public class TestKotlinAnalyzerSynthesized extends CommonKotlinAnalyzerTest {
     }
 
     /*
-     #90 (fixed by #85, 2026-09-28): the constructor stores the delegate, so the type, the constructor and the field
-     agree with the Java twin. ⛔ maddi#93: the forwarder's parameter does not: Java's one-method Sink is a functional
+     CodeLaser/maddi#90 (fixed by CodeLaser/maddi#85, 2026-09-28): the constructor stores the delegate, so the type, the constructor and the field
+     agree with the Java twin. ⛔ CodeLaser/maddi#93: the forwarder's parameter does not: Java's one-method Sink is a functional
      interface and `$$delegate_0.put(s)` takes the lambda path (`~Λ`, @Dependent); Kotlin's `interface Sink` is not
-     (`fun interface` would be), and the ordinary abstract call reads `s` as @Independent of the delegate. When #93
+     (`fun interface` would be), and the ordinary abstract call reads `s` as @Independent of the delegate. When CodeLaser/maddi#93
      is settled, this becomes `a.assertSameAsJava("Forward2")` and `a.assertSameAsJava("Forward")`.
      */
     @Test
@@ -152,7 +152,7 @@ public class TestKotlinAnalyzerSynthesized extends CommonKotlinAnalyzerTest {
 
     /*
      `with`/`run` (the receiver), `also` (the `it`) and `use` (a try-with-resources on its receiver) are inlined
-     (#88): a modification in the body is the method's, as in the Java twin.
+     (CodeLaser/maddi#88): a modification in the body is the method's, as in the Java twin.
      */
     @Test
     public void scopeFunctionsOnAField() {

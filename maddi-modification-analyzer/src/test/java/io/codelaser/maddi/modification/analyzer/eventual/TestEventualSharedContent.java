@@ -30,7 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * After the mark, what an argument or a return value SHARES decides, not its own type (#51). The shape of
+ * After the mark, what an argument or a return value SHARES decides, not its own type (CodeLaser/maddi#51). The shape of
  * {@code Element.print(Qualification)} and {@code Element.typesReferenced()}: an implementation hands one of its
  * fields -- of an eventually immutable type -- to a mutable collector passed in, and returns it in a fresh
  * {@code Stream}. Both are {@code @Dependent} unconditionally (the field's type is not yet immutable-hc), and neither

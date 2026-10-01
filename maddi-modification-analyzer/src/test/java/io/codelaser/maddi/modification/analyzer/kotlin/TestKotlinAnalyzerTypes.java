@@ -134,7 +134,7 @@ public class TestKotlinAnalyzerTypes extends CommonKotlinAnalyzerTest {
 
     /*
      Companion state: kotlinc puts the companion's `private var next` on Ids as a static field, and so does the front
-     end (#73; it was an instance field of the Companion, which made the Companion @Mutable and Ids @FinalFields).
+     end (CodeLaser/maddi#73; it was an instance field of the Companion, which made the Companion @Mutable and Ids @FinalFields).
      Ids also has the static initializer that assigns `next = 0`, where the Java twin writes a field initializer.
      */
     @Test

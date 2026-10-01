@@ -262,7 +262,7 @@ public class TypeEventualAnalyzerImpl extends CommonAnalyzerImpl implements Type
      * (old {@code approvedPreconditionsFromParent}); see {@code docs/design/eventual-immutability.md}.
      */
     private void computeTypeLevel(TypeInfo typeInfo, boolean activateCycleBreaking) {
-        // EVENTUALCLUSTER (#51): the verdict is write-once, except that a WEAK one (@FinalFields after the mark)
+        // EVENTUALCLUSTER (CodeLaser/maddi#51): the verdict is write-once, except that a WEAK one (@FinalFields after the mark)
         // stays open to an upgrade in the cycle-breaking phase. Its excusals can rest on labels that arrive only
         // after weak verdicts elsewhere exist: Element's abstract typesReferenced is eventually non-modifying only
         // once its implementations' hand-on walks see Element.TypeReference's verdict, i.e. AFTER Element's own
@@ -458,9 +458,9 @@ public class TypeEventualAnalyzerImpl extends CommonAnalyzerImpl implements Type
                 .getOrDefault(IMMUTABLE_TYPE, ValueImpl.ImmutableImpl.MUTABLE);
         // Under EVENTUALCLUSTER an after-mark @FinalFields equal to the unconditional one is still written: the
         // eventual verdict is the cluster's proof token (contraction discharge, treatAsEventuallyImmutable's
-        // "proven" branch, the label walks). Since #34 (a @FinalFields supertype caps instead of sinking) some 120
+        // "proven" branch, the label walks). Since CodeLaser/maddi#34 (a @FinalFields supertype caps instead of sinking) some 120
         // dogfood types -- Statement, Block, CompilationUnit, RuntimeImpl -- went unconditional @Mutable ->
-        // @FinalFields; skipping their verdict as "buys nothing" retracted every type that leaned on them (#51).
+        // @FinalFields; skipping their verdict as "buys nothing" retracted every type that leaned on them (CodeLaser/maddi#51).
         if (afterMarkLevel.compareTo(unconditional) < 0
             || afterMarkLevel.compareTo(unconditional) == 0
                && !(EventualCluster.ENABLED && afterMarkLevel.isFinalFields()

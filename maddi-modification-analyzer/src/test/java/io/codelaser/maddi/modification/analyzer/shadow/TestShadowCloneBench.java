@@ -226,7 +226,7 @@ public class TestShadowCloneBench extends CommonTest {
         // `l == null ? emptyList() : Collections.unmodifiableList(l)` — and what marks them modified is the
         // ARCHIVE (`unmodifiableList` carries @Independent[M] and no @NotModified, so its argument is
         // modified), not the fix. ⚠ If that hint is ever corrected, these ten go away again.
-        // ⭐ Re-baselined 2026-09-24 (issue #51), bisected on this corpus, same 9,319 types:
+        // ⭐ Re-baselined 2026-09-24 (issue CodeLaser/maddi#51), bisected on this corpus, same 9,319 types:
         //   aa730a3bf (the pass no longer carries whole-object modification across an assigned-from link with a
         //   VIRTUAL end -- the engine's own relevantLinkForModification rule):
         //     divergences 847 -> 718   {nonModifyingMethod 11 -> 7, unmodifiedParameter 810 -> 685}
@@ -243,17 +243,17 @@ public class TestShadowCloneBench extends CommonTest {
         // pass misses it through the cast, and did so at unit scale before aa730a3bf too (not this change).
         // ⭐ Re-baselined 2026-09-28, the first shadow run after the four-thread merge into devel (31 engine
         // commits, 7db3d7140..164c81db6: the fork/join linker 0d755fabd, latest-wins method links f747b2105,
-        // the composition rules f4f19205e, the eventual-walk fix 6666426bd, and the #64 archive hints). A/B on
+        // the composition rules f4f19205e, the eventual-walk fix 6666426bd, and the CodeLaser/maddi#64 archive hints). A/B on
         // this corpus (7db3d7140 in a detached worktree reproduces {708, 285} exactly), same 9,319 types:
         //     divergences 708 -> 712   {unmodifiedParameter 675 -> 679}   {propagated 684 -> 688}
         //     reverse      285 -> 282   (5 closed, 2 opened)
         // Closed reverse, five: four are the iterator-remove shape design A left frozen-modified and the pass
         // did not reach (ArrayList_RetainAll.retainAll_iterator and its $3.accept, HashSet_RetainAll
         // .retainAllContainsRemove_canonical, Function1642250.deleteAnnotations: `iter = param.iterator();
-        // … iter.remove()`) -- the `iterator.§m ☷{remove}` link the first computation dropped and #15's
+        // … iter.remove()`) -- the `iterator.§m ☷{remove}` link the first computation dropped and CodeLaser/maddi#15's
         // latest-wins now keeps, so both sides read it; the fifth (Function22541204.printCaughtExceptions,
         // `t.printStackTrace(writer)`) is the archive: printStackTrace's PrintWriter is @Independent[M] since
-        // 2ab65eaa6 (#64), and both sides read the hint.
+        // 2ab65eaa6 (CodeLaser/maddi#64), and both sides read the hint.
         // Opened reverse, two, one shape: a local that is the parameter in one branch and a fresh, modified
         // object in the other (Function22818474.encodePapPassword: `userPassBytes = userPass` vs
         // `userPassBytes = new byte[128]; arraycopy(…, userPassBytes, …)`; Function23679178.executeAutoitFile:

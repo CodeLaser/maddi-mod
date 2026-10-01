@@ -140,7 +140,7 @@ public record ShallowMethodLinkComputer(Runtime runtime, VirtualFieldComputer vi
                 // boolean isSupplier = sam.parameters().isEmpty();
                 boolean outputHasTypeParameters = sam.returnType().hasTypeParameters();
                 // Kotlin's `(T) -> Unit` is Function1<T, Unit>: the formal SAM returns R, but the concrete result is
-                // Unit, which is nothing -- a consumer, as java.util.function.Consumer is (#94)
+                // Unit, which is nothing -- a consumer, as java.util.function.Consumer is (CodeLaser/maddi#94)
                 boolean unitResult = outputHasTypeParameters && isUnit(findReturnType(pi.parameterizedType()));
                 if (outputHasTypeParameters && !unitResult && !forceIntoReturn) {
                     // yes to Supplier<T> (result: T), no to Predicate<T> (result: boolean)
@@ -626,7 +626,7 @@ public record ShallowMethodLinkComputer(Runtime runtime, VirtualFieldComputer vi
      A STATIC method whose first parameter plays the object's part -- a Kotlin extension function on the JVM,
      `forEach($receiver: Iterable<T>, action: (T) -> Unit)` -- applying a consumer to that parameter's hidden content:
      the contract an instance method gets for 'this' (Iterable.forEach: 'this.§ts ⊇ action'), rooted at the receiver
-     parameter instead (#94). Null when the receiver has no hidden content of the consumer's type parameters.
+     parameter instead (CodeLaser/maddi#94). Null when the receiver has no hidden content of the consumer's type parameters.
      */
     private Links receiverConsumer(ParameterInfo receiver, ParameterInfo pi, Value.Independent independent,
                                    Set<TypeParameter> consumerTps) {

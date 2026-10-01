@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /*
  A lambda that writes THROUGH a captured holder -- an array element, a field of a captured object -- has an effect
- its creator sees (#94): applied by forEach to a collection's elements, the holder holds one of them, as after the
+ its creator sees (CodeLaser/maddi#94): applied by forEach to a collection's elements, the holder holds one of them, as after the
  equivalent `for` loop.
  */
 public class TestLambdaWritesCapturedHolder extends CommonTest {

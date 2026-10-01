@@ -1115,7 +1115,7 @@ public class MethodAnalyzer {
             }
             if (e instanceof SwitchExpression switchExpression) {
                 switchExpression.selector().visit(this);
-                // #74: the arms are analysed against the variable data from BEFORE this statement, which knows every
+                // CodeLaser/maddi#74: the arms are analysed against the variable data from BEFORE this statement, which knows every
                 // earlier local. They used to get currentVariableData -- this statement's still-empty builder -- so
                 // an earlier local read or assigned in an arm looked freshly declared there and was dropped below.
                 String end = index + StatementIndex.END;
@@ -1215,7 +1215,7 @@ public class MethodAnalyzer {
         }*/
 
         /*
-         #94: a lambda's write THROUGH a captured holder -- a field or an array element of a local of this method, as
+         CodeLaser/maddi#94: a lambda's write THROUGH a captured holder -- a field or an array element of a local of this method, as
          Kotlin's `var n; xs.forEach { n++ }` is `n.element++` on a Ref holder -- is an assignment at the statement that
          creates the lambda. (A lambda cannot assign the local itself; that is Java's rule, and kotlinc's holder is how
          Kotlin keeps to it.)

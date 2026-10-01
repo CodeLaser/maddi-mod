@@ -51,7 +51,7 @@ public class TestKotlinAnalyzerConstruction extends CommonKotlinAnalyzerTest {
     }
 
     /*
-     maddi#85 (fixed 2026-09-28): `private val items = xs` reads the constructor parameter, so it is code of the
+     CodeLaser/maddi#85 (fixed 2026-09-28): `private val items = xs` reads the constructor parameter, so it is code of the
      constructor, as kotlinc compiles it; the constructor stores its parameter, which reads @Dependent as in Java.
      */
     @Test
@@ -62,7 +62,7 @@ public class TestKotlinAnalyzerConstruction extends CommonKotlinAnalyzerTest {
     }
 
     /*
-     maddi#84 (fixed 2026-09-28, Java too): a field assigned in a nested block of the constructor -- every Kotlin
+     CodeLaser/maddi#84 (fixed 2026-09-28, Java too): a field assigned in a nested block of the constructor -- every Kotlin
      init block -- now gets its links merged into the block statement, and so its independence; the nested-block
      twin and the flat constructor give the same verdicts.
      */
@@ -76,7 +76,7 @@ public class TestKotlinAnalyzerConstruction extends CommonKotlinAnalyzerTest {
                 .filter(l -> l.startsWith("field")).findFirst().orElseThrow());
     }
 
-    /* maddi#86 (fixed 2026-09-28): the constructor parameter of `vararg val xs: String` is a String[] varargs parameter */
+    /* CodeLaser/maddi#86 (fixed 2026-09-28): the constructor parameter of `vararg val xs: String` is a String[] varargs parameter */
     @Test
     public void varargProperty() {
         assertEquals("Type String[]", a.kotlinType("Varg").findConstructor(1).parameters().getFirst().parameterizedType()

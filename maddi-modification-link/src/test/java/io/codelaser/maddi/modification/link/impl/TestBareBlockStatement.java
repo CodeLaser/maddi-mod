@@ -36,7 +36,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Shadow clone bench try_pure_compiles getPluginImageURL (9 clones): a reflective call inside an if inside a try,
- * then the same shape inside a BARE BLOCK. The #84 block merge first read every variable as modified at the block
+ * then the same shape inside a BARE BLOCK. The CodeLaser/maddi#84 block merge first read every variable as modified at the block
  * (the merge started from an evaluation stage the block never had): +9 reverse divergences on 2026-09-28. A bare
  * block goes through the statement path like any other statement; the block's links survive to the method.
  */

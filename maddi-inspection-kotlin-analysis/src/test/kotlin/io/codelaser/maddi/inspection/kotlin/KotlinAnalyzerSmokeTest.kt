@@ -60,7 +60,7 @@ class KotlinAnalyzerSmokeTest {
     /**
      * `s ?: return 0` lowers into TWO statements, indexed as siblings. They were `0.0`/`0.1`, children of a
      * statement `0` that did not exist, and prep, which scopes a local by its statement index, lost `t` after
-     * them (#69). This test passed all along: `names.contains("t")` matched the `t` of `String`. It now asks
+     * them (CodeLaser/maddi#69). This test passed all along: `names.contains("t")` matched the `t` of `String`. It now asks
      * for the variable by its whole name.
      */
     @Test

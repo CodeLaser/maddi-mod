@@ -81,7 +81,7 @@ public class TestKotlinTypeLevel extends CommonKotlinTest {
     @Test
     public void callGraphAndAnalysisOrder() {
         G<Info> graph = new ComputeCallGraph(p.runtime(), p.kotlinX()).go().graph();
-        // a companion's `const val C` is one static field of X, as kotlinc emits it (#73), initialized in X's static
+        // a companion's `const val C` is one static field of X, as kotlinc emits it (CodeLaser/maddi#73), initialized in X's static
         // initializer; make() reads X.C
         assertEquals("""
                 k.X->S->k.X.<init>(), k.X->S->k.X.<init>(int), k.X->S->k.X.<static_0>(), k.X->S->k.X.C, \
@@ -118,7 +118,7 @@ public class TestKotlinTypeLevel extends CommonKotlinTest {
         assertEquals("code=true, A=true, B=true", finalFields(type("k.E")));
         assertEquals("hits=false, INSTANCE=true", finalFields(type("k.O")));
         // class delegation: the delegate is a synthetic final field; kotlinc assigns it in the constructor, K2's
-        // lowering does not (maddi#90, see delegationConstructor)
+        // lowering does not (CodeLaser/maddi#90, see delegationConstructor)
         assertEquals("$$delegate_0=true", finalFields(type("k.Del")));
     }
 
@@ -165,13 +165,13 @@ public class TestKotlinTypeLevel extends CommonKotlinTest {
         assertEquals("equals, hashCode, toString", emptyBodies(type("k.D")));
         assertEquals("name, values, valueOf, getEntries, <static_0>", emptyBodies(type("k.E")));
         assertEquals("<init>", emptyBodies(type("k.O")));
-        // since #85 (2026-09-28) the delegate is assigned IN the constructor (`this.$$delegate_0 = d` reads the
-        // constructor parameter), so Del's constructor is no longer empty (#90)
+        // since CodeLaser/maddi#85 (2026-09-28) the delegate is assigned IN the constructor (`this.$$delegate_0 = d` reads the
+        // constructor parameter), so Del's constructor is no longer empty (CodeLaser/maddi#90)
         assertEquals("", emptyBodies(type("k.Del")));
     }
 
     /*
-     #90 (fixed by #85, 2026-09-28): kotlinc's constructor is `{this.$$delegate_0=d;}`, and so is K2's; before, the
+     CodeLaser/maddi#90 (fixed by CodeLaser/maddi#85, 2026-09-28): kotlinc's constructor is `{this.$$delegate_0=d;}`, and so is K2's; before, the
      lowering left it empty, `d` was read nowhere, the field assigned nowhere, and prep had no variable data for
      the constructor at all.
      */

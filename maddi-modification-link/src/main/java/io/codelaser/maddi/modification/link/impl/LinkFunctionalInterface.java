@@ -69,7 +69,7 @@ public record LinkFunctionalInterface(Runtime runtime, VirtualFieldComputer virt
         // and only its bare CONTAINS_AS_MEMBER connection to the primary is kept (see the links.isEmpty() case below,
         // and TestForEachLambda,6).
         boolean isSupplier = sam.parameters().isEmpty();
-        // Kotlin's `(T) -> Unit` is Function1<T, Unit>: its SAM returns R, concretely Unit, which is nothing (#94)
+        // Kotlin's `(T) -> Unit` is Function1<T, Unit>: its SAM returns R, concretely Unit, which is nothing (CodeLaser/maddi#94)
         boolean isConsumer = sam.noReturnValue() || returnsUnit(functionalInterfaceType);
 
         if (isSupplier || isConsumer) {
@@ -108,7 +108,7 @@ public record LinkFunctionalInterface(Runtime runtime, VirtualFieldComputer virt
                                 from = fromTranslated;
                             } else if (isConsumer && !isSupplier
                                        && LinkNatureImpl.IS_ASSIGNED_TO.equals(link.linkNature())) {
-                                // →: the element is STORED, `x -> r.element = x` (#94; Kotlin's `var` a lambda
+                                // →: the element is STORED, `x -> r.element = x` (CodeLaser/maddi#94; Kotlin's `var` a lambda
                                 // assigns is such a Ref holder): the target holds one of the source's elements, as
                                 // after `for (x : xs) r = x`: source.§$s ∋ target
                                 from = sam.parameters().size() >= 2

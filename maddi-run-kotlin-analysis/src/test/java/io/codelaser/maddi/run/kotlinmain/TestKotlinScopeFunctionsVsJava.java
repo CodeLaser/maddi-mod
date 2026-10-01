@@ -53,12 +53,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * already treat as unmodified -- so the census's "uncontracted" does not mean "harmful" here.
  *
  * <p>The MODIFY rows ({@code s.apply { clear() }}) are MODIFIED: the scope functions are {@code @InlineOnly}, and
- * the front end inlines them as kotlinc does (#88), so the body is the method's own code and the modification is
+ * the front end inlines them as kotlinc does (CodeLaser/maddi#88), so the body is the method's own code and the modification is
  * the field's, as in the control. The Java twins through a JDK lambda -- {@code Optional.of(s).ifPresent(x ->
  * x.clear())}, {@code Stream.of(s).forEach(..)}, {@code list.forEach(..)} -- still leave {@code s} unmodified: that
  * is the engine's design for a library call that applies a lambda it may never call. They are no longer the right
  * twins for a scope function, which is not a call at all once compiled; they stay as the record of that design.
- * Until #88 the Kotlin rows read unmodified too.
+ * Until CodeLaser/maddi#88 the Kotlin rows read unmodified too.
  *
  * <p>Guarded as TestKotlinPredicatesVsJava is: a zero-placeholder census, and a control that does modify.
  */
@@ -71,10 +71,10 @@ public class TestKotlinScopeFunctionsVsJava {
             "RequireRead", "CheckRead", "ErrorRead", "RequireNotNullRead",
             // modifications in the inlined body: modified, as the direct code kotlinc compiles it to (see the class doc)
             "ApplyModify", "AlsoModify", "LetModify", "RunModify", "WithModify",
-            // a `return@label` to the scope function's own lambda (#88 stage 2): still inlined, the rest of the body
+            // a `return@label` to the scope function's own lambda (CodeLaser/maddi#88 stage 2): still inlined, the rest of the body
             // in the other branch
             "LetLabelledModify", "AlsoLabelledRead", "LetElvisModify",
-            // `use` is a try-with-resources on its receiver (#88 stage 3): as b.JTryWithResourcesRead
+            // `use` is a try-with-resources on its receiver (CodeLaser/maddi#88 stage 3): as b.JTryWithResourcesRead
             "UseRead", "UseModify",
             // the sensor sees a modification at all
             "Control");

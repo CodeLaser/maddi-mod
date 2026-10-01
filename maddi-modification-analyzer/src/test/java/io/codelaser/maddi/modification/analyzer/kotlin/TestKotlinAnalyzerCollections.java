@@ -9,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 /*
  Defensive copies. A Kotlin class that keeps `xs.toList()` has the same meaning as a Java class that keeps
  `List.copyOf(xs)`; the analyzer recognises only the Java spelling. Both Kotlin classes initialize the field in a
- property initializer, so #85 applies to their constructors alike; the type and field verdicts isolate the copy.
+ property initializer, so CodeLaser/maddi#85 applies to their constructors alike; the type and field verdicts isolate the copy.
  */
 public class TestKotlinAnalyzerCollections extends CommonKotlinAnalyzerTest {
 
@@ -42,7 +42,7 @@ public class TestKotlinAnalyzerCollections extends CommonKotlinAnalyzerTest {
         assertEquals("type SnapJ: @Immutable(hc=true) @Independent(hc=true)", a.kotlin("SnapJ").lines().findFirst().orElseThrow());
     }
 
-    /* ⛔ maddi#87: `toList()` is not a recognised copy; the field reads as the caller's list */
+    /* ⛔ CodeLaser/maddi#87: `toList()` is not a recognised copy; the field reads as the caller's list */
     @Test
     public void defensiveCopy() {
         assertEquals("""

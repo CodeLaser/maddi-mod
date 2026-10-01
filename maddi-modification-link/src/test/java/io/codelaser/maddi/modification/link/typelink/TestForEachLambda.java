@@ -314,7 +314,7 @@ public class TestForEachLambda extends CommonTest {
         assertEquals("Type java.util.Map.§$$[]", link.from().parameterizedType().toString());
 
         // keys to keys ([-1] ~ [-1]) and values to values, as method2's direct put: the lambda parameter's own index
-        // chooses the slice (#94; its position among the linked parameters had the two swapped)
+        // chooses the slice (CodeLaser/maddi#94; its position among the linked parameters had the two swapped)
         assertEquals("""
                 0:map.§$$s~this.map.§$$s,0:map.§$$s[-1]~this.map.§$$s[-1],0:map.§$$s[-1]∩this.map.§$$s[-2],\
                 0:map.§$$s[-2]∩this.map.§$$s[-1],0:map.§$$s[-2]~this.map.§$$s[-2]\

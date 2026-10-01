@@ -139,7 +139,7 @@ public class TestKotlinTry extends CommonKotlinTest {
 
     /*
      `val v = try { … } catch …` is TWO statements, `int v;` and a try assigning it, indexed as siblings, 0 and 1, as
-     the Java twin's are (#69: they were 0.0 and 0.1, children of statement 0, and `v` was unknown at statement 1).
+     the Java twin's are (CodeLaser/maddi#69: they were 0.0 and 0.1, children of statement 0, and `v` was unknown at statement 1).
      */
     @Test
     public void tryValue() {

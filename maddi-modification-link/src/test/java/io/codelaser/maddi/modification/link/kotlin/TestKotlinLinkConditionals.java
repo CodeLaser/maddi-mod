@@ -88,8 +88,8 @@ public class TestKotlinLinkConditionals extends CommonKotlinLinkTest {
     }
 
     /*
-     A smart-cast read is a cast (#67): `if (o is StringBuilder) return o` converts to `return (StringBuilder)o;` and
-     links exactly as the Java cast form `smartIfCast`. Since maddi#95 a downcast returned whole keeps the
+     A smart-cast read is a cast (CodeLaser/maddi#67): `if (o is StringBuilder) return o` converts to `return (StringBuilder)o;` and
+     links exactly as the Java cast form `smartIfCast`. Since CodeLaser/maddi#95 a downcast returned whole keeps the
      modification-area link a pattern variable keeps (`§m≡0:o.§m`), so the Kotlin smart cast and the Java pattern
      summarise alike: modifying the result is modifying `o`.
      */
@@ -104,8 +104,8 @@ public class TestKotlinLinkConditionals extends CommonKotlinLinkTest {
     }
 
     /*
-     A pattern variable in a Java conditional expression links to the value it was bound from (#79, fixed; it linked
-     to nothing). The Kotlin side reads `(StringBuilder)o`, a cast, which carries the same `§m≡` since maddi#95.
+     A pattern variable in a Java conditional expression links to the value it was bound from (CodeLaser/maddi#79, fixed; it linked
+     to nothing). The Kotlin side reads `(StringBuilder)o`, a cast, which carries the same `§m≡` since CodeLaser/maddi#95.
      */
     @Test
     public void smartCastExpression() {

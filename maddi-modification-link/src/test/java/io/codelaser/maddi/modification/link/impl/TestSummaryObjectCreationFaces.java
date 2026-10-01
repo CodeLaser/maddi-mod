@@ -29,7 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 /**
- * #91: a method's summary must not carry the deep FACES of the objects it creates ('fillAfter.keys.§m ≡ oc:15-31.§m',
+ * CodeLaser/maddi#91: a method's summary must not carry the deep FACES of the objects it creates ('fillAfter.keys.§m ≡ oc:15-31.§m',
  * 'ret.selector.sorter.keys.§es ∩ oc:N.a.b.§es'). Such an object is anonymous to every caller: the caller reaches it
  * only through the return value or a parameter's fields, and those paths are in the summary already ('fillAfter.keys
  * ← oc:15-31' plus 'fillAfter.keys.§$s ~ 0:keys.§$s'). On timefold's selector factories the faces were 55 % of all

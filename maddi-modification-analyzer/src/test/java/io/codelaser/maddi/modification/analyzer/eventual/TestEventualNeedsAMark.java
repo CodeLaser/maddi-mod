@@ -32,7 +32,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 /**
  * No mark, no eventual verdict. vavr's {@code MatchError}: a {@code @FinalFields} type (there its Throwable super caps
  * it; here a super with a modified final list) holding one {@code final Object} field. The field's name becomes a label -- Object is immutable-hc with hidden
- * content -- and the #51 relaxation that writes an after-mark {@code @FinalFields} equal to the unconditional one
+ * content -- and the CodeLaser/maddi#51 relaxation that writes an after-mark {@code @FinalFields} equal to the unconditional one
  * certified "eventually @FinalFields after obj": a transition that does not exist. On vavr, which has no mark at all,
  * that relaxation and its contraction twin certified 119 such verdicts.
  */

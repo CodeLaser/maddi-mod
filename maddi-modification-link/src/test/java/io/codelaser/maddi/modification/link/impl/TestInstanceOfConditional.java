@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /*
  A pattern variable bound in the condition of a conditional EXPRESSION links to the value it was bound from, as it
- does in an `if` statement (#79).
+ does in an `if` statement (CodeLaser/maddi#79).
  */
 public class TestInstanceOfConditional extends CommonTest {
 

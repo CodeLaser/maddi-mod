@@ -642,7 +642,7 @@ public class TypeIndependentAnalyzerImpl extends CommonAnalyzerImpl implements T
                 return "java.util.List".equals(owner) || "java.util.Set".equals(owner)
                        || "java.util.Map".equals(owner);
             }
-            // the Kotlin spellings of the same copies (#87): `xs.toList()`, `toSet()`, `toMap()`, and the literal
+            // the Kotlin spellings of the same copies (CodeLaser/maddi#87): `xs.toList()`, `toSet()`, `toMap()`, and the literal
             // constructors `listOf`/`setOf`/`mapOf`, static members of the kotlin.collections facades
             if (mi.isStatic() && KOTLIN_COPIES.contains(name)
                 && mi.typeInfo().fullyQualifiedName().startsWith("kotlin.collections.")) {
