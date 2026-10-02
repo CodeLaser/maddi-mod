@@ -482,7 +482,7 @@ public record ExpressionVisitor(Runtime runtime,
         Links.Builder builder = new LinksImpl.Builder(newVE.variable());
         if (newVE.variable().parameterizedType().isFunctionalInterface()
             && variableData != null && variableData.isKnown(newVE.variable().fullyQualifiedName())) {
-            VariableInfo vi = variableData.variableInfo(newVE.variable());
+            VariableInfo vi = variableData.variableInfo(newVE.variable(), stage);
             Links links = Objects.requireNonNullElse(vi.linkedVariables(), LinksImpl.EMPTY);
             links.forEach(l -> builder.add(l.from(), l.linkNature(), l.to()));
         }
