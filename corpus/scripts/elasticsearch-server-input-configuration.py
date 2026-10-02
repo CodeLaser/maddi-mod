@@ -71,7 +71,7 @@ def main() -> int:
     corpus_root = oss_root / CORPUS
     full = corpus_root / "inputConfiguration.json"
     if not full.is_file():
-        print(f"missing {full}; run `task elasticsearch && task config:elasticsearch` first",
+        print(f"missing {full}; run `task catalogue:obtain NAME=elasticsearch && task catalogue:config NAME=elasticsearch` first",
               file=sys.stderr)
         return 1
     d = json.loads(full.read_text())
