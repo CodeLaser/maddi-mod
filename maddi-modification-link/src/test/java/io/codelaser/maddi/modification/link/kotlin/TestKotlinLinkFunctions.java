@@ -8,9 +8,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /*
  Function types and lambdas. A Kotlin function type is kotlin.jvm.functions.FunctionN: the Java twins that take a
- Function1 link exactly as Kotlin does, those that take a java.util.function type do not (#80). What Kotlin's
- lambdas can do and Java's cannot: return from the enclosing function (#65) and assign an enclosing `var` (#72, now a
- Ref holder, whose write reaches the creator since #94).
+ Function1 link exactly as Kotlin does, those that take a java.util.function type do not (CodeLaser/maddi#80). What Kotlin's
+ lambdas can do and Java's cannot: return from the enclosing function (CodeLaser/maddi#65) and assign an enclosing `var` (CodeLaser/maddi#72, now a
+ Ref holder, whose write reaches the creator since CodeLaser/maddi#94).
  */
 public class TestKotlinLinkFunctions extends CommonKotlinLinkTest {
 
@@ -66,7 +66,7 @@ public class TestKotlinLinkFunctions extends CommonKotlinLinkTest {
     }
 
     /*
-     ⛔ maddi#80: FunctionN is a custom functional interface to the link engine, java.util.function a standard
+     ⛔ CodeLaser/maddi#80: FunctionN is a custom functional interface to the link engine, java.util.function a standard
      one. With a Consumer the argument is not modified and the call is an applied-functional-interface link; with
      a Kotlin function type `s` is modified and flows into `f`. A decision, not a defect: if FunctionN becomes
      standard, the Kotlin side must equal these Java lines.
@@ -81,7 +81,7 @@ public class TestKotlinLinkFunctions extends CommonKotlinLinkTest {
     }
 
     /*
-     ⛔ maddi#65: `return it` inside forEach returns from `find`; its value never reaches find's return variable, so
+     ⛔ CodeLaser/maddi#65: `return it` inside forEach returns from `find`; its value never reaches find's return variable, so
      the result reads as linked to nothing. The Java loop links it to an element of xs. Unsound: an independence
      claim on `find` would be wrong.
      */
@@ -92,8 +92,8 @@ public class TestKotlinLinkFunctions extends CommonKotlinLinkTest {
     }
 
     /*
-     The lambda assigns the enclosing `var r`: a Ref holder, `r.element = it`, as kotlinc compiles it (#72). A lambda's
-     write through a captured holder -- a Ref field, an array element -- now reaches its creator (#94): the lambda's
+     The lambda assigns the enclosing `var r`: a Ref holder, `r.element = it`, as kotlinc compiles it (CodeLaser/maddi#72). A lambda's
+     write through a captured holder -- a Ref field, an array element -- now reaches its creator (CodeLaser/maddi#94): the lambda's
      summary keeps its parameter's link to the closure variable, and a Consumer applied to a collection's elements
      stores one of them there. The Java holder forms link as the `for` loop does; they also keep the holder's earlier
      value (`←1:a`), which the loop form drops, at the price of an over-approximate parameter link (`1:a∈0:xs.§$s`).
@@ -115,7 +115,7 @@ public class TestKotlinLinkFunctions extends CommonKotlinLinkTest {
      Kotlin's `forEach` is the stdlib's static extension CollectionsKt.forEach(Iterable, Function1<T, Unit>). Its
      derived contract roots the consumer at the receiver parameter as Java's Iterable.forEach roots it at 'this'
      (`0:$receiver.§ts⊇Λ1:action`), the call applies it with the first argument as the object, and a Unit-returning
-     Function1 lifts as a Consumer (#94). `captured` links as the Java `capturedRef`, in another order.
+     Function1 lifts as a Consumer (CodeLaser/maddi#94). `captured` links as the Java `capturedRef`, in another order.
      */
     @Test
     public void kotlinForEachIsContracted() {

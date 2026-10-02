@@ -8,7 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /*
  Class delegation: kotlinc stores the delegate in `$$delegate_0` and synthesizes one forwarder per interface method.
- The forwarders link as the Java twin; the constructor does not assign the field (#90).
+ The forwarders link as the Java twin; the constructor does not assign the field (CodeLaser/maddi#90).
  */
 public class TestKotlinLinkDelegation extends CommonKotlinLinkTest {
 
@@ -44,7 +44,7 @@ public class TestKotlinLinkDelegation extends CommonKotlinLinkTest {
         p.assertSameAsJava("last");
     }
 
-    /* #90 (fixed by #85, 2026-09-28): the constructor stores the delegate, `this.$$delegate_0 = d`, as kotlinc's does */
+    /* CodeLaser/maddi#90 (fixed by CodeLaser/maddi#85, 2026-09-28): the constructor stores the delegate, `this.$$delegate_0 = d`, as kotlinc's does */
     @Test
     public void constructorStoresTheDelegate() {
         p.assertSameAsJava("<init>");

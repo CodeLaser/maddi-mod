@@ -94,7 +94,7 @@ public class TestKotlinAnalyzerSuspend extends CommonKotlinAnalyzerTest {
     }
 
     /*
-     ⚠ maddi#89, Java too: `sequence`/`yieldAll` have no contract. `all` returns a sequence over the StringBuilders
+     ⚠ CodeLaser/maddi#89, Java too: `sequence`/`yieldAll` have no contract. `all` returns a sequence over the StringBuilders
      of `xs`, yet reads @Independent on both sides (a copy would be @Independent(hc=true), a view @Dependent), and
      `xs` reads modified although nothing modifies it.
      */

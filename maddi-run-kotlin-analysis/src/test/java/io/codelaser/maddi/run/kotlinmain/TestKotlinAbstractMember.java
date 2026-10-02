@@ -48,7 +48,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * The same interface written twice, once in Kotlin and once in Java: does maddi model the two the same way?
  * <p>
  * It did not. An abstract Kotlin function was built as a plain method carrying the {@code abstract} MODIFIER, where
- * both Java front ends give it the abstract method TYPE (#35). So {@code isAbstract()} was false for every Kotlin
+ * both Java front ends give it the abstract method TYPE (CodeLaser/maddi#35). So {@code isAbstract()} was false for every Kotlin
  * interface member, and prep's {@code addImplementation} -- which filters {@code overrides()} on exactly that -- never
  * registered an implementation for one. The eventual analysis of a call through a Kotlin interface therefore had no
  * implementations to consult, which made it optimistic: on detekt, 674 types were called {@code @Immutable} against

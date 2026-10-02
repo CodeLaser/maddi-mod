@@ -69,7 +69,7 @@ public class TestKotlinLinkFields extends CommonKotlinLinkTest {
     }
 
     /*
-     maddi#77 (fixed 2026-09-28): the synthesized setter's statement is statement "0", and it links as the Java twin
+     CodeLaser/maddi#77 (fixed 2026-09-28): the synthesized setter's statement is statement "0", and it links as the Java twin
      does. The strings differ in the parameter's NAME only: kotlinc's synthesized setter calls it `value`.
      */
     @Test

@@ -468,7 +468,7 @@ public record LinkMethodCall(JavaInspector javaInspector,
     /*
      LEAF — the return value relates to the ELEMENTS of an expanded varargs parameter: each argument is one element.
      'mutableListOf(vararg elements: T)' summarises as 'rv.§ts ⊆ elements.§ts'; at 'mutableListOf(a, b)' the result
-     contains each argument, 'rv.§ts ∋ a, rv.§ts ∋ b'. Before #78 the parameter was mapped to the LAST argument, as if
+     contains each argument, 'rv.§ts ∋ a, rv.§ts ∋ b'. Before CodeLaser/maddi#78 the parameter was mapped to the LAST argument, as if
      it were the array ('rv.§ts ⊆ b.§ts'). Returns false for any other link to the parameter, which keeps the
      translation it had (a source method's 'pick(vararg xs) = xs[0]': 'pick←0:xs[0]', see TestKotlinLinkConditionals).
      */
@@ -604,7 +604,7 @@ public record LinkMethodCall(JavaInspector javaInspector,
      LEAF 5b — a static method applying a consumer to its FIRST parameter's hidden content, a Kotlin extension function
      on the JVM: `xs.forEach { r = it }` is `CollectionsKt.forEach(xs, action)`, whose summary roots the contract at the
      receiver parameter as Iterable.forEach's is rooted at 'this' (ShallowMethodLinkComputer.receiverConsumer). The first
-     argument plays the object, and the lambda is lifted as parametersToObject lifts it (#94).
+     argument plays the object, and the lambda is lifted as parametersToObject lifts it (CodeLaser/maddi#94).
      */
     private void receiverConsumers(MethodInfo methodInfo, List<Result> params, MethodLinkedVariables mlv,
                                    Map<Variable, Links> extra) {

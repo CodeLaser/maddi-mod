@@ -2,7 +2,7 @@
 """
 Generate <TEST_OSS_ROOT>/coil/inputConfiguration.json — the JVM slice of coil-core.
 
-Run via `task config:coil`.
+Run via `task catalogue:config NAME=coil` (the entry's config route).
 
 WHY THIS IS A SCRIPT AND NOT ONE OF THE TWO NORMAL ROUTES
 --------------------------------------------------------
@@ -129,7 +129,8 @@ def main():
         sys.exit("TEST_OSS_ROOT is not set (the Taskfile exports it)")
     corpus = os.path.join(root, "coil")
     if not os.path.isdir(corpus):
-        sys.exit("no coil checkout at %s; run `task coil` first" % corpus)
+        sys.exit("no coil checkout at %s; obtain it with `task catalogue:obtain NAME=coil` (maddi-mod/corpus), "
+                 "or check that TEST_OSS_ROOT is an expanded path" % corpus)
 
     source_dirs = []
     for s in SOURCE_SETS:

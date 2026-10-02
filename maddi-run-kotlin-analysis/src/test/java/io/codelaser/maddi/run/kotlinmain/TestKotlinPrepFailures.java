@@ -25,7 +25,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
- * The two shapes prep could not analyse on detekt (#32), each written down as the source that made it fail. Prep
+ * The two shapes prep could not analyse on detekt (CodeLaser/maddi#32), each written down as the source that made it fail. Prep
  * isolated 8 methods there; both causes were in the Kotlin front end.
  * <ul>
  *     <li>the <b>elvis</b> operator was lowered with its left operand in the test and in the branch, as ONE CST

@@ -217,7 +217,7 @@ public class TypeImmutableAnalyzerImpl extends CommonAnalyzerImpl implements Typ
                 // not sink -- rather than falling through the isMutable() exit (true for FINAL_FIELDS too). Only a truly
                 // MUTABLE supertype sinks the subtype. First on the after-mark path, where the sink zeroed whole
                 // families (one transiently-capped FF write on Expression turned every subtype @Mutable); now on
-                // the unconditional path too, where it made the verdict order-dependent (#34): the breaking pass
+                // the unconditional path too, where it made the verdict order-dependent (CodeLaser/maddi#34): the breaking pass
                 // floors an UNDECIDED supertype at FINAL_FIELDS, so a subtype computed before its parent was decided
                 // got @FinalFields, one computed after got @Mutable, and the refused downgrade froze whichever ran
                 // first -- on 8 threads, DetektError's subclasses in 1 run in 4.

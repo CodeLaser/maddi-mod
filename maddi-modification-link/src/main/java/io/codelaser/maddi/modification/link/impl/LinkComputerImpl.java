@@ -580,7 +580,7 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                         ? "?" : vd.variableInfo(returnVariable).linkedVariables())
                                    + " ofReturnValue=" + ofReturnValue);
             }
-            // #91: a face of an object created INSIDE this method ('oc:337-26.selectionComparatorFactory.§$') is
+            // CodeLaser/maddi#91: a face of an object created INSIDE this method ('oc:337-26.selectionComparatorFactory.§$') is
             // anonymous to every caller: the caller can reach that object only through the return value or a
             // parameter's fields, and those paths are spelled on the return/parameter already. Re-exporting the
             // faces made summaries transitive dumps of callee-internal object graphs (timefold's selector
@@ -780,7 +780,7 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
             if (viLinks == null || viLinks.primary() == null) return LinksImpl.EMPTY;
             // a local of the ENCLOSING method (a lambda's, a local or anonymous class's closure) is not this method's
             // local: a parameter's link to it -- `x -> r.element = x`, the Ref holder of a Kotlin var the lambda
-            // assigns -- is the lambda's effect on its creator, and applying the lambda must carry it there (#94)
+            // assigns -- is the lambda's effect on its creator, and applying the lambda must carry it there (CodeLaser/maddi#94)
             Links links = viLinks.removeIfFromTo(v -> !(LinkVariable.acceptForLinkedVariables(v)
                                                         || isInClosure(v, inClosure))
                                                       || isParameterOfSiblingMethod(v)
@@ -827,7 +827,7 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                     vd = doBlock(b, vd);
                 } else {
                     // a bare block among the statements goes through the statement path like any other: it is its
-                    // own sub-block, so its statements are linked and merged into the block's variable data (#84: a
+                    // own sub-block, so its statements are linked and merged into the block's variable data (CodeLaser/maddi#84: a
                     // field assigned inside it -- every Kotlin `init` block -- had links only on the inner statement,
                     // and a reader of the constructor's last statement, the block, saw none: independence undecided
                     // forever). The merge needs the block's evaluation stage seeded from the statement before, which

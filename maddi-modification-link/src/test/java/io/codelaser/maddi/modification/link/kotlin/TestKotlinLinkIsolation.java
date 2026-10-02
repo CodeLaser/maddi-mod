@@ -6,11 +6,11 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /*
- ⛔ maddi#83: state from one parse leaks into the link results of a later, independent parse in the same JVM. Linking
+ ⛔ CodeLaser/maddi#83: state from one parse leaks into the link results of a later, independent parse in the same JVM. Linking
  a static call (`listOf(a)`, i.e. CollectionsKt__CollectionsJVMKt.listOf) is enough; afterwards a singleton's field
  `Registry.INSTANCE.all` prints with the earlier call's scope as its owner, on the Kotlin and the Java side. Which
  wrong name it gets depends on what ran first in the JVM, so this asserts only that the right one is absent; it
- fails when #83 is fixed, and should then assert `Registry.INSTANCE.all`.
+ fails when CodeLaser/maddi#83 is fixed, and should then assert `Registry.INSTANCE.all`.
  */
 public class TestKotlinLinkIsolation extends CommonKotlinLinkTest {
 

@@ -69,7 +69,7 @@ public class TestKotlinEscapes extends CommonKotlinTest {
         assertEquals("0=true", escapes(p.kotlin("todo")));
     }
 
-    /* maddi#75 (fixed 2026-09-28): the arms of a `when` used as a value are indexed under their statement, as in Java */
+    /* CodeLaser/maddi#75 (fixed 2026-09-28): the arms of a `when` used as a value are indexed under their statement, as in Java */
     @Test
     public void whenThrows() {
         assertEquals("0=true", escapes(p.kotlin("whenThrows")));
@@ -81,7 +81,7 @@ public class TestKotlinEscapes extends CommonKotlinTest {
 
     /*
      The control-flow elvis: `val t = s ?: return 0` is `if (s == null) return 0;` and `String t = s;`, siblings 0
-     and 1, as the Java twin writes them (#69: they were 0.0 and 0.1, and `t` was lost at statement 1).
+     and 1, as the Java twin writes them (CodeLaser/maddi#69: they were 0.0 and 0.1, and `t` was lost at statement 1).
      */
     @Test
     public void elvisReturn() {

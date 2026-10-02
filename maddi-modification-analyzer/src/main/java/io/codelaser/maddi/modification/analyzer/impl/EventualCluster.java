@@ -146,7 +146,7 @@ public class EventualCluster {
      * method (an {@code EVENTUAL_METHOD} verdict, computed or loaded from hints) is reachable from {@code start} over
      * the edges the labels travel: supertypes, analyzed subtypes and implementors, the types of instance fields
      * (type arguments included), and the enclosing type of a non-static nested, anonymous or lambda type. Labels are field names, and the enm walks, label inheritance and markless carriers
-     * mint them whether or not anything ever commits. The #51 relaxations (an FF==FF verdict is still written; an
+     * mint them whether or not anything ever commits. The CodeLaser/maddi#51 relaxations (an FF==FF verdict is still written; an
      * unconditional @FinalFields discharges in the contraction) must only apply to grounded types: on vavr, which has
      * no mark at all, they certified 119 eventual verdicts over labels such as {@code HashMap}'s {@code trie}
      * (already unconditionally hc: no transition) or {@code List}'s {@code front,rear} (Queue's fields).

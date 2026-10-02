@@ -91,14 +91,14 @@ public record ExpressionVisitor(Runtime runtime,
             case TypeExpression _, EmptyExpression _ -> EMPTY;
             case SwitchExpression se -> switchExpression(se, variableData, stage);
             default -> {
-                // #22: an expression kind the linker does not enumerate contributes no links; before, this threw
+                // CodeLaser/maddi#22: an expression kind the linker does not enumerate contributes no links; before, this threw
                 // and (under fault tolerance) cost the whole method its link analysis
                 LOGGER.warn("Link engine: no visitor for {} in {}; contributes no links", expression.getClass().getName(),
                         currentMethod);
                 yield EMPTY;
             }
         };
-        // ⛔ the return value matters: for the shared EMPTY, setEvaluated returns a copy (#83). Ignoring it wrote the
+        // ⛔ the return value matters: for the shared EMPTY, setEvaluated returns a copy (CodeLaser/maddi#83). Ignoring it wrote the
         // first TypeExpression ever visited into EMPTY, and every later EMPTY in the JVM carried that expression
         if (r.getEvaluated() == null) r = r.setEvaluated(expression);
         return r;
@@ -344,7 +344,7 @@ public record ExpressionVisitor(Runtime runtime,
         Links newLinks = rtChanged.merge(rfChanged);
         // the condition's own links go to `extra`: `with(newLinks)` below replaces the main links, and a pattern
         // binding in the condition (`o instanceof T t ? t : …`) IS the condition's main links, `o → t`. Replaced, `t`
-        // linked to nothing and the ternary's value lost `o` (#79); an `if` statement's condition keeps them.
+        // linked to nothing and the ternary's value lost `o` (CodeLaser/maddi#79); an `if` statement's condition keeps them.
         Result merge = rc.moveLinksToExtra().merge(rt).merge(rf);
         // ⛔ `new Result(links, extra)` keeps only those two and resets the other five — including `modified`,
         // the record of which variables a call in here modifies. It threw away every modification made by the

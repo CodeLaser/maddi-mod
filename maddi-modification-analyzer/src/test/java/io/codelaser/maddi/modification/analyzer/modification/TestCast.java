@@ -231,9 +231,9 @@ public class TestCast extends CommonTest {
             """;
 
     /*
-    maddi#95: a downcast returned whole is the same object as its operand, and its summary now says so with the §m
+    CodeLaser/maddi#95: a downcast returned whole is the same object as its operand, and its summary now says so with the §m
     pair a pattern binding's return already had (only because a return inside a block is rebuilt through the
-    shared-variable reconstruct). Every Kotlin smart cast converts to such a cast (#67).
+    shared-variable reconstruct). Every Kotlin smart cast converts to such a cast (CodeLaser/maddi#67).
     ⚠ The caller verdicts below held BEFORE the fix too (A/B with NORVCAST, 2026-09-29, also for a result kept in a
     local, a field argument, and an accessor downcasting a field): the whole-object ← already carries the
     modification. They guard that; the summary assertion is what the fix changed.
