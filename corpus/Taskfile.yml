@@ -177,9 +177,17 @@ tasks:
       - { task: check,  vars: { NAME: '{{.NAME}}' } }
 
   install:wired:
-    desc: 'Obtain (at its pin), build and configure every corpus this machine holds -- hours'
+    desc: 'Obtain (at its pin), build and configure every corpus this machine holds -- hours. FROM=<name> resumes there'
     vars:
-      HELD: { sh: '{{.TASKFILE_DIR}}/scripts/catalogue.py list --held --names' }
+      # FROM=<name>: the held list from that entry on, in the same order -- to resume after a failure
+      # without rebuilding everything before it. A name not in the list is refused, not an empty run.
+      HELD:
+        sh: >-
+          {{.TASKFILE_DIR}}/scripts/catalogue.py list --held --names
+          {{if .FROM}}| sed -n '/^{{.FROM}}$/,$p'{{end}}
+    preconditions:
+      - sh: '[ -n "{{.HELD}}" ]'
+        msg: '{{if .FROM}}FROM={{.FROM}} is not an entry this machine holds (catalogue.py list --held --names){{else}}this machine holds no corpus{{end}}'
     cmds:
       - { task: config:plugin }
       - for: { var: HELD }
