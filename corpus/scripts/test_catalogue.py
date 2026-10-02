@@ -477,6 +477,18 @@ class TestPhases(CatalogueTest):
         self.assertEqual(script, catalogue.script_path(e))
         self.assertIn(f'python3 {script}', catalogue.plan(e, 'config'))
 
+    def test_a_gradle_log_init_script_is_resolved_against_the_declaring_catalogue(self):
+        """retrofit's toolchain init script: passed as --init-script, from the catalogue that declares it."""
+        cat, script = self.overlay('devops4', None, script_name='tc.init.gradle')
+        self.entry(cat, 'mixed', 'config:\n  route: gradle-log-kotlin\n  tasks: classes\n'
+                                 '  init_script: ../scripts/tc.init.gradle\n')
+        cmd = catalogue.plan(catalogue.load_one('mixed'), 'config')
+        self.assertIn(f'classes --no-configuration-cache -Dorg.gradle.warning.mode=summary '
+                      f'--init-script {script} --debug', cmd)
+        # absent, the route is unchanged
+        self.entry(cat, 'plain', 'config:\n  route: gradle-log-kotlin\n  tasks: classes\n')
+        self.assertNotIn('--init-script', catalogue.plan(catalogue.load_one('plain'), 'config'))
+
     def test_the_then_placeholder_follows_the_declaring_catalogue_too(self):
         cat, script = self.overlay('devops2', None, script_name='derive.py')
         self.entry(cat, 'over', 'config:\n  route: maven-plugin\n  module: m\n'

@@ -635,19 +635,20 @@ def entry_dir(entry, dotted):
     return origin_of(entry, dotted).parent
 
 
-def script_path(entry):
-    """The config route's script: `config.script` relative to its own catalogue directory.
+def script_path(entry, field='script'):
+    """A file the config phase runs -- `config.script`, or `config.init_script` -- relative to its own
+    catalogue directory.
 
     Checked here, because the alternative is handing a path that does not exist to the shell: the phase
     then fails as `python3: can't open file ...` once it is already running, which names the symptom and
     not the cause.
     """
     c = entry.get('config') or {}
-    rel = Path(str(c['script']))
-    base = entry_dir(entry, 'config.script')
+    rel = Path(str(c[field]))
+    base = entry_dir(entry, f'config.{field}')
     f = rel if rel.is_absolute() else (base / rel).resolve()
     if not f.is_file():
-        sys.exit(f"{entry['name']}: config.script {c['script']!r} is not a file at {f} -- it is "
+        sys.exit(f"{entry['name']}: config.{field} {c[field]!r} is not a file at {f} -- it is "
                  f"resolved against {base}, the directory of the catalogue file that declares it")
     return f
 
@@ -1073,6 +1074,11 @@ def _route_cmd(entry, c, route):
         grep = ("grep -aE 'Compiler arguments:|Kotlin compiler args:'"
                 if route.endswith('kotlin') else "grep -a 'Compiler arguments:'")
         extra = ' --no-configuration-cache -Dorg.gradle.warning.mode=summary' if route.endswith('kotlin') else ''
+        # `config.init_script`: a Gradle init script that adjusts the build WITHOUT editing the checkout,
+        # resolved like `config.script`. retrofit is the case: it pins JDK 8 and Azul 14/16 toolchains that
+        # foojay cannot provision on Apple silicon, and its init script moves all three to one installed JDK.
+        if c.get('init_script'):
+            extra += f' --init-script {script_path(entry, "init_script")}'
         return mk + (f'./gradlew --no-build-cache --rerun-tasks {c["tasks"]}{extra} --debug 2>&1 | '
                 f'{grep} > compile.log; '
                 f'{dist}/gradlew -p {dist} :{target}:run '
