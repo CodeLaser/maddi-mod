@@ -415,6 +415,11 @@ def obtain(entry):
     """Clone if absent, then check out `source.rev`. Runs git itself rather than printing a plan:
     there is no build tool output to stream and no exit code worth handing to Task."""
     name = entry['name']
+    owner = checkout_owner(entry)
+    if owner is not None and owner is not entry:
+        # A shared tree (fernflower-plugin) is obtained at its ONE pin, the owner's.
+        print(f'{name}: shares the checkout of {owner["name"]}', file=sys.stderr)
+        return obtain(owner)
     s = entry.get('source') or {}
     if s.get('kind') != 'git':
         print(f"{name}: source.kind is {s.get('kind')!r}, not git -- obtain it by hand "

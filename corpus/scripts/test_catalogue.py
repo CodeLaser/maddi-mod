@@ -251,6 +251,21 @@ class TestPinning(CatalogueTest):
         self.assertEqual(first, git(self.oss / 'lib', 'rev-parse', 'HEAD'))
         self.assertTrue(catalogue.rev_state(e)['at_pin'])
 
+    def test_obtain_of_a_shared_checkout_obtains_the_owners(self):
+        # fernflower-plugin: no `source`, only `dir: fernflower`. It used to fail provision outright.
+        upstream, (first, _) = self.checkout('upstream')
+        self.entry(self.public, 'lib', f'''
+            source:
+              kind: git
+              url: file://{upstream}
+              rev: {first}
+            ''')
+        self.entry(self.public, 'lib-plugin', 'dir: lib\n')
+        self.assertEqual(0, catalogue.obtain(catalogue.load_one('lib-plugin')))
+        self.assertEqual(first, git(self.oss / 'lib', 'rev-parse', 'HEAD'))
+        self.entry(self.public, 'loose', 'dir: nowhere\n')
+        self.assertEqual(1, catalogue.obtain(catalogue.load_one('loose')))
+
     def test_obtain_refuses_to_check_out_over_tracked_edits(self):
         d, (first, _) = self.checkout('lib')
         self.entry(self.public, 'lib', f'''
