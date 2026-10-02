@@ -1037,7 +1037,11 @@ def _route_cmd(entry, c, route):
                 f'-Dmaddi.pluginVersion={ver}{jmods_prop}{apply_to} -Dmaddi.outputFile={out} '
                 f'{prefix}:maddi-write-input-configuration')
     if route == 'maven-log':
-        jh = f'JAVA_HOME={c["build_java_home"]} ' if c.get('build_java_home') else ''
+        # The capture rebuilds the reactor, so it needs the JDK the build phase got: an explicit
+        # `config.build_java_home`, else build_java_home() -- BUILD_JAVA_HOME or the machine profile's
+        # JDK for `build.jdk.version`. Ambient, a JDK-17 Lombok build ran on laser1's 26 and failed.
+        home = c.get('build_java_home') or build_java_home(entry)
+        jh = f'JAVA_HOME={home} ' if home else ''
         # `clean` is mandatory: maven-compiler-plugin skips an up-to-date module and a skipped
         # module emits no "Command line options:" line at all, so capturing over an already
         # built reactor yields a SILENTLY PARTIAL config -- measured on timefold, 22 source

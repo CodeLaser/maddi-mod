@@ -345,6 +345,32 @@ class TestMachineProfile(CatalogueTest):
         self.assertEqual('JAVA_HOME=/opt/override ./gradlew build',
                          catalogue.plan(catalogue.load_one('old'), 'build'))
 
+    def test_the_maven_log_capture_runs_on_the_build_phases_jdk(self):
+        # dolphinscheduler on laser1: built on the profile's 17, then captured on the ambient 26.
+        self.entry(self.public, 'old', '''
+            build:
+              cmd: ./mvnw compile
+              jdk: {version: 17}
+            config:
+              route: maven-log
+              tasks: compile
+            ''')
+        self.entry(self.public, 'pinned', '''
+            build:
+              cmd: ./mvnw compile
+              jdk: {version: 17}
+            config:
+              route: maven-log
+              tasks: compile
+              build_java_home: /opt/explicit
+            ''')
+        self.entry(self.public, 'new', 'config:\n  route: maven-log\n  tasks: compile\n')
+        self.profile('jdks:\n  - {version: 17, home: /opt/jdk17}\n')
+        self.assertIn('JAVA_HOME=/opt/jdk17 MAVEN_OPTS=', catalogue.plan(catalogue.load_one('old'), 'config'))
+        self.assertIn('JAVA_HOME=/opt/explicit MAVEN_OPTS=',
+                      catalogue.plan(catalogue.load_one('pinned'), 'config'))
+        self.assertNotIn('JAVA_HOME=', catalogue.plan(catalogue.load_one('new'), 'config'))
+
     def test_check_jdk_uses_the_profiles_jdk(self):
         home = self.fake_jdk(21)
         self.entry(self.public, 'old', 'build:\n  cmd: make\n  jdk: {version: 21}\n')
