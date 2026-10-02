@@ -293,6 +293,16 @@ def build_java_home(entry, profile=None):
     return ((profile if profile is not None else machine_profile() or {}).get('jdks') or {}).get(str(want))
 
 
+def gradle_java_home(entry, profile=None):
+    """The JDK a Gradle config route LAUNCHES Gradle on, or None for the ambient one: the profile's JDK
+    for `config.jdk.version`. An old wrapper refuses a newer JDK before any task exists -- Gradle 8.14
+    stops with nothing but "What went wrong: 26.0.2" -- and the route's grep then leaves an empty log."""
+    want = ((entry.get('config') or {}).get('jdk') or {}).get('version')
+    if want is None:
+        return None
+    return ((profile if profile is not None else machine_profile() or {}).get('jdks') or {}).get(str(want))
+
+
 def _java_props(home):
     try:
         p = subprocess.run([str(Path(home) / 'bin' / 'java'), '-XshowSettings:properties', '-version'],
@@ -1083,6 +1093,11 @@ def _route_cmd(entry, c, route):
         # foojay cannot provision on Apple silicon, and its init script moves all three to one installed JDK.
         if c.get('init_script'):
             extra += f' --init-script {script_path(entry, "init_script")}'
+        # `config.jdk`: the JDK Gradle itself runs on, as -Dorg.gradle.java.home because that beats a
+        # global gradle.properties pin where JAVA_HOME does not. The compilations keep their toolchains.
+        gjh = gradle_java_home(entry)
+        if gjh:
+            extra += f' -Dorg.gradle.java.home={gjh}'
         return mk + (f'./gradlew --no-build-cache --rerun-tasks {c["tasks"]}{extra} --debug 2>&1 | '
                 f'{grep} > compile.log; '
                 f'{dist}/gradlew -p {dist} :{target}:run '

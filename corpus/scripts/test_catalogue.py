@@ -371,6 +371,20 @@ class TestMachineProfile(CatalogueTest):
                       catalogue.plan(catalogue.load_one('pinned'), 'config'))
         self.assertNotIn('JAVA_HOME=', catalogue.plan(catalogue.load_one('new'), 'config'))
 
+    def test_a_gradle_route_launches_gradle_on_config_jdk(self):
+        # exposed on laser1: Gradle 8.14 refuses the ambient 26 before any task exists.
+        self.entry(self.public, 'old', '''
+            config:
+              route: gradle-log-kotlin
+              tasks: classes
+              jdk: {version: 21}
+            ''')
+        self.entry(self.public, 'new', 'config:\n  route: gradle-log\n  tasks: classes\n')
+        self.profile('jdks:\n  - {version: 21, home: /opt/jdk21}\n')
+        self.assertIn('-Dorg.gradle.java.home=/opt/jdk21 --debug',
+                      catalogue.plan(catalogue.load_one('old'), 'config'))
+        self.assertNotIn('org.gradle.java.home', catalogue.plan(catalogue.load_one('new'), 'config'))
+
     def test_check_jdk_uses_the_profiles_jdk(self):
         home = self.fake_jdk(21)
         self.entry(self.public, 'old', 'build:\n  cmd: make\n  jdk: {version: 21}\n')

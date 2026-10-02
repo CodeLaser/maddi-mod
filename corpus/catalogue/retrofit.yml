@@ -17,13 +17,14 @@ source:
 
 # No `build`: the config route IS the build, as for detekt.
 #
-# ⚠ GRADLE 8.14 DOES NOT RUN ON JDK 27. A machine whose global gradle.properties pins
-# org.gradle.java.home to a newer JDK must run this route under a Gradle user home that pins one Gradle
-# 8.14 accepts (21 is what it was configured with); maddi's own side still runs on its own JDK.
+# ⚠ GRADLE 8.14 RUNS ON JDK 24 AT MOST. `config.jdk` launches it on the machine profile's 21 (what it
+# was configured with), passed as -Dorg.gradle.java.home so it also beats a global gradle.properties pin;
+# maddi's own side still runs on its own JDK.
 
 config:
   route: gradle-log-kotlin
   tasks: classes
+  jdk: {version: 21}
   # retrofit pins JDK 8 (every subproject) and Azul 14/16 (retrofit's multi-release source sets); foojay
   # cannot provision 8 on Apple silicon. The init script moves all three to one installed JDK (21) and
   # turns errorprone off -- the checkout is not edited. See the script.
