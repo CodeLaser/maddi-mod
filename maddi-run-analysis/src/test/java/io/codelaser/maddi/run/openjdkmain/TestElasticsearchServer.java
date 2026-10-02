@@ -176,7 +176,10 @@ public class TestElasticsearchServer {
         // deliberately not a skip and not a warning: a missing jar takes javac down inside itself,
         // and "cannot find lucene" is a far better report than that NPE
         throw new IllegalStateException("not in the Gradle cache: " + coordinate + " (looked under "
-                                        + versionDir + "). Build the corpus with `task corpus:elasticsearch`.");
+                                        + versionDir + " and the corpus's lib/). Vendor every jar this slice names"
+                                        + " with `python3 corpus/scripts/vendor-libraries.py --coordinates --project "
+                                        + corpus.getFileName() + " maddi-run-analysis/src/test/resources" + CONFIG_RESOURCE
+                                        + "` (from maddi-mod; it downloads what the cache lost).");
     }
 
     @Test

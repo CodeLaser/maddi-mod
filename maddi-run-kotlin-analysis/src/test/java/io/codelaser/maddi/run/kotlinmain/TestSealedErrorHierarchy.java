@@ -33,7 +33,7 @@ import java.util.stream.Stream;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
- * detekt's {@code DetektError.kt}, the whole file, on its own: the shape behind #34. {@code IssuesFound} and
+ * detekt's {@code DetektError.kt}, the whole file, on its own: the shape behind CodeLaser/maddi#34. {@code IssuesFound} and
  * {@code InvalidConfig} are character-identical apart from their name.
  * <p>
  * On the corpus the subclasses were {@code @Mutable} in most runs and {@code @FinalFields} in about 1 in 4. The breaking
@@ -87,7 +87,7 @@ public class TestSealedErrorHierarchy {
         InputConfiguration config = new InputConfigurationImpl.Builder()
                 .addClassPathParts(stdlib).addSourceSets(kotlinSet).build();
 
-        // the committed instrument (#34) is how the verdicts are read back: no API of its own to maintain
+        // the committed instrument (CodeLaser/maddi#34) is how the verdicts are read back: no API of its own to maintain
         Path dump = tmp.resolve("verdicts.txt");
         String previous = System.setProperty("maddi.verdictDump", dump.toString());
         try {

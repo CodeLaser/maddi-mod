@@ -86,7 +86,7 @@ public class TestKotlinAnalyzerMethods extends CommonKotlinAnalyzerTest {
     }
 
     /*
-     `fun addAll(xs) = apply { xs.forEach { sb.append(it) } }`: `apply` is inlined (#88), so the modification of
+     `fun addAll(xs) = apply { xs.forEach { sb.append(it) } }`: `apply` is inlined (CodeLaser/maddi#88), so the modification of
      `sb` is the method's, as in the Java twin. It read as non-modifying while the body was a lambda's.
      */
     @Test
@@ -113,7 +113,7 @@ public class TestKotlinAnalyzerMethods extends CommonKotlinAnalyzerTest {
         a.assertSameAsJava("Ops", "fail", "fact");
     }
 
-    /* ⛔ maddi#89: Iterable<Int>.sum() (sumOfInt) has no contract, so a read-only call modifies its argument */
+    /* ⛔ CodeLaser/maddi#89: Iterable<Int>.sum() (sumOfInt) has no contract, so a read-only call modifies its argument */
     @Test
     public void stdlibSum() {
         assertEquals("method sumOf: nonModifying=true @Independent | 0: unmodified=true @Independent",

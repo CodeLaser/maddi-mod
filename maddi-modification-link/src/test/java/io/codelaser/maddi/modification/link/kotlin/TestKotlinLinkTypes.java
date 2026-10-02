@@ -81,7 +81,7 @@ public class TestKotlinLinkTypes extends CommonKotlinLinkTest {
     }
 
     /*
-     maddi#81 (fixed 2026-09-28): `d.copy(a = a)` binds to the data class's `copy$default`, whose body substitutes
+     CodeLaser/maddi#81 (fixed 2026-09-28): `d.copy(a = a)` binds to the data class's `copy$default`, whose body substitutes
      `this.b` for the omitted `b` before calling `copy`, as kotlinc's does.
      */
     @Test
@@ -107,7 +107,7 @@ public class TestKotlinLinkTypes extends CommonKotlinLinkTest {
     }
 
     /*
-     maddi#82 (fixed 2026-09-28): with a custom setter a field write does not mean the same. kotlinc calls setSb
+     CodeLaser/maddi#82 (fixed 2026-09-28): with a custom setter a field write does not mean the same. kotlinc calls setSb
      (count++), and so does the CST now; the setter's side effect is part of customSet.
      */
     @Test
@@ -117,7 +117,7 @@ public class TestKotlinLinkTypes extends CommonKotlinLinkTest {
     }
 
     /*
-     ⚠ The owner is matched loosely: maddi#83 makes it print as the scope of a static call from an EARLIER parse in
+     ⚠ The owner is matched loosely: CodeLaser/maddi#83 makes it print as the scope of a static call from an EARLIER parse in
      the same JVM (`List.INSTANCE.all`), depending on which test classes share the fork. TestKotlinLinkIsolation
      pins that; here only the shape counts.
      */
@@ -137,7 +137,7 @@ public class TestKotlinLinkTypes extends CommonKotlinLinkTest {
 
     /*
      `also`/`apply` return their receiver, and the modification in the lambda (`it.append`) is a modification of it:
-     both are inlined as kotlinc inlines them (#88), so they link exactly as Java's `s.append("x"); return s;`.
+     both are inlined as kotlinc inlines them (CodeLaser/maddi#88), so they link exactly as Java's `s.append("x"); return s;`.
      Before, the lambda's parameter was modified and the engine (by design, for a call that applies a lambda) did
      not carry that back.
      */
@@ -148,7 +148,7 @@ public class TestKotlinLinkTypes extends CommonKotlinLinkTest {
         assertEquals("[-] --> alsoIt←0:s*", p.kotlinLinks("alsoIt"));
     }
 
-    /* `s.let { it }` returns s: inlined (#88), the result is `s` itself, as Java's `return s` (it linked nothing) */
+    /* `s.let { it }` returns s: inlined (CodeLaser/maddi#88), the result is `s` itself, as Java's `return s` (it linked nothing) */
     @Test
     public void letResult() {
         p.assertSameAsJava("letIt");
@@ -157,7 +157,7 @@ public class TestKotlinLinkTypes extends CommonKotlinLinkTest {
 
     /*
      asSequence().first() returns an element of xs. Iterable and Sequence each have one abstract method, iterator();
-     until #78 both were read as function types, the contracts linked nothing and the nested call's result was not
+     until CodeLaser/maddi#78 both were read as function types, the contracts linked nothing and the nested call's result was not
      passed on.
      */
     @Test

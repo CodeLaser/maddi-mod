@@ -438,7 +438,7 @@ public class Util {
      * A type a caller passes a FUNCTION as: a functional interface, except one whose single abstract method is
      * {@code iterator()}. {@code java.lang.Iterable} and Kotlin's {@code Sequence} are functional interfaces by shape
      * but containers by use; read as a supplier of an Iterator, a static {@code toList(Iterable)} or
-     * {@code first(Sequence)} linked to nothing (#78). {@link #needsVirtual} still uses the shape (see its note).
+     * {@code first(Sequence)} linked to nothing (CodeLaser/maddi#78). {@link #needsVirtual} still uses the shape (see its note).
      */
     public static boolean isFunctionType(ParameterizedType pt) {
         if (!pt.isFunctionalInterface()) return false;

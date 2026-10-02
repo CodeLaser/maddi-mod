@@ -224,7 +224,7 @@ public class TestKotlinAssignments extends CommonKotlinTest {
     }
 
     /*
-     ⛔ maddi#74 (Java and Kotlin alike): `x = 5` inside an arm of a switch expression is not an assignment of the
+     ⛔ CodeLaser/maddi#74 (Java and Kotlin alike): `x = 5` inside an arm of a switch expression is not an assignment of the
      enclosing statement, so `return r + x` sees `x = 0` only. Both sides agree, on the wrong answer.
      */
     @Test
@@ -237,7 +237,7 @@ public class TestKotlinAssignments extends CommonKotlinTest {
                 x: D:0, A:[0, 1.0.0] | R 2""", summary(p.kotlin("whenArmAssigns")));
     }
 
-    /* maddi#74 and #75 (both fixed 2026-09-28): the reads and the assignment of `x` in the arms, at the arms' indices */
+    /* CodeLaser/maddi#74 and CodeLaser/maddi#75 (both fixed 2026-09-28): the reads and the assignment of `x` in the arms, at the arms' indices */
     @Test
     public void whenArmReads() {
         p.assertSameAsJava("whenArmReads");

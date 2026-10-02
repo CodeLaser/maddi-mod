@@ -4,7 +4,7 @@ Aspects of the prep analyzer (`maddi-modification-prepwork`) that still need har
 code audit on 2026-06-27. Paths are relative to
 `maddi-modification-prepwork/src/main/java/io/codelaser/maddi/modification/prepwork/` unless noted.
 
-> **The H items are tracked as GitHub issues** — see the tracking issue #13. This document
+> **The H items are tracked as GitHub issues** — see the tracking issue CodeLaser/maddi#13. This document
 > remains the record: the M and L items, the reasoning, and the corrections live here only.
 > Fixing an item means ticking its checkbox here in the same pull request.
 
@@ -22,7 +22,7 @@ Severity: **H** high, **M** medium, **L** low.
 ---
 
 ## 1. Linked variables — data model bugs + least validated  (H)
-- [ ] **H** (#15) `LinksImpl.equals`/`hashCode` compare only `primary`, ignoring `linkSet`
+- [ ] **H** (CodeLaser/maddi#15) `LinksImpl.equals`/`hashCode` compare only `primary`, ignoring `linkSet`
   (`variable/impl/LinksImpl.java:112-121`). `VariableInfoImpl.setLinkedVariables`
   (`variable/impl/VariableInfoImpl.java:53-64`) uses this for change-detection → an update with same primary,
   different links is silently dropped; a primary change hits `overwriteAllowed` (`Links.java:83-86`, true only
@@ -186,10 +186,10 @@ Severity: **H** high, **M** medium, **L** low.
   changes after translation (`:59,67,137`).
 
 ## 7. Serialization IO  (M→H robustness)
-- [ ] **H** (#16) No version/schema marker; `LoadAnalysisResults` reads by fixed positional index with unchecked
+- [ ] **H** (CodeLaser/maddi#16) No version/schema marker; `LoadAnalysisResults` reads by fixed positional index with unchecked
   casts (`io/LoadAnalysisResults.java:159-184`) → format drift = `ClassCastException`.
-- [x] **H** (#17) A stale/renamed `Info` on load aborts the whole file (`:167-170`); no skip-and-continue.
-- [x] **H** (#18) Properties the codec can't encode are silently dropped, no log (`io/WriteAnalysisResults.java:115`).
+- [x] **H** (CodeLaser/maddi#17) A stale/renamed `Info` on load aborts the whole file (`:167-170`); no skip-and-continue.
+- [x] **H** (CodeLaser/maddi#18) Properties the codec can't encode are silently dropped, no log (`io/WriteAnalysisResults.java:115`).
   `PrepWorkCodec` registers exactly one maddi property (`io/PrepWorkCodec.java:56-57`) — easy to forget new ones.
 - [ ] **M** Jar reads use platform charset vs UTF-8 elsewhere (`io/LoadAnalysisResults.java:105`).
 - [ ] **M** `DecoratorImpl.importsNeeded` is mutable instance state — not thread-safe if reused
@@ -203,7 +203,7 @@ Severity: **H** high, **M** medium, **L** low.
   depends on it + the CST `analysis()` stores being thread-safe. Unverified, no `parallel=true` test.
 
 ## 9. `VariableData` ordering is non-deterministic across runs  (M→H, added 2026-07-25)
-- [ ] **H** (#19) `VariableDataImpl.variableInfoStream()` order is **identity-hashCode sensitive**, hence
+- [ ] **H** (CodeLaser/maddi#19) `VariableDataImpl.variableInfoStream()` order is **identity-hashCode sensitive**, hence
   non-deterministic across JVM runs. The order is the insertion order of the `vicByFqn` `LinkedHashMap`
   (`variable/impl/VariableDataImpl.java:42,82-84,125-126`; `Builder.put` `:58-60`), which is populated during
   `MethodAnalyzer` as variables are encountered. That encounter order depends on object-allocation order (it is

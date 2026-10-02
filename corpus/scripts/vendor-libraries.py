@@ -5,6 +5,7 @@ Copy every jar an inputConfiguration.json names from OUTSIDE the corpus into
 
     vendor-libraries.py [--corpus ROOT] [--dry-run] [--offline] CONFIG...
     vendor-libraries.py [--corpus ROOT] [--dry-run] [--offline] --all
+    vendor-libraries.py [--corpus ROOT] [--dry-run] [--offline] --coordinates --project NAME CONFIG...
 
 Run by every `_config:*` task after it writes a configuration; run it by hand once on a machine
 whose configurations predate it. Idempotent: a path already inside the corpus is left alone, so a
@@ -41,6 +42,16 @@ is downloaded from Maven Central (unless --offline). For a Gradle module the cac
 above the jar IS the jar's SHA-1, so the download is checked against the digest the configuration
 itself recorded. For ~/.m2 it is checked against Central's own .sha1. A jar that cannot be
 recovered keeps its old path, is named, and makes the exit status 1.
+
+A CONFIGURATION THAT NAMES COORDINATES
+--------------------------------------
+A committed configuration cannot carry this machine's paths, so some name a Gradle-cache jar by
+coordinate instead: `gradle-cache:<group>/<artifact>/<version>/<file>` (maddi-mod's
+elasticsearch-server.json, written by elasticsearch-server-input-configuration.py). Its reader looks in
+lib/<project>/<group as path>/<artifact>/<version>/<file> first and in the Gradle cache second, so
+`--coordinates --project <project>` fills exactly that place -- from the Gradle cache, else ~/.m2, else
+Maven Central against Central's .sha1 -- and leaves the configuration alone: it is portable by design.
+Without this the cache cleanup took 22 of its 25 jars and TestElasticsearchServer failed (2026-10-02).
 
 The rewrite is textual -- each old `uri` string replaced by the new one -- so the configuration
 keeps whatever formatting its generator gave it, and a diff shows only the paths that moved.
@@ -254,6 +265,42 @@ class Vendor:
         return complete
 
 
+GRADLE_CACHE = "gradle-cache:"
+
+
+def vendor_coordinates(v, config, project):
+    """-> True when every gradle-cache: entry of `config` is in lib/<project>/. Never rewrites `config`."""
+    with open(config, encoding="utf-8") as f:
+        d = json.load(f)
+    coordinates = []
+    for field in ("classPathParts", "sourceSets"):
+        for part in d.get(field, []):
+            uri = part.get("uri", "")
+            if uri.startswith(GRADLE_CACHE) and uri not in coordinates:
+                coordinates.append(uri)
+    complete, bad = True, [c for c in coordinates if len(c[len(GRADLE_CACHE):].split("/")) != 4]
+    if bad:
+        raise ValueError(f"{config}: not <group>/<artifact>/<version>/<file>: {bad[0]}")
+    for uri in coordinates:
+        group, artifact, version, name = uri[len(GRADLE_CACHE):].split("/")
+        relative = "/".join([group.replace(".", "/"), artifact, version, name])
+        cached = sorted(glob.glob(os.path.join(v.home, ".gradle", MODULES.strip("/"), group, artifact,
+                                               version, "*", name)))
+        m2 = os.path.join(v.home, M2.strip("/"), relative)
+        if cached:
+            source, location = cached[0], locate(cached[0])
+        elif os.path.isfile(m2):
+            source, location = m2, locate(m2)
+        else:
+            # gone from both caches: `uri` is what UNRECOVERED names, and Central's .sha1 checks it
+            source, location = uri, Location(relative, None, None if "-SNAPSHOT" in relative else relative)
+        if v.place(project, source, location) is None:
+            complete = False
+    v.say(f"{os.path.basename(config)}: {len(coordinates)} coordinate(s) in {LIB}/{project}/"
+          + ("" if complete else " -- INCOMPLETE, see UNRECOVERED above"))
+    return complete
+
+
 def all_configs(corpus):
     found = set()
     for pattern in ("*/inputConfiguration.json", "*/*/target/inputConfiguration.json",
@@ -270,7 +317,20 @@ def main(argv=None):
                     or os.path.expanduser("~/git/test-oss"))
     ap.add_argument("--dry-run", action="store_true", help="report, copy nothing, rewrite nothing")
     ap.add_argument("--offline", action="store_true", help="never download a jar that is gone")
+    ap.add_argument("--coordinates", action="store_true",
+                    help="CONFIG names gradle-cache: coordinates; fill lib/<--project>/, never rewrite CONFIG")
+    ap.add_argument("--project", help="with --coordinates: the lib/<project>/ the configuration's reader looks in")
     a = ap.parse_args(argv)
+    if a.coordinates:
+        if a.all or not a.configs or not a.project:
+            ap.error("--coordinates takes --project NAME and the configuration(s), not --all")
+        v = Vendor(a.corpus, a.dry_run, a.offline)
+        ok = all([vendor_coordinates(v, c, a.project) for c in a.configs])
+        s = v.stats
+        print(f"{'(dry run) ' if a.dry_run else ''}{len(a.configs)} configuration(s): "
+              f"{s['copied']} copied, {s['linked']} hard-linked, {s['downloaded']} downloaded, "
+              f"{s['present']} already in {LIB}/, {s['unrecovered']} unrecovered")
+        return 0 if ok else 1
     configs = all_configs(a.corpus) if a.all else a.configs
     if not configs:
         ap.error("name the configuration(s), or --all")

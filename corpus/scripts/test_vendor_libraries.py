@@ -233,6 +233,49 @@ class TestVendorLibraries(unittest.TestCase):
         self.vendor(top)
         self.assertEqual(sorted([top, sub]), vendor_libraries.all_configs(self.corpus))
 
+    # --coordinates: a committed configuration (outside the corpus) naming gradle-cache: coordinates
+
+    def coordinate_config(self, *coordinates):
+        d = {"classPathParts": [{"uri": "jmod:java.base"}]
+             + [{"uri": "gradle-cache:" + c} for c in coordinates[:-1]],
+             "sourceSets": [{"uri": "gradle-cache:" + coordinates[-1]}]}
+        return self.write(os.path.join(self.home, "repo", "src", "test", "resources", "es.json"),
+                          json.dumps(d, indent=2).encode())
+
+    def by_coordinates(self, config, **kw):
+        v = vendor_libraries.Vendor(self.corpus, fetch=self.fetch, out=io.StringIO(), home=self.home, **kw)
+        return v, vendor_libraries.vendor_coordinates(v, config, "elasticsearch")
+
+    def test_coordinates_fill_lib_from_both_caches_and_central_and_leave_the_config_alone(self):
+        self.gradle_jar("org.projectlombok", "lombok", "1.18.42", LOMBOK)            # in the Gradle cache
+        self.write(os.path.join(self.m2, "a/b/1/b-1.jar"), b"m2 bytes")               # in ~/.m2
+        cfg = self.coordinate_config("org.projectlombok/lombok/1.18.42/lombok-1.18.42.jar",
+                                     "a/b/1/b-1.jar",
+                                     "commons-io/commons-io/2.11/commons-io-2.11.jar")  # gone: Central
+        before = open(cfg, "rb").read()
+        v, ok = self.by_coordinates(cfg)
+        self.assertTrue(ok)
+        self.assertEqual(before, open(cfg, "rb").read())
+        for rel, data in [("org/projectlombok/lombok/1.18.42/lombok-1.18.42.jar", LOMBOK),
+                          ("a/b/1/b-1.jar", b"m2 bytes"),
+                          ("commons-io/commons-io/2.11/commons-io-2.11.jar", b"cio")]:
+            self.assertEqual(data, open(self.lib("elasticsearch", rel), "rb").read(), rel)
+        self.assertEqual((2, 1), (v.stats["copied"], v.stats["downloaded"]))
+        _, again = self.by_coordinates(cfg)
+        self.assertTrue(again)
+
+    def test_a_coordinate_on_no_cache_and_not_on_central_is_unrecovered(self):
+        cfg = self.coordinate_config("x/y/1/y-1.jar")
+        v, ok = self.by_coordinates(cfg)
+        self.assertFalse(ok)
+        self.assertEqual(1, v.stats["unrecovered"])
+        self.assertIn("gradle-cache:x/y/1/y-1.jar", v.out.getvalue())
+
+    def test_a_coordinate_that_is_not_four_parts_is_an_error(self):
+        cfg = self.coordinate_config("x/y/y-1.jar")
+        with self.assertRaises(ValueError):
+            self.by_coordinates(cfg)
+
 
 if __name__ == "__main__":
     unittest.main()

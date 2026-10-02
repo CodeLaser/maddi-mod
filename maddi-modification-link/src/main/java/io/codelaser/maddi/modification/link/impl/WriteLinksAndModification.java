@@ -696,7 +696,7 @@ class WriteLinksAndModification {
        mutable). A pattern binding got it already, but only because a return inside a block is rebuilt through
        the shared-variable reconstruct, which carries the binding's §m: 'if (o instanceof StringBuilder s) return
        s' summarised with it, 'return (StringBuilder) o' and 'x = (StringBuilder) o; return x' without, so a caller
-       modifying the result did not modify o (maddi#95; every Kotlin smart cast is such a cast since #67). A
+       modifying the result did not modify o (CodeLaser/maddi#95; every Kotlin smart cast is such a cast since CodeLaser/maddi#67). A
        same-type return ('return sb') is left alone: its ← already denotes the object and its modification area.
      */
     private void returnSideModificationCompanions(ReturnVariable rv, Links.Builder builder) {

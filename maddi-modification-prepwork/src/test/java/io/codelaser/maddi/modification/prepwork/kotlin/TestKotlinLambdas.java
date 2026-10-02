@@ -16,8 +16,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /*
  Lambdas: a Kotlin lambda is a Function1 whose body prep analyses as its own method, with the enclosing method's
- variables carried in. What Kotlin can do and Java cannot is where the gaps are: assign an enclosing `var` (#72)
- and return from the enclosing function (#65). A local `fun` is lowered to a lambda held in a local variable.
+ variables carried in. What Kotlin can do and Java cannot is where the gaps are: assign an enclosing `var` (CodeLaser/maddi#72)
+ and return from the enclosing function (CodeLaser/maddi#65). A local `fun` is lowered to a lambda held in a local variable.
  */
 public class TestKotlinLambdas extends CommonKotlinTest {
 
@@ -104,9 +104,9 @@ public class TestKotlinLambdas extends CommonKotlinTest {
     }
 
     /*
-     The lambda assigns the enclosing `var n`: kotlinc's IntRef holder (#72), declared and initialized at 0 and 1, and
+     The lambda assigns the enclosing `var n`: kotlinc's IntRef holder (CodeLaser/maddi#72), declared and initialized at 0 and 1, and
      every read and write is one of `n.element`. The lambda's `n.element++` is an assignment at statement 2, the one
-     creating the lambda (#94), so `return n.element` reads a value the lambda may have written.
+     creating the lambda (CodeLaser/maddi#94), so `return n.element` reads a value the lambda may have written.
      */
     @Test
     public void capturedVar() {
@@ -121,7 +121,7 @@ public class TestKotlinLambdas extends CommonKotlinTest {
     }
 
     /*
-     ⛔ maddi#65, as prep sees it. `return it` leaves `nonLocal` (ReturnStatement.exitLevels() == 1), but it is
+     ⛔ CodeLaser/maddi#65, as prep sees it. `return it` leaves `nonLocal` (ReturnStatement.exitLevels() == 1), but it is
      recorded as an assignment to the LAMBDA's return variable, and the enclosing method's return variable is
      assigned by `return 0` only. The front end marks the return; nothing downstream reads the mark yet.
      */
@@ -147,7 +147,7 @@ public class TestKotlinLambdas extends CommonKotlinTest {
     }
 
     /*
-     `val n = s?.let { … } ?: 0`: the `let` is inlined (#88), `$let0` null unless `s` is not, then assigned in the
+     `val n = s?.let { … } ?: 0`: the `let` is inlined (CodeLaser/maddi#88), `$let0` null unless `s` is not, then assigned in the
      branch, and the elvis reads it; `return n` at 3 reads `n`.
      */
     @Test

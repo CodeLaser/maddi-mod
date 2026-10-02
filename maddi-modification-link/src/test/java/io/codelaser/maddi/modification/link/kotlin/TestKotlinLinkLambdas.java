@@ -72,7 +72,7 @@ public class TestKotlinLinkLambdas extends CommonKotlinLinkTest {
         assertEquals("[] --> supplier←Λ$_fi0", p.kotlinLinks("supplier"));
     }
 
-    /* a bound callable reference is typed as the FunctionN it is on the JVM, and links as Java's method reference (#92) */
+    /* a bound callable reference is typed as the FunctionN it is on the JVM, and links as Java's method reference (CodeLaser/maddi#92) */
     @Test
     public void boundMethodReference() {
         p.assertSameAsJava("appender");
@@ -115,7 +115,7 @@ public class TestKotlinLinkLambdas extends CommonKotlinLinkTest {
             """;
 
     /*
-     A Kotlin call into a Java-source class (#68's shape, static and instance, with a lambda for a Consumer) is the
+     A Kotlin call into a Java-source class (CodeLaser/maddi#68's shape, static and instance, with a lambda for a Consumer) is the
      Java front end's MethodInfo, and links as the same call written in Java.
      */
     @Test

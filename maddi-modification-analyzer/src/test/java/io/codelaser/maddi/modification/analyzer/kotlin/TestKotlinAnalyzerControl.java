@@ -120,9 +120,9 @@ public class TestKotlinAnalyzerControl extends CommonKotlinAnalyzerTest {
     }
 
     /*
-     ⛔ maddi#87: the only caller of the private constructor passes `xs.toList()`, which is not a recognised copy, where
+     ⛔ CodeLaser/maddi#87: the only caller of the private constructor passes `xs.toList()`, which is not a recognised copy, where
      the Java twin's `List.of(xs)` is: Java concludes @Immutable(hc=true) from the call site, Kotlin @FinalFields.
-     The companion itself agrees. When #87 is fixed, this becomes `a.assertSameAsJava("Made", "<init>", "items",
+     The companion itself agrees. When CodeLaser/maddi#87 is fixed, this becomes `a.assertSameAsJava("Made", "<init>", "items",
      "getItems")`.
      */
     @Test

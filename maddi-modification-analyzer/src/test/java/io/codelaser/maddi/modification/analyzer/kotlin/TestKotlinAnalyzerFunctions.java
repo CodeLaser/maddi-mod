@@ -7,8 +7,8 @@ import org.junit.jupiter.api.Test;
 /*
  Methods and functions: a function-typed parameter (FunctionN, the Java twin a Consumer), a function stored in a
  field, top-level extension functions (static methods of the XKt facade, receiver first), and the shapes that are
- wrong one layer down but agree here: a non-local return (#65), a `var` assigned in a lambda (#72), a property with a
- custom setter written from outside (#82). Their verdicts agree with Java on these fixtures, which is not evidence
+ wrong one layer down but agree here: a non-local return (CodeLaser/maddi#65), a `var` assigned in a lambda (CodeLaser/maddi#72), a property with a
+ custom setter written from outside (CodeLaser/maddi#82). Their verdicts agree with Java on these fixtures, which is not evidence
  that the lower-layer defects are harmless: the fixtures' results are all @Independent / unmodified either way.
  */
 public class TestKotlinAnalyzerFunctions extends CommonKotlinAnalyzerTest {

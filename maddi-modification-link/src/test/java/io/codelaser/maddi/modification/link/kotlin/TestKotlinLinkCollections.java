@@ -92,7 +92,7 @@ public class TestKotlinLinkCollections extends CommonKotlinLinkTest {
 
     /*
      toList/toSet/filter return a collection sharing the receiver's elements, as the JDK twins do. The receiver is an
-     Iterable, which has one abstract method; until #78 the shallow link computer read it as a function parameter
+     Iterable, which has one abstract method; until CodeLaser/maddi#78 the shallow link computer read it as a function parameter
      (a supplier of an Iterator) and linked the result to nothing.
      */
     @Test
@@ -104,7 +104,7 @@ public class TestKotlinLinkCollections extends CommonKotlinLinkTest {
     }
 
     /*
-     A library vararg call passing its elements one by one: the result contains each argument. Until #78 the vararg
+     A library vararg call passing its elements one by one: the result contains each argument. Until CodeLaser/maddi#78 the vararg
      parameter was bound to the LAST argument, as if it were the array. The Java call of the same library method
      agrees.
      */

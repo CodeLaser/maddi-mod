@@ -31,7 +31,7 @@ import java.util.stream.Collectors;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
- * #74: a local assigned or read inside a switch EXPRESSION's arms is assigned or read in the statement that holds
+ * CodeLaser/maddi#74: a local assigned or read inside a switch EXPRESSION's arms is assigned or read in the statement that holds
  * the switch expression, and so in every later statement. Found by the Kotlin tier (a `when` used as a value is
  * a switch expression), through the Java twins.
  */

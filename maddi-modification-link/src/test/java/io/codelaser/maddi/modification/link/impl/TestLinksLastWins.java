@@ -30,7 +30,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * #15: {@code Links} equality is primary-only, and {@code VariableInfoImpl.setLinkedVariables} used it for change
+ * CodeLaser/maddi#15: {@code Links} equality is primary-only, and {@code VariableInfoImpl.setLinkedVariables} used it for change
  * detection, so a recomputed value with the same primary but different CONTENT replaced nothing: a variable's
  * statement-level links stayed at the method's FIRST link computation for the rest of the run (EC O4:
  * {@code iterator ↦ -} kept over {@code iterator.§m ☷{remove} this.§m}). Since f747b2105 the last computation wins
