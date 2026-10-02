@@ -188,7 +188,11 @@ class Vendor:
             if digest is None or sha1(target) == digest:
                 self.stats["present"] += 1
                 return target
-            raise ValueError(f"{target} already holds a different file than {source}")
+            if not (exists and "-SNAPSHOT" in location.relative):
+                raise ValueError(f"{target} already holds a different file than {source}")
+            # A SNAPSHOT is re-installed by every build of its reactor (jenkins' cli), so different
+            # bytes under the same name are the newer build, not a mix-up: replace it below.
+            self.say(f"  refreshed   {location.relative}")
         if exists:
             twin = self.twin(project, location.relative, digest)
             self.stats["linked" if twin else "copied"] += 1

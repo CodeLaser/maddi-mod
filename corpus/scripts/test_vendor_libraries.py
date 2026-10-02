@@ -203,6 +203,23 @@ class TestVendorLibraries(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.vendor(cfg)
 
+    def test_a_rebuilt_snapshot_replaces_the_vendored_one(self):
+        # jenkins: every build re-installs its reactor's cli-*-SNAPSHOT.jar with new bytes.
+        rel = "org/x/cli/1.0-SNAPSHOT/cli-1.0-SNAPSHOT.jar"
+        jar = self.write(os.path.join(self.m2, rel), b"rebuilt")
+        old = self.write(self.lib("p", rel), b"previous build")
+        twin = self.lib("q", rel)
+        os.makedirs(os.path.dirname(twin))
+        os.link(old, twin)
+        cfg = self.config("p", [jar])
+        _, ok = self.vendor(cfg)
+        self.assertTrue(ok)
+        self.assertEqual("file:" + self.lib("p", rel), self.uris(cfg)[1])
+        with open(self.lib("p", rel), "rb") as f:
+            self.assertEqual(b"rebuilt", f.read())
+        with open(twin, "rb") as f:
+            self.assertEqual(b"previous build", f.read())   # another project's link is left alone
+
     def test_a_digest_directory_without_its_leading_zero_still_checks(self):
         # Gradle drops leading zeros: 0e3f... is stored as e3f..., 39 characters
         data = next(b"aop" + bytes([i]) for i in range(256) if hashlib.sha1(b"aop" + bytes([i])).hexdigest()[0] == "0")
