@@ -2,8 +2,9 @@
 
 The **modification analysis** of [maddi](https://github.com/CodeLaser/maddi): prep work, the link engine, the
 iterating analyzer, the analysis-hints (AAPI) parser, and `maddi-run-analysis`, the implementation of maddi's
-`AnalysisEngine` service. This repository also holds the analysis tests of the drivers and the open-source
-**corpus** tooling (`corpus/`) with its large-corpus `slowTest` battery.
+`AnalysisEngine` service. This repository also holds the analysis tests of the drivers, among them the
+large-corpus `slowTest` battery. The open-source **corpus** tooling that provisions those corpora is maddi's
+`corpus/` (here from the split until 2026-10-03); `task corpus:*` works from this root too.
 
 ## The tier rule
 

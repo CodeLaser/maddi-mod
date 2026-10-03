@@ -17,7 +17,7 @@ import org.junit.jupiter.api.Tag;
 /**
  * Guava core (~350k lines, 20k elements): the generics/immutability-depth corpus — recursive self-bounded
  * generics, deep hidden-content structures. Green since 2026-07-17 (certified fixpoint, ~72s at PARALLEL
- * defaults). Config generated from the whole reactor's compile log (corpus/catalogue/guava.yml;
+ * defaults). Config generated from the whole reactor's compile log (maddi's corpus/catalogue/guava.yml;
  * `task corpus:catalogue:config NAME=guava`); the corpus-root copy carries an absolute workingDirectory.
  */
 @Tag("slow")
