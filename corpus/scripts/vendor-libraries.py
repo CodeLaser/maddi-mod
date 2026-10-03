@@ -55,12 +55,34 @@ Without this the cache cleanup took 22 of its 25 jars and TestElasticsearchServe
 
 The rewrite is textual -- each old `uri` string replaced by the new one -- so the configuration
 keeps whatever formatting its generator gave it, and a diff shows only the paths that moved.
+
+LOMBOK IS REPLACED BY 1.18.48
+-----------------------------
+Whatever Lombok a configuration names (org.projectlombok:lombok, the annotation processor), it is
+vendored as lombok-1.18.48.jar instead: the copy, the `uri` and every reference to the jar's
+`name` (the source sets' dependencies) all say 1.18.48. Also for a configuration vendored before,
+whose Lombok already sits in lib/.
+
+JDK 27 removed com.sun.tools.javac.tree.EndPosTable, and Lombok up to 1.18.46 needs it: its
+processor dies with an ExceptionInInitializerError, and maddi then records a parse error for every
+source set that uses Lombok (pulsar declares 1.18.42: 105 source sets; timefold-solver and
+dolphinscheduler 1.18.46). 1.18.48 runs on JDK 24, 26 and 27. These corpora are pinned upstream
+checkouts, and their own builds cannot compile on JDK 27 with the Lombok they declare either, so
+parsing with it would reproduce nothing; for what they use (@Slf4j, @Getter, builders, ...) 1.18.48
+generates the same members. This changes test data, not maddi: maddi parses with the Lombok a
+configuration names, and says so when that Lombok cannot run.
+
+The jar is taken from the Gradle cache or ~/.m2 when either holds it, else downloaded from Maven
+Central (unless --offline); either way it must have the SHA-1 pinned below. Not touched:
+rewrite-java-lombok-*.jar, an OpenRewrite artifact rather than the processor. Nor a configuration
+read with --coordinates, which this script never rewrites; none of those names Lombok.
 """
 import argparse
 import glob
 import hashlib
 import json
 import os
+import re
 import shutil
 import sys
 import time
@@ -71,6 +93,12 @@ CENTRAL = "https://repo1.maven.org/maven2"
 MODULES = "/caches/modules-2/files-2.1/"
 M2 = "/.m2/repository/"
 LIB = "lib"
+
+LOMBOK_VERSION = "1.18.48"
+LOMBOK_SHA1 = "6858f13541bab505384f07053c5a7b539bbfd3e3"  # repo1.maven.org's .sha1, and Gradle's cache directory
+LOMBOK_RELATIVE = f"org/projectlombok/lombok/{LOMBOK_VERSION}/lombok-{LOMBOK_VERSION}.jar"
+# the processor jar, lombok-<version>.jar; not rewrite-java-lombok-*.jar, not lombok-<version>-sources.jar
+LOMBOK_JAR = re.compile(r"^lombok-\d+(\.\d+)*(-SNAPSHOT)?\.jar$")
 
 
 def sha1(path):
@@ -136,7 +164,8 @@ class Vendor:
         self.offline = offline
         self.fetch = fetch
         self.out = out
-        self.stats = {"copied": 0, "linked": 0, "downloaded": 0, "present": 0, "unrecovered": 0}
+        self.stats = {"copied": 0, "linked": 0, "downloaded": 0, "present": 0, "unrecovered": 0,
+                      "lombok": 0}
 
     def say(self, msg):
         print(msg, file=self.out)
@@ -219,16 +248,31 @@ class Vendor:
             os.replace(target + ".part", target)
         return target
 
+    def lombok_source(self):
+        """A local lombok-1.18.48.jar with the pinned digest, or a path that does not exist (place() downloads)."""
+        candidates = sorted(glob.glob(os.path.join(self.home, ".gradle", MODULES.strip("/"), "org.projectlombok",
+                                                   "lombok", LOMBOK_VERSION, "*", f"lombok-{LOMBOK_VERSION}.jar")))
+        candidates.append(os.path.join(self.home, M2.strip("/"), LOMBOK_RELATIVE))
+        for candidate in candidates:
+            if os.path.isfile(candidate) and sha1(candidate) == LOMBOK_SHA1:
+                return candidate
+        return os.path.join(self.home, M2.strip("/"), LOMBOK_RELATIVE)  # absent: recovered from Central
+
     def vendor(self, config):
         """-> True when every class-path entry of this configuration is now inside the corpus."""
         project, rel = self.project_of(config)
         with open(config, encoding="utf-8") as f:
             text = f.read()
-        external = []
+        external, lombok = [], {}
         for part in json.loads(text).get("classPathParts", []):
             uri = part.get("uri", "")
             path = strip_scheme(uri)
-            if path is not None and not self.inside_corpus(path) and uri not in external:
+            name = os.path.basename(path) if path is not None else None
+            if name and LOMBOK_JAR.match(name) and name != f"lombok-{LOMBOK_VERSION}.jar":
+                lombok[uri] = part.get("name", name)  # replaced, inside the corpus or not -- see the docstring
+                if not self.inside_corpus(path):
+                    external.append(uri)  # still counts for the another-machine check below
+            elif path is not None and not self.inside_corpus(path) and uri not in external:
                 external.append(uri)
         foreign = [u for u in external if not strip_scheme(u).startswith(self.home + "/")]
         if foreign:
@@ -238,22 +282,41 @@ class Vendor:
                      f"{strip_scheme(foreign[0])} -- generated on another machine; regenerate it here")
             self.stats["foreign"] = self.stats.get("foreign", 0) + 1
             return True
-        moves, complete = {}, True
+        moves, renames, complete = {}, {}, True
         for uri in external:
+            if uri in lombok:
+                continue
             path = strip_scheme(uri)
             new = self.place(project, path, locate(path))
             if new is None:
                 complete = False
             else:
                 moves[uri] = "file:" + new
+        if lombok:
+            names = {p.get("name") for p in json.loads(text).get("classPathParts", [])}
+            if f"lombok-{LOMBOK_VERSION}.jar" in names:
+                raise ValueError(f"{config}: names lombok-{LOMBOK_VERSION}.jar AND {sorted(set(lombok.values()))};"
+                                 f" replacing would leave two class-path parts with one name")
+            new = self.place(project, self.lombok_source(), Location(LOMBOK_RELATIVE, LOMBOK_SHA1, LOMBOK_RELATIVE))
+            if new is None:
+                complete = False
+            else:
+                self.stats["lombok"] += 1
+                for uri, name in lombok.items():
+                    moves[uri] = "file:" + new
+                    renames[name] = f"lombok-{LOMBOK_VERSION}.jar"
+                self.say(f"{rel}: Lombok {sorted(set(lombok.values()))} -> lombok-{LOMBOK_VERSION}.jar")
         if moves:
-            for old, new in moves.items():
-                # json.dumps gives the exact spelling the generator wrote: both are plain JSON strings
+            # json.dumps gives the exact spelling the generator wrote: both are plain JSON strings. A uri and a
+            # name never share a spelling ('"file:/...jar"' vs '"lombok-1.18.42.jar"'), so the order is immaterial.
+            for old, new in list(moves.items()) + list(renames.items()):
                 text = text.replace(json.dumps(old), json.dumps(new))
             check = {p.get("uri") for p in json.loads(text).get("classPathParts", [])}
             missing = [old for old in moves if old in check]
             if missing:
                 raise ValueError(f"{config}: could not rewrite {len(missing)} uri(s), e.g. {missing[0]}")
+            if any(json.dumps(name) in text for name in renames):
+                raise ValueError(f"{config}: a reference to {sorted(renames)} survived the rewrite")
             if not self.dry_run:
                 backup = os.path.join(self.lib_root, project, "_backup",
                                       rel.replace(os.sep, "__") + time.strftime(".%Y%m%d-%H%M%S"))
@@ -343,7 +406,8 @@ def main(argv=None):
     s = v.stats
     print(f"{'(dry run) ' if a.dry_run else ''}{len(configs)} configuration(s): "
           f"{s['copied']} copied, {s['linked']} hard-linked, {s['downloaded']} downloaded, "
-          f"{s['present']} already in {LIB}/, {s['unrecovered']} unrecovered"
+          f"{s['present']} already in {LIB}/, {s['unrecovered']} unrecovered, "
+          f"{s['lombok']} with Lombok replaced by {LOMBOK_VERSION}"
           + (f"; {s['foreign']} configuration(s) from another machine skipped" if s.get("foreign") else ""))
     return 0 if ok else 1
 

@@ -18,8 +18,11 @@ _spec = importlib.util.spec_from_file_location(
 vendor_libraries = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(vendor_libraries)
 
-LOMBOK = b"lombok bytes"
-LOMBOK_SHA1 = hashlib.sha1(LOMBOK).hexdigest()
+SLF4J = b"slf4j bytes"
+SLF4J_SHA1 = hashlib.sha1(SLF4J).hexdigest()
+# stand-ins for the real Lombok jars; setUp pins LOMBOK_SHA1 to the replacement's digest
+LOMBOK_OLD = b"lombok 1.18.42 bytes"
+LOMBOK_NEW = b"lombok 1.18.48 bytes"
 
 
 class TestVendorLibraries(unittest.TestCase):
@@ -31,8 +34,11 @@ class TestVendorLibraries(unittest.TestCase):
         self.modules = os.path.join(self.home, ".gradle", "caches", "modules-2", "files-2.1")
         self.m2 = os.path.join(self.home, ".m2", "repository")
         self.fetched = []
+        self._pinned = vendor_libraries.LOMBOK_SHA1
+        vendor_libraries.LOMBOK_SHA1 = hashlib.sha1(LOMBOK_NEW).hexdigest()
 
     def tearDown(self):
+        vendor_libraries.LOMBOK_SHA1 = self._pinned
         self._tmp.cleanup()
 
     def write(self, path, data):
@@ -48,10 +54,13 @@ class TestVendorLibraries(unittest.TestCase):
             self.write(path, data)
         return path
 
-    def config(self, project, paths, pretty=True, below=""):
+    def config(self, project, paths, pretty=True, below="", source_sets=()):
         parts = [{"name": "java.base", "uri": "jmod:java.base"}]
         parts += [{"name": os.path.basename(p), "uri": "file:" + p, "library": True} for p in paths]
         d = {"workingDirectory": os.path.join(self.corpus, project), "classPathParts": parts}
+        if source_sets:
+            # a source set names the class-path parts it depends on by their name
+            d["sourceSets"] = [{"name": n, "dependencies": deps} for n, deps in source_sets]
         path = os.path.join(self.corpus, project, below, "inputConfiguration.json")
         # the two spellings the generators produce: Jackson's pretty printer and a compact one
         text = json.dumps(d, indent=2, separators=(",", " : ")) if pretty else json.dumps(d)
@@ -61,7 +70,7 @@ class TestVendorLibraries(unittest.TestCase):
     def fetch(self, url):
         self.fetched.append(url)
         table = {
-            f"{vendor_libraries.CENTRAL}/org/projectlombok/lombok/1.18.42/lombok-1.18.42.jar": LOMBOK,
+            f"{vendor_libraries.CENTRAL}/org/slf4j/slf4j-api/2.0.9/slf4j-api-2.0.9.jar": SLF4J,
             f"{vendor_libraries.CENTRAL}/org/yaml/snakeyaml/2.6/snakeyaml-2.6.jar": b"tampered",
             f"{vendor_libraries.CENTRAL}/commons-io/commons-io/2.11/commons-io-2.11.jar": b"cio",
             f"{vendor_libraries.CENTRAL}/commons-io/commons-io/2.11/commons-io-2.11.jar.sha1":
@@ -133,14 +142,13 @@ class TestVendorLibraries(unittest.TestCase):
             self.assertEqual(original, f.read())
 
     def test_a_jar_gone_from_the_gradle_cache_is_downloaded_and_checked_against_its_directory(self):
-        gone = os.path.join(self.modules, "org.projectlombok", "lombok", "1.18.42", LOMBOK_SHA1,
-                            "lombok-1.18.42.jar")
+        gone = os.path.join(self.modules, "org.slf4j", "slf4j-api", "2.0.9", SLF4J_SHA1, "slf4j-api-2.0.9.jar")
         cfg = self.config("p", [gone])
         v, ok = self.vendor(cfg)
         self.assertTrue(ok)
         self.assertEqual(1, v.stats["downloaded"])
-        with open(self.lib("p", "org/projectlombok/lombok/1.18.42/lombok-1.18.42.jar"), "rb") as f:
-            self.assertEqual(LOMBOK, f.read())
+        with open(self.lib("p", "org/slf4j/slf4j-api/2.0.9/slf4j-api-2.0.9.jar"), "rb") as f:
+            self.assertEqual(SLF4J, f.read())
 
     def test_a_download_with_the_wrong_digest_is_refused_and_the_old_path_kept(self):
         gone = os.path.join(self.modules, "org.yaml", "snakeyaml", "2.6", "0" * 40, "snakeyaml-2.6.jar")
@@ -167,8 +175,7 @@ class TestVendorLibraries(unittest.TestCase):
         self.assertEqual([], self.fetched)
 
     def test_offline_downloads_nothing(self):
-        gone = os.path.join(self.modules, "org.projectlombok", "lombok", "1.18.42", LOMBOK_SHA1,
-                            "lombok-1.18.42.jar")
+        gone = os.path.join(self.modules, "org.slf4j", "slf4j-api", "2.0.9", SLF4J_SHA1, "slf4j-api-2.0.9.jar")
         _, ok = self.vendor(self.config("p", [gone]), offline=True)
         self.assertFalse(ok)
         self.assertEqual([], self.fetched)
@@ -264,16 +271,16 @@ class TestVendorLibraries(unittest.TestCase):
         return v, vendor_libraries.vendor_coordinates(v, config, "elasticsearch")
 
     def test_coordinates_fill_lib_from_both_caches_and_central_and_leave_the_config_alone(self):
-        self.gradle_jar("org.projectlombok", "lombok", "1.18.42", LOMBOK)            # in the Gradle cache
+        self.gradle_jar("org.slf4j", "slf4j-api", "2.0.9", SLF4J)                    # in the Gradle cache
         self.write(os.path.join(self.m2, "a/b/1/b-1.jar"), b"m2 bytes")               # in ~/.m2
-        cfg = self.coordinate_config("org.projectlombok/lombok/1.18.42/lombok-1.18.42.jar",
+        cfg = self.coordinate_config("org.slf4j/slf4j-api/2.0.9/slf4j-api-2.0.9.jar",
                                      "a/b/1/b-1.jar",
                                      "commons-io/commons-io/2.11/commons-io-2.11.jar")  # gone: Central
         before = open(cfg, "rb").read()
         v, ok = self.by_coordinates(cfg)
         self.assertTrue(ok)
         self.assertEqual(before, open(cfg, "rb").read())
-        for rel, data in [("org/projectlombok/lombok/1.18.42/lombok-1.18.42.jar", LOMBOK),
+        for rel, data in [("org/slf4j/slf4j-api/2.0.9/slf4j-api-2.0.9.jar", SLF4J),
                           ("a/b/1/b-1.jar", b"m2 bytes"),
                           ("commons-io/commons-io/2.11/commons-io-2.11.jar", b"cio")]:
             self.assertEqual(data, open(self.lib("elasticsearch", rel), "rb").read(), rel)
@@ -292,6 +299,105 @@ class TestVendorLibraries(unittest.TestCase):
         cfg = self.coordinate_config("x/y/y-1.jar")
         with self.assertRaises(ValueError):
             self.by_coordinates(cfg)
+
+
+    # -- Lombok: replaced by LOMBOK_VERSION (JDK 27 removed a javac class Lombok <= 1.18.46 needs) --
+
+    def lombok_new_in_gradle_cache(self):
+        return self.gradle_jar("org.projectlombok", "lombok", vendor_libraries.LOMBOK_VERSION, LOMBOK_NEW)
+
+    def names(self, config):
+        with open(config) as f:
+            d = json.load(f)
+        return [p["name"] for p in d["classPathParts"]], [s["dependencies"] for s in d.get("sourceSets", [])]
+
+    def test_lombok_is_replaced_by_the_pinned_version_uri_and_names(self):
+        self.lombok_new_in_gradle_cache()
+        old = self.gradle_jar("org.projectlombok", "lombok", "1.18.42", LOMBOK_OLD)
+        guava = self.gradle_jar("g", "guava", "1", b"guava")
+        cfg = self.config("p", [old, guava], source_sets=[("a/main", ["lombok-1.18.42.jar", "guava-1.jar"]),
+                                                          ("b/main", ["guava-1.jar"])])
+        v, ok = self.vendor(cfg)
+        self.assertTrue(ok)
+        self.assertEqual(1, v.stats["lombok"])
+        new = self.lib("p", vendor_libraries.LOMBOK_RELATIVE)
+        self.assertEqual("file:" + new, self.uris(cfg)[1])
+        parts, deps = self.names(cfg)
+        self.assertEqual(["java.base", "lombok-1.18.48.jar", "guava-1.jar"], parts)
+        self.assertEqual([["lombok-1.18.48.jar", "guava-1.jar"], ["guava-1.jar"]], deps)
+        with open(new, "rb") as f:
+            self.assertEqual(LOMBOK_NEW, f.read())
+        # the old Lombok is not vendored at all, and nothing was downloaded: the cache had the new one
+        self.assertFalse(os.path.exists(self.lib("p", "org/projectlombok/lombok/1.18.42")))
+        self.assertEqual([], self.fetched)
+
+    def test_a_lombok_already_in_lib_is_replaced_too_and_downloaded_when_no_cache_has_it(self):
+        vendored = self.write(self.lib("p", "org/projectlombok/lombok/1.18.46/lombok-1.18.46.jar"), LOMBOK_OLD)
+        cfg = self.config("p", [vendored], source_sets=[("a/main", ["lombok-1.18.46.jar"])])
+        self.table_extra = {f"{vendor_libraries.CENTRAL}/{vendor_libraries.LOMBOK_RELATIVE}": LOMBOK_NEW}
+        v, ok = self.vendor(cfg)
+        self.assertTrue(ok)
+        self.assertEqual(1, v.stats["downloaded"])
+        self.assertEqual("file:" + self.lib("p", vendor_libraries.LOMBOK_RELATIVE), self.uris(cfg)[1])
+        self.assertEqual([["lombok-1.18.48.jar"]], self.names(cfg)[1])
+
+    def test_a_lombok_download_with_the_wrong_digest_leaves_the_configuration_alone(self):
+        old = self.gradle_jar("org.projectlombok", "lombok", "1.18.42", LOMBOK_OLD)
+        cfg = self.config("p", [old], source_sets=[("a/main", ["lombok-1.18.42.jar"])])
+        self.table_extra = {f"{vendor_libraries.CENTRAL}/{vendor_libraries.LOMBOK_RELATIVE}": b"tampered"}
+        with open(cfg) as f:
+            before = f.read()
+        v, ok = self.vendor(cfg)
+        self.assertFalse(ok)
+        self.assertEqual(1, v.stats["unrecovered"])
+        with open(cfg) as f:
+            self.assertEqual(before, f.read())
+
+    def test_the_replacement_is_idempotent(self):
+        self.lombok_new_in_gradle_cache()
+        cfg = self.config("p", [self.gradle_jar("org.projectlombok", "lombok", "1.18.42", LOMBOK_OLD)],
+                          source_sets=[("a/main", ["lombok-1.18.42.jar"])])
+        self.vendor(cfg)
+        with open(cfg) as f:
+            once = f.read()
+        v, ok = self.vendor(cfg)
+        self.assertTrue(ok)
+        self.assertEqual(0, v.stats["lombok"])
+        with open(cfg) as f:
+            self.assertEqual(once, f.read())
+
+    def test_only_the_processor_jar_is_lombok(self):
+        self.lombok_new_in_gradle_cache()
+        rewrite = self.write(os.path.join(self.m2, "org/openrewrite/rewrite-java-lombok/8.84.0/"
+                                                   "rewrite-java-lombok-8.84.0.jar"), b"rewrite")
+        sources = self.write(os.path.join(self.m2, "org/projectlombok/lombok/1.18.42/lombok-1.18.42-sources.jar"),
+                             b"sources")
+        cfg = self.config("p", [rewrite, sources])
+        v, ok = self.vendor(cfg)
+        self.assertTrue(ok)
+        self.assertEqual(0, v.stats["lombok"])
+        self.assertEqual(["java.base", "rewrite-java-lombok-8.84.0.jar", "lombok-1.18.42-sources.jar"],
+                         self.names(cfg)[0])
+
+    def test_a_configuration_naming_two_lomboks_is_refused(self):
+        new = self.lombok_new_in_gradle_cache()
+        old = self.gradle_jar("org.projectlombok", "lombok", "1.18.42", LOMBOK_OLD)
+        with self.assertRaises(ValueError):
+            self.vendor(self.config("p", [old, new]))
+
+    def test_dry_run_reports_the_lombok_replacement_and_writes_nothing(self):
+        self.lombok_new_in_gradle_cache()
+        cfg = self.config("p", [self.gradle_jar("org.projectlombok", "lombok", "1.18.42", LOMBOK_OLD)])
+        with open(cfg) as f:
+            before = f.read()
+        v, _ = self.vendor(cfg, dry_run=True)
+        self.assertEqual(1, v.stats["lombok"])
+        with open(cfg) as f:
+            self.assertEqual(before, f.read())
+        self.assertFalse(os.path.exists(self.lib("p")))
+
+    def test_the_pinned_digest_is_the_real_one(self):
+        self.assertEqual("6858f13541bab505384f07053c5a7b539bbfd3e3", self._pinned)
 
 
 if __name__ == "__main__":
