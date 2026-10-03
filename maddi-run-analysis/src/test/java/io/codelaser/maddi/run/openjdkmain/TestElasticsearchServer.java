@@ -35,7 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>
  * The slice is therefore <b>checked in</b>, at {@value #CONFIG_RESOURCE}: {@code server/main} as
  * the only source set, its 19 {@code libs/*} dependencies as compiled class directories, and the
- * JDK jmods. Regenerate with {@code task corpus:config:elasticsearch-server}.
+ * JDK jmods. Regenerate with {@code task corpus:config:elasticsearch-server} (maddi's corpus/).
  * <p>
  * ⚠ The 26 external jars (lucene, log4j, hppc, joni, …) are deliberately NOT named: they live in
  * the Gradle cache, and pinning those absolute paths is what makes a generated configuration
@@ -149,7 +149,7 @@ public class TestElasticsearchServer {
      * differs per resolved artifact. The coordinate above it is identical on every machine, so the
      * committed file carries the coordinate and this globs the single level between.
      * <p>
-     * The corpus's own copy comes first: {@code corpus/scripts/vendor-libraries.py} moves every jar a
+     * The corpus's own copy comes first: maddi's {@code corpus/scripts/vendor-libraries.py} moves every jar a
      * generated configuration names into {@code <TEST_OSS_ROOT>/lib/<project>/}, in Maven layout, because
      * Gradle deletes a cache entry it has not itself used for 30 days (18 jars, 2026-09-25).
      */
@@ -177,7 +177,7 @@ public class TestElasticsearchServer {
         // and "cannot find lucene" is a far better report than that NPE
         throw new IllegalStateException("not in the Gradle cache: " + coordinate + " (looked under "
                                         + versionDir + " and the corpus's lib/). Vendor every jar this slice names"
-                                        + " with `python3 corpus/scripts/vendor-libraries.py --coordinates --project "
+                                        + " with `python3 ../maddi/corpus/scripts/vendor-libraries.py --coordinates --project "
                                         + corpus.getFileName() + " maddi-run-analysis/src/test/resources" + CONFIG_RESOURCE
                                         + "` (from maddi-mod; it downloads what the cache lost).");
     }

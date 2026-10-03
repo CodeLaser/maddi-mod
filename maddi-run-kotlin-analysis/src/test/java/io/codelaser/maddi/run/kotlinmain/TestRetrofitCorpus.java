@@ -44,7 +44,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * {@code MixedProjectInspector} takes its interleaved path here and nowhere else in the corpus.
  *
  * <p>The configuration comes from the {@code --compile-log} route (22 javac + 6 kotlinc invocations, 24 source
- * sets); see {@code corpus/catalogue/retrofit.yml} in maddi-mod, including the init script that moves
+ * sets); see {@code corpus/catalogue/retrofit.yml} in maddi, including the init script that moves
  * retrofit's JDK 8 / Azul 14 / Azul 16 toolchains to one installed JDK.
  */
 @Tag("slow")
