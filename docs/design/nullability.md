@@ -263,3 +263,14 @@ Cost: the modification analysis of guava with `nullability` on takes about 100 s
 12 minutes were DEBUG logging); the pass itself is
 negligible. ⛔ A corpus test must set the log level to INFO itself: the first run logged at DEBUG into a 27.7 GB
 test report.
+
+### 2026-10-06 — local variables, for the Java→Kotlin printer
+
+Locals get a verdict (`Report.locals()`, `Report.local(MethodInfo, Element declaration, LocalVariable)`), so the
+printer can write `val x: String?`. A `LocalVariable` is equal BY NAME, so the first cut's per-method name key
+merged same-named locals of sibling blocks. A local is now keyed by its declaring element, by identity: the
+`LocalVariableCreation` (including a for-each variable, a `for` initializer, a try resource) or the `CatchClause`.
+The pass resolves names through block scopes; Java forbids a local to shadow a local, so a name in scope denotes
+one declaration. Pattern variables have no declaration key yet; they fall back to a per-method name key and get no
+verdict. A lambda resolves captured locals in its enclosing scope. The guava declaration scores are unchanged
+(12,766 / 321 / 817).
