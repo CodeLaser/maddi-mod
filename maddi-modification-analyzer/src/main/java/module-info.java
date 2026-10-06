@@ -4,6 +4,7 @@ module io.codelaser.maddi.modification.analyzer {
     exports io.codelaser.maddi.modification.analyzer.impl;
     exports io.codelaser.maddi.modification.analyzer;
     exports io.codelaser.maddi.modification.analyzer.shadow;
+    exports io.codelaser.maddi.modification.analyzer.nullability;
 
     requires io.codelaser.maddi.modification.common;
     requires io.codelaser.maddi.modification.link;

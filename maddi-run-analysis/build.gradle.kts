@@ -50,6 +50,7 @@ dependencies {
     // path; they keep their packages. The class path below is what they had there, plus this module.
     testImplementation("io.codelaser:maddi-run-openjdk:$maddiVersion")
     testImplementation(testFixtures("io.codelaser:maddi-util:$maddiVersion"))  // Corpora, the corpus locator
+    testImplementation("io.codelaser:maddi-cst-impl:$maddiVersion")  // DeclaredNullability, the nullability oracle
     testImplementation("io.codelaser:maddi-run-main:$maddiVersion")
     testImplementation("io.codelaser:maddi-run-config:$maddiVersion")
     testImplementation("io.codelaser:maddi-graph:$maddiVersion")
