@@ -263,3 +263,36 @@ Cost: the modification analysis of guava with `nullability` on takes about 100 s
 12 minutes were DEBUG logging); the pass itself is
 negligible. ⛔ A corpus test must set the log level to INFO itself: the first run logged at DEBUG into a 27.7 GB
 test report.
+
+### 2026-10-06 — local variables, for the Java→Kotlin printer
+
+Locals get a verdict (`Report.locals()`, `Report.local(MethodInfo, Element declaration, LocalVariable)`), so the
+printer can write `val x: String?`. A `LocalVariable` is equal BY NAME, so the first cut's per-method name key
+merged same-named locals of sibling blocks. A local is now keyed by its declaring element, by identity: the
+`LocalVariableCreation` (including a for-each variable, a `for` initializer, a try resource) or the `CatchClause`.
+The pass resolves names through block scopes; Java forbids a local to shadow a local, so a name in scope denotes
+one declaration. Pattern variables have no declaration key yet; they fall back to a per-method name key and get no
+verdict. A lambda resolves captured locals in its enclosing scope. The guava declaration scores are unchanged
+(12,766 / 321 / 817).
+
+### 2026-10-06 — B2 properties and D1 annotated Java (first cut)
+
+- **B2** (maddi base): `Value.Nullability` / `ValueImpl.NullabilityImpl`, the state of the value and,
+  recursively, of each type argument. *Changed while implementing:* the value stores the states only, not a
+  `ParameterizedType`. The declared type is already the field's, parameter's or return type; `applyTo(declared)`
+  rebuilds the typed form, and the codec, whose `encodeType` does not carry `NullableState`, stays untouched.
+  Encoded as a shape string (`U(N,Q)` is `Map<String, String?>!`). Properties `NULLABILITY_FIELD`,
+  `NULLABILITY_PARAMETER`, `NULLABILITY_METHOD`, default UNSPECIFIED, registered with the provider. *Deviation:*
+  `NOT_NULL_*` are NOT derived from it yet. Writing them would make `DecoratorImpl` print maddi's `@NotNull`
+  everywhere under the `@NullMarked` policy, and change the hints round-trip; that waits for a decision.
+- **Writing**: `IteratingAnalyzerImpl.analyze` runs `NullabilityPass` (policy `NULL_MARKED`) after convergence
+  when `Configuration.nullability()` is on, and `NullabilityPass.write` stores the verdicts. Overwrite is allowed:
+  a re-analysis recomputes from complete facts.
+- **D1** (`prepwork/io/NullabilityDecorator`, a separate decorator that wraps another, e.g. `DecoratorImpl`):
+  flavours JSpecify, Checker, JetBrains (TYPE_USE), JSR-305 and maddi (declaration); option `writeNonNull`
+  (false is the `@NullMarked` style: only `@Nullable`). An annotation type not on the classpath is stubbed for
+  printing and import. Nothing is written for primitives, UNSPECIFIED verdicts, or where the source already has a
+  null annotation (a contract). Skipped in TYPE_USE flavours: arrays (declaration position would speak about the
+  elements) and nested types (`@Nullable Map.Entry` does not compile). Both, and type arguments, need the
+  annotation inside the printed type: next. `TestNullabilityAnnotations` pins JSpecify `@NullMarked` and JSR-305
+  with non-null output end to end.

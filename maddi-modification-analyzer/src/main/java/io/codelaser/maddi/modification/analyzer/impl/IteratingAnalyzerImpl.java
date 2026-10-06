@@ -406,6 +406,17 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
     @Override
     public void analyze(List<Info> analysisOrder, io.codelaser.maddi.graph.G<Info> dependencyGraph,
                         java.util.Set<Info> initialDirty, java.util.function.Consumer<Info> beforeFirstRecompute) {
+        iterate(analysisOrder, dependencyGraph, initialDirty, beforeFirstRecompute);
+        if (configuration.nullability()) {
+            // docs/design/nullability.md M3/B2: one-shot, over the converged link facts
+            var pass = new io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass(
+                    io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass.Policy.NULL_MARKED);
+            io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass.write(pass.go(analysisOrder));
+        }
+    }
+
+    private void iterate(List<Info> analysisOrder, io.codelaser.maddi.graph.G<Info> dependencyGraph,
+                         java.util.Set<Info> initialDirty, java.util.function.Consumer<Info> beforeFirstRecompute) {
         // incremental (early-cutoff) mode: seed the worklist with initialDirty and stop the moment it runs dry,
         // WITHOUT the full verification / cycle-breaking passes — those re-touch the untouched (carried) elements
         // and would defeat the skip. See docs/design/analysis-rewiring.md and IteratingAnalyzer#analyze(List,G,Set).

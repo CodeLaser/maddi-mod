@@ -14,6 +14,8 @@
 
 package io.codelaser.maddi.modification.analyzer.nullability;
 
+import io.codelaser.maddi.cst.api.analysis.Property;
+import io.codelaser.maddi.cst.api.element.Element;
 import io.codelaser.maddi.cst.api.expression.Assignment;
 import io.codelaser.maddi.cst.api.expression.BinaryOperator;
 import io.codelaser.maddi.cst.api.expression.Cast;
@@ -29,15 +31,19 @@ import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.statement.Block;
 import io.codelaser.maddi.cst.api.statement.ExplicitConstructorInvocation;
+import io.codelaser.maddi.cst.api.statement.ForEachStatement;
+import io.codelaser.maddi.cst.api.statement.ForStatement;
 import io.codelaser.maddi.cst.api.statement.LocalVariableCreation;
 import io.codelaser.maddi.cst.api.statement.ReturnStatement;
 import io.codelaser.maddi.cst.api.statement.Statement;
+import io.codelaser.maddi.cst.api.statement.TryStatement;
 import io.codelaser.maddi.cst.api.type.NullableState;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.cst.api.variable.LocalVariable;
 import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
+import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 import io.codelaser.maddi.modification.link.LinkComputer;
 import io.codelaser.maddi.modification.link.impl.LinkComputerImpl;
 import io.codelaser.maddi.modification.prepwork.Util;
@@ -49,11 +55,15 @@ import io.codelaser.maddi.modification.prepwork.variable.VariableInfo;
 import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Deque;
+import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -61,8 +71,9 @@ import java.util.Set;
  * Modelled on {@code ShadowModificationPass}: a one-shot pass after the iterating analyzer has converged, so no
  * optimistic value is frozen before its evidence arrives.
  * <p>
- * <b>Nodes</b>: fields, parameters, and methods standing for their return value; locals carry null between
- * statements. <b>Seeds</b> (may be null): a null constant flowing into a node, as a link to a null-constant marker
+ * <b>Nodes</b>: fields, parameters, methods standing for their return value, and local variables. A local is
+ * keyed by its DECLARATION ({@link Local}), resolved through the block scopes, so same-named locals of sibling
+ * scopes are distinct nodes (a {@link LocalVariable} is equal by name). <b>Seeds</b> (may be null): a null constant flowing into a node, as a link to a null-constant marker
  * or as a {@code null} argument; a field that can still hold Java's default value (not final, no initializer, not
  * assigned in every constructor); under {@link Policy#nullTests()}, a parameter or field compared with null; the
  * JDK's null contracts ({@link LibraryNullness}): overriding a method that may return null or accepts null, and
@@ -74,7 +85,7 @@ import java.util.Set;
  * <p>
  * <b>Verdict</b>: reached is {@link NullableState#NULLABLE}; not reached is {@link Policy#unreached()}; a primitive
  * is {@link NullableState#NONNULL}; a type-variable type and the outputs of a degraded method (no links) are
- * {@link NullableState#UNSPECIFIED}. Type arguments are not inferred yet (content slots, §4.2 M3): they stay
+ * {@link NullableState#UNSPECIFIED}. Locals get a verdict too ({@link Report#local}). Type arguments are not inferred yet (content slots, §4.2 M3): they stay
  * UNSPECIFIED.
  * <p>
  * Requires the analyzer to have run with {@code Configuration.nullability()}: without
@@ -96,8 +107,26 @@ public final class NullabilityPass {
         public static final Policy CAUTIOUS = new Policy(NullableState.UNSPECIFIED, true);
     }
 
-    public record Report(Map<Info, ParameterizedType> verdicts, Map<Object, Object> cause,
-                         Map<Object, String> seedOrigin) {
+    /**
+     * @param verdicts fields, parameters, and methods (their return value)
+     * @param locals   every declared local variable, by its declaration
+     */
+    public record Report(Map<Info, ParameterizedType> verdicts, Map<Local, ParameterizedType> locals,
+                         Map<Object, Object> cause, Map<Object, String> seedOrigin) {
+
+        /**
+         * The verdict of a local variable, or null when there is none (a pattern variable; a declaration the pass
+         * did not see).
+         *
+         * @param declaration the {@link LocalVariableCreation} (also of a for-each loop, a {@code for} initializer,
+         *                    a try resource), the {@link ForEachStatement}, or the {@link TryStatement.CatchClause}
+         *                    that declares {@code variable}; compared by identity
+         */
+        public ParameterizedType local(MethodInfo methodInfo, Element declaration, LocalVariable variable) {
+            Element d = declaration instanceof ForEachStatement fe ? fe.initializer() : declaration;
+            return locals.get(new Local(methodInfo, d, variable.simpleName()));
+        }
+
         /** The chain that made a node nullable: node, its cause, ..., the seed and its origin. */
         public String explain(Object node) {
             StringBuilder sb = new StringBuilder(label(node));
@@ -124,6 +153,9 @@ public final class NullabilityPass {
     private final Map<Object, Set<Object>> successors = new LinkedHashMap<>();
     private final Map<Object, String> seedOrigin = new LinkedHashMap<>();
     private final Set<MethodInfo> degraded = new LinkedHashSet<>();
+    private final Map<Local, LocalVariable> declaredLocals = new LinkedHashMap<>();
+    // per method (a lambda is its own), the declarations of each name: the fallback when scopes do not resolve one
+    private final Map<MethodInfo, Map<String, List<Local>>> declaredByName = new HashMap<>();
 
     public NullabilityPass(Policy policy) {
         this.policy = policy;
@@ -141,6 +173,9 @@ public final class NullabilityPass {
         Set<Object> reached = closure(cause);
 
         Map<Info, ParameterizedType> verdicts = new LinkedHashMap<>();
+        Map<Local, ParameterizedType> locals = new LinkedHashMap<>();
+        declaredLocals.forEach((local, lv) -> locals.put(local,
+                verdict(lv.parameterizedType(), reached.contains(local), false)));
         for (FieldInfo fi : fields) {
             verdicts.put(fi, verdict(fi.type(), reached.contains(fi), false));
         }
@@ -153,7 +188,26 @@ public final class NullabilityPass {
                 verdicts.put(mi, verdict(mi.returnType(), reached.contains(mi), deg));
             }
         }
-        return new Report(verdicts, cause, seedOrigin);
+        return new Report(verdicts, locals, cause, seedOrigin);
+    }
+
+    /**
+     * Writes the declaration verdicts as the B2 properties ({@code NULLABILITY_FIELD}, {@code _PARAMETER},
+     * {@code _METHOD}), which the annotation decorator and the printers read. Locals have no property: they are
+     * not {@link Info}s; a printer asks the {@link Report}.
+     */
+    public static void write(Report report) {
+        report.verdicts().forEach((info, pt) -> {
+            Property property = switch (info) {
+                case FieldInfo _ -> PropertyImpl.NULLABILITY_FIELD;
+                case ParameterInfo _ -> PropertyImpl.NULLABILITY_PARAMETER;
+                case MethodInfo _ -> PropertyImpl.NULLABILITY_METHOD;
+                default -> null;
+            };
+            if (property != null) {
+                info.analysis().setAllowControlledOverwrite(property, ValueImpl.NullabilityImpl.of(pt));
+            }
+        });
     }
 
     private ParameterizedType verdict(ParameterizedType declared, boolean reached, boolean degradedOutput) {
@@ -204,24 +258,71 @@ public final class NullabilityPass {
         return pt.typeParameter() != null && pt.arrays() == 0;
     }
 
-    // a local variable of one method: a graph node without a verdict, through which null travels between statements
-    record Local(MethodInfo methodInfo, String name) {
+    /**
+     * A local variable as a graph node, keyed by its DECLARATION (by identity) and name: Java forbids a local to
+     * shadow a local, so in scope a name denotes one declaration, but same-named locals of sibling blocks or of
+     * different methods are different variables. The method is for display; a key without a declaration (a pattern
+     * variable, a name no scope resolved) is per method and name.
+     */
+    public record Local(MethodInfo methodInfo, Element declaration, String name) {
+        @Override
+        public boolean equals(Object o) {
+            if (!(o instanceof Local(MethodInfo m, Element d, String n)) || !name.equals(n)) return false;
+            return declaration == null ? d == null && methodInfo.equals(m) : declaration == d;
+        }
+
+        @Override
+        public int hashCode() {
+            return declaration == null ? Objects.hash(methodInfo, name)
+                    : 31 * System.identityHashCode(declaration) + name.hashCode();
+        }
+
         @Override
         public String toString() {
             return name + " in " + methodInfo.fullyQualifiedName();
         }
     }
 
+    // the locals in scope: a block, or a statement's own (for initializers, for-each variable, try resources)
+    private record Scope(Scope parent, Map<String, Local> names) {
+        Scope(Scope parent) {
+            this(parent, new HashMap<>());
+        }
+
+        Local resolve(String name) {
+            for (Scope s = this; s != null; s = s.parent) {
+                Local local = s.names.get(name);
+                if (local != null) return local;
+            }
+            return null;
+        }
+    }
+
+    private void declare(Scope scope, MethodInfo mi, Element declaration, LocalVariable lv) {
+        Local local = new Local(mi, declaration, lv.simpleName());
+        scope.names.put(lv.simpleName(), local);
+        declaredLocals.put(local, lv);
+        declaredByName.computeIfAbsent(mi, _ -> new HashMap<>())
+                .computeIfAbsent(lv.simpleName(), _ -> new ArrayList<>()).add(local);
+    }
+
     // the node a variable stands for: a parameter, a field (field-insensitive in its object), a return value, a
-    // local of this method. Markers ($_ce, $_v) and the link engine's intermediates ($__) are not nodes.
-    private static Object node(MethodInfo mi, Variable v) {
+    // local in scope. Markers ($_ce, $_v) and the link engine's intermediates ($__) are not nodes.
+    private Object node(MethodInfo mi, Scope scope, Variable v) {
         return switch (v) {
             case ParameterInfo pi -> pi;
             case ReturnVariable rv -> rv.methodInfo();
             case FieldReference fr when !Util.virtual(fr) -> fr.fieldInfo();
-            case LocalVariable lv when !lv.simpleName().startsWith("$") -> new Local(mi, lv.fullyQualifiedName());
+            case LocalVariable lv when !lv.simpleName().startsWith("$") -> local(mi, scope, lv.simpleName());
             case null, default -> null;
         };
+    }
+
+    private Local local(MethodInfo mi, Scope scope, String name) {
+        Local inScope = scope == null ? null : scope.resolve(name);
+        if (inScope != null) return inScope;
+        List<Local> declared = declaredByName.getOrDefault(mi, Map.of()).getOrDefault(name, List.of());
+        return declared.size() == 1 ? declared.getFirst() : new Local(mi, null, name);
     }
 
     // a constant marker ('$_ceN', the link module's MarkerVariable, seen through the API) holding the null constant
@@ -258,19 +359,21 @@ public final class NullabilityPass {
             }
         }
         if (mi.analysis().getOrDefault(PropertyImpl.DEGRADED_ANALYSIS_METHOD,
-                io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.FALSE).isTrue()) {
+                ValueImpl.BoolImpl.FALSE).isTrue()) {
             degraded.add(mi);
         }
+        // the body first: it declares the locals; the method's own variable data is the state at the end of the
+        // body, in the body's scope
+        Scope body = mi.methodBody() == null ? new Scope(null) : handleBlock(mi, mi.methodBody(), null);
         VariableData vd = VariableDataImpl.of(mi);
         if (vd != null) {
-            vd.variableInfoStream().forEach(vi -> linksOf(mi, vi));
+            vd.variableInfoStream().forEach(vi -> linksOf(mi, body, vi));
         }
-        if (mi.methodBody() != null) handleBlock(mi, mi.methodBody());
     }
 
-    private void linksOf(MethodInfo mi, VariableInfo vi) {
+    private void linksOf(MethodInfo mi, Scope scope, VariableInfo vi) {
         Variable v = vi.variable();
-        Object recipient = node(mi, v);
+        Object recipient = node(mi, scope, v);
         Links links = vi.linkedVariables();
         if (recipient == null || links == null) return;
         for (Link link : links) {
@@ -279,55 +382,90 @@ public final class NullabilityPass {
                 if (isNullMarker(link.to())) {
                     seed(recipient, "null in " + mi.fullyQualifiedName());
                 } else {
-                    addEdge(node(mi, link.to()), recipient);
+                    addEdge(node(mi, scope, link.to()), recipient);
                 }
             } else if (link.linkNature().isIdenticalToOrAssignedFromTo()) {
                 // '→': v is assigned to link.to()
-                addEdge(recipient, node(mi, link.to()));
+                addEdge(recipient, node(mi, scope, link.to()));
             }
         }
     }
 
-    private void handleBlock(MethodInfo mi, Block block) {
+    // returns the block's scope at its end
+    private Scope handleBlock(MethodInfo mi, Block block, Scope parent) {
+        Scope scope = new Scope(parent);
         for (Statement statement : block.statements()) {
-            statement.subBlockStream().forEach(sb -> handleBlock(mi, sb));
+            // a statement's own declarations are visible in the statement only; a local variable creation's in the
+            // rest of the block
+            Scope own = new Scope(scope);
+            Map<Block, TryStatement.CatchClause> catchBlocks = new IdentityHashMap<>();
+            switch (statement) {
+                case LocalVariableCreation lvc -> lvc.localVariableStream().forEach(lv -> declare(scope, mi, lvc, lv));
+                case ForEachStatement fe when fe.initializer() != null -> fe.initializer().localVariableStream()
+                        .forEach(lv -> declare(own, mi, fe.initializer(), lv));
+                case ForStatement fs -> fs.initializers().forEach(e -> {
+                    if (e instanceof LocalVariableCreation lvc) {
+                        lvc.localVariableStream().forEach(lv -> declare(own, mi, lvc, lv));
+                    }
+                });
+                case TryStatement ts -> {
+                    ts.resources().forEach(r -> {
+                        if (r instanceof LocalVariableCreation lvc) {
+                            lvc.localVariableStream().forEach(lv -> declare(own, mi, lvc, lv));
+                        }
+                    });
+                    ts.catchClauses().forEach(cc -> catchBlocks.put(cc.block(), cc));
+                }
+                default -> {
+                }
+            }
+            statement.subBlockStream().forEach(sb -> {
+                TryStatement.CatchClause cc = catchBlocks.get(sb);
+                Scope blockParent = own;
+                if (cc != null && cc.catchVariable() != null) {
+                    blockParent = new Scope(own);
+                    declare(blockParent, mi, cc, cc.catchVariable());
+                }
+                handleBlock(mi, sb, blockParent);
+            });
             VariableData vd = VariableDataImpl.of(statement);
-            if (vd != null) vd.variableInfoStream().forEach(vi -> linksOf(mi, vi));
+            if (vd != null) vd.variableInfoStream().forEach(vi -> linksOf(mi, own, vi));
             statement.visit(e -> {
                 if (e instanceof Lambda lambda) {
-                    if (lambda.methodBody() != null) handleBlock(lambda.methodInfo(), lambda.methodBody());
+                    if (lambda.methodBody() != null) handleBlock(lambda.methodInfo(), lambda.methodBody(), own);
                     return false;
                 }
                 if (e instanceof Block) return false; // nested statements are handled with their own vd
-                if (policy.nullTests() && e instanceof BinaryOperator bo) nullTest(mi, bo);
+                if (policy.nullTests() && e instanceof BinaryOperator bo) nullTest(mi, own, bo);
                 if (e instanceof MethodCall mc && mc.methodInfo() != null) {
-                    callSite(mi, mc.methodInfo(), mc.analysis(), mc.parameterExpressions());
+                    callSite(mi, own, mc.methodInfo(), mc.analysis(), mc.parameterExpressions());
                 } else if (e instanceof ConstructorCall cc && cc.constructor() != null) {
-                    callSite(mi, cc.constructor(), cc.analysis(), cc.parameterExpressions());
+                    callSite(mi, own, cc.constructor(), cc.analysis(), cc.parameterExpressions());
                 }
                 return true;
             });
-            libraryResult(mi, statement);
+            libraryResult(mi, own, statement);
             if (statement instanceof ExplicitConstructorInvocation eci && eci.methodInfo() != null) {
-                callSite(mi, eci.methodInfo(), eci.analysis(), eci.parameterExpressions());
+                callSite(mi, own, eci.methodInfo(), eci.analysis(), eci.parameterExpressions());
             }
         }
+        return scope;
     }
 
     // a library call whose result may be null (LibraryNullness), USED DIRECTLY: returned, assigned, initializing a
     // local. Its value reaches the link graph only as an opaque '$_v', so the use is matched syntactically.
-    private void libraryResult(MethodInfo mi, Statement statement) {
+    private void libraryResult(MethodInfo mi, Scope scope, Statement statement) {
         if (statement instanceof ReturnStatement rs && !mi.isConstructor() && !mi.returnType().isVoid()) {
             String lib = nullableLibraryCall(rs.expression());
             if (lib != null) seed(mi, "returns " + lib);
         } else if (statement instanceof LocalVariableCreation lvc) {
             lvc.localVariableStream().forEach(lv -> {
                 String lib = nullableLibraryCall(lv.assignmentExpression());
-                if (lib != null) seed(new Local(mi, lv.fullyQualifiedName()), "assigned " + lib);
+                if (lib != null) seed(local(mi, scope, lv.simpleName()), "assigned " + lib);
             });
         } else if (statement.expression() instanceof Assignment a && a.variableTarget() != null) {
             String lib = nullableLibraryCall(a.value());
-            if (lib != null) seed(node(mi, a.variableTarget()), "assigned " + lib);
+            if (lib != null) seed(node(mi, scope, a.variableTarget()), "assigned " + lib);
         }
     }
 
@@ -340,17 +478,17 @@ public final class NullabilityPass {
     }
 
     // in Java only == and != take a null operand
-    private void nullTest(MethodInfo mi, BinaryOperator bo) {
+    private void nullTest(MethodInfo mi, Scope scope, BinaryOperator bo) {
         Expression other = bo.lhs() instanceof NullConstant ? bo.rhs() : bo.rhs() instanceof NullConstant ? bo.lhs() : null;
         if (other instanceof VariableExpression ve) {
-            Object node = node(mi, ve.variable());
+            Object node = node(mi, scope, ve.variable());
             if (node instanceof ParameterInfo || node instanceof FieldInfo) {
                 seed(node, "compared with null in " + mi.fullyQualifiedName());
             }
         }
     }
 
-    private void callSite(MethodInfo mi, MethodInfo callee,
+    private void callSite(MethodInfo mi, Scope scope, MethodInfo callee,
                           io.codelaser.maddi.cst.api.analysis.PropertyValueMap analysis, List<Expression> arguments) {
         List<ParameterInfo> parameters = callee.parameters();
         if (parameters.isEmpty()) return;
@@ -376,21 +514,21 @@ public final class NullabilityPass {
                 seed(pi, "null argument in " + mi.fullyQualifiedName());
                 continue;
             }
-            Object node = node(mi, primary);
+            Object node = node(mi, scope, primary);
             if (node != null) addEdge(node, pi);
             // an intermediate (or a local assigned in this very statement): its sources, in the argument's own links
-            sourcesOf(mi, primary, links, pi);
+            sourcesOf(mi, scope, primary, links, pi);
         }
     }
 
-    private void sourcesOf(MethodInfo mi, Variable primary, Links links, ParameterInfo pi) {
+    private void sourcesOf(MethodInfo mi, Scope scope, Variable primary, Links links, ParameterInfo pi) {
         for (Link link : links) {
             if (!link.from().equals(primary)) continue;
             if (!(link.linkNature().isIdenticalTo() || link.linkNature().isAssignedFrom())) continue;
             if (isNullMarker(link.to())) {
                 seed(pi, "null argument (via " + primary.simpleName() + ") in " + mi.fullyQualifiedName());
             } else {
-                addEdge(node(mi, link.to()), pi);
+                addEdge(node(mi, scope, link.to()), pi);
             }
         }
     }

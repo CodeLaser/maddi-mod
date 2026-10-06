@@ -27,8 +27,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  */
 public class TestNullabilityPass extends CommonTest {
 
+    private TypeInfo parsed;
+
     private NullabilityPass.Report run(String fqn, String src) {
         TypeInfo t = javaInspector.parse(fqn, src);
+        parsed = t;
         List<Info> ao = prepWork(t);
         ModAnalyzerForTesting analyzer = new SingleIterationAnalyzerImpl(javaInspector,
                 new IteratingAnalyzerImpl.ConfigurationBuilder().setNullability(true).build());
@@ -273,5 +276,65 @@ public class TestNullabilityPass extends CommonTest {
         // upward stops at the type variable: Lookup's null return does not make every implementation's nullable
         assertEquals("String?", byLabel.get("a.b.G.Lookup.apply(String)"));
         assertEquals("String", byLabel.get("a.b.G.ToString.apply(Object)"));
+    }
+
+    @Language("java")
+    private static final String LOCALS = """
+            package a.b;
+            import java.util.List;
+            class V {
+                String reassigned(boolean b) { String x = null; if (b) x = "a"; return "z"; }
+                void sibling(boolean b) {
+                    if (b) { String s = null; System.out.println(s); }
+                    else { String s = "t"; System.out.println(s); }
+                }
+                void loops(List<String> list) {
+                    for (String e : list) { System.out.println(e); }
+                    for (String f = null; f != null; ) { }
+                }
+                void caught() {
+                    try { System.out.println("x"); } catch (RuntimeException ex) { System.out.println(ex); }
+                }
+                String flows() { String y = null; String w = y; return w; }
+            }
+            """;
+
+    // every local verdict, sorted: 'method.name: Type', a counter per method and name so sibling locals both show
+    private static String locals(NullabilityPass.Report report) {
+        Map<String, Integer> seen = new java.util.HashMap<>();
+        return report.locals().entrySet().stream()
+                .map(e -> {
+                    String key = e.getKey().methodInfo().name() + "." + e.getKey().name();
+                    int n = seen.merge(key, 1, Integer::sum);
+                    return key + (n > 1 ? "#" + n : "") + ": " + k(e.getValue());
+                })
+                .sorted().collect(Collectors.joining("\n"));
+    }
+
+    @DisplayName("locals: keyed by declaration, so same-named locals of sibling blocks have their own verdict")
+    @Test
+    public void locals() {
+        NullabilityPass.Report report = run("a.b.V", LOCALS);
+        System.out.println(explain(report));
+        assertEquals("""
+                caught.ex: RuntimeException
+                flows.w: String?
+                flows.y: String?
+                loops.e: String
+                loops.f: String?
+                reassigned.x: String?
+                sibling.s#2: String
+                sibling.s: String?""", locals(report));
+        assertEquals("String?", k(report.verdicts().entrySet().stream()
+                .filter(e -> e.getKey() instanceof MethodInfo mi && "flows".equals(mi.name()))
+                .findFirst().orElseThrow().getValue()));
+        // the lookup the printer uses: by declaring element
+        MethodInfo sibling = parsed.findUniqueMethod("sibling", 1);
+        io.codelaser.maddi.cst.api.statement.Statement ifElse = sibling.methodBody().statements().getFirst();
+        var first = (io.codelaser.maddi.cst.api.statement.LocalVariableCreation) ifElse.block().statements().getFirst();
+        var second = (io.codelaser.maddi.cst.api.statement.LocalVariableCreation) ifElse.otherBlocksStream()
+                .findFirst().orElseThrow().statements().getFirst();
+        assertEquals("String?", k(report.local(sibling, first, first.localVariable())));
+        assertEquals("String", k(report.local(sibling, second, second.localVariable())));
     }
 }
