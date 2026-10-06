@@ -14,10 +14,11 @@
 
 /*
  * TEST-ONLY host (split stage 3): the maddi-inspection-kotlin tests that run the prep analyzer on Kotlin CST --
- * ports of the Java prep-analyzer tests (Kotlin source in, the same VariableData assertion strings out), the
- * analyzer smoke test and two printer tests. They test that the Kotlin CST feeds the analyzer faithfully, a
+ * ports of the Java prep-analyzer tests (Kotlin source in, the same VariableData assertion strings out) and the
+ * analyzer smoke test. They test that the Kotlin CST feeds the analyzer faithfully, a
  * claim about both tiers; maddi-inspection-kotlin is base and cannot have maddi-mod on its test class path.
  * The test JVM is maddi-inspection-kotlin's: the flat front end (FlatFrontEndTestBootstrap), not the realm.
+ * The two printer tests moved to maddi's maddi-inspection-kotlin (2026-10-06): they never needed the prep analyzer.
  */
 plugins {
     kotlin("jvm") version "2.4.0"
