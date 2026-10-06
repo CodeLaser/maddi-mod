@@ -1,7 +1,7 @@
 # Nullability inference — design (2026-10-06)
 
-Status: **proposal**, nothing implemented beyond the feasibility probe
-(`maddi-modification-link/src/test/java/.../link/nullflow/TestNullFlowProbe.java`).
+Status: **in progress** — steps 1–3 of §7 have a first implementation; see §9 for what landed and what it
+measures. Feasibility probe: `maddi-modification-link/src/test/java/.../link/nullflow/TestNullFlowProbe.java`.
 
 ## 1. Goal and applications
 
@@ -70,10 +70,13 @@ has the edges needed (argument → parameter via `LINKED_VARIABLES_ARGUMENTS`, f
 
 **maddi (base)**
 
-- **B1 — Java front end reads null annotations** (`maddi-java-openjdk`): JSpecify, JetBrains, Checker
-  Framework, JSR-305 / javax, Lombok `@NonNull`, and the scope of `@NullMarked` / `@NullUnmarked`, into
-  `NullableState` on each type use. `TypeUseAnnotationClosure` (maddi-run-config) already knows these
-  annotation families. Feeds both the user's contracts (seeds) and the test oracle (§6).
+- **B1 — what the source declares** (`maddi-cst-impl`, `DeclaredNullability`): JSpecify, JetBrains, Checker
+  Framework, JSR-305 / javax, Lombok `@NonNull`, and the scope of `@NullMarked` / `@NullUnmarked` /
+  `@ParametersAreNonnullByDefault`, read into the B2 value shape. *Changed while implementing:* the front end does
+  not write `NullableState`. Since `6d189c44e` it carries type-use annotations as annotations on the
+  `ParameterizedType` (their identity and import are what printing back needs; `TestTypeUseAnnotationDistinguishesUses`
+  records that decision), so B1 is an interpreter over those annotations and the declaration annotations, not a
+  second channel. Feeds the user's contracts (seeds) and the test oracle (§6).
 - **B2 — value model** (`maddi-cst-analysis`, codec in `maddi-cst-io`): the inferred type is a
   **`ParameterizedType` carrying `NullableState` per type argument** (decision 2026-10-06). The outer state
   answers "can this be null", the arguments answer "can its elements / keys / values be null"
@@ -89,10 +92,12 @@ has the edges needed (argument → parameter via `LINKED_VARIABLES_ARGUMENTS`, f
 **maddi-mod**
 
 - **M1 — link module hands over the facts** (`maddi-modification-link`): the link engine stays free of nullability
-  semantics. Work: close the marker-only-return gap (either keep null markers in the summary, or carry the
-  return's constant sources side-band for M3); check that `LINKED_VARIABLES_ARGUMENTS` is populated in the
-  configurations M3 runs under (`Options.PRODUCTION` has `trackObjectCreations = true`). Every change behind a
-  gate, with an FPDUMP A/B and `TestParSeqLinkBench` (golden rule: no silent verdict changes).
+  semantics. Work: close the marker-only-return gap; check that `LINKED_VARIABLES_ARGUMENTS` is populated in the
+  configurations M3 runs under. *Implemented as* `LinkComputer.Options.nullConstantReturns` (keep the links to
+  NULL-constant markers only; side-band was rejected: a caller of `source()` only sees `$_v`, so the fact has to
+  travel in the summary). Off everywhere by default, switched on with the analyzer's `Configuration.nullability()`
+  (which also turns on `trackObjectCreations`); turning it on in PRODUCTION waits for an FPDUMP A/B and
+  `TestParSeqLinkBench` (golden rule: no silent verdict changes).
 - **M2 — seeds** (`maddi-modification-common`): library seeds exist (`ShallowMethodAnalyzer`); add B1's
   annotations as contracts (a contract wins over inference, as `SourceContractMaterializer` does for other
   properties).
@@ -193,3 +198,68 @@ Discrete items go to GitHub issues, linking back to the section here.
   non-null-by-precondition (previous question)?
 - Generic type parameters (`T` vs `T & Any` / `T?` in Kotlin, `@Nullable T` in JSpecify): where the type
   parameter itself carries the nullability.
+
+## 9. Implementation log
+
+### 2026-10-06 — steps 1–3, first cut
+
+- **B1** `DeclaredNullability` (maddi `maddi-cst-impl`), tests `TestDeclaredNullability` (maddi-java-openjdk).
+  Front-end facts found on the way, all pinned there:
+  - a bounded wildcard dropped its bound's type-use annotations (`? extends @Nullable CharSequence`): fixed in
+    `ClassSymbolScanner`, the `JCTypeApply` defect of `6d189c44e` once more;
+  - javac normalizes `? extends @Nullable Object` to `?`: the annotation is gone, and an unbounded wildcard is
+    parametric anyway;
+  - an array is one `ParameterizedType`, so element nullability has no slot. On a FIELD, `@Nullable String[] a`
+    stays a declaration annotation and is skipped (it qualifies the elements); on a PARAMETER or RETURN it reaches
+    the type and reads as a nullable array, which it is not. Open: an element slot for arrays (B2).
+- **T6** `TestNullabilityOracleGuava` (maddi-run-analysis, slow) with `NullabilityComparison` (analyzer
+  `nullability/`). Reference: 607 primary types, 15 `@NullMarked` packages, 15,787 scored positions (2,515
+  declared nullable, 13,272 non-null). Baselines: all-nullable 0 unsafe / 13,272 noise; all-non-null 2,515 unsafe /
+  0 noise.
+- **M1** `LinkComputer.Options.nullConstantReturns`, `TestNullFlowProbe` test 7.
+- **M3** `NullabilityPass` v1 (analyzer `nullability/`), tests `TestNullabilityPass`: top-level reachability over
+  fields, parameters and returns, locals as carriers between statements, overrides per §4.2; type arguments not
+  inferred yet (UNSPECIFIED). Policies `NULL_MARKED` (with null tests), `NULL_MARKED_FLOW_ONLY`, `CAUTIOUS`.
+  Wired through `IteratingAnalyzer.Configuration.nullability()`; not yet called from the iterating analyzer nor
+  written into properties (step 4).
+
+**First measurement on guava** (top-level positions only; type arguments are UNDECIDED by construction):
+
+| verdict | agree | unsafe | noise | undecided (top) |
+|---|---:|---:|---:|---:|
+| all-non-null baseline | 13,272 | 2,515 | 0 | 0 |
+| all-nullable baseline | 2,515 | 0 | 13,272 | 0 |
+| `NULL_MARKED_FLOW_ONLY` | 12,609 | 467 | 696 | 277 |
+| `NULL_MARKED` (+ null tests) | 12,702 | 391 | 711 | 245 |
+| + JDK contracts (`LibraryNullness`) | 12,798 | 321 | 825 | 145 |
+| + override edges directional at type variables | **12,766** | **321** | **817** | 145 |
+
+Against "everything non-null" the pass removes 84% of the unsafe positions, at 5% of the noise of "everything
+nullable"; null tests take unsafe 467 → 391 for 15 extra noise. A 40-name sample of the unsafe ones shows three
+causes: (1) array and varargs parameters, where the REFERENCE is misread (the B1 array gap: an element annotation
+on a parameter lands on the array type), (2) public API parameters no analysed caller passes null to
+(`Joiner.join(@Nullable Object first, ...)`), (3) values returned from library calls (`comparator()`,
+`pollFirstEntry()`), which the pass reads as non-null. The oracle now writes every disagreement with its cause chain
+to `maddi-run-analysis/build/nullability-oracle-guava-<policy>.tsv` for classification.
+
+After the first measurement:
+
+- **JDK contracts** (`LibraryNullness`, a stopgap for M2): overriding a JDK method that may return null
+  (`NavigableMap.ceilingEntry`, `SortedMap.comparator`, ...) or accepts null (`equals(Object)`,
+  `Collection.contains(Object)`, ...), and using such a call's result directly (returned, assigned, passed on).
+  Unsafe returns 128 → 64. Its noise is mostly the flow-insensitivity of the pass: `V v = map.get(k); if (v ==
+  null) {...}` and then `v` stored or passed — the null is checked away, which M4 will see.
+- **Override edges**: downward (overridden → implementation) always, upward not through a type-variable position.
+  Joining both ways made every implementation of a generic interface one hub. A type-variable position null
+  reaches is still NULLABLE: guava writes `@Nullable V get(Object)`, and marking such positions parametric cost
+  ~500 agreements.
+
+The remaining unsafe (321): 72 array/varargs positions (mostly the reference misread, B1 array gap); ~200 public
+API parameters no analysed caller passes null to (`Preconditions.checkNotNull(..., p1, p2)` format arguments,
+guava's own `Multimap.containsEntry(Object, Object)`), which need either use-site evidence (M4) or a policy for
+public entry points (§8); 36 returns; 12 fields.
+
+Cost: the modification analysis of guava with `nullability` on takes about 100 s of test time (the first run's
+12 minutes were DEBUG logging); the pass itself is
+negligible. ⛔ A corpus test must set the log level to INFO itself: the first run logged at DEBUG into a 27.7 GB
+test report.

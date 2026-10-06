@@ -29,6 +29,7 @@ public interface IteratingAnalyzer {
             return new LinkComputer.Options.Builder()
                     .setRecurse(true)
                     .setTrackObjectCreations(trackObjectCreations())
+                    .setNullConstantReturns(nullability())
                     .build();
         }
 
@@ -94,6 +95,16 @@ public interface IteratingAnalyzer {
          * {@link #modificationViaReachability()} (the shadow pass reads all statements).
          */
         default boolean flattenVariableData() {
+            return false;
+        }
+
+        /**
+         * Prepare the link artifacts the nullability pass reads (docs/design/nullability.md, M3): a returned null
+         * stays in the method summary ({@code LinkComputer.Options.nullConstantReturns}) and every call site
+         * records its argument links ({@link #trackObjectCreations()}). Off by default: the first changes
+         * METHOD_LINKS.
+         */
+        default boolean nullability() {
             return false;
         }
 

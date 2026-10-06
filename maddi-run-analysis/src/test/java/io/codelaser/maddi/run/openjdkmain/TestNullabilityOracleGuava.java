@@ -1,7 +1,11 @@
 package io.codelaser.maddi.run.openjdkmain;
 
 import io.codelaser.maddi.cst.api.expression.AnnotationExpression;
+import io.codelaser.maddi.analysis.api.PrepOutcome;
+import io.codelaser.maddi.analysis.api.PrepRequest;
+import io.codelaser.maddi.callgraph.ComputeAnalysisOrder;
 import io.codelaser.maddi.cst.api.info.FieldInfo;
+import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
@@ -12,11 +16,16 @@ import io.codelaser.maddi.inspection.api.integration.JavaInspector;
 import io.codelaser.maddi.inspection.api.parser.Summary;
 import io.codelaser.maddi.inspection.openjdk.JavaInspectorImpl;
 import io.codelaser.maddi.inspection.resource.InputConfigurationImpl;
+import io.codelaser.maddi.modification.analyzer.IteratingAnalyzer;
+import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
 import io.codelaser.maddi.modification.analyzer.nullability.NullabilityComparison;
+import io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass;
+import io.codelaser.maddi.run.analysis.AnalysisEngineImpl;
 import io.codelaser.maddi.modification.analyzer.nullability.NullabilityComparison.Kind;
 import io.codelaser.maddi.modification.analyzer.nullability.NullabilityComparison.Outcome;
 import io.codelaser.maddi.run.config.util.JsonStreaming;
 import io.codelaser.maddi.util.corpus.Corpora;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
@@ -26,7 +35,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
-import java.util.function.BiConsumer;
+import java.util.Set;
 import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
 
@@ -50,7 +59,24 @@ public class TestNullabilityOracleGuava {
 
     private static final Path CONFIG = Corpora.oss("guava").config();
 
+    /*
+     ⛔ INFO, set here: without it the analyzer logs at DEBUG into the test report, and one inference run wrote a
+     27.7 GB XML (2026-10-06). TestGuava sets the same.
+     */
+    @BeforeAll
+    public static void beforeAll() {
+        ((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME))
+                .setLevel(ch.qos.logback.classic.Level.INFO);
+    }
+
+    private record Parsed(JavaInspector javaInspector, Summary summary, List<TypeInfo> types) {
+    }
+
     private static List<TypeInfo> parseGuava() throws IOException {
+        return parse().types();
+    }
+
+    private static Parsed parse() throws IOException {
         Corpora.oss("guava").requireConfig();
         InputConfigurationImpl inputConfiguration = JsonStreaming.objectMapper()
                 .readValue(CONFIG.toFile(), InputConfigurationImpl.class);
@@ -61,23 +87,26 @@ public class TestNullabilityOracleGuava {
         Summary summary = javaInspector.parse(new JavaInspector.ParseOptions.Builder()
                 .setDetailedSources(true).setFailFast(false).setParallel(true).setIgnoreModule(true).build());
         assertFalse(summary.haveErrors(), "guava must parse cleanly");
-        return List.copyOf(summary.parseResult().primaryTypes());
+        return new Parsed(javaInspector, summary, List.copyOf(summary.parseResult().primaryTypes()));
     }
 
     /** Every source declaration with a reference type, through {@code sink(kind, declared type)}. */
-    static void declarations(List<TypeInfo> primaryTypes, DeclaredNullability dn,
-                             BiConsumer<Kind, ParameterizedType> sink) {
+    interface Sink {
+        void accept(Kind kind, Info info, ParameterizedType declared);
+    }
+
+    static void declarations(List<TypeInfo> primaryTypes, DeclaredNullability dn, Sink sink) {
         primaryTypes.stream()
                 .filter(t -> !t.typeNature().isPackageInfo())
                 .flatMap(TypeInfo::recursiveSubTypeStream)
                 .forEach(t -> {
                     for (FieldInfo f : t.fields()) {
-                        if (!f.isSynthetic()) sink.accept(Kind.FIELD, dn.field(f));
+                        if (!f.isSynthetic()) sink.accept(Kind.FIELD, f, dn.field(f));
                     }
                     t.constructorAndMethodStream().filter(m -> !m.isSynthetic()).forEach(m -> {
-                        for (ParameterInfo p : m.parameters()) sink.accept(Kind.PARAMETER, dn.parameter(p));
+                        for (ParameterInfo p : m.parameters()) sink.accept(Kind.PARAMETER, p, dn.parameter(p));
                         ParameterizedType rt = dn.returnType(m);
-                        if (rt != null) sink.accept(Kind.RETURN, rt);
+                        if (rt != null) sink.accept(Kind.RETURN, m, rt);
                     });
                 });
     }
@@ -100,7 +129,7 @@ public class TestNullabilityOracleGuava {
     private static NullabilityComparison score(List<TypeInfo> types, DeclaredNullability dn,
                                                UnaryOperator<ParameterizedType> verdict) {
         NullabilityComparison comparison = new NullabilityComparison();
-        declarations(types, dn, (kind, declared) -> comparison.add(kind, declared, verdict.apply(declared)));
+        declarations(types, dn, (kind, _, declared) -> comparison.add(kind, declared, verdict.apply(declared)));
         return comparison;
     }
 
@@ -130,5 +159,81 @@ public class TestNullabilityOracleGuava {
         assertEquals(0, allNonNull.count(Outcome.NOISE));
         assertEquals(allNullable.count(Outcome.AGREE), allNonNull.count(Outcome.UNSAFE));
         assertEquals(allNullable.count(Outcome.NOISE), allNonNull.count(Outcome.AGREE));
+    }
+
+    private static final String JDK_HINTS =
+            "../../maddi/maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles/jdk";
+
+    /**
+     * The inference (M3) against the reference: the modification analysis runs as the CLI runs it (JDK hints, prep,
+     * call-graph order, MODREACH), plus {@code nullability}, then {@link NullabilityPass} under the
+     * {@code @NullMarked} policy. Logged, not yet ratcheted: this is the first measurement.
+     */
+    @Test
+    public void inference() throws IOException {
+        Parsed parsed = parse();
+        JavaInspector javaInspector = parsed.javaInspector();
+        AnalysisEngineImpl engine = new AnalysisEngineImpl();
+        engine.resultsLoader(javaInspector.runtime(), javaInspector.mainSources()).load(List.of(JDK_HINTS));
+        var parseResult = parsed.summary().parseResult();
+        PrepOutcome prep = engine.prep(new PrepRequest(javaInspector.runtime(), Set.copyOf(parseResult.primaryTypes()),
+                parseResult.sourceSetToModuleInfoMap().values(), _ -> false, true, true));
+        List<Info> order = new ComputeAnalysisOrder().go(prep.callGraph().graph(), true);
+        IteratingAnalyzer analyzer = new IteratingAnalyzerImpl(javaInspector,
+                new IteratingAnalyzerImpl.ConfigurationBuilder()
+                        .setMaxIterations(30)
+                        .setStopWhenCycleDetectedAndNoImprovements(true)
+                        .setFaultTolerant(true)
+                        .setModificationViaReachability(true)
+                        .setNullability(true)
+                        .build());
+        analyzer.analyze(order, prep.callGraph().graph());
+
+        List<TypeInfo> types = parsed.types();
+        DeclaredNullability dn = declaredNullability(types);
+        NullabilityComparison flowOnly = measure("NULL_MARKED_FLOW_ONLY", types, dn,
+                new NullabilityPass(NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY).go(order));
+        NullabilityComparison comparison = measure("NULL_MARKED", types, dn,
+                new NullabilityPass(NullabilityPass.Policy.NULL_MARKED).go(order));
+        assertTrue(flowOnly.count(Outcome.AGREE) >= 10_000, "the inference must cover the reference");
+        assertTrue(comparison.count(Outcome.UNSAFE) <= flowOnly.count(Outcome.UNSAFE),
+                "null tests only add nullable seeds, so they cannot add unsafe verdicts");
+    }
+
+    private static NullabilityComparison measure(String name, List<TypeInfo> types, DeclaredNullability dn,
+                                                 NullabilityPass.Report report) {
+        NullabilityComparison comparison = new NullabilityComparison();
+        int[] missing = new int[1];
+        List<String> disagreements = new java.util.ArrayList<>();
+        declarations(types, dn, (kind, info, declared) -> {
+            ParameterizedType verdict = report.verdicts().get(info);
+            if (verdict == null) {
+                missing[0]++;
+                return;
+            }
+            int unsafeBefore = comparison.count(Outcome.UNSAFE);
+            int noiseBefore = comparison.count(Outcome.NOISE);
+            comparison.add(kind, declared, verdict);
+            boolean unsafe = comparison.count(Outcome.UNSAFE) > unsafeBefore;
+            if (unsafe || comparison.count(Outcome.NOISE) > noiseBefore) {
+                String shape = declared.arrays() > 0 ? (info instanceof ParameterInfo pi && pi.isVarArgs()
+                        ? "varargs" : "array") : "plain";
+                disagreements.add((unsafe ? "UNSAFE" : "NOISE") + "\t" + kind + "\t" + shape + "\t"
+                                  + info.fullyQualifiedName() + "\t" + report.explain(info));
+            }
+        });
+        LOGGER.info("INFERENCE ({} policy), {} declarations without a verdict\n{}", name, missing[0],
+                comparison.report());
+        // every disagreement with its cause chain, for classification: kind, shape, element, chain
+        java.nio.file.Path out = java.nio.file.Path.of("build", "nullability-oracle-guava-" + name + ".tsv");
+        try {
+            java.nio.file.Files.createDirectories(out.getParent());
+            java.nio.file.Files.write(out, disagreements.stream().sorted().toList());
+            LOGGER.info("INFERENCE ({} policy): {} disagreements written to {}", name, disagreements.size(),
+                    out.toAbsolutePath());
+        } catch (IOException e) {
+            throw new java.io.UncheckedIOException(e);
+        }
+        return comparison;
     }
 }

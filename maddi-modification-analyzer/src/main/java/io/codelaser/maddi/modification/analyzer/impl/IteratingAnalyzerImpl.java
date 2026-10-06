@@ -90,7 +90,8 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                                     NearMissPolicy nearMissPolicy,
                                     boolean modificationViaReachability,
                                     boolean flattenVariableData,
-                                    Duration maxDuration) implements Configuration {
+                                    Duration maxDuration,
+                                    boolean nullability) implements Configuration {
     }
 
     public static class ConfigurationBuilder {
@@ -102,6 +103,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
         private boolean warnNearMisses;
         private boolean modificationViaReachability;
         private boolean flattenVariableData;
+        private boolean nullability;
         private Duration maxDuration; // null = unlimited
         private NearMissPolicy nearMissPolicy = NearMissPolicy.STRICT;
         private CycleBreakingStrategy cycleBreakingStrategy = CycleBreakingStrategy.NONE;
@@ -152,6 +154,12 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
             return this;
         }
 
+        public ConfigurationBuilder setNullability(boolean nullability) {
+            this.nullability = nullability;
+            if (nullability) this.trackObjectCreations = true; // argument links at every call site
+            return this;
+        }
+
         public ConfigurationBuilder setFlattenVariableData(boolean flattenVariableData) {
             this.flattenVariableData = flattenVariableData;
             return this;
@@ -166,7 +174,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
         public Configuration build() {
             return new ConfigurationImpl(maxIterations, stopWhenCycleDetectedAndNoImprovements, cycleBreakingStrategy,
                     trackObjectCreations, guardContracts, faultTolerant, warnNearMisses, nearMissPolicy,
-                    modificationViaReachability, flattenVariableData, maxDuration);
+                    modificationViaReachability, flattenVariableData, maxDuration, nullability);
         }
     }
 
