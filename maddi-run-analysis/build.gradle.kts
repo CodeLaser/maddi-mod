@@ -58,6 +58,9 @@ dependencies {
     testImplementation("io.codelaser:maddi-inspection-resource:$maddiVersion")
     testImplementation("io.codelaser:maddi-inspection-integration:$maddiVersion")
     testRuntimeOnly("io.codelaser:maddi-aapi-archive:$maddiVersion")
+    // TestJavaToKotlinFernflowerNullability: maddi's translation ratchet, with the NullabilityPass verdicts
+    testImplementation(testFixtures("io.codelaser:maddi-run-openjdk:$maddiVersion"))
+    testImplementation("io.codelaser:maddi-cst-print-kotlin:$maddiVersion")
     testImplementation("commons-cli:commons-cli")
     testImplementation("ch.qos.logback:logback-classic")
     testImplementation("com.fasterxml.jackson.core:jackson-databind")
@@ -95,4 +98,21 @@ tasks.test {
             "-XX:+UnlockDiagnosticVMOptions", "-XX:+DebugNonSafepoints"
         )
     }
+}
+
+// TestJavaToKotlinFernflowerNullability: the Kotlin compiler judging the translation runs in a child JVM, from a
+// configuration of its own, as in maddi-run-openjdk (see the comment there). 2.4.0: maddi-kotlin-k2's Kotlin.
+val kotlinCompiler = configurations.create("kotlinCompiler") {
+    isCanBeResolved = true
+    isCanBeConsumed = false
+}
+dependencies {
+    kotlinCompiler("org.jetbrains.kotlin:kotlin-compiler-embeddable:2.4.0")
+}
+// withType, not tasks.test: slowTest copies test's jvmArgs and system properties, not its argument providers.
+tasks.withType<Test>().configureEach {
+    inputs.files(kotlinCompiler).withPropertyName("kotlinCompiler")
+    jvmArgumentProviders.add(CommandLineArgumentProvider {
+        listOf("-Dmaddi.test.kotlinCompilerClasspath=" + kotlinCompiler.asPath)
+    })
 }

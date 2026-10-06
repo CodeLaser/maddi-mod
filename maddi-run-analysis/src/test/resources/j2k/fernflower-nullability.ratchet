@@ -1,0 +1,14 @@
+# TestJavaToKotlinFernflowerNullability: fernflower printed as Kotlin with NullabilityPass (NULL_MARKED) verdicts,
+# judged by kotlinc 2.4.0 (see maddi-run-openjdk's JavaToKotlinRatchet). Lower is better for printerCrashes and
+# syntaxErrors, higher for syntaxCleanFiles and compilingFiles; `types` must not move. Write a better value here in
+# the commit that earns it.
+#
+# 2026-10-06, first record, measured with field, parameter and return verdicts only (local verdicts stubbed: ws/maddi-null
+# 44f88974 was not merged yet) and before maddi a51782475 (`!!` on a nullable for-each iterable): 761 type errors,
+# 275 of them null into a non-null declaration (locals, array elements, type arguments). With local verdicts the
+# numbers move: tighten them in the commit after the merge.
+types	199
+printerCrashes	0
+syntaxErrors	0
+syntaxCleanFiles	199
+compilingFiles	81
