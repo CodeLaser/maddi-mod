@@ -527,4 +527,30 @@ public class TestNullabilityPass extends CommonTest {
         String locals = locals(report);
         org.junit.jupiter.api.Assertions.assertTrue(locals.contains("lookup.v: String?"), locals);
     }
+
+    @Language("java")
+    private static final String SMART_CASTS = """
+            package a.b;
+            import java.util.Objects;
+            class K {
+                int checked(String s) { if (s == null) return 0; return s.length(); }
+                int required(String r) { Objects.requireNonNull(r); return r.length(); }
+            }
+            """;
+
+    @DisplayName("smart casts: only what Kotlin derives too; requireNonNull is Java's, not Kotlin's")
+    @Test
+    public void smartCasts() {
+        NullabilityPass.Report report = run("a.b.K", SMART_CASTS);
+        io.codelaser.maddi.cst.api.info.MethodInfo checked = parsed.findUniqueMethod("checked", 1);
+        io.codelaser.maddi.cst.api.statement.Statement ret = checked.methodBody().statements().getLast();
+        assertEquals(true, report.useSites().nonNullAt(ret, checked.parameters().getFirst()));
+        assertEquals(true, report.smartCasts().nonNullAt(ret, checked.parameters().getFirst()));
+        io.codelaser.maddi.cst.api.info.MethodInfo required = parsed.findUniqueMethod("required", 1);
+        io.codelaser.maddi.cst.api.statement.Statement ret2 = required.methodBody().statements().getLast();
+        ParameterInfo r = required.parameters().getFirst();
+        // the JDK hint: requireNonNull's parameter demands non-null, so Java knows; Kotlin does not smart-cast
+        assertEquals(true, report.useSites().nonNullAt(ret2, r));
+        assertEquals(false, report.smartCasts().nonNullAt(ret2, r));
+    }
 }

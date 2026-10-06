@@ -45,6 +45,10 @@ import java.util.function.Function;
  * break or continue) are joined by intersection. Fields are not tracked (another call may change them). A lambda
  * body starts with the facts where it is written: it can only capture effectively final variables.
  * <p>
+ * {@link #kotlinSmartCasts()} restricts the facts to what Kotlin's smart cast also derives, for a printer that drops
+ * {@code !!} and relies on it: no fact from a Java parameter that demands non-null ({@code requireNonNull(v)}), from
+ * {@code assert}, or from assigning a Java call's result (a platform type).
+ * <p>
  * Variables are compared as the CST compares them: a {@link LocalVariable} by name, which is safe at one statement
  * because Java forbids a local to shadow a local, and a declaration kills the facts of an earlier same-named one.
  */
@@ -53,6 +57,7 @@ public final class NonNullFacts {
     private final Map<Statement, Set<Variable>> before = new IdentityHashMap<>();
     private final Function<ParameterInfo, NullableState> parameterContract;
     private final Function<MethodInfo, NullableState> returnContract;
+    private final boolean kotlinSmartCasts;
 
     /**
      * @param parameterContract the contract on a callee's parameter (NONNULL: passing null throws), or null
@@ -60,8 +65,19 @@ public final class NonNullFacts {
      */
     public NonNullFacts(Function<ParameterInfo, NullableState> parameterContract,
                         Function<MethodInfo, NullableState> returnContract) {
+        this(parameterContract, returnContract, false);
+    }
+
+    private NonNullFacts(Function<ParameterInfo, NullableState> parameterContract,
+                         Function<MethodInfo, NullableState> returnContract, boolean kotlinSmartCasts) {
         this.parameterContract = parameterContract;
         this.returnContract = returnContract;
+        this.kotlinSmartCasts = kotlinSmartCasts;
+    }
+
+    /** The same walk, restricted to what Kotlin's smart cast derives (class comment); walk it before use. */
+    public NonNullFacts kotlinSmartCasts() {
+        return new NonNullFacts(parameterContract, returnContract, true);
     }
 
     /** Walks one method body; may be called for several methods. */
@@ -118,7 +134,7 @@ public final class NonNullFacts {
             }
             case AssertStatement as -> {
                 effects(as.expression(), facts);
-                facts.addAll(whenTrue(as.expression()));
+                if (!kotlinSmartCasts) facts.addAll(whenTrue(as.expression()));
                 return new Out(facts, true);
             }
             case IfElseStatement ifElse -> {
@@ -284,8 +300,8 @@ public final class NonNullFacts {
             case VariableExpression ve -> ve.variable() instanceof io.codelaser.maddi.cst.api.variable.This
                                           || facts.contains(ve.variable());
             case InlineConditional ic -> nonNull(ic.ifTrue(), facts) && nonNull(ic.ifFalse(), facts);
-            case MethodCall mc -> mc.methodInfo() != null && returnContract.apply(mc.methodInfo())
-                                                             == NullableState.NONNULL;
+            case MethodCall mc -> !kotlinSmartCasts && mc.methodInfo() != null
+                                  && returnContract.apply(mc.methodInfo()) == NullableState.NONNULL;
             case Assignment a -> nonNull(a.value(), facts);
             default -> x.parameterizedType() != null && x.parameterizedType().isPrimitiveExcludingVoid()
                        && x.parameterizedType().arrays() == 0;
@@ -365,6 +381,7 @@ public final class NonNullFacts {
     }
 
     private void demanded(MethodInfo callee, List<Expression> arguments, Set<Variable> facts) {
+        if (kotlinSmartCasts) return;
         List<ParameterInfo> parameters = callee.parameters();
         for (int i = 0; i < arguments.size() && i < parameters.size(); i++) {
             ParameterInfo pi = parameters.get(i);

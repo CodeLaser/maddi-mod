@@ -129,9 +129,12 @@ public final class NullabilityPass {
      * @param verdicts fields, parameters, and methods (their return value)
      * @param locals   every declared local variable, by its declaration
      * @param useSites per statement, the locals and parameters known non-null when it starts (M4)
+     * @param smartCasts the same, restricted to what Kotlin's smart cast derives: for a printer that drops
+     *                   {@code !!} where Kotlin will see the variable as non-null
      */
     public record Report(Map<Info, ParameterizedType> verdicts, Map<Local, ParameterizedType> locals,
-                         Map<Object, Object> cause, Map<Object, String> seedOrigin, NonNullFacts useSites) {
+                         Map<Object, Object> cause, Map<Object, String> seedOrigin, NonNullFacts useSites,
+                         NonNullFacts smartCasts) {
 
         /**
          * The verdict of a local variable, or null when there is none (a pattern variable; a declaration the pass
@@ -236,7 +239,9 @@ public final class NullabilityPass {
                 verdicts.put(mi, contracted(mi, verdict(mi.returnType(), reached.contains(mi), deg)));
             }
         }
-        return new Report(verdicts, locals, cause, seedOrigin, facts);
+        NonNullFacts smartCasts = facts.kotlinSmartCasts();
+        methods.forEach(smartCasts::walk);
+        return new Report(verdicts, locals, cause, seedOrigin, facts, smartCasts);
     }
 
     /**
