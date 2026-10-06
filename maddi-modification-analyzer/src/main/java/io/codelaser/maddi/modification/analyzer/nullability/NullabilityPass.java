@@ -14,6 +14,7 @@
 
 package io.codelaser.maddi.modification.analyzer.nullability;
 
+import io.codelaser.maddi.cst.api.analysis.Property;
 import io.codelaser.maddi.cst.api.element.Element;
 import io.codelaser.maddi.cst.api.expression.Assignment;
 import io.codelaser.maddi.cst.api.expression.BinaryOperator;
@@ -42,6 +43,7 @@ import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.cst.api.variable.LocalVariable;
 import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
+import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 import io.codelaser.maddi.modification.link.LinkComputer;
 import io.codelaser.maddi.modification.link.impl.LinkComputerImpl;
 import io.codelaser.maddi.modification.prepwork.Util;
@@ -187,6 +189,25 @@ public final class NullabilityPass {
             }
         }
         return new Report(verdicts, locals, cause, seedOrigin);
+    }
+
+    /**
+     * Writes the declaration verdicts as the B2 properties ({@code NULLABILITY_FIELD}, {@code _PARAMETER},
+     * {@code _METHOD}), which the annotation decorator and the printers read. Locals have no property: they are
+     * not {@link Info}s; a printer asks the {@link Report}.
+     */
+    public static void write(Report report) {
+        report.verdicts().forEach((info, pt) -> {
+            Property property = switch (info) {
+                case FieldInfo _ -> PropertyImpl.NULLABILITY_FIELD;
+                case ParameterInfo _ -> PropertyImpl.NULLABILITY_PARAMETER;
+                case MethodInfo _ -> PropertyImpl.NULLABILITY_METHOD;
+                default -> null;
+            };
+            if (property != null) {
+                info.analysis().setAllowControlledOverwrite(property, ValueImpl.NullabilityImpl.of(pt));
+            }
+        });
     }
 
     private ParameterizedType verdict(ParameterizedType declared, boolean reached, boolean degradedOutput) {
@@ -338,7 +359,7 @@ public final class NullabilityPass {
             }
         }
         if (mi.analysis().getOrDefault(PropertyImpl.DEGRADED_ANALYSIS_METHOD,
-                io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.FALSE).isTrue()) {
+                ValueImpl.BoolImpl.FALSE).isTrue()) {
             degraded.add(mi);
         }
         // the body first: it declares the locals; the method's own variable data is the state at the end of the
