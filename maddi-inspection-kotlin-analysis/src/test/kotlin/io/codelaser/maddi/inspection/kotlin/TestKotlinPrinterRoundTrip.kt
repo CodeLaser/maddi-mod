@@ -158,10 +158,10 @@ class TestKotlinPrinterRoundTrip {
         assertTrue(kotlin.contains("for (x in xs)"), kotlin) // for-each -> for-in
         assertTrue(kotlin.contains("catch (e: RuntimeException)"), kotlin) // try/catch
         assertTrue(kotlin.contains("throw RuntimeException(\"x\")"), kotlin) // throw + new
-        assertTrue(kotlin.contains("= { x -> x + k }"), kotlin) // lambda
+        // lambda; outside argument position it names its interface (a SAM constructor)
+        assertTrue(kotlin.contains("= java.util.function.Function<Int, Int> { x -> x + k }"), kotlin)
         assertTrue(!kotlin.contains("instanceof") && !kotlin.contains(" new "), kotlin)
 
-        // KNOWN gap: old-style (fall-through) `switch` is left as Java; arrow switches DO become `when`.
     }
 
     @Test
@@ -176,7 +176,8 @@ class TestKotlinPrinterRoundTrip {
         assertTrue(kotlin.contains("else if (score >= 80)"), kotlin) // else-if chain flattens (no `else { if … }`)
         assertTrue(kotlin.contains("fun <U> identity(u: U): U = u"), kotlin) // generic method
         // diamond + JDK type map; the constructed type is qualified as the Java printer would (no import computed here)
-        assertTrue(kotlin.contains("fun counts(): Map<String, Int> = java.util.HashMap<String, Int>()"), kotlin)
+        // Java's Map is mutable: MutableMap
+        assertTrue(kotlin.contains("fun counts(): MutableMap<String, Int> = java.util.HashMap<String, Int>()"), kotlin)
 
         assertTrue(javaIsms(kotlin).isEmpty(), "unexpected un-translated Java-isms ${javaIsms(kotlin)} in:\n$kotlin")
     }
