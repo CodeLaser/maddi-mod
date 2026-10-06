@@ -47,7 +47,6 @@ import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.ImmutableImpl.IMMUT
 import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.ImmutableImpl.MUTABLE;
 import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.DEPENDENT;
 import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.INDEPENDENT;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.NotNullImpl.NOT_NULL;
 
 public class ShallowTypeAnalyzer extends AnnotationToProperty {
     private static final Logger LOGGER = LoggerFactory.getLogger(ShallowTypeAnalyzer.class);
@@ -183,14 +182,14 @@ public class ShallowTypeAnalyzer extends AnnotationToProperty {
                 fieldMap.put(FINAL_FIELD, DEFAULT_FALSE);
             }
         }
-        ValueOrigin nn = fieldMap.get(NOT_NULL_FIELD);
-        if (nn == null || ((Value.NotNullProperty) nn.value()).isNullable()) {
+        ValueOrigin nn = fieldMap.get(NULLABILITY_FIELD);
+        if (nn == null) {
             if (enumField) {
-                fieldMap.put(NOT_NULL_FIELD, new ValueOrigin(NOT_NULL, FROM_OWNER));
+                fieldMap.put(NULLABILITY_FIELD, new ValueOrigin(ValueImpl.NullabilityImpl.NONNULL, FROM_OWNER));
             } else if (fieldInfo.type().isPrimitiveExcludingVoid()) {
-                fieldMap.put(NOT_NULL_FIELD, new ValueOrigin(NOT_NULL, FROM_TYPE));
-            } else if (nn == null) {
-                fieldMap.put(NOT_NULL_FIELD, NULLABLE_DEFAULT);
+                fieldMap.put(NULLABILITY_FIELD, new ValueOrigin(ValueImpl.NullabilityImpl.NONNULL, FROM_TYPE));
+            } else {
+                fieldMap.put(NULLABILITY_FIELD, UNSPECIFIED_DEFAULT);
             }
         }
         ValueOrigin c = fieldMap.get(CONTAINER_FIELD);

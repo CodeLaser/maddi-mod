@@ -25,13 +25,12 @@ import org.junit.jupiter.api.Test;
 
 import java.util.NoSuchElementException;
 
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.NullabilityImpl.UNSPECIFIED;
 import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.*;
 import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.FALSE;
 import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.TRUE;
 import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.ImmutableImpl.*;
 import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.*;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.NotNullImpl.NOT_NULL;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.NotNullImpl.NULLABLE;
 import static org.junit.jupiter.api.Assertions.*;
 
 public class TestJavaLang extends CommonTest {
@@ -47,7 +46,7 @@ public class TestJavaLang extends CommonTest {
         TypeInfo typeInfo = compiledTypesManager().typeIfLoaded(Object.class);
         MethodInfo methodInfo = typeInfo.findUniqueMethod("toString", 0);
         assertSame(FALSE,  methodInfo.analysis().getOrDefault(CONTAINER_METHOD, FALSE));
-        assertSame(NOT_NULL, methodInfo.analysis().getOrDefault(NOT_NULL_METHOD, NULLABLE));
+        assertEquals("N", methodInfo.analysis().getOrDefault(NULLABILITY_METHOD, UNSPECIFIED).toString());
         assertFalse(methodInfo.isModifying());
         assertSame(IMMUTABLE, methodInfo.analysis().getOrDefault(IMMUTABLE_METHOD, MUTABLE));
         assertSame(INDEPENDENT, methodInfo.analysis().getOrDefault(INDEPENDENT_METHOD, DEPENDENT));
@@ -116,7 +115,7 @@ public class TestJavaLang extends CommonTest {
         ParameterInfo p0 = methodInfo.parameters().getFirst();
         assertSame(INDEPENDENT, p0.analysis().getOrDefault(INDEPENDENT_PARAMETER, DEPENDENT));
         assertSame(IMMUTABLE, p0.analysis().getOrDefault(IMMUTABLE_PARAMETER, MUTABLE));
-        assertSame(NOT_NULL, p0.analysis().getOrDefault(NOT_NULL_PARAMETER, NULLABLE));
+        assertEquals("N", p0.analysis().getOrDefault(NULLABILITY_PARAMETER, UNSPECIFIED).toString());
         assertSame(TRUE, p0.analysis().getOrDefault(UNMODIFIED_PARAMETER, FALSE));
     }
 
@@ -133,7 +132,7 @@ public class TestJavaLang extends CommonTest {
         ParameterInfo p0 = methodInfo.parameters().getFirst();
         assertSame(INDEPENDENT, p0.analysis().getOrDefault(INDEPENDENT_PARAMETER, DEPENDENT));
         assertSame(IMMUTABLE, p0.analysis().getOrDefault(IMMUTABLE_PARAMETER, MUTABLE));
-        assertSame(NULLABLE, p0.analysis().getOrDefault(NOT_NULL_PARAMETER, NULLABLE));
+        assertEquals("U", p0.analysis().getOrDefault(NULLABILITY_PARAMETER, UNSPECIFIED).toString());
         assertSame(TRUE, p0.analysis().getOrDefault(UNMODIFIED_PARAMETER, FALSE));
     }
 
@@ -206,7 +205,7 @@ public class TestJavaLang extends CommonTest {
         assertEquals(0, p0.index());
         assertSame(INDEPENDENT, p0.analysis().getOrDefault(INDEPENDENT_PARAMETER, DEPENDENT));
         assertSame(IMMUTABLE_HC, p0.analysis().getOrDefault(IMMUTABLE_PARAMETER, MUTABLE));
-        assertSame(NOT_NULL, p0.analysis().getOrDefault(NOT_NULL_PARAMETER, NULLABLE));
+        assertEquals("N", p0.analysis().getOrDefault(NULLABILITY_PARAMETER, UNSPECIFIED).toString());
         assertSame(TRUE, p0.analysis().getOrDefault(UNMODIFIED_PARAMETER, FALSE));
     }
 
@@ -301,7 +300,7 @@ public class TestJavaLang extends CommonTest {
 
         ParameterInfo p0 = methodInfo.parameters().getFirst();
         assertSame(INDEPENDENT_HC, p0.analysis().getOrDefault(INDEPENDENT_PARAMETER, DEPENDENT));
-        assertSame(NOT_NULL, p0.analysis().getOrDefault(NOT_NULL_PARAMETER, NULLABLE));
+        assertEquals("N", p0.analysis().getOrDefault(NULLABILITY_PARAMETER, UNSPECIFIED).toString());
     }
 
     @Test
@@ -333,14 +332,14 @@ public class TestJavaLang extends CommonTest {
         assertEquals("arg0", p0.name());
         Independent independentP0 = p0.analysis().getOrDefault(INDEPENDENT_PARAMETER, DEPENDENT);
         assertEquals("@Independent(hc=true, hcParameters={2})", independentP0.toString());
-        assertSame(NOT_NULL, p0.analysis().getOrDefault(NOT_NULL_PARAMETER, NULLABLE));
+        assertEquals("N", p0.analysis().getOrDefault(NULLABILITY_PARAMETER, UNSPECIFIED).toString());
         assertSame(TRUE, p0.analysis().getOrDefault(UNMODIFIED_PARAMETER, FALSE));
 
         ParameterInfo p2 = methodInfo.parameters().get(2);
         assertEquals("arg2", p2.name());
         Value.Independent independentP2 = p2.analysis().getOrDefault(INDEPENDENT_PARAMETER, DEPENDENT);
         assertTrue(independentP2.isIndependent());
-        assertSame(NOT_NULL, p2.analysis().getOrDefault(NOT_NULL_PARAMETER, NULLABLE));
+        assertEquals("N", p2.analysis().getOrDefault(NULLABILITY_PARAMETER, UNSPECIFIED).toString());
         assertSame(TRUE, p2.analysis().getOrDefault(UNMODIFIED_PARAMETER, FALSE));
     }
 
@@ -390,7 +389,7 @@ public class TestJavaLang extends CommonTest {
         ParameterInfo p0 = methodInfo.parameters().getFirst();
         assertEquals("arg0", p0.name());
         assertSame(INDEPENDENT, p0.analysis().getOrDefault(INDEPENDENT_PARAMETER, DEPENDENT));
-        assertSame(NOT_NULL, p0.analysis().getOrDefault(NOT_NULL_PARAMETER, NULLABLE));
+        assertEquals("N", p0.analysis().getOrDefault(NULLABILITY_PARAMETER, UNSPECIFIED).toString());
         assertSame(TRUE, p0.analysis().getOrDefault(UNMODIFIED_PARAMETER, FALSE));
     }
 
@@ -427,7 +426,7 @@ public class TestJavaLang extends CommonTest {
 
         ParameterInfo p0 = methodInfo.parameters().getFirst();
         assertSame(INDEPENDENT, p0.analysis().getOrDefault(INDEPENDENT_PARAMETER, DEPENDENT));
-        assertSame(NOT_NULL, p0.analysis().getOrDefault(NOT_NULL_PARAMETER, NULLABLE));
+        assertEquals("N", p0.analysis().getOrDefault(NULLABILITY_PARAMETER, UNSPECIFIED).toString());
         assertSame(FALSE, p0.analysis().getOrDefault(UNMODIFIED_PARAMETER, FALSE));
     }
 

@@ -25,6 +25,7 @@ import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.runtime.Runtime;
+import io.codelaser.maddi.cst.api.type.NullableState;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.impl.analysis.MessageImpl;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
@@ -33,6 +34,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.*;
+import java.util.stream.Collectors;
 
 import static io.codelaser.maddi.modification.common.defaults.ShallowAnalyzer.AnnotationOrigin.*;
 import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.*;
@@ -145,34 +147,34 @@ public class ShallowMethodAnalyzer extends AnnotationToProperty {
         if (ind == null) {
             map.put(INDEPENDENT_METHOD, computeMethodIndependent(methodInfo, map));
         }
-        ValueOrigin nn = map.get(NOT_NULL_METHOD);
-        if (nn == null) {
-            map.put(NOT_NULL_METHOD, computeMethodNotNull(methodInfo, map));
+        ValueOrigin nn = map.get(NULLABILITY_METHOD);
+        if (nn == null && !methodInfo.isConstructor() && !methodInfo.isVoid()) {
+            map.put(NULLABILITY_METHOD, computeMethodNullability(methodInfo, map));
         }
     }
 
-    private static final ValueOrigin NOT_NULL_FROM_METHOD = new ValueOrigin(ValueImpl.NotNullImpl.NOT_NULL,
+    private static final ValueOrigin NONNULL_FROM_METHOD = new ValueOrigin(ValueImpl.NullabilityImpl.NONNULL,
             ShallowAnalyzer.AnnotationOrigin.FROM_METHOD);
-    private static final ValueOrigin NOT_NULL_FROM_TYPE = new ValueOrigin(ValueImpl.NotNullImpl.NOT_NULL,
+    private static final ValueOrigin NONNULL_FROM_TYPE = new ValueOrigin(ValueImpl.NullabilityImpl.NONNULL,
             ShallowAnalyzer.AnnotationOrigin.FROM_TYPE);
 
-    private ValueOrigin computeMethodNotNull(MethodInfo methodInfo, Map<Property, ValueOrigin> map) {
-        if (methodInfo.isConstructor() || methodInfo.isVoid()) {
-            return NOT_NULL_FROM_METHOD;
-        }
-        if (methodInfo.returnType().isPrimitiveExcludingVoid()) {
-            return NOT_NULL_FROM_TYPE;
-        }
+    // a return: non-null when the type, fluency, or an overridden method says so; else nullable when an overridden
+    // method says that (an override may narrow, but nothing says this one does); else unspecified
+    private ValueOrigin computeMethodNullability(MethodInfo methodInfo, Map<Property, ValueOrigin> map) {
+        if (methodInfo.returnType().isPrimitiveExcludingVoid()) return NONNULL_FROM_TYPE;
         ValueOrigin fluent = map.get(FLUENT_METHOD);
-        if (fluent.valueAsBool().isTrue()) return NOT_NULL_FROM_METHOD;
-        NotNullProperty v = ValueImpl.NotNullImpl.NULLABLE;
-        for (MethodInfo mi : methodInfo.overrides()) {
-            if (mi.isPublic()) {
-                NotNullProperty nn = mi.analysis().getOrDefault(NOT_NULL_METHOD, ValueImpl.NotNullImpl.NULLABLE);
-                v = v.max(nn);
-            }
+        if (fluent.valueAsBool().isTrue()) return NONNULL_FROM_METHOD;
+        Set<NullableState> overridden = methodInfo.overrides().stream().filter(MethodInfo::isPublic)
+                .map(mi -> mi.analysis().getOrDefault(NULLABILITY_METHOD, ValueImpl.NullabilityImpl.UNSPECIFIED)
+                        .state())
+                .collect(Collectors.toUnmodifiableSet());
+        if (overridden.contains(NullableState.NONNULL)) {
+            return new ValueOrigin(ValueImpl.NullabilityImpl.NONNULL, FROM_OVERRIDE);
         }
-        return new ValueOrigin(v, v == ValueImpl.NotNullImpl.NULLABLE ? DEFAULT : FROM_OVERRIDE);
+        if (overridden.contains(NullableState.NULLABLE)) {
+            return new ValueOrigin(ValueImpl.NullabilityImpl.NULLABLE, FROM_OVERRIDE);
+        }
+        return UNSPECIFIED_DEFAULT;
     }
 
     private static final ValueOrigin MUTABLE_DEFAULT = new ValueOrigin(ValueImpl.ImmutableImpl.MUTABLE, DEFAULT);
@@ -371,9 +373,8 @@ public class ShallowMethodAnalyzer extends AnnotationToProperty {
             }
             map.put(INDEPENDENT_PARAMETER, INDEPENDENT_FROM_METHOD);
             map.put(UNMODIFIED_PARAMETER, FROM_METHOD_TRUE);
-            NotNullProperty notNullOfType = analysisHelper.notNullOfType(parameterInfo.parameterizedType());
-            map.put(NOT_NULL_PARAMETER, notNullOfType.isNullable() ? NULLABLE_DEFAULT :
-                    new ValueOrigin(notNullOfType, FROM_TYPE));
+            Value.Nullability ofType = analysisHelper.nullabilityOfType(parameterInfo.parameterizedType());
+            map.put(NULLABILITY_PARAMETER, ofType.isDefault() ? UNSPECIFIED_DEFAULT : new ValueOrigin(ofType, FROM_TYPE));
             map.putIfAbsent(IGNORE_MODIFICATIONS_PARAMETER, DEFAULT_FALSE);
         } else {
             ValueOrigin imm = map.get(IMMUTABLE_PARAMETER);
@@ -403,9 +404,9 @@ public class ShallowMethodAnalyzer extends AnnotationToProperty {
             if (mod == null) {
                 map.put(UNMODIFIED_PARAMETER, computeParameterUnmodified(parameterInfo, ignComputed));
             }
-            ValueOrigin nn = map.get(NOT_NULL_PARAMETER);
+            ValueOrigin nn = map.get(NULLABILITY_PARAMETER);
             if (nn == null) {
-                map.put(NOT_NULL_PARAMETER, computeParameterNotNull(parameterInfo));
+                map.put(NULLABILITY_PARAMETER, computeParameterNullability(parameterInfo));
             }
             ValueOrigin c = map.get(CONTAINER_PARAMETER);
             if (c == null) {
@@ -425,17 +426,24 @@ public class ShallowMethodAnalyzer extends AnnotationToProperty {
         return pt.isStandardFunctionalInterface() ? FROM_TYPE_TRUE : DEFAULT_FALSE;
     }
 
-    private ValueOrigin computeParameterNotNull(ParameterInfo parameterInfo) {
+    // a parameter has one nullability along its override chain (Kotlin's rule): nullable when an overridden method
+    // accepts null, else non-null when one demands non-null, else unspecified
+    private ValueOrigin computeParameterNullability(ParameterInfo parameterInfo) {
         ParameterizedType pt = parameterInfo.parameterizedType();
-        if (pt.isPrimitiveExcludingVoid()) return NOT_NULL_FROM_TYPE;
-        MethodInfo methodInfo = parameterInfo.methodInfo();
-        NotNullProperty fromOverride = methodInfo.overrides().stream()
+        if (pt.isPrimitiveExcludingVoid()) return NONNULL_FROM_TYPE;
+        Set<NullableState> overridden = parameterInfo.methodInfo().overrides().stream()
                 .filter(MethodInfo::isPublic)
                 .map(mi -> mi.parameters().get(parameterInfo.index()))
-                .filter(pi -> pi.analysis().haveAnalyzedValueFor(NOT_NULL_PARAMETER))
-                .map(pi -> pi.analysis().getOrDefault(NOT_NULL_PARAMETER, ValueImpl.NotNullImpl.NULLABLE))
-                .reduce(ValueImpl.NotNullImpl.NULLABLE, NotNullProperty::max);
-        return fromOverride.isNullable() ? NULLABLE_DEFAULT : NOT_NULL_FROM_OVERRIDE;
+                .map(pi -> pi.analysis().getOrDefault(NULLABILITY_PARAMETER, ValueImpl.NullabilityImpl.UNSPECIFIED)
+                        .state())
+                .collect(Collectors.toUnmodifiableSet());
+        if (overridden.contains(NullableState.NULLABLE)) {
+            return new ValueOrigin(ValueImpl.NullabilityImpl.NULLABLE, FROM_OVERRIDE);
+        }
+        if (overridden.contains(NullableState.NONNULL)) {
+            return new ValueOrigin(ValueImpl.NullabilityImpl.NONNULL, FROM_OVERRIDE);
+        }
+        return UNSPECIFIED_DEFAULT;
     }
 
     private ValueOrigin computeParameterUnmodified(ParameterInfo parameterInfo, ValueOrigin ign) {

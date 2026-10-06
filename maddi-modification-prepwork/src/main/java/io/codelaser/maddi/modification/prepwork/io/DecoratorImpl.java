@@ -36,6 +36,7 @@ import io.codelaser.maddi.cst.api.expression.Expression;
 import io.codelaser.maddi.cst.api.info.*;
 import io.codelaser.maddi.cst.api.output.Qualification;
 import io.codelaser.maddi.cst.api.runtime.Runtime;
+import io.codelaser.maddi.cst.api.type.NullableState;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
@@ -55,6 +56,7 @@ public class DecoratorImpl implements Qualification.Decorator {
     private final TypeInfo independentTi;
     private final TypeInfo immutableContainerTi;
     private final TypeInfo notNullTi;
+    private final TypeInfo nullableTi;
     private final TypeInfo commutableTi;
     private final TypeInfo getSetTi;
     private final TypeInfo modifiedTi;
@@ -119,6 +121,7 @@ public class DecoratorImpl implements Qualification.Decorator {
         TypeInfo fluentTi = runtime.getFullyQualified(Fluent.class, true, sourceSetOfRequest);
         fluentAnnotation = runtime.newAnnotationExpressionBuilder().setTypeInfo(fluentTi).build();
         notNullTi = runtime.getFullyQualified(NotNull.class, true, sourceSetOfRequest);
+        nullableTi = runtime.getFullyQualified(Nullable.class, true, sourceSetOfRequest);
         this.translationMap = translationMap;
         TypeInfo utilityClassTi = runtime.getFullyQualified(UtilityClass.class, true, sourceSetOfRequest);
         utilityClassAnnotation = runtime.newAnnotationExpressionBuilder().setTypeInfo(utilityClassTi).build();
@@ -171,8 +174,10 @@ public class DecoratorImpl implements Qualification.Decorator {
         Property propertyIdentity = null;
         Property propertyFluent = null;
         Property propertyFinalizer = null;
-        Value.NotNullProperty notNull = null;
-        Property propertyNotNull = null;
+        // the declared type of the value whose nullability is printed, and its property (explicit mode only:
+        // user-facing null annotations are NullabilityDecorator's, in the flavour the user chose)
+        ParameterizedType nullabilityType = null;
+        Property propertyNullability = null;
         PropertyValueMap analysis = info.analysis();
         Property propertyUtilityClass = null;
         Property propertyIgnoreModifications = null;
@@ -197,11 +202,10 @@ public class DecoratorImpl implements Qualification.Decorator {
                     Value.Independent independentValue = analysis.getOrDefault(INDEPENDENT_METHOD, DEPENDENT);
                     independent = independent(independentValue, methodInfo.returnType());
                     linkToParametersReturnValue = independentValue.linkToParametersReturnValue();
-                    notNull = notNull(analysis.getOrDefault(NOT_NULL_METHOD, ValueImpl.NotNullImpl.NULLABLE),
-                            methodInfo.returnType());
+                    nullabilityType = methodInfo.returnType();
                 }
                 propertyIndependent = INDEPENDENT_METHOD;
-                propertyNotNull = NOT_NULL_METHOD;
+                propertyNullability = NULLABILITY_METHOD;
                 propertyImmutable = IMMUTABLE_METHOD;
                 propertyUnmodified = !methodInfo.isConstructor() && analysis.getOrDefault(NON_MODIFYING_METHOD, FALSE).isTrue()
                         ? NON_MODIFYING_METHOD : null;
@@ -233,8 +237,8 @@ public class DecoratorImpl implements Qualification.Decorator {
                 propertyIndependent = INDEPENDENT_FIELD;
                 propertyFinalField = !fieldInfo.isFinal() && fieldInfo.isPropertyFinal() ? FINAL_FIELD : null;
                 propertyIgnoreModifications = fieldInfo.isIgnoreModifications() ? IGNORE_MODIFICATIONS_FIELD : null;
-                propertyNotNull = NOT_NULL_FIELD;
-                notNull = notNull(analysis.getOrDefault(NOT_NULL_FIELD, ValueImpl.NotNullImpl.NULLABLE), fieldInfo.type());
+                propertyNullability = NULLABILITY_FIELD;
+                nullabilityType = fieldInfo.type();
                 Value.SetOfStrings eff = analysis.getOrDefault(EVENTUALLY_FINAL_FIELD,
                         ValueImpl.SetOfStringsImpl.EMPTY_SET);
                 if (!eff.set().isEmpty()) eventuallyFinalLabels = eff.set();
@@ -253,8 +257,8 @@ public class DecoratorImpl implements Qualification.Decorator {
                 independent = independent(independentValue, pi.parameterizedType());
                 linkToParametersReturnValue = independentValue.linkToParametersReturnValue();
                 propertyIndependent = INDEPENDENT_PARAMETER;
-                propertyNotNull = NOT_NULL_PARAMETER;
-                notNull = notNull(analysis.getOrDefault(NOT_NULL_PARAMETER, ValueImpl.NotNullImpl.NULLABLE), pi.parameterizedType());
+                propertyNullability = NULLABILITY_PARAMETER;
+                nullabilityType = pi.parameterizedType();
                 propertyIgnoreModifications = pi.isIgnoreModifications() ? IGNORE_MODIFICATIONS_PARAMETER : null;
                 Value.VariableToTypeInfoSet casts = analysis.getOrDefault(DOWNCAST_PARAMETER, ValueImpl.VariableToTypeInfoSetImpl.EMPTY);
                 if (!casts.variableToTypeInfoSet().isEmpty() && !pi.isUnmodified()) {
@@ -389,13 +393,23 @@ public class DecoratorImpl implements Qualification.Decorator {
             importsNeeded.add(Modified.class);
             list.add(new AnnotationProperty(modifiedAnnotation, propertyModifiedAnnotated));
         }
-        if (notNull != null && !notNull.isNullable()) {
-            importsNeeded.add(NotNull.class);
-            AnnotationExpression.Builder b = runtime.newAnnotationExpressionBuilder().setTypeInfo(notNullTi);
-            if (notNull.equals(ValueImpl.NotNullImpl.CONTENT_NOT_NULL)) {
-                b.addKeyValuePair("content", runtime.constantTrue());
+        if (explicit && nullabilityType != null
+            && !(nullabilityType.isPrimitiveExcludingVoid() && nullabilityType.arrays() == 0)) {
+            Value.Nullability nullability = analysis.getOrDefault(propertyNullability,
+                    ValueImpl.NullabilityImpl.UNSPECIFIED);
+            if (nullability.state() == NullableState.NONNULL) {
+                importsNeeded.add(NotNull.class);
+                AnnotationExpression.Builder b = runtime.newAnnotationExpressionBuilder().setTypeInfo(notNullTi);
+                if (!nullability.arguments().isEmpty() && nullability.arguments().stream()
+                        .allMatch(a -> a.state() == NullableState.NONNULL)) {
+                    b.addKeyValuePair("content", runtime.constantTrue());
+                }
+                list.add(new AnnotationProperty(b.build(), propertyNullability));
+            } else if (nullability.state() == NullableState.NULLABLE) {
+                importsNeeded.add(Nullable.class);
+                list.add(new AnnotationProperty(runtime.newAnnotationExpressionBuilder().setTypeInfo(nullableTi)
+                        .build(), propertyNullability));
             }
-            list.add(new AnnotationProperty(b.build(), propertyNotNull));
         }
         if (propertyUtilityClass != null) {
             importsNeeded.add(UtilityClass.class);
@@ -515,11 +529,6 @@ public class DecoratorImpl implements Qualification.Decorator {
     // EventualImpl.labelToFields)
     private static String joinLabels(Set<String> labels) {
         return String.join(",", new TreeSet<>(labels));
-    }
-
-    private Value.NotNullProperty notNull(Value.NotNullProperty notNull, ParameterizedType parameterizedType) {
-        if (parameterizedType.isPrimitiveExcludingVoid()) return null;
-        return notNull;
     }
 
     // we're only showing IMMUTABLE in non-trivial cases

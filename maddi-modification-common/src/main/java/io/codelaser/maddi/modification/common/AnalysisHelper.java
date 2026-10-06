@@ -136,14 +136,10 @@ public class AnalysisHelper {
         return bestType.analysis().getOrDefault(PropertyImpl.INDEPENDENT_TYPE, ValueImpl.IndependentImpl.DEPENDENT);
     }
 
-    public NotNullProperty notNullOfType(ParameterizedType parameterizedType) {
-        if (parameterizedType.isPrimitiveExcludingVoid()) {
-            return ValueImpl.NotNullImpl.NOT_NULL;
-        }
-        if (parameterizedType.isVoid()) {
-            return ValueImpl.NotNullImpl.NO_VALUE;
-        }
-        return ValueImpl.NotNullImpl.NULLABLE;
+    /** What the type alone says: a primitive is non-null; anything else is not decided by its type. */
+    public Value.Nullability nullabilityOfType(ParameterizedType parameterizedType) {
+        if (parameterizedType.isPrimitiveExcludingVoid()) return ValueImpl.NullabilityImpl.NONNULL;
+        return ValueImpl.NullabilityImpl.UNSPECIFIED;
     }
 
     public Value.Bool typeContainer(ParameterizedType parameterizedType) {

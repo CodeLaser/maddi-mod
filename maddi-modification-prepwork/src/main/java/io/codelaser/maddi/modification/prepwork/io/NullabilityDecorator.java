@@ -28,9 +28,9 @@ import io.codelaser.maddi.cst.api.output.Qualification;
 import io.codelaser.maddi.cst.api.runtime.Runtime;
 import io.codelaser.maddi.cst.api.type.NullableState;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
+import io.codelaser.maddi.cst.impl.analysis.NullAnnotations;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
-import io.codelaser.maddi.cst.impl.type.DeclaredNullability;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -45,7 +45,7 @@ import java.util.stream.Stream;
  * {@link DecoratorImpl}), so maddi's own annotations and the null annotations can be printed together.
  * <p>
  * Nothing is written for a primitive, for an UNSPECIFIED verdict, or where the source already carries a null
- * annotation (by simple name, as {@link DeclaredNullability} reads them): a source annotation is a contract.
+ * annotation (by simple name, {@link NullAnnotations}): a source annotation is a contract.
  * <p>
  * Only the top-level state is written, in declaration position. For a TYPE_USE flavour that position is wrong in two
  * cases, which are therefore skipped: an ARRAY ({@code @Nullable String[] a} would speak about the elements; the
@@ -138,7 +138,7 @@ public class NullabilityDecorator implements Qualification.Decorator {
         List<AnnotationExpression> list = new ArrayList<>();
         if (delegate != null) list.addAll(delegate.annotations(element));
         AnnotationExpression ae = nullness(element);
-        if (ae != null && list.stream().noneMatch(DeclaredNullability::isNullnessAnnotation)) {
+        if (ae != null && list.stream().noneMatch(NullAnnotations::isNullnessAnnotation)) {
             importsNeeded.add(ae.typeInfo().fullyQualifiedName());
             list.add(ae);
         }
@@ -183,7 +183,7 @@ public class NullabilityDecorator implements Qualification.Decorator {
 
     private static boolean alreadyAnnotated(Element element, ParameterizedType type) {
         return Stream.concat(element.annotations().stream(), type.annotations().stream())
-                .anyMatch(DeclaredNullability::isNullnessAnnotation);
+                .anyMatch(NullAnnotations::isNullnessAnnotation);
     }
 
     @Override

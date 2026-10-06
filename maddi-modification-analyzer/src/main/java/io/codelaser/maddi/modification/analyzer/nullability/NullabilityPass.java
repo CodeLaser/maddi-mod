@@ -42,6 +42,7 @@ import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.cst.api.variable.LocalVariable;
 import io.codelaser.maddi.cst.api.variable.Variable;
+import io.codelaser.maddi.cst.impl.analysis.NullAnnotations;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 import io.codelaser.maddi.modification.link.LinkComputer;
@@ -194,7 +195,8 @@ public final class NullabilityPass {
     /**
      * Writes the declaration verdicts as the B2 properties ({@code NULLABILITY_FIELD}, {@code _PARAMETER},
      * {@code _METHOD}), which the annotation decorator and the printers read. Locals have no property: they are
-     * not {@link Info}s; a printer asks the {@link Report}.
+     * not {@link Info}s; a printer asks the {@link Report}. A declaration that carries a null annotation keeps the
+     * value that annotation gave it: a contract wins over inference (M2).
      */
     public static void write(Report report) {
         report.verdicts().forEach((info, pt) -> {
@@ -204,7 +206,7 @@ public final class NullabilityPass {
                 case MethodInfo _ -> PropertyImpl.NULLABILITY_METHOD;
                 default -> null;
             };
-            if (property != null) {
+            if (property != null && !NullAnnotations.hasNullnessAnnotation(info)) {
                 info.analysis().setAllowControlledOverwrite(property, ValueImpl.NullabilityImpl.of(pt));
             }
         });

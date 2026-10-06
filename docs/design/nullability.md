@@ -17,7 +17,9 @@ dereference, whether the value can be null at that point. Two applications consu
 
 What to do with a value the analysis cannot decide is a **policy parameter**, not a design decision (§5).
 
-## 2. What exists today
+## 2. What existed at the start (2026-10-06)
+
+(`NOT_NULL_*` and `NotNullImpl` have since been removed; see B2 and the §9 log.)
 
 | piece | where | state |
 |---|---|---|
@@ -82,9 +84,10 @@ has the edges needed (argument → parameter via `LINKED_VARIABLES_ARGUMENTS`, f
   answers "can this be null", the arguments answer "can its elements / keys / values be null"
   (`Map<String, String?>`). Nullability is already a per-use dimension of the type
   (`TestTypeUseAnnotationDistinguishesUses`), and the Kotlin printer already prints it. New properties on
-  `FieldInfo`, `ParameterInfo` and `MethodInfo` (return), e.g. `NULLABILITY_TYPE_FIELD/PARAMETER/METHOD`. The
-  existing `NOT_NULL_*` stay, derived from the outer state, so `DecoratorImpl`, `MethodInfo.isNotNull…` and the
-  hint files keep working. `UNSPECIFIED` means *undecided* (input to the policy, §5).
+  `FieldInfo`, `ParameterInfo` and `MethodInfo` (return): `NULLABILITY_FIELD/PARAMETER/METHOD`, the ONLY
+  nullness properties (decision 2026-10-06: `NOT_NULL_*` removed, no backward compatibility). `UNSPECIFIED`, the
+  default, means *nobody said* (input to the policy, §5); the old properties' default was NULLABLE, which could
+  not tell "may be null" from "unknown".
 - **B3 — printers**: the Kotlin printer reads the property for declarations, falling back to
   `NullableState`, and reads a per-expression use-site decision (M4) for `?.` / `!!` / `?:`. The Java side
   is `DecoratorImpl`, which is in maddi-mod (§D1). No base → mod dependency arises: the properties live in base.
@@ -296,3 +299,33 @@ verdict. A lambda resolves captured locals in its enclosing scope. The guava dec
   elements) and nested types (`@Nullable Map.Entry` does not compile). Both, and type arguments, need the
   annotation inside the printed type: next. `TestNullabilityAnnotations` pins JSpecify `@NullMarked` and JSR-305
   with non-null output end to end.
+
+### 2026-10-06 — NOT_NULL_* removed; NULLABILITY_* is the only nullness property
+
+Decision (Bart): `NOT_NULL_*` was a relic of an older analyzer; remove it, no backward compatibility.
+
+- **Gone**: `NOT_NULL_FIELD/_METHOD/_PARAMETER`, `ValueImpl.NotNullImpl`, `Value.NotNullProperty`,
+  `MethodInfo.isPropertyNullable` (unused). `isPropertyNotNull` (Lombok uses it) now reads `NULLABILITY_*`.
+- **Contracts** (`AnnotationToProperty`): maddi's `@NotNull` → N, `@NotNull(content = true)` → N with every type
+  argument N, `@Nullable` → Q (it was not read at all before), `absent = true` → U explicitly (it stops a default).
+  B1 now reads `content = true` the same way: the value is non-null too. The 38 such hints are all
+  `List.of`/`Map.of`/`stream()`, which are non-null themselves, so the earlier "content only" reading was wrong.
+- **Library defaults** (`ShallowMethodAnalyzer`/`ShallowTypeAnalyzer`): primitive, fluent and enum-constant → N.
+  A return inherits N from an overridden method, else Q; a parameter inherits Q from an overridden method, else N
+  (Kotlin's one-nullability-per-chain rule). Otherwise U, where the old default was NULLABLE. Constructors and void
+  methods get no value (they used to get a meaningless NOT_NULL).
+- **Hint archives** regenerated (`compileAnalysisHints`, on JDK 26, the recorded release, via
+  `-Dorg.gradle.java.home`): 4,641 `nullabilityMethod` N, 27 N(N), 11 N(N,N), 4,630 parameter N, 304 field N. The
+  libs/support results were regenerated with `GenerateSupportAnalysisResults`; the file name had been stale since
+  the e2immu → maddi rename.
+- **Printing**: `DecoratorImpl` prints maddi's `@NotNull`/`@Nullable` from `NULLABILITY_*` in explicit mode only
+  (the hints round-trip). User-facing null annotations are `NullabilityDecorator`'s, in the chosen flavour.
+- **The pass** does not overwrite a declaration that carries a null annotation (contract wins). Using contracts as
+  seeds is still M2 work. The simple-name lists moved to `cst-analysis` `NullAnnotations`, shared by B1, the pass
+  and the decorator.
+- **IDE daemon** (maddi-dist `AnnotationTagger`): `@Nullable` tag from state Q.
+- Not touched: `maddi-run-analysis/src/test/resources/json/JavaIo.json`, `JavaLang.json`, fixtures of a
+  `@Disabled` test that already use other obsolete keys.
+
+Test suites: maddi 2,388 tests, maddi-mod 1,568, all passing, `TestAnalysisHintsCompiler` included. Guava oracle
+unchanged.

@@ -346,7 +346,7 @@ Written by `AnnotationToProperty.annotationsToMap` on the contract side; compute
 | Independence | `INDEPENDENT_TYPE` | `INDEPENDENT_METHOD` | `INDEPENDENT_PARAMETER` | `INDEPENDENT_FIELD` |
 | Modification | — | `NON_MODIFYING_METHOD` | `UNMODIFIED_PARAMETER` | `UNMODIFIED_FIELD` |
 | Finality | — (see below) | — | — | `FINAL_FIELD` |
-| Not-null | — | `NOT_NULL_METHOD` | `NOT_NULL_PARAMETER` | `NOT_NULL_FIELD` |
+| Nullability | — | `NULLABILITY_METHOD` | `NULLABILITY_PARAMETER` | `NULLABILITY_FIELD` |
 | Ignore modifications | — | `IGNORE_MODIFICATION_METHOD` | `IGNORE_MODIFICATIONS_PARAMETER` | `IGNORE_MODIFICATIONS_FIELD` |
 
 **Watch the polarity**: the annotations are `@Modified`/`@NotModified`, but the properties are
