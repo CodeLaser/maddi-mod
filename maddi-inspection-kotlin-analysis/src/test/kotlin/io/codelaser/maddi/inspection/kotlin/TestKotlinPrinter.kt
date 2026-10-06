@@ -14,7 +14,6 @@
 
 package io.codelaser.maddi.inspection.kotlin
 
-import io.codelaser.maddi.modification.prepwork.PrepAnalyzer
 import io.codelaser.maddi.cst.api.info.MethodPrinter
 import io.codelaser.maddi.cst.api.info.TypeInfo
 import io.codelaser.maddi.cst.api.info.TypePrinter
@@ -43,7 +42,7 @@ class TestKotlinPrinter {
         return Formatter2Impl(runtime, FormattingOptionsImpl.Builder().build()).write(ob)
     }
 
-    /** Parse Kotlin, run prepwork (populates getSetField), print back as Kotlin. */
+    /** Parse Kotlin and print it back as Kotlin (the front end itself populates getSetField). */
     @Test
     fun kotlinRoundTrip() {
         val runtime = RuntimeImpl()
@@ -53,7 +52,6 @@ class TestKotlinPrinter {
             "    fun greet(name: String): String = \"hi \" + name\n" +
             "}\n"
         val types = KotlinScan(runtime, sourceSet, InfoByFqn()).parse("a/Foo.kt", src)
-        PrepAnalyzer(runtime).doPrimaryTypes(types.toSet())
         val foo = types.first { it.simpleName() == "Foo" }
 
         val kotlin = printKotlin(runtime, foo)
@@ -78,7 +76,6 @@ class TestKotlinPrinter {
             "    }\n" +
             "}\n"
         val types = KotlinScan(runtime, sourceSet, InfoByFqn()).parse("a/Bar.kt", src)
-        PrepAnalyzer(runtime).doPrimaryTypes(types.toSet())
         val bar = types.first { it.simpleName() == "Bar" }
         val kotlin = printKotlin(runtime, bar)
 
@@ -101,7 +98,6 @@ class TestKotlinPrinter {
             "    fun b(x: Any): Boolean = !x.equals(x)\n" +
             "}\n"
         val types = KotlinScan(runtime, sourceSet, InfoByFqn()).parse("a/Baz.kt", src)
-        PrepAnalyzer(runtime).doPrimaryTypes(types.toSet())
         val baz = types.first { it.simpleName() == "Baz" }
         val kotlin = printKotlin(runtime, baz)
 
@@ -125,7 +121,6 @@ class TestKotlinPrinter {
             "    }\n" +
             "}\n"
         val types = KotlinScan(runtime, sourceSet, InfoByFqn()).parse("a/Q.kt", src)
-        PrepAnalyzer(runtime).doPrimaryTypes(types.toSet())
         val q = types.first { it.simpleName() == "Q" }
         val kotlin = printKotlin(runtime, q)
 
@@ -149,7 +144,6 @@ class TestKotlinPrinter {
             "    }\n" +
             "}\n"
         val types = KotlinScan(runtime, sourceSet, InfoByFqn()).parse("a/R.kt", src)
-        PrepAnalyzer(runtime).doPrimaryTypes(types.toSet())
         val r = types.first { it.simpleName() == "R" }
         val kotlin = printKotlin(runtime, r)
 
@@ -172,7 +166,6 @@ class TestKotlinPrinter {
             "    }\n" +
             "}\n"
         val types = KotlinScan(runtime, sourceSet, InfoByFqn()).parse("a/Point.kt", src)
-        PrepAnalyzer(runtime).doPrimaryTypes(types.toSet())
         val point = types.first { it.simpleName() == "Point" }
         val kotlin = printKotlin(runtime, point)
 
@@ -191,7 +184,6 @@ class TestKotlinPrinter {
         val sourceSet = SourceSetImpl.Builder().setName("main").setUri(URI.create("file:/")).build()
         val types = KotlinScan(runtime, sourceSet, InfoByFqn())
             .parse("a/Foo.kt", "package a\nclass Foo { fun greet(): String = \"hi\" }\n")
-        PrepAnalyzer(runtime).doPrimaryTypes(types.toSet())
         val foo = types.first { it.simpleName() == "Foo" }
 
         // a custom method printer that replaces the method rendering entirely

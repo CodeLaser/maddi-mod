@@ -14,7 +14,6 @@
 
 package io.codelaser.maddi.inspection.kotlin
 
-import io.codelaser.maddi.modification.prepwork.PrepAnalyzer
 import io.codelaser.maddi.cst.impl.info.ImportComputerImpl
 import io.codelaser.maddi.cst.print.FormattingOptionsImpl
 import io.codelaser.maddi.cst.print.formatter2.Formatter2Impl
@@ -28,13 +27,13 @@ import org.junit.jupiter.api.Test
 import java.net.URI
 
 /**
- * Round-trip harness: parse real **Java** with the openjdk front-end, run prepwork, and print it back as Kotlin
+ * Round-trip harness: parse real **Java** with the openjdk front-end and print it back as Kotlin
  * — to shake out printer gaps at scale. Any un-translated Java-only surface (`new`, `instanceof`, `switch`,
  * `? :`, `;`) shows up as a leftover "Java-ism" and is reported (and, for the ones already covered, asserted).
  */
 class TestKotlinPrinterRoundTrip {
 
-    /** Parse one `.java` primary type with the openjdk front-end, run prepwork, and print it back as Kotlin. */
+    /** Parse one `.java` primary type with the openjdk front-end and print it back as Kotlin. */
     private fun printAsKotlin(fqn: String, source: String): String {
         val javaInspector = JavaInspectorImpl()
         val sourceSet = SourceSetImpl.Builder().setName(JavaInspector.TEST_PROTOCOL).setUri(URI.create("file:/")).build()
@@ -44,7 +43,6 @@ class TestKotlinPrinterRoundTrip {
         javaInspector.onlyPreload()
         val runtime = javaInspector.runtime()
         val type = javaInspector.parse(fqn, source)
-        PrepAnalyzer(runtime).doPrimaryTypes(setOf(type))
 
         val ob = KotlinTypePrinter(type, true)
             .print(ImportComputerImpl(), runtime.qualificationQualifyFromPrimaryType(), true)
