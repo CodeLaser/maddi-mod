@@ -192,9 +192,9 @@ public class TestNullabilityOracleGuava {
         List<TypeInfo> types = parsed.types();
         DeclaredNullability dn = declaredNullability(types);
         NullabilityComparison flowOnly = measure("NULL_MARKED_FLOW_ONLY", types, dn,
-                new NullabilityPass(NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY).go(order));
+                new NullabilityPass(NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY.withoutContracts()).go(order));
         NullabilityComparison comparison = measure("NULL_MARKED", types, dn,
-                new NullabilityPass(NullabilityPass.Policy.NULL_MARKED).go(order));
+                new NullabilityPass(NullabilityPass.Policy.NULL_MARKED.withoutContracts()).go(order));
         assertTrue(flowOnly.count(Outcome.AGREE) >= 10_000, "the inference must cover the reference");
         assertTrue(comparison.count(Outcome.UNSAFE) <= flowOnly.count(Outcome.UNSAFE),
                 "null tests only add nullable seeds, so they cannot add unsafe verdicts");

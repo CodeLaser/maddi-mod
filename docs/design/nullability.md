@@ -329,3 +329,34 @@ Decision (Bart): `NOT_NULL_*` was a relic of an older analyzer; remove it, no ba
 
 Test suites: maddi 2,388 tests, maddi-mod 1,568, all passing, `TestAnalysisHintsCompiler` included. Guava oracle
 unchanged.
+
+### 2026-10-06 — M2: contracts; the JDK null contracts move into the hints
+
+- **Decision (Bart)**: an array gets an element slot in B2. Proposed shape: for an array type, `arguments()`
+  holds the element state, so `String?[]` is `N(Q)`; no new format. Implemented with content inference.
+- **Library contracts from the hints**: `LibraryNullness` is gone. Its entries are maddi `@Nullable` in the JDK
+  shadows (`Map.get/put/remove/...`, `NavigableMap`/`NavigableSet` lookups and polls, `Queue.poll/peek`, `Deque`,
+  `BlockingQueue`/`BlockingDeque` timed polls, `comparator()`, `Reference.get`, `ThreadLocal.get`,
+  `System.getProperty/getenv`, `Class`/`Throwable` getters, `readLine`, `InvocationHandler.invoke`; parameters of
+  `equals`, `contains`, `indexOf`, `Map.get/containsKey/...`). The pass reads a library method's
+  `NULLABILITY_*` (state Q) for itself and the methods it overrides. Only methods outside the analysis count:
+  the analysed ones' properties may be an earlier run's output. Override inheritance in the shallow analyzer makes
+  every `equals(Object)` parameter Q, among others: 156 returns and 169 parameters in the JDK archive. Apart from
+  that, the regenerated archive changed no verdict except the "annotated" marker on the 5 added `poll` methods,
+  plus the newly shadowed types (`DataInput`, `ThreadLocal`, `InvocationHandler`, `Blocking{Queue,Deque}`,
+  `PriorityBlockingQueue`, `Reference`) with their defaults.
+- **Source contracts** (`Policy.contracts`, on in every preset; the oracle turns it off with
+  `withoutContracts()`, since it measures the inference against those very annotations): a declaration annotated
+  nullable (any family, `NullAnnotations.explicitState`) seeds, and so does a call to it used directly; one
+  annotated non-null stops null: a seed or an edge into it is dropped (the caller's error, an M5 finding), and its
+  verdict is the annotation's.
+- **The literal `null`** assigned to a local or field is seeded from the code, not from the links. Fernflower's
+  `FlattenStatementsHelper.flattenStatement` is DEGRADED (too big for the link engine, so no links), and its
+  `X x = null` locals came out non-null; the Kotlin printer then failed on them. An unreached local of a
+  degraded method is now UNSPECIFIED, like its outputs.
+- **Rejected**: a general edge from an analysed callee's return to wherever its result is used directly.
+  On guava it gave -27 unsafe for +947 noise: the flow-insensitivity of `v = get(k); if (v == null) ...` carried
+  into callers. Revisit with M4.
+
+Guava (NULL_MARKED, contracts off): 12,772 agree / 315 unsafe / 817 noise (was 12,766 / 321 / 817); field
+unsafe 14 → 8 from the literal-null seeds.

@@ -59,6 +59,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -76,9 +77,13 @@ import java.util.Set;
  * keyed by its DECLARATION ({@link Local}), resolved through the block scopes, so same-named locals of sibling
  * scopes are distinct nodes (a {@link LocalVariable} is equal by name). <b>Seeds</b> (may be null): a null constant flowing into a node, as a link to a null-constant marker
  * or as a {@code null} argument; a field that can still hold Java's default value (not final, no initializer, not
- * assigned in every constructor); under {@link Policy#nullTests()}, a parameter or field compared with null; the
- * JDK's null contracts ({@link LibraryNullness}): overriding a method that may return null or accepts null, and
- * using such a method's result directly.
+ * assigned in every constructor); a local or field assigned the literal {@code null} (read from the code, so also in
+ * a degraded method); under {@link Policy#nullTests()}, a parameter or field compared with null; library null
+ * contracts (a library method's {@code NULLABILITY_*} property, from the analysis hints, says NULLABLE):
+ * overriding a method that may return null or accepts null, and using such a method's result directly; under
+ * {@link Policy#contracts()}, a source declaration annotated nullable. A source declaration annotated NON-NULL is
+ * a contract too: null does not travel through it (passing null there is the caller's error, an M5 finding), and
+ * its verdict is the annotation's.
  * <b>Edges</b>, in the direction null travels (source to recipient): {@code ←}/{@code ≡}/{@code →} links between
  * nodes in each method's variable data; an argument's nodes to the callee's parameter (the per-call argument
  * links); an implementation's return to the return it overrides; and a parameter to the parameter at the same
@@ -86,7 +91,7 @@ import java.util.Set;
  * <p>
  * <b>Verdict</b>: reached is {@link NullableState#NULLABLE}; not reached is {@link Policy#unreached()}; a primitive
  * is {@link NullableState#NONNULL}; a type-variable type and the outputs of a degraded method (no links) are
- * {@link NullableState#UNSPECIFIED}. Locals get a verdict too ({@link Report#local}). Type arguments are not inferred yet (content slots, §4.2 M3): they stay
+ * {@link NullableState#UNSPECIFIED}, as are the unreached locals of a degraded method. Locals get a verdict too ({@link Report#local}). Type arguments are not inferred yet (content slots, §4.2 M3): they stay
  * UNSPECIFIED.
  * <p>
  * Requires the analyzer to have run with {@code Configuration.nullability()}: without
@@ -101,11 +106,17 @@ public final class NullabilityPass {
      * @param nullTests a parameter or field compared with {@code null} ({@code p == null}, {@code f != null}) is
      *                  taken as nullable: the author expects null there, even when no null is seen arriving (a
      *                  public parameter no analysed caller passes null to; a lazily initialized field)
+     * @param contracts the null annotations on source declarations are contracts (M2): a nullable one is a seed, a
+     *                  non-null one stops null. Off to measure the inference against those annotations (the oracle).
      */
-    public record Policy(NullableState unreached, boolean nullTests) {
-        public static final Policy NULL_MARKED = new Policy(NullableState.NONNULL, true);
-        public static final Policy NULL_MARKED_FLOW_ONLY = new Policy(NullableState.NONNULL, false);
-        public static final Policy CAUTIOUS = new Policy(NullableState.UNSPECIFIED, true);
+    public record Policy(NullableState unreached, boolean nullTests, boolean contracts) {
+        public static final Policy NULL_MARKED = new Policy(NullableState.NONNULL, true, true);
+        public static final Policy NULL_MARKED_FLOW_ONLY = new Policy(NullableState.NONNULL, false, true);
+        public static final Policy CAUTIOUS = new Policy(NullableState.UNSPECIFIED, true, true);
+
+        public Policy withoutContracts() {
+            return new Policy(unreached, nullTests, false);
+        }
     }
 
     /**
@@ -154,6 +165,14 @@ public final class NullabilityPass {
     private final Map<Object, Set<Object>> successors = new LinkedHashMap<>();
     private final Map<Object, String> seedOrigin = new LinkedHashMap<>();
     private final Set<MethodInfo> degraded = new LinkedHashSet<>();
+    // the methods of this analysis: their own NULLABILITY_* may be this pass's output of an earlier run, so only the
+    // others' (the library's, from the hints) are read as contracts
+    private final Set<MethodInfo> analysed = new HashSet<>();
+    // source declarations annotated non-null (Policy.contracts): null stops there
+    private final Set<Object> nonNullContracts = new HashSet<>();
+    // the analysed method a local belongs to (a lambda's local: the method the lambda is in)
+    private final Map<Local, MethodInfo> localOwner = new HashMap<>();
+    private MethodInfo owner;
     private final Map<Local, LocalVariable> declaredLocals = new LinkedHashMap<>();
     // per method (a lambda is its own), the declarations of each name: the fallback when scopes do not resolve one
     private final Map<MethodInfo, Map<String, List<Local>>> declaredByName = new HashMap<>();
@@ -167,7 +186,18 @@ public final class NullabilityPass {
                 .filter(i -> i instanceof MethodInfo).map(i -> (MethodInfo) i).toList();
         List<FieldInfo> fields = analysisOrder.stream()
                 .filter(i -> i instanceof FieldInfo).map(i -> (FieldInfo) i).toList();
-        for (MethodInfo mi : methods) buildForMethod(mi);
+        analysed.addAll(methods);
+        if (policy.contracts()) {
+            for (FieldInfo fi : fields) contract(fi, fi);
+            for (MethodInfo mi : methods) {
+                for (ParameterInfo pi : mi.parameters()) contract(pi, pi);
+                if (!mi.isConstructor() && !mi.returnType().isVoid()) contract(mi, mi);
+            }
+        }
+        for (MethodInfo mi : methods) {
+            owner = mi;
+            buildForMethod(mi);
+        }
         for (FieldInfo fi : fields) seedDefaultValue(fi);
 
         Map<Object, Object> cause = new LinkedHashMap<>();
@@ -175,18 +205,19 @@ public final class NullabilityPass {
 
         Map<Info, ParameterizedType> verdicts = new LinkedHashMap<>();
         Map<Local, ParameterizedType> locals = new LinkedHashMap<>();
-        declaredLocals.forEach((local, lv) -> locals.put(local,
-                verdict(lv.parameterizedType(), reached.contains(local), false)));
+        // an unreached local of a degraded method: its links are missing, so "no null reaches it" is not known
+        declaredLocals.forEach((local, lv) -> locals.put(local, verdict(lv.parameterizedType(),
+                reached.contains(local), degraded.contains(localOwner.get(local)))));
         for (FieldInfo fi : fields) {
-            verdicts.put(fi, verdict(fi.type(), reached.contains(fi), false));
+            verdicts.put(fi, contracted(fi, verdict(fi.type(), reached.contains(fi), false)));
         }
         for (MethodInfo mi : methods) {
             boolean deg = degraded.contains(mi);
             for (ParameterInfo pi : mi.parameters()) {
-                verdicts.put(pi, verdict(pi.parameterizedType(), reached.contains(pi), false));
+                verdicts.put(pi, contracted(pi, verdict(pi.parameterizedType(), reached.contains(pi), false)));
             }
             if (!mi.isConstructor() && !mi.returnType().isVoid()) {
-                verdicts.put(mi, verdict(mi.returnType(), reached.contains(mi), deg));
+                verdicts.put(mi, contracted(mi, verdict(mi.returnType(), reached.contains(mi), deg)));
             }
         }
         return new Report(verdicts, locals, cause, seedOrigin);
@@ -210,6 +241,42 @@ public final class NullabilityPass {
                 info.analysis().setAllowControlledOverwrite(property, ValueImpl.NullabilityImpl.of(pt));
             }
         });
+    }
+
+    // a source declaration's null annotation, under Policy.contracts: nullable seeds, non-null stops null
+    private void contract(Info info, Object node) {
+        NullableState state = NullAnnotations.explicitState(info);
+        if (state == NullableState.NULLABLE) seed(node, "annotated nullable");
+        else if (state == NullableState.NONNULL) nonNullContracts.add(node);
+    }
+
+    private ParameterizedType contracted(Info info, ParameterizedType verdict) {
+        if (!policy.contracts() || verdict.isPrimitiveExcludingVoid() && verdict.arrays() == 0) return verdict;
+        NullableState state = NullAnnotations.explicitState(info);
+        return state == null ? verdict : verdict.withNullable(state);
+    }
+
+    // ------------------------------------------------------------------ library contracts (the analysis hints)
+
+    private static NullableState stateOf(Info info, Property property) {
+        return info.analysis().getOrDefault(property, ValueImpl.NullabilityImpl.UNSPECIFIED).state();
+    }
+
+    /** A library method, {@code mi} or one it overrides, whose return may be null; null when there is none. */
+    private String libraryNullableReturn(MethodInfo mi) {
+        return java.util.stream.Stream.concat(java.util.stream.Stream.of(mi), mi.overrides().stream())
+                .filter(m -> !analysed.contains(m))
+                .filter(m -> stateOf(m, PropertyImpl.NULLABILITY_METHOD) == NullableState.NULLABLE)
+                .map(MethodInfo::fullyQualifiedName).findFirst().orElse(null);
+    }
+
+    /** A library method, {@code mi} or one it overrides, whose parameter {@code index} accepts null. */
+    private String libraryNullableParameter(MethodInfo mi, int index) {
+        return java.util.stream.Stream.concat(java.util.stream.Stream.of(mi), mi.overrides().stream())
+                .filter(m -> !analysed.contains(m) && index < m.parameters().size())
+                .filter(m -> stateOf(m.parameters().get(index), PropertyImpl.NULLABILITY_PARAMETER)
+                             == NullableState.NULLABLE)
+                .map(MethodInfo::fullyQualifiedName).findFirst().orElse(null);
     }
 
     private ParameterizedType verdict(ParameterizedType declared, boolean reached, boolean degradedOutput) {
@@ -242,12 +309,14 @@ public final class NullabilityPass {
     }
 
     private Set<Object> closure(Map<Object, Object> cause) {
+        // a seed on a non-null contract is the caller's error (an M5 finding), not a source of null
         Set<Object> reached = new LinkedHashSet<>(seedOrigin.keySet());
+        reached.removeAll(nonNullContracts);
         Deque<Object> queue = new ArrayDeque<>(reached);
         while (!queue.isEmpty()) {
             Object n = queue.removeFirst();
             for (Object s : successors.getOrDefault(n, Set.of())) {
-                if (reached.add(s)) {
+                if (!nonNullContracts.contains(s) && reached.add(s)) {
                     cause.put(s, n);
                     queue.addLast(s);
                 }
@@ -304,6 +373,7 @@ public final class NullabilityPass {
         Local local = new Local(mi, declaration, lv.simpleName());
         scope.names.put(lv.simpleName(), local);
         declaredLocals.put(local, lv);
+        localOwner.put(local, owner);
         declaredByName.computeIfAbsent(mi, _ -> new HashMap<>())
                 .computeIfAbsent(lv.simpleName(), _ -> new ArrayList<>()).add(local);
     }
@@ -353,10 +423,10 @@ public final class NullabilityPass {
             }
         }
         if (!mi.isConstructor()) {
-            String lib = LibraryNullness.nullableReturn(mi);
+            String lib = libraryNullableReturn(mi);
             if (lib != null && !mi.returnType().isVoid()) seed(mi, "overrides " + lib);
             for (ParameterInfo pi : mi.parameters()) {
-                String libParam = LibraryNullness.nullableParameter(mi, pi.index());
+                String libParam = libraryNullableParameter(mi, pi.index());
                 if (libParam != null) seed(pi, "overrides " + libParam);
             }
         }
@@ -446,7 +516,7 @@ public final class NullabilityPass {
                 }
                 return true;
             });
-            libraryResult(mi, own, statement);
+            syntacticSeeds(mi, own, statement);
             if (statement instanceof ExplicitConstructorInvocation eci && eci.methodInfo() != null) {
                 callSite(mi, own, eci.methodInfo(), eci.analysis(), eci.parameterExpressions());
             }
@@ -454,27 +524,48 @@ public final class NullabilityPass {
         return scope;
     }
 
-    // a library call whose result may be null (LibraryNullness), USED DIRECTLY: returned, assigned, initializing a
-    // local. Its value reaches the link graph only as an opaque '$_v', so the use is matched syntactically.
-    private void libraryResult(MethodInfo mi, Scope scope, Statement statement) {
+    // read from the code, not from the links: the literal null assigned to a local or field (so also in a degraded
+    // method, which has no links), and a library call whose result may be null USED DIRECTLY: returned, assigned,
+    // initializing a local (its value reaches the link graph only as an opaque '$_v')
+    private void syntacticSeeds(MethodInfo mi, Scope scope, Statement statement) {
         if (statement instanceof ReturnStatement rs && !mi.isConstructor() && !mi.returnType().isVoid()) {
-            String lib = nullableLibraryCall(rs.expression());
-            if (lib != null) seed(mi, "returns " + lib);
+            callResult(mi, rs.expression());
         } else if (statement instanceof LocalVariableCreation lvc) {
             lvc.localVariableStream().forEach(lv -> {
-                String lib = nullableLibraryCall(lv.assignmentExpression());
-                if (lib != null) seed(local(mi, scope, lv.simpleName()), "assigned " + lib);
+                Object local = local(mi, scope, lv.simpleName());
+                if (lv.assignmentExpression() instanceof NullConstant) {
+                    seed(local, "initialized null in " + mi.fullyQualifiedName());
+                }
+                callResult(local, lv.assignmentExpression());
             });
         } else if (statement.expression() instanceof Assignment a && a.variableTarget() != null) {
-            String lib = nullableLibraryCall(a.value());
-            if (lib != null) seed(node(mi, scope, a.variableTarget()), "assigned " + lib);
+            Object target = node(mi, scope, a.variableTarget());
+            if (a.value() instanceof NullConstant) seed(target, "assigned null in " + mi.fullyQualifiedName());
+            callResult(target, a.value());
         }
     }
 
-    private static String nullableLibraryCall(Expression e) {
+    // a call's result used directly: a library method that may return null, or (Policy.contracts) an analysed one
+    // annotated nullable, seeds. Neither leaves a null marker in the link summary. NOT a general edge from every
+    // analysed callee's return: on guava that carried the flow-insensitivity of 'v = get(k); if (v == null) ...'
+    // into the callers, +947 noise for -27 unsafe (2026-10-06); to be revisited with the use-site pass (M4).
+    private void callResult(Object target, Expression value) {
+        Expression unwrapped = value instanceof Cast c ? c.expression() : value;
+        if (target == null || !(unwrapped instanceof MethodCall mc) || mc.methodInfo() == null) return;
+        MethodInfo callee = mc.methodInfo();
+        String lib = libraryNullableReturn(callee);
+        if (lib != null) {
+            seed(target, "assigned " + lib);
+        } else if (policy.contracts() && analysed.contains(callee)
+                   && NullAnnotations.explicitState(callee) == NullableState.NULLABLE) {
+            seed(target, "assigned " + callee.fullyQualifiedName() + ", annotated nullable");
+        }
+    }
+
+    private String nullableLibraryCall(Expression e) {
         Expression unwrapped = e instanceof Cast c ? c.expression() : e;
         if (unwrapped instanceof MethodCall mc && mc.methodInfo() != null) {
-            return LibraryNullness.nullableReturn(mc.methodInfo());
+            return libraryNullableReturn(mc.methodInfo());
         }
         return null;
     }

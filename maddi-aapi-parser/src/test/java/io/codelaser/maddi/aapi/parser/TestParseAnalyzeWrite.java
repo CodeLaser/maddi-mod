@@ -103,7 +103,7 @@ public class TestParseAnalyzeWrite extends CommonTest {
         long sideLoadedUnits = types.stream().filter(t -> t.packageName().endsWith(".libs.eclipsecollections")
                                                         || t.packageName().endsWith(".libs.guava")).count();
         LOGGER.info("Side-loaded hint units parsed on the shared factory: {}", sideLoadedUnits);
-        assertEquals(31 + kotlinUnits, types.size() - sideLoadedUnits); // 28 + JavaMath + JavaTimeFormat + OrgE2immuSupport
+        assertEquals(32 + kotlinUnits, types.size() - sideLoadedUnits); // 28 + JavaMath + JavaTimeFormat + OrgE2immuSupport + JavaLangRef
         for (TypeInfo typeInfo : types) {
             if ("JavaLang".equals(typeInfo.fullyQualifiedName())) {
                 TypeInfo charSeq = typeInfo.findSubType("CharSequence$");
