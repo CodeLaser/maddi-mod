@@ -360,3 +360,47 @@ unchanged.
 
 Guava (NULL_MARKED, contracts off): 12,772 agree / 315 unsafe / 817 noise (was 12,766 / 321 / 817); field
 unsafe 14 → 8 from the literal-null seeds.
+
+### 2026-10-06 — M4, first cut: use sites cut the flow-insensitive edges
+
+`NonNullFacts` walks each method body (lambda bodies included) in statement order. For every statement it records
+the locals and parameters known non-null when the statement starts:
+- after `if (v == null) return/throw/break/continue;`;
+- inside `if (v != null)`, and in the `else` of `v == null`, with `&&`, `||`, `!` and `instanceof` handled;
+- after a dereference `v.m()`, `v.f`, `v[i]`;
+- after passing `v` to a parameter that demands non-null (a library `@NotNull`, or a source contract);
+- after `assert v != null`;
+- after `v = <non-null expression>` (`new`, a literal, a non-null variable, a call whose contract is non-null).
+
+It is conservative where it has to be. An assignment kills a fact. Loops, `try` and `switch` keep only the facts
+of variables they do not assign. Two branches that both continue are joined by intersection. Fields are not
+tracked.
+
+The declaration pass uses the facts in two places.
+- **Link edges** are decided after all statements have been seen. An edge is dropped when, at every statement
+  that assigns the recipient, the source can only become the assigned value where it is known non-null. This is
+  analysed structurally through `?:`, nested assignments and casts, so the lazy getter
+  `return r == null ? field = new X() : r` counts as guarded.
+- **An argument** that is a variable known non-null at the call carries nothing to the parameter.
+
+`Report.useSites()` exposes the facts per statement, for the Kotlin printer's `!!` / `?.` decisions.
+
+Measured on guava and rejected: treating `if (p == null) throw` as a non-null precondition rather than a null
+test. Guava's own checking methods (`checkEntryNotNull`, `checkElementNotNull`, …) annotate such parameters
+`@Nullable`, because their job is to accept null and throw; the rule cost 28 agreements and +3 unsafe.
+
+Guava (NULL_MARKED, contracts off): **12,949 agree / 340 unsafe / 610 noise**. Before M4 it was 12,772 / 315 / 817.
+The +25 unsafe are almost all one pattern: `this.mutex = (mutex == null) ? this : mutex`. The field is now
+rightly non-null. Before, it was wrongly nullable, and that made the `mutex` parameters of every `Synchronized`
+factory nullable "by accident". Guava declares those parameters `@Nullable` by API design: it is the open
+public-API-parameter question (§8), not an M4 error.
+
+What is left of the noise:
+- 97 parameters compared with null, where the test is not a guard;
+- about 85 nulls fanning out through JDK interface parameters to every implementation (`Comparator.compare`,
+  `Collection.addAll`, `Map.put`);
+- lazy fields read without a local (fields are not tracked);
+- no relation between two variables (`if (map.containsKey(k)) map.get(k)`).
+
+Next for M4 are field facts for `this.f` within a method, killed at calls, and the per-dereference decision for
+the printer.

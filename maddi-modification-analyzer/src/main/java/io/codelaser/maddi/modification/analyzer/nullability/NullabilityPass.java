@@ -20,9 +20,12 @@ import io.codelaser.maddi.cst.api.expression.Assignment;
 import io.codelaser.maddi.cst.api.expression.BinaryOperator;
 import io.codelaser.maddi.cst.api.expression.Cast;
 import io.codelaser.maddi.cst.api.expression.ConstructorCall;
+import io.codelaser.maddi.cst.api.expression.ConstantExpression;
 import io.codelaser.maddi.cst.api.expression.Expression;
+import io.codelaser.maddi.cst.api.expression.InlineConditional;
 import io.codelaser.maddi.cst.api.expression.Lambda;
 import io.codelaser.maddi.cst.api.expression.MethodCall;
+import io.codelaser.maddi.cst.api.expression.MethodReference;
 import io.codelaser.maddi.cst.api.expression.NullConstant;
 import io.codelaser.maddi.cst.api.expression.VariableExpression;
 import io.codelaser.maddi.cst.api.info.FieldInfo;
@@ -88,6 +91,9 @@ import java.util.Set;
  * nodes in each method's variable data; an argument's nodes to the callee's parameter (the per-call argument
  * links); an implementation's return to the return it overrides; and a parameter to the parameter at the same
  * index along the override chain, both ways (Kotlin's rule: one nullability per chain).
+ * <b>Use sites</b> ({@link NonNullFacts}, M4): an edge from a link or an argument is not made where the source is a
+ * local or parameter known non-null at that statement (after {@code if (v == null) return;}, inside
+ * {@code if (v != null)}, after a dereference, in the {@code ?:} branch that excludes null).
  * <p>
  * <b>Verdict</b>: reached is {@link NullableState#NULLABLE}; not reached is {@link Policy#unreached()}; a primitive
  * is {@link NullableState#NONNULL}; a type-variable type and the outputs of a degraded method (no links) are
@@ -122,9 +128,10 @@ public final class NullabilityPass {
     /**
      * @param verdicts fields, parameters, and methods (their return value)
      * @param locals   every declared local variable, by its declaration
+     * @param useSites per statement, the locals and parameters known non-null when it starts (M4)
      */
     public record Report(Map<Info, ParameterizedType> verdicts, Map<Local, ParameterizedType> locals,
-                         Map<Object, Object> cause, Map<Object, String> seedOrigin) {
+                         Map<Object, Object> cause, Map<Object, String> seedOrigin, NonNullFacts useSites) {
 
         /**
          * The verdict of a local variable, or null when there is none (a pattern variable; a declaration the pass
@@ -173,6 +180,10 @@ public final class NullabilityPass {
     // the analysed method a local belongs to (a lambda's local: the method the lambda is in)
     private final Map<Local, MethodInfo> localOwner = new HashMap<>();
     private MethodInfo owner;
+    private NonNullFacts facts;
+    // link-derived edges, decided after every statement was seen: dropped when the source is known non-null at every
+    // statement that assigns it directly to the recipient (M4)
+    private final Map<List<Object>, int[]> linkEdges = new LinkedHashMap<>();
     private final Map<Local, LocalVariable> declaredLocals = new LinkedHashMap<>();
     // per method (a lambda is its own), the declarations of each name: the fallback when scopes do not resolve one
     private final Map<MethodInfo, Map<String, List<Local>>> declaredByName = new HashMap<>();
@@ -187,6 +198,7 @@ public final class NullabilityPass {
         List<FieldInfo> fields = analysisOrder.stream()
                 .filter(i -> i instanceof FieldInfo).map(i -> (FieldInfo) i).toList();
         analysed.addAll(methods);
+        facts = new NonNullFacts(this::parameterContract, this::returnContract);
         if (policy.contracts()) {
             for (FieldInfo fi : fields) contract(fi, fi);
             for (MethodInfo mi : methods) {
@@ -199,6 +211,10 @@ public final class NullabilityPass {
             buildForMethod(mi);
         }
         for (FieldInfo fi : fields) seedDefaultValue(fi);
+        linkEdges.forEach((edge, count) -> {
+            // [0] assigned directly where the source is known non-null, [1] assigned directly otherwise
+            if (count[1] > 0 || count[0] == 0) addEdge(edge.get(0), edge.get(1));
+        });
 
         Map<Object, Object> cause = new LinkedHashMap<>();
         Set<Object> reached = closure(cause);
@@ -220,7 +236,7 @@ public final class NullabilityPass {
                 verdicts.put(mi, contracted(mi, verdict(mi.returnType(), reached.contains(mi), deg)));
             }
         }
-        return new Report(verdicts, locals, cause, seedOrigin);
+        return new Report(verdicts, locals, cause, seedOrigin, facts);
     }
 
     /**
@@ -260,6 +276,17 @@ public final class NullabilityPass {
 
     private static NullableState stateOf(Info info, Property property) {
         return info.analysis().getOrDefault(property, ValueImpl.NullabilityImpl.UNSPECIFIED).state();
+    }
+
+    // what a callee promises, for the use-site facts: a library method's hints; an analysed one's annotation
+    private NullableState parameterContract(ParameterInfo pi) {
+        if (!analysed.contains(pi.methodInfo())) return stateOf(pi, PropertyImpl.NULLABILITY_PARAMETER);
+        return policy.contracts() ? NullAnnotations.explicitState(pi) : null;
+    }
+
+    private NullableState returnContract(MethodInfo mi) {
+        if (!analysed.contains(mi)) return stateOf(mi, PropertyImpl.NULLABILITY_METHOD);
+        return policy.contracts() ? NullAnnotations.explicitState(mi) : null;
     }
 
     /** A library method, {@code mi} or one it overrides, whose return may be null; null when there is none. */
@@ -436,14 +463,15 @@ public final class NullabilityPass {
         }
         // the body first: it declares the locals; the method's own variable data is the state at the end of the
         // body, in the body's scope
+        facts.walk(mi);
         Scope body = mi.methodBody() == null ? new Scope(null) : handleBlock(mi, mi.methodBody(), null);
         VariableData vd = VariableDataImpl.of(mi);
         if (vd != null) {
-            vd.variableInfoStream().forEach(vi -> linksOf(mi, body, vi));
+            vd.variableInfoStream().forEach(vi -> linksOf(mi, body, vi, null));
         }
     }
 
-    private void linksOf(MethodInfo mi, Scope scope, VariableInfo vi) {
+    private void linksOf(MethodInfo mi, Scope scope, VariableInfo vi, Statement statement) {
         Variable v = vi.variable();
         Object recipient = node(mi, scope, v);
         Links links = vi.linkedVariables();
@@ -454,13 +482,85 @@ public final class NullabilityPass {
                 if (isNullMarker(link.to())) {
                     seed(recipient, "null in " + mi.fullyQualifiedName());
                 } else {
-                    addEdge(node(mi, scope, link.to()), recipient);
+                    linkEdge(node(mi, scope, link.to()), recipient, link.to(), v, statement);
                 }
             } else if (link.linkNature().isIdenticalToOrAssignedFromTo()) {
                 // '→': v is assigned to link.to()
-                addEdge(recipient, node(mi, scope, link.to()));
+                linkEdge(recipient, node(mi, scope, link.to()), v, link.to(), statement);
             }
         }
+    }
+
+    // an edge from a link: sourceVar's value flows into recipientVar. Counted per statement that assigns the
+    // recipient (decided in go): where every position in which the source can BE the assigned value is one where it
+    // is known non-null, the statement carries no null from it (M4)
+    private void linkEdge(Object from, Object to, Variable sourceVar, Variable recipientVar, Statement statement) {
+        if (from == null || to == null || from.equals(to)) return;
+        int[] count = linkEdges.computeIfAbsent(List.of(from, to), _ -> new int[2]);
+        if (statement == null) return;
+        Expression value = assignedValue(statement, recipientVar);
+        if (value == null) return;
+        Guard guard = guard(value, sourceVar, facts.before(statement));
+        if (guard == Guard.GUARDED) count[0]++;
+        else if (guard == Guard.UNGUARDED) count[1]++;
+    }
+
+    // the value 'recipient' gets in this statement: 'recipient = v;', 'T recipient = v;', 'return v;'; else null
+    private static Expression assignedValue(Statement statement, Variable recipient) {
+        return switch (statement) {
+            case LocalVariableCreation lvc -> lvc.localVariableStream().filter(lv -> lv.equals(recipient))
+                    .map(LocalVariable::assignmentExpression).findFirst().orElse(null);
+            case ReturnStatement rs -> recipient instanceof ReturnVariable ? rs.expression() : null;
+            default -> statement.expression() instanceof Assignment a && recipient.equals(a.variableTarget())
+                       && a.assignmentOperator() == null ? a.value() : null;
+        };
+    }
+
+    /**
+     * How {@code source} can become the value of an assigned expression. ABSENT: it does not occur as a value
+     * (it may still flow in through an alias, so this decides nothing); GUARDED: every value position it occurs in
+     * is one where it is known non-null, or it is assigned a non-null value right there
+     * ({@code return result == null ? field = new X() : result}); UNGUARDED: somewhere it may be null; OPAQUE: a
+     * part is not seen through (a call, another object's field).
+     */
+    private enum Guard {ABSENT, GUARDED, UNGUARDED, OPAQUE}
+
+    private Guard guard(Expression value, Variable source, Set<Variable> known) {
+        Expression e = NonNullFacts.unwrap(value);
+        switch (e) {
+            case VariableExpression ve -> {
+                if (ve.variable().equals(source)) return known.contains(source) ? Guard.GUARDED : Guard.UNGUARDED;
+                return ve.variable() instanceof io.codelaser.maddi.cst.api.variable.FieldReference fr
+                       && !fr.scopeIsRecursivelyThis() ? Guard.OPAQUE : Guard.ABSENT;
+            }
+            case InlineConditional ic -> {
+                Set<Variable> whenTrue = new java.util.HashSet<>(known);
+                whenTrue.addAll(facts.whenTrue(ic.condition()));
+                Set<Variable> whenFalse = new java.util.HashSet<>(known);
+                whenFalse.addAll(facts.whenFalse(ic.condition()));
+                return combine(guard(ic.ifTrue(), source, whenTrue), guard(ic.ifFalse(), source, whenFalse));
+            }
+            case Assignment a -> {
+                if (a.assignmentOperator() != null) return Guard.OPAQUE;
+                if (source.equals(a.variableTarget())) {
+                    return facts.nonNull(a.value(), known) ? Guard.GUARDED : Guard.UNGUARDED;
+                }
+                return guard(a.value(), source, known);
+            }
+            case NullConstant _, ConstructorCall _, Lambda _, MethodReference _, ConstantExpression<?> _ -> {
+                return Guard.ABSENT;
+            }
+            default -> {
+                return Guard.OPAQUE;
+            }
+        }
+    }
+
+    private static Guard combine(Guard g1, Guard g2) {
+        if (g1 == Guard.OPAQUE || g2 == Guard.OPAQUE) return Guard.OPAQUE;
+        if (g1 == Guard.UNGUARDED || g2 == Guard.UNGUARDED) return Guard.UNGUARDED;
+        if (g1 == Guard.GUARDED || g2 == Guard.GUARDED) return Guard.GUARDED;
+        return Guard.ABSENT;
     }
 
     // returns the block's scope at its end
@@ -501,7 +601,7 @@ public final class NullabilityPass {
                 handleBlock(mi, sb, blockParent);
             });
             VariableData vd = VariableDataImpl.of(statement);
-            if (vd != null) vd.variableInfoStream().forEach(vi -> linksOf(mi, own, vi));
+            if (vd != null) vd.variableInfoStream().forEach(vi -> linksOf(mi, own, vi, statement));
             statement.visit(e -> {
                 if (e instanceof Lambda lambda) {
                     if (lambda.methodBody() != null) handleBlock(lambda.methodInfo(), lambda.methodBody(), own);
@@ -510,15 +610,15 @@ public final class NullabilityPass {
                 if (e instanceof Block) return false; // nested statements are handled with their own vd
                 if (policy.nullTests() && e instanceof BinaryOperator bo) nullTest(mi, own, bo);
                 if (e instanceof MethodCall mc && mc.methodInfo() != null) {
-                    callSite(mi, own, mc.methodInfo(), mc.analysis(), mc.parameterExpressions());
+                    callSite(mi, own, statement, mc.methodInfo(), mc.analysis(), mc.parameterExpressions());
                 } else if (e instanceof ConstructorCall cc && cc.constructor() != null) {
-                    callSite(mi, own, cc.constructor(), cc.analysis(), cc.parameterExpressions());
+                    callSite(mi, own, statement, cc.constructor(), cc.analysis(), cc.parameterExpressions());
                 }
                 return true;
             });
             syntacticSeeds(mi, own, statement);
             if (statement instanceof ExplicitConstructorInvocation eci && eci.methodInfo() != null) {
-                callSite(mi, own, eci.methodInfo(), eci.analysis(), eci.parameterExpressions());
+                callSite(mi, own, statement, eci.methodInfo(), eci.analysis(), eci.parameterExpressions());
             }
         }
         return scope;
@@ -572,6 +672,9 @@ public final class NullabilityPass {
 
     // in Java only == and != take a null operand
     private void nullTest(MethodInfo mi, Scope scope, BinaryOperator bo) {
+        // NOT excluded: 'if (p == null) throw ...'. Guava annotates such checking parameters @Nullable (the method's
+        // job is to accept null and throw); treating the test as a non-null precondition cost 28 agreements, +3
+        // unsafe (2026-10-06)
         Expression other = bo.lhs() instanceof NullConstant ? bo.rhs() : bo.rhs() instanceof NullConstant ? bo.lhs() : null;
         if (other instanceof VariableExpression ve) {
             Object node = node(mi, scope, ve.variable());
@@ -581,7 +684,7 @@ public final class NullabilityPass {
         }
     }
 
-    private void callSite(MethodInfo mi, Scope scope, MethodInfo callee,
+    private void callSite(MethodInfo mi, Scope scope, Statement statement, MethodInfo callee,
                           io.codelaser.maddi.cst.api.analysis.PropertyValueMap analysis, List<Expression> arguments) {
         List<ParameterInfo> parameters = callee.parameters();
         if (parameters.isEmpty()) return;
@@ -594,6 +697,9 @@ public final class NullabilityPass {
                 seed(pi, "null argument in " + mi.fullyQualifiedName());
                 continue;
             }
+            // M4: a variable argument known non-null at this statement carries no null
+            if (NonNullFacts.unwrap(arguments.get(i)) instanceof VariableExpression ve
+                && facts.nonNullAt(statement, ve.variable())) continue;
             String lib = nullableLibraryCall(arguments.get(i));
             if (lib != null) {
                 seed(pi, "argument " + lib + " in " + mi.fullyQualifiedName());

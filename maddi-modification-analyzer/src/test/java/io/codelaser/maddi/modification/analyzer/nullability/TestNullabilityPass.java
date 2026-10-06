@@ -177,10 +177,9 @@ public class TestNullabilityPass extends CommonTest {
                 never(0:n): String
                 passLocal(0:b): boolean
                 take(0:s): String?
-                tolerant(): String?
+                tolerant(): String
                 tolerant(0:t): String?""", verdicts(report));
-        // tolerant(): String? is the flow-insensitivity of the pass: after the test, t is not null where it is
-        // returned. The use-site pass (M4) is where that is seen.
+        // tolerant(): after 'if (t == null) return ""', t is known non-null where it is returned (M4)
     }
 
     @Language("java")
@@ -468,5 +467,64 @@ public class TestNullabilityPass extends CommonTest {
         String all = locals(report);
         org.junit.jupiter.api.Assertions.assertTrue(all.contains("big.none: String?"), all);
         org.junit.jupiter.api.Assertions.assertTrue(all.contains("big.known: String!"), all);
+    }
+
+    @Language("java")
+    private static final String USE_SITES = """
+            package a.b;
+            import java.util.HashMap;
+            import java.util.Map;
+            class U {
+                private final Map<String, String> map = new HashMap<>();
+                private String cache;
+                U() { cache = "c"; }
+                String lookup(String k) {
+                    String v = map.get(k);
+                    if (v == null) return "default";
+                    cache = v;
+                    return v;
+                }
+                void passOn(String k) {
+                    String v = map.get(k);
+                    if (v != null) {
+                        take(v);
+                    }
+                }
+                void take(String t) { System.out.println(t); }
+                int deref(String s) {
+                    String w = map.get(s);
+                    int n = w.length();
+                    keep(w);
+                    return n;
+                }
+                void keep(String x) { System.out.println(x); }
+                void requireIt(String p) {
+                    if (p == null) throw new IllegalArgumentException();
+                    System.out.println(p);
+                }
+                String unguarded(String k) { String u = map.get(k); return u; }
+                private String lazy;
+                String getLazy() { String result = lazy; return result == null ? lazy = "z" : result; }
+            }
+            """;
+
+    @DisplayName("use sites (M4): a null checked away, dereferenced away, or thrown on does not travel")
+    @Test
+    public void useSites() {
+        NullabilityPass.Report report = run("a.b.U", USE_SITES);
+        System.out.println(explain(report));
+        Map<String, String> byLabel = report.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> label(e.getKey()), e -> k(e.getValue())));
+        assertEquals("String", byLabel.get("cache"), "assigned after 'if (v == null) return'");
+        assertEquals("String", byLabel.get("lookup()"), "returned after the guard");
+        assertEquals("String", byLabel.get("take(0:t)"), "passed inside 'if (v != null)'");
+        assertEquals("String", byLabel.get("keep(0:x)"), "passed after 'w.length()'");
+        // a null test is an expectation of null, even when its branch throws (guava's checking methods)
+        assertEquals("String?", byLabel.get("requireIt(0:p)"));
+        assertEquals("String?", byLabel.get("unguarded()"), "no check: Map.get's null travels");
+        assertEquals("String?", byLabel.get("lazy"), "Java's default value");
+        assertEquals("String", byLabel.get("getLazy()"), "the lazy getter: null only in the branch that assigns");
+        String locals = locals(report);
+        org.junit.jupiter.api.Assertions.assertTrue(locals.contains("lookup.v: String?"), locals);
     }
 }
