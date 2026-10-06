@@ -175,7 +175,8 @@ class TestKotlinPrinterRoundTrip {
         assertTrue(kotlin.contains("} while (n > 0)"), kotlin) // do-while
         assertTrue(kotlin.contains("else if (score >= 80)"), kotlin) // else-if chain flattens (no `else { if … }`)
         assertTrue(kotlin.contains("fun <U> identity(u: U): U = u"), kotlin) // generic method
-        assertTrue(kotlin.contains("fun counts(): Map<String, Int> = HashMap<String, Int>()"), kotlin) // diamond + JDK type map
+        // diamond + JDK type map; the constructed type is qualified as the Java printer would (no import computed here)
+        assertTrue(kotlin.contains("fun counts(): Map<String, Int> = java.util.HashMap<String, Int>()"), kotlin)
 
         assertTrue(javaIsms(kotlin).isEmpty(), "unexpected un-translated Java-isms ${javaIsms(kotlin)} in:\n$kotlin")
     }
@@ -197,7 +198,7 @@ class TestKotlinPrinterRoundTrip {
 
         assertTrue(kotlin.contains("enum class Color {"), kotlin)
         assertTrue(kotlin.contains("RED, GREEN, BLUE;"), kotlin) // enum constants -> entries (not `val RED = Color()`)
-        assertTrue(kotlin.contains("fun isRed(): Boolean = this == Color.RED"), kotlin)
+        assertTrue(kotlin.contains("fun isRed(): Boolean = this === RED"), kotlin) // Java's == on references is identity
         // the enum-constant `new Color()` initializers must NOT leak through as `new`
         assertTrue(javaIsms(kotlin).isEmpty(), "unexpected un-translated Java-isms ${javaIsms(kotlin)} in:\n$kotlin")
     }
@@ -206,7 +207,7 @@ class TestKotlinPrinterRoundTrip {
     fun javaToKotlin5_operators() {
         val kotlin = printAsKotlin("a.Ops", opsJava)
 
-        assertTrue(kotlin.contains("fun sumAll(xs: Array<Int>): Int"), kotlin) // int[] -> Array<Int>
+        assertTrue(kotlin.contains("fun sumAll(xs: IntArray): Int"), kotlin) // int[] -> IntArray
         assertTrue(kotlin.contains("for (x in xs)"), kotlin)
         assertTrue(kotlin.contains("fun either(a: Boolean, b: Boolean): Boolean = a || !b"), kotlin) // ||, unary !
         assertTrue(kotlin.contains("fun mod(a: Int, b: Int): Int = a % b"), kotlin) // %
