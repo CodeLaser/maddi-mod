@@ -752,6 +752,11 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
             if (links == null) return LinksImpl.EMPTY;
             if (links.stream().allMatch(l ->
                     l.to() instanceof MarkerVariable mv && (mv.isSomeValue() || mv.isConstant()))) {
+                // see Options.nullConstantReturns: a returned null is the one marker a caller must still see
+                if (options.nullConstantReturns()) {
+                    Links nulls = links.removeIfTo(v -> !isNullConstant(v));
+                    if (!nulls.isEmpty()) return nulls;
+                }
                 return LinksImpl.EMPTY;
             }
             if (!links.isEmpty()) {
@@ -768,6 +773,10 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                 return links2;
             }
             return links;
+        }
+
+        private static boolean isNullConstant(Variable v) {
+            return v instanceof MarkerVariable mv && mv.isConstant() && mv.assignmentExpression() instanceof NullConstant;
         }
 
         private Links filteredPi(ParameterInfo pi, Set<ParameterInfo> ignoreReturnValue, VariableData vd,

@@ -58,14 +58,21 @@ public interface LinkComputer {
      assert. Their transitive web is quadratic on deeply recursive generic structures (TestParSeqLinkBench:
      48.7s with, ~1s without), so PRODUCTION switches them off.
      */
+    /*
+     nullConstantReturns: a return whose links all point at markers is emptied from the summary
+     (LinkComputerImpl.emptyIfOnlySomeValue), so 'return null' leaves '[] --> -' and a caller sees only '$_v'. With
+     this option the links to NULL-constant markers stay ('direct←$_ce0'), which the nullability analysis needs to
+     follow null across a call (maddi-mod docs/design/nullability.md §3, M1). Off by default: it changes METHOD_LINKS,
+     so it waits for an FPDUMP A/B before it can be on in PRODUCTION; TestNullFlowProbe pins both settings.
+     */
     record Options(boolean recurse, boolean forceShallow, boolean checkDuplicateNames, boolean trackObjectCreations,
-                   boolean objectGraphLinks, Engine engine) {
+                   boolean objectGraphLinks, Engine engine, boolean nullConstantReturns) {
         public static final Options TEST = new Options(true, false, true,
-                false, true, Engine.LEGACY);
+                false, true, Engine.LEGACY, false);
         public static final Options PRODUCTION = new Options(true, false, false,
-                true, false, Engine.LEGACY);
+                true, false, Engine.LEGACY, false);
         public static final Options FORCE_SHALLOW = new Options(true, true, true,
-                false, true, Engine.LEGACY);
+                false, true, Engine.LEGACY, false);
 
         public static class Builder {
             boolean recurse;
@@ -74,6 +81,7 @@ public interface LinkComputer {
             boolean trackObjectCreations;
             boolean objectGraphLinks = true;
             Engine engine = Engine.LEGACY;
+            boolean nullConstantReturns;
 
             public Builder setObjectGraphLinks(boolean objectGraphLinks) {
                 this.objectGraphLinks = objectGraphLinks;
@@ -100,6 +108,11 @@ public interface LinkComputer {
                 return this;
             }
 
+            public Builder setNullConstantReturns(boolean nullConstantReturns) {
+                this.nullConstantReturns = nullConstantReturns;
+                return this;
+            }
+
             public Builder setEngine(Engine engine) {
                 this.engine = engine;
                 return this;
@@ -107,7 +120,7 @@ public interface LinkComputer {
 
             public Options build() {
                 return new Options(recurse, forceShallow, checkDuplicateNames, trackObjectCreations,
-                        objectGraphLinks, engine);
+                        objectGraphLinks, engine, nullConstantReturns);
             }
         }
 

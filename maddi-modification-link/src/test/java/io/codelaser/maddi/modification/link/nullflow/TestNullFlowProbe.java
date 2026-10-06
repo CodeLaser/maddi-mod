@@ -4,6 +4,7 @@ import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.modification.link.CommonTest;
+import io.codelaser.maddi.modification.link.LinkComputer;
 import io.codelaser.maddi.modification.link.impl.LinkComputerImpl;
 import io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl;
 import io.codelaser.maddi.modification.link.impl.localvar.MarkerVariable;
@@ -55,11 +56,19 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 public class TestNullFlowProbe extends CommonTest {
 
     private TypeInfo analyze(String fqn, String src) {
+        return analyze(fqn, src, LinkComputer.Options.TEST);
+    }
+
+    private TypeInfo analyze(String fqn, String src, LinkComputer.Options options) {
         TypeInfo type = javaInspector.parse(fqn, src);
         new PrepAnalyzer(runtime, new PrepAnalyzer.Options.Builder().build()).doPrimaryType(type);
-        new LinkComputerImpl(javaInspector).doPrimaryType(type);
+        new LinkComputerImpl(javaInspector, options).doPrimaryType(type);
         return type;
     }
+
+    // TEST, plus Options.nullConstantReturns
+    private static final LinkComputer.Options NULL_RETURNS = new LinkComputer.Options.Builder()
+            .setRecurse(true).setCheckDuplicateNames(true).setNullConstantReturns(true).build();
 
     private static MethodInfo method(TypeInfo type, String name) {
         return type.methodStream().filter(m -> m.name().equals(name)).findFirst().orElseThrow();
@@ -275,5 +284,41 @@ public class TestNullFlowProbe extends CommonTest {
         assertEquals("x←$_ce1,x→this.f,x←0:s", links(t, "guarded", "x"));
         assertEquals("[0:s→this*.f] --> -", summary(t, "guarded"));
         assertEquals("$_ce1=nonNull", markers(t, "guarded"));
+    }
+
+    @DisplayName("7 Options.nullConstantReturns closes the marker-only-return gap of tests 1, 3, 4 and 5")
+    @Test
+    public void nullConstantReturns() {
+        @Language("java") String src = """
+                package a.b;
+                import java.util.*;
+                class N7 {
+                    static class Box<T> {
+                        private T t;
+                        Box(T t) { this.t = t; }
+                        T get() { return t; }
+                    }
+                    String direct() { return null; }
+                    String viaCall() { return direct(); }
+                    String emptyString() { return ""; }
+                    List<String> listOfNull() { List<String> l = new ArrayList<>(); l.add(null); return l; }
+                    Box<String> make() { return new Box<>(null); }
+                    String read() { Box<String> b = new Box<>(null); return b.get(); }
+                    String ternary(boolean b, String s) { return b ? s : null; }
+                }
+                """;
+        TypeInfo t = analyze("a.b.N7", src, NULL_RETURNS);
+        assertEquals("[] --> direct←$_ce0", summary(t, "direct"));
+        assertEquals("$_ce0=null", markers(t, "direct"));
+        // the null now crosses the call
+        assertEquals("[] --> viaCall←$_ce0", summary(t, "viaCall"));
+        assertEquals("$_ce0=null", markers(t, "viaCall"));
+        // only NULL constants are kept: a returned non-null literal still empties the summary
+        assertEquals("[] --> -", summary(t, "emptyString"));
+        assertEquals("[] --> listOfNull.§$s∋$_ce1", summary(t, "listOfNull"));
+        assertEquals("[] --> make.t←$_ce1", summary(t, "make"));
+        assertEquals("[] --> read←$_ce1", summary(t, "read"));
+        // unchanged where the summary was not marker-only
+        assertEquals("[-, -] --> ternary←$_ce0,ternary←1:s", summary(t, "ternary"));
     }
 }
