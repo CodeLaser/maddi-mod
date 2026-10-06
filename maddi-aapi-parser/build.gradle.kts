@@ -27,29 +27,25 @@ java {
 
 dependencies {
     implementation("io.codelaser:maddi-analysis-api:$maddiVersion")  // AnalysisHintsShadows (split stage 3)
+    testImplementation("io.codelaser:maddi-annotation:$maddiVersion")
+    implementation("io.codelaser:maddi-cst-api:$maddiVersion")
     api("io.codelaser:maddi-support:$maddiVersion")
     api("io.codelaser:maddi-inspection-api:$maddiVersion")
     implementation(project(":maddi-modification-common"))
     implementation(project(":maddi-modification-prepwork"))
-    implementation("io.codelaser:maddi-graph:$maddiVersion")
+    testImplementation("io.codelaser:maddi-graph:$maddiVersion")
     implementation("io.codelaser:maddi-util:$maddiVersion")
     implementation("io.codelaser:maddi-cst-analysis:$maddiVersion")
 
     implementation("io.codelaser:maddi-cst-impl:$maddiVersion")
-    implementation("io.codelaser:maddi-cst-io:$maddiVersion")
-    implementation("io.codelaser:maddi-cst-print:$maddiVersion")
-    implementation("io.codelaser:maddi-inspection-parser:$maddiVersion")
     implementation("io.codelaser:maddi-inspection-resource:$maddiVersion")
 
     // test-only: aapi-parser's main has no reference to the in-house inspector; only module-info
     // required it, which put it on the runtime class path of every consumer (notably maddi-run-openjdk,
     // which has its own inspector).
     testImplementation("io.codelaser:maddi-inspection-integration:$maddiVersion")
-    testImplementation("io.codelaser:maddi-java-bytecode:$maddiVersion")
-    testImplementation("io.codelaser:maddi-java-parser:$maddiVersion")
 
     testImplementation("io.codelaser:maddi-inspection-openjdk:$maddiVersion")
-    testImplementation("io.codelaser:maddi-java-openjdk:$maddiVersion")
     testImplementation(testFixtures(project(":maddi-modification-common")))
 
     implementation("ch.qos.logback:logback-classic")
@@ -68,7 +64,6 @@ dependencies {
     // and for the side-loaded Guava hints (libs/guava)
     testImplementation("com.google.guava:guava:33.6.0-jre")
 
-    testImplementation("org.apiguardian:apiguardian-api:1.1.2")
     testRuntimeOnly("info.picocli:picocli:4.7.7")
     testRuntimeOnly("org.junit.jupiter:junit-jupiter:5.9.2")
     testRuntimeOnly("org.springframework.security:spring-security-config:6.3.9")

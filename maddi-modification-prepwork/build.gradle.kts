@@ -25,6 +25,9 @@ java {
 }
 dependencies {
     api("io.codelaser:maddi-callgraph:$maddiVersion")  // ComputeCallGraph & co., moved out of prepwork (split stage 2)
+    implementation("io.codelaser:maddi-annotation:$maddiVersion")
+    implementation("io.codelaser:maddi-cst-api:$maddiVersion")
+    implementation("io.codelaser:maddi-support:$maddiVersion")
     api("io.codelaser:maddi-inspection-api:$maddiVersion")
     implementation(project(":maddi-modification-common"))
     implementation("io.codelaser:maddi-graph:$maddiVersion")

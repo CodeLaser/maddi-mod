@@ -25,6 +25,9 @@ java {
 }
 dependencies {
     api("io.codelaser:maddi-analysis-api:$maddiVersion")  // AnalysisValueFeed, in IteratingAnalyzer's signature (split stage 3)
+    implementation("io.codelaser:maddi-annotation:$maddiVersion")
+    implementation("io.codelaser:maddi-cst-api:$maddiVersion")
+    implementation("io.codelaser:maddi-support:$maddiVersion")
     implementation("io.codelaser:maddi-callgraph:$maddiVersion")  // ComputeCallGraph & co., moved out of prepwork (split stage 2)
     api("io.codelaser:maddi-inspection-api:$maddiVersion")
     implementation("io.codelaser:maddi-graph:$maddiVersion")

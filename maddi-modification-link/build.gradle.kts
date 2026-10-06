@@ -25,6 +25,7 @@ java {
 }
 dependencies {
     api("io.codelaser:maddi-cst-api:$maddiVersion")
+    implementation("io.codelaser:maddi-support:$maddiVersion")
     api("io.codelaser:maddi-inspection-api:$maddiVersion")
     implementation("io.codelaser:maddi-graph:$maddiVersion")
     implementation("io.codelaser:maddi-util:$maddiVersion")
