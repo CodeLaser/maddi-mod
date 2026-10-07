@@ -1135,4 +1135,51 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("Stack<String?>", byName.get("a.b.Q.names"));
         assertEquals("T?", byName.get("a.b.Q.Stack.peek()"), "a null of the class's own");
     }
+
+    @DisplayName("super(...) and this(...) arguments carry no links: their slots are still tied to the parameter's")
+    @Test
+    public void explicitConstructorInvocation() {
+        NullabilityPass.Report report = run("a.b.M", """
+                package a.b;
+                import java.util.*;
+                class M {
+                    static class Constant {
+                        Object value;
+                        Constant(Object v) { value = v; }
+                        String getString() { return (String) value; }
+                    }
+                    static class Member {
+                        protected Map<String, Integer> attributes;
+                        Member(Map<String, Integer> attributes) { this.attributes = attributes; }
+                    }
+                    static class Field extends Member {
+                        Field(Map<String, Integer> attributes) { super(attributes); }
+                        static Field create(Constant c) {
+                            Map<String, Integer> attributes = read(c);
+                            return new Field(attributes);
+                        }
+                    }
+                    static Map<String, Integer> read(Constant c) {
+                        Map<String, Integer> attributes = new HashMap<>();
+                        String name = c.getString();
+                        attributes.put(name, 1);
+                        return attributes;
+                    }
+                    static Map<String, Integer> nulls() {
+                        Map<String, Integer> m = new HashMap<>();
+                        m.put(null, 1);
+                        return m;
+                    }
+                    static Field viaNulls() { return new Field(nulls()); }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        System.out.println(explain(report));
+        Map<String, String> byName = report.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+        assertEquals("Map<String?, Integer>", byName.get("a.b.M.Field.<init>(java.util.Map):0:attributes"));
+        // invariance: what reaches Field's map reaches Member's, and every map passed to Field (read's too)
+        assertEquals("Map<String?, Integer>", byName.get("a.b.M.Member.<init>(java.util.Map):0:attributes"));
+        assertEquals("Map<String?, Integer>", byName.get("a.b.M.Member.attributes"));
+        assertEquals("String", byName.get("a.b.M.Constant.getString()"));
+    }
 }

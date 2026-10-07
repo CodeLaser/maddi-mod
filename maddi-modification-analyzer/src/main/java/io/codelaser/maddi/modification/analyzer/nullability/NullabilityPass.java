@@ -1753,7 +1753,11 @@ public final class NullabilityPass {
             seedIndirect(pi, "argument " + lib + " in " + mi.fullyQualifiedName());
             return;
         }
-        if (list == null || i >= list.list().size()) return;
+        if (list == null || i >= list.list().size()) {
+            // no argument links ('super(attributes)', 'this(...)' carry none): the argument's own node
+            if (!(unwrappedArgument instanceof MethodCall)) addEdge(argumentNode(mi, scope, arguments.get(i)), pi);
+            return;
+        }
         Links links = list.list().get(i);
         Variable primary = links.primary();
         if (primary == null) return;

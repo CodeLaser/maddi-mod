@@ -734,3 +734,16 @@ non-null. Fernflower: 161 files, 102 errors (was 160, 109).
 A related fernflower error that the verdicts can't fix: `FastSparseSetIterator.next()` really returns null, which
 breaks `Iterator.next(): E`. Kotlin can't override with `E?`, so the printer has to keep `E` and write
 `null as E`.
+
+### 2026-10-07 — `super(...)` and `this(...)` arguments
+
+An explicit constructor invocation carries no argument links (`LINKED_VARIABLES_ARGUMENTS`), so `argument()`
+returned before adding any edge. A variable passed to `super(...)` or `this(...)` therefore never reached the
+called constructor's parameter, at the top level or in its slots. In fernflower, `StructField(Map<String?, ...>)`
+called `super(accessFlags, attributes)` while `StructMember(Map<String, ...>)` stayed clean. When there are no
+links, the argument's own node (`argumentNode`) now flows into the parameter. That also couples their slots.
+
+Guava, `NULL_MARKED`: unsafe 348 → 339 (parameters 248 → 241, fields 8 → 6, returns 39 → 38); noise 403 → 425.
+The new noise is real flow from imprecision further upstream (`TypeToken.of(Class)` fed by
+`Class.getComponentType()`; `ImmutableSortedSet`'s comparator chain). Fernflower not measured: the printer session
+was updating the ratchet at the time.
