@@ -195,9 +195,21 @@ public class TestNullabilityOracleGuava {
                 new NullabilityPass(NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY.withoutContracts()).go(order));
         NullabilityComparison comparison = measure("NULL_MARKED", types, dn,
                 new NullabilityPass(NullabilityPass.Policy.NULL_MARKED.withoutContracts()).go(order));
+        // guava is a library: its users are callers the analysis does not see (docs/design/nullability.md §8)
+        NullabilityComparison openVisibility = measure("OPEN_VISIBILITY", types, dn, new NullabilityPass(
+                NullabilityPass.Policy.NULL_MARKED.withoutContracts().withWorld(NullabilityPass.World.OPEN_VISIBILITY))
+                .go(order));
+        NullabilityComparison open = measure("OPEN", types, dn, new NullabilityPass(
+                NullabilityPass.Policy.NULL_MARKED.withoutContracts().withWorld(NullabilityPass.World.OPEN))
+                .go(order));
         assertTrue(flowOnly.count(Outcome.AGREE) >= 10_000, "the inference must cover the reference");
         assertTrue(comparison.count(Outcome.UNSAFE) <= flowOnly.count(Outcome.UNSAFE),
                 "null tests only add nullable seeds, so they cannot add unsafe verdicts");
+        assertTrue(openVisibility.count(Outcome.UNSAFE) <= comparison.count(Outcome.UNSAFE),
+                "outside callers only turn non-null verdicts into unspecified ones");
+        assertTrue(open.count(Outcome.UNSAFE) >= openVisibility.count(Outcome.UNSAFE)
+                   && open.count(Outcome.UNSAFE) <= comparison.count(Outcome.UNSAFE),
+                "preconditions take back part of what outside callers gave up");
     }
 
     private static NullabilityComparison measure(String name, List<TypeInfo> types, DeclaredNullability dn,

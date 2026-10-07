@@ -455,3 +455,44 @@ the chain. Still a heuristic: a receiver typed through a subtype or a wildcard (
 not dispatch.
 
 Guava: **13,302 agree / 351 unsafe / 244 noise** (was 13,172 / 351 / 374): 130 fewer noise, no new unsafe.
+
+### 2026-10-07 — closed and open world; preconditions
+
+A parameter's verdict comes from the analysed invocations. That is right when they are all the invocations,
+and wrong for a library, whose users are callers the analysis does not see. `Policy.world` now makes that a
+choice:
+
+- `CLOSED` (the default, unchanged): no analysed call passes null, so the parameter is non-null. This is for an
+  application analysed together with its callers, and for whole-program Kotlin translation.
+- `OPEN_VISIBILITY`: a parameter that can be called from outside and that no null reaches is UNSPECIFIED. Every
+  declaration it flows into is UNSPECIFIED too: a second closure over the same edges, which stops at null
+  contracts. "Called from outside" means public, or protected in an extensible type, of a type reachable from
+  outside. It also covers overriding such a method, or overriding a library method whose hint does not declare
+  the parameter non-null. A library calls its overrides back, as the JDK calls `Comparator.compare`.
+- `OPEN`: the same, except for a parameter that the body makes non-null on every normal exit without assigning
+  it (`NonNullFacts.nonNullAtExit`). It may be dereferenced, passed to a non-null parameter, or rejected with
+  `if (p == null) throw`. A null argument then throws whoever passes it, so the parameter is a precondition and
+  non-null (§8).
+
+Preconditions also cross calls: in every world, a round hands the next one the analysed parameters it found to
+be preconditions, as `parameterContract` NONNULL. The argument is then non-null after the call. A precondition
+only counts at a call when no override can replace the body: the method is static, private, final, a
+constructor, or in a final type, or (closed world only) has no analysed override.
+
+Guava (top-level positions only; "undecided" is UNSPECIFIED):
+
+| world | agree | unsafe | noise | undecided |
+|---|---:|---:|---:|---:|
+| `CLOSED` | 13,306 | 354 | 233 | 1,894 |
+| `OPEN_VISIBILITY` | 9,640 | 158 | 236 | 5,753 |
+| `OPEN` | 11,133 | 166 | 236 | 4,252 |
+
+Preconditions crossing calls changed `CLOSED` by +3 unsafe and −11 noise. The 8 unsafe that `OPEN` adds over
+`OPEN_VISIBILITY` are all array and varargs parameters (`Joiner.join(…, Object... rest)`, `Invokable.invoke`).
+That is the B1 misread: guava's `@Nullable Object...` speaks about the elements. What remains in the open world
+is mostly arrays as well.
+
+Not yet done:
+- `IteratingAnalyzerImpl` still runs `CLOSED`: there is no configuration switch yet.
+- Under `@NullMarked`, the JSpecify output prints nothing for UNSPECIFIED, which reads as non-null. An open-world
+  verdict needs a different presentation there: `@NullUnmarked` on the member, or no `@NullMarked` scope.

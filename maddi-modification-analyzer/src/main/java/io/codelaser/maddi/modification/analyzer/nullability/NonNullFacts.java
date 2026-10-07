@@ -24,6 +24,7 @@ import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.cst.api.variable.LocalVariable;
 import io.codelaser.maddi.cst.api.variable.Variable;
 
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
@@ -62,6 +63,9 @@ public final class NonNullFacts {
 
     private final Map<Statement, Set<Variable>> before = new IdentityHashMap<>();
     private final Map<Expression, Set<Variable>> atExpression = new IdentityHashMap<>();
+    private final Map<MethodInfo, Set<Variable>> atExit = new IdentityHashMap<>();
+    // the facts at each normal exit (a return, the end of the body) of the method being walked; null in a lambda
+    private List<Set<Variable>> exits;
     private final Function<ParameterInfo, NullableState> parameterContract;
     private final Function<MethodInfo, NullableState> returnContract;
     private final boolean kotlinSmartCasts;
@@ -89,7 +93,27 @@ public final class NonNullFacts {
 
     /** Walks one method body; may be called for several methods. */
     public void walk(MethodInfo methodInfo) {
-        if (methodInfo.methodBody() != null) block(methodInfo.methodBody(), Set.of());
+        Block body = methodInfo.methodBody();
+        if (body == null) return;
+        exits = new ArrayList<>();
+        Out out = block(body, Set.of());
+        if (out.completes) exits.add(out.facts);
+        if (!exits.isEmpty()) {
+            Set<Variable> common = new HashSet<>(exits.getFirst());
+            exits.forEach(common::retainAll);
+            common.removeAll(assignedIn(body));
+            atExit.put(methodInfo, Set.copyOf(common));
+        }
+        exits = null;
+    }
+
+    /**
+     * Is {@code parameter} non-null whenever its method returns normally, without ever being assigned? Then a null
+     * argument throws before the method completes (a dereference, {@code requireNonNull}, an explicit
+     * {@code if (p == null) throw}): a precondition. False for a method that never completes normally.
+     */
+    public boolean nonNullAtExit(MethodInfo methodInfo, ParameterInfo parameter) {
+        return atExit.getOrDefault(methodInfo, Set.of()).contains(parameter);
     }
 
     /** The locals and parameters known non-null when {@code statement} starts; empty when it was not walked. */
@@ -143,6 +167,7 @@ public final class NonNullFacts {
             }
             case ReturnStatement rs -> {
                 effects(rs.expression(), facts);
+                if (exits != null) exits.add(Set.copyOf(facts));
                 return new Out(facts, false);
             }
             case ThrowStatement ts -> {
@@ -366,7 +391,10 @@ public final class NonNullFacts {
                     if (lambda.methodBody() != null) {
                         Set<Variable> in = new HashSet<>(facts);
                         in.removeIf(NonNullFacts::isNonFinalField); // the body runs later
+                        List<Set<Variable>> enclosing = exits;
+                        exits = null; // a return in the lambda does not leave the method
                         block(lambda.methodBody(), in);
+                        exits = enclosing;
                     }
                     return false;
                 }
