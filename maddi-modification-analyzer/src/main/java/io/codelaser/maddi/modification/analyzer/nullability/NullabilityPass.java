@@ -807,6 +807,7 @@ public final class NullabilityPass {
      ties their Contents both ways, recursively for nested arrays.
      */
     private void coupleContent() {
+        Set<Object> writtenThrough = writtenThrough();
         Deque<List<Object>> queue = new ArrayDeque<>(flows);
         Set<List<Object>> seen = new HashSet<>();
         while (!queue.isEmpty()) {
@@ -821,7 +822,9 @@ public final class NullabilityPass {
                 Content c0 = new Content(flow.get(0));
                 Content c1 = new Content(flow.get(1));
                 successors.computeIfAbsent(c0, _ -> new LinkedHashSet<>()).add(c1);
-                successors.computeIfAbsent(c1, _ -> new LinkedHashSet<>()).add(c0);
+                if (policy.assertContentWrites() || writtenThrough.contains(flow.get(1))) {
+                    successors.computeIfAbsent(c1, _ -> new LinkedHashSet<>()).add(c0);
+                }
                 queue.add(List.of(c0, c1));
             } else if (t0.arrays() == 0 && t1.arrays() == 0 && !t0.parameters().isEmpty()
                        && t0.parameters().size() == t1.parameters().size()) {
@@ -843,6 +846,35 @@ public final class NullabilityPass {
                 }
             }
         }
+    }
+
+    /*
+     For Java annotations an array's elements need to flow only forward: Java arrays are covariant, and so is
+     JSpecify. Backward only where the downstream array is written through ('void f(Object[] a) { a[0] = null; }'
+     puts the null in the caller's array), directly or via another array it flows on into. Kotlin's Array<T> is
+     invariant, so under Policy.assertContentWrites both ways regardless. Guava 2026-10-07: coupling both ways made
+     ImmutableMap.Builder.entries, ImmutableList.array, Joiner.join(Object[]) and TypeToken's Type[] one slot.
+     */
+    private Set<Object> writtenThrough() {
+        Set<Object> written = new HashSet<>();
+        successors.forEach((from, tos) -> {
+            if (from instanceof Content) return;
+            for (Object to : tos) if (to instanceof Content c) written.add(c.of());
+        });
+        seedOrigin.forEach((node, origin) -> {
+            if (node instanceof Content c && !origin.startsWith("array created") && !origin.startsWith("null in an array initializer")) {
+                written.add(c.of());
+            }
+        });
+        Map<Object, List<Object>> upstream = new HashMap<>();
+        for (List<Object> flow : flows) upstream.computeIfAbsent(flow.get(1), _ -> new ArrayList<>()).add(flow.get(0));
+        Deque<Object> queue = new ArrayDeque<>(written);
+        while (!queue.isEmpty()) {
+            for (Object up : upstream.getOrDefault(queue.removeFirst(), List.of())) {
+                if (written.add(up)) queue.add(up);
+            }
+        }
+        return written;
     }
 
     // no type variable among the type arguments (or an array's element), at any depth

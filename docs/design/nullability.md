@@ -764,3 +764,15 @@ the nulls away once it is full), coupled both ways with `ImmutableList.array`, `
 `TypeToken`'s `Type[]`. A cast barrier on content (`(Entry<K, V>[]) entries`) was tried and dropped. It made no
 difference: the link engine's transitive links bypass the cast, and cutting those too lost a real flow
 (`HashBiMap.hashTableVToK`).
+
+### 2026-10-07 — array content: backward only where written through
+
+`coupleContent` tied two arrays' elements both ways on every flow, because Kotlin's `Array<T>` is invariant. Java
+arrays are covariant, and so is JSpecify, so for Java annotations an element only needs to flow forward. The
+exception is aliasing: in `void f(Object[] a) { a[0] = null; }` the null lands in the caller's array. Outside
+`Policy.assertContentWrites` (`KOTLIN`), the backward edge is now added only when the downstream array is written
+through, directly (`a[i] = v`, a null stored into its elements) or via an array it flows on into.
+
+Guava `NULL_MARKED`: noise 422 → 414, unsafe unchanged (339). Dropping the backward edge altogether gave
+noise 386 but unsafe 346: those 7 come from writes that this rule doesn't recognise (library writes such as
+`System.arraycopy` are one possibility, not confirmed). Fernflower uses `KOTLIN` and is not affected.
