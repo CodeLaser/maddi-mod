@@ -236,6 +236,16 @@ public class TestNullabilityOracleGuava {
             if (unsafe || comparison.count(Outcome.NOISE) > noiseBefore) {
                 String shape = declared.arrays() > 0 ? (info instanceof ParameterInfo pi && pi.isVarArgs()
                         ? "varargs" : "array") : "plain";
+                // a type argument that disagrees, at the first level: explained on its own
+                for (int i = 0; declared.arrays() == 0 && i < declared.parameters().size()
+                                && i < verdict.parameters().size(); i++) {
+                    Outcome o = NullabilityComparison.outcome(declared.parameters().get(i).nullable(),
+                            verdict.parameters().get(i).nullable());
+                    if (o == Outcome.UNSAFE || o == Outcome.NOISE) {
+                        disagreements.add(o + "\t" + kind + "\targument" + i + "\t" + info.fullyQualifiedName()
+                                          + "\t" + report.explain(new NullabilityPass.Arg(info, i)));
+                    }
+                }
                 disagreements.add((unsafe ? "UNSAFE" : "NOISE") + "\t" + kind + "\t" + shape
                                   + (element ? "/element" : "") + "\t" + info.fullyQualifiedName() + "\t"
                                   + report.explain(element ? new NullabilityPass.Content(info) : info));

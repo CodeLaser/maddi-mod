@@ -61,7 +61,7 @@ public class TestNullabilityAnnotations extends CommonTest {
         TypeInfo x = analyze();
         assertEquals("Q", x.getFieldByName("lazy", true).analysis()
                 .getOrDefault(PropertyImpl.NULLABILITY_FIELD, ValueImpl.NullabilityImpl.UNSPECIFIED).toString());
-        assertEquals("N(U,U)", x.findUniqueMethod("find", 2).parameters().getFirst().analysis()
+        assertEquals("N(N,N)", x.findUniqueMethod("find", 2).parameters().getFirst().analysis()
                 .getOrDefault(PropertyImpl.NULLABILITY_PARAMETER, ValueImpl.NullabilityImpl.UNSPECIFIED).toString());
         // in a TYPE_USE flavour, declaration position annotates an array's ELEMENTS: 'fresh' returns a non-null
         // array of nullable elements; a nullable array ('arr', 'getArr') cannot be said there and is left out. A
