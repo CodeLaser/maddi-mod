@@ -20,8 +20,11 @@
 # (cff104ec), with maddi 9339a09bb (calls and types: varargs spread, raw types, char labels, ...), 23923cfbf (val)
 # and 0aca7a1de (the printer follows element states: Array<IntArray?>, `!!` on a[i], no smart cast of a var
 # property): 139 files compile, 209 type errors (merged devel without 0aca7a1de: 132 files, 396).
+#
+# 2026-10-07, type-argument slots, Policy.KOTLIN (content writes asserted, call results tie slots), content copies
+# and reads, loop and case facts (6ed2c4de..7587b495; maddi 3ef44495c): 154 files compile, 133 type errors.
 types	199
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	199
-compilingFiles	139
+compilingFiles	154
