@@ -432,3 +432,12 @@ rounds). It catches guava's lazy getter with a factory method,
 `return r == null ? keySet = createKeySet() : r`, in which `createKeySet()` is not annotated.
 
 Guava: 13,085 agree / 346 unsafe / 467 noise (was 13,006 / 346 / 546): 79 fewer noise, no new unsafe.
+
+- A value known non-null as a whole guards every source that flows into it: `return requireNonNull(links)` and
+  `return checkNotNull(x)` (the call's contract or trusted return is non-null). Type-variable returns are trusted
+  too when unreached. Their verdict stays parametric, but no null of this program reaches them, so calls to them
+  here are non-null values: guava's own `checkNotNull(T)`.
+
+  Guava: **13,172 agree / 351 unsafe / 374 noise** (was 13,085 / 346 / 467). The +5 unsafe: 3 are the B1 array
+  gap (`requireKeys()` is declared `@Nullable Object[]`, meaning the elements, but read as a nullable array; the
+  array really is non-null), and 2 are public-API parameters (`StandardTable.containsMapping`/`removeMapping`).

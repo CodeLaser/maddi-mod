@@ -222,13 +222,15 @@ public final class NullabilityPass {
         }
     }
 
-    // analysed methods with a reference return no null reached (not degraded, not a type variable)
+    // analysed methods with a reference return no null reached, not degraded. A type-variable return counts too:
+    // its verdict stays parametric, but no null of this program reaches it, so its calls here are non-null values
+    // (guava's own 'checkNotNull(T)')
     private Set<MethodInfo> unreachedReturns() {
         Set<MethodInfo> set = new HashSet<>();
         for (MethodInfo mi : analysed) {
             ParameterizedType rt = mi.returnType();
             if (mi.isConstructor() || rt.isVoid() || rt.isPrimitiveExcludingVoid() && rt.arrays() == 0
-                || isTypeVariable(rt) || degraded.contains(mi) || reached.contains(mi)) continue;
+                || degraded.contains(mi) || reached.contains(mi)) continue;
             set.add(mi);
         }
         return Set.copyOf(set);
@@ -571,6 +573,8 @@ public final class NullabilityPass {
     private enum Guard {ABSENT, GUARDED, UNGUARDED, OPAQUE}
 
     private Guard guard(Expression value, Variable source, Set<Variable> known) {
+        // a value known non-null as a whole carries no null, whatever flows into it ('return requireNonNull(f)')
+        if (facts.nonNull(value, known)) return Guard.GUARDED;
         Expression e = NonNullFacts.unwrap(value);
         switch (e) {
             case VariableExpression ve -> {
