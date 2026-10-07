@@ -131,26 +131,36 @@ public final class NullabilityPass {
      *                  ({@code list.add(map.get(k)!!)}), instead of a {@code !!} at every read of a
      *                  {@code List<X?>}. A null literal, a null argument or initializer, and a source annotation,
      *                  still make the slot nullable. Off for Java annotations, which say what can happen.
+     * @param callResults a local, field or return assigned directly the result of an analysed method (not one typed
+     *                  by a type variable) receives that method's nullability. Off for guava's annotations, where it
+     *                  carried the flow-insensitivity of 'v = get(k); if (v == null) ...' into the callers (+947 noise,
+     *                  2026-10-06); on for Kotlin, which does not compile a non-null variable holding a nullable
+     *                  result.
      */
     public record Policy(NullableState unreached, boolean nullTests, boolean contracts, World world,
-                         boolean assertContentWrites) {
-        public static final Policy NULL_MARKED = new Policy(NullableState.NONNULL, true, true, World.CLOSED, false);
+                         boolean assertContentWrites, boolean callResults) {
+        public static final Policy NULL_MARKED = new Policy(NullableState.NONNULL, true, true, World.CLOSED, false,
+                false);
         public static final Policy NULL_MARKED_FLOW_ONLY = new Policy(NullableState.NONNULL, false, true,
-                World.CLOSED, false);
-        public static final Policy CAUTIOUS = new Policy(NullableState.UNSPECIFIED, true, true, World.CLOSED, false);
-        /** {@link #NULL_MARKED} for the Java→Kotlin translation: content writes are asserted. */
-        public static final Policy KOTLIN = new Policy(NullableState.NONNULL, true, true, World.CLOSED, true);
+                World.CLOSED, false, false);
+        public static final Policy CAUTIOUS = new Policy(NullableState.UNSPECIFIED, true, true, World.CLOSED, false,
+                false);
+        /**
+         * {@link #NULL_MARKED} for the Java→Kotlin translation: content writes are asserted, and a variable assigned an
+         * analysed method's nullable result is nullable (Kotlin will not compile it otherwise).
+         */
+        public static final Policy KOTLIN = new Policy(NullableState.NONNULL, true, true, World.CLOSED, true, true);
 
         public Policy withoutContracts() {
-            return new Policy(unreached, nullTests, false, world, assertContentWrites);
+            return new Policy(unreached, nullTests, false, world, assertContentWrites, callResults);
         }
 
         public Policy withWorld(World world) {
-            return new Policy(unreached, nullTests, contracts, world, assertContentWrites);
+            return new Policy(unreached, nullTests, contracts, world, assertContentWrites, callResults);
         }
 
         public Policy withAssertContentWrites(boolean assertContentWrites) {
-            return new Policy(unreached, nullTests, contracts, world, assertContentWrites);
+            return new Policy(unreached, nullTests, contracts, world, assertContentWrites, callResults);
         }
     }
 
@@ -809,6 +819,15 @@ public final class NullabilityPass {
         }
     }
 
+    // no type variable among the type arguments (or an array's element), at any depth
+    private static boolean concreteArguments(ParameterizedType pt) {
+        if (pt.arrays() > 0) return concreteArguments(pt.componentType()) && pt.componentType().typeParameter() == null;
+        for (ParameterizedType a : pt.parameters()) {
+            if (a.typeParameter() != null || !concreteArguments(a)) return false;
+        }
+        return true;
+    }
+
     private static boolean isBoxedVoid(ParameterizedType pt) {
         return pt.arrays() == 0 && pt.typeInfo() != null && "java.lang.Void".equals(pt.typeInfo().fullyQualifiedName());
     }
@@ -1228,9 +1247,11 @@ public final class NullabilityPass {
     // method, which has no links), and a library call whose result may be null USED DIRECTLY: returned, assigned,
     // initializing a local (its value reaches the link graph only as an opaque '$_v')
     private void syntacticSeeds(MethodInfo mi, Scope scope, Statement statement) {
+        nestedAssignments(mi, scope, statement);
         if (statement instanceof ReturnStatement rs && !mi.isConstructor() && !mi.returnType().isVoid()) {
             callResult(mi, rs.expression());
             seedCreated(mi, rs.expression(), mi);
+            constructorCopies(mi, scope, mi, rs.expression());
         } else if (statement instanceof LocalVariableCreation lvc) {
             lvc.localVariableStream().forEach(lv -> {
                 Object local = local(mi, scope, lv.simpleName());
@@ -1239,12 +1260,14 @@ public final class NullabilityPass {
                 }
                 callResult(local, lv.assignmentExpression());
                 seedCreated(local, lv.assignmentExpression(), mi);
+                constructorCopies(mi, scope, local, lv.assignmentExpression());
             });
         } else if (statement.expression() instanceof Assignment a && a.variableTarget() != null) {
             Object target = node(mi, scope, a.variableTarget());
             if (a.value() instanceof NullConstant) seed(target, "assigned null in " + mi.fullyQualifiedName());
             callResult(target, a.value());
             seedCreated(target, a.value(), mi);
+            constructorCopies(mi, scope, target, a.value());
         } else if (statement instanceof ForEachStatement fe && fe.initializer() != null) {
             // for (T x : array): the elements flow into x
             Expression iterated = NonNullFacts.unwrap(fe.expression());
@@ -1260,6 +1283,67 @@ public final class NullabilityPass {
                         .forEach(lv -> addEdge(elements, local(mi, scope, lv.simpleName())));
             }
         }
+    }
+
+    // an assignment inside an expression: 'if ((res = isHead(h)) != null)', 'while ((x = next()) != null)'
+    private void nestedAssignments(MethodInfo mi, Scope scope, Statement statement) {
+        Expression top = statement.expression();
+        if (top == null) return;
+        top.visit(e -> {
+            if (e instanceof Lambda) return false;
+            if (e instanceof Assignment a && a != top && a.variableTarget() != null && a.assignmentOperator() == null) {
+                Object target = node(mi, scope, a.variableTarget());
+                if (a.value() instanceof NullConstant) seed(target, "assigned null in " + mi.fullyQualifiedName());
+                callResult(target, a.value());
+                seedCreated(target, a.value(), mi);
+            }
+            return true;
+        });
+    }
+
+    /*
+     'new ArrayList<>(c)', 'new HashMap<>(m)': a library constructor copying the content of its argument into the
+     new object, which is the target's ('l = new ArrayList<>(c)'): the argument's slots flow into the target's.
+     */
+    private void constructorCopies(MethodInfo mi, Scope scope, Object target, Expression value) {
+        if (target == null || !(NonNullFacts.unwrap(value) instanceof ConstructorCall cc) || cc.constructor() == null
+            || cc.parameterizedType() == null || cc.parameterizedType().arrays() > 0) return;
+        contentCopies(mi, scope, target, cc.constructor(), cc.parameterExpressions());
+    }
+
+    /*
+     A parameter whose type arguments are the declaring class's type variables ('addAll(Collection<? extends E>)',
+     'putAll(Map<? extends K, ? extends V>)', 'ArrayList(Collection<? extends E>)'): the argument's slot j flows into
+     the receiver's slot of that variable. Slot to slot: the content of one object copied into another.
+     */
+    private void contentCopies(MethodInfo mi, Scope scope, Object receiver, MethodInfo callee,
+                               List<Expression> arguments) {
+        ParameterizedType type = typeOf(receiver);
+        int arity = callee.typeInfo().typeParameters().size();
+        if (type == null || type.arrays() > 0 || arity == 0 || type.parameters().size() != arity) return;
+        List<ParameterInfo> parameters = callee.parameters();
+        for (int i = 0; i < arguments.size() && i < parameters.size(); i++) {
+            ParameterizedType pt = parameters.get(i).parameterizedType();
+            if (pt.arrays() > 0 || pt.parameters().isEmpty()) continue;
+            Object source = argumentNode(mi, scope, arguments.get(i));
+            if (source == null) continue;
+            for (int j = 0; j < pt.parameters().size(); j++) {
+                ParameterizedType a = pt.parameters().get(j);
+                if (a.typeParameter() == null || a.typeParameter().isMethodTypeParameter()
+                    || a.typeParameter().getOwner().getLeft() != callee.typeInfo()) continue;
+                int index = a.typeParameter().getIndex();
+                if (index < arity) addEdge(new Arg(source, j), new Arg(receiver, index));
+            }
+        }
+    }
+
+    // the node an argument expression denotes: a variable, or an analysed method's result
+    private Object argumentNode(MethodInfo mi, Scope scope, Expression argument) {
+        Expression e = NonNullFacts.unwrap(argument);
+        if (e instanceof VariableExpression ve) return node(mi, scope, ve.variable());
+        if (e instanceof MethodCall mc && mc.methodInfo() != null && analysed.contains(mc.methodInfo())
+            && !mc.methodInfo().returnType().isVoid()) return mc.methodInfo();
+        return null;
     }
 
     /*
@@ -1323,6 +1407,12 @@ public final class NullabilityPass {
         Expression unwrapped = value instanceof Cast c ? c.expression() : value;
         if (target == null || !(unwrapped instanceof MethodCall mc) || mc.methodInfo() == null) return;
         MethodInfo callee = mc.methodInfo();
+        if (analysed.contains(callee) && !callee.isConstructor() && !callee.returnType().isVoid()) {
+            // the same object: its content slots are one (coupleContent); not where the callee's type arguments are
+            // type variables, which each call instantiates anew
+            if (concreteArguments(callee.returnType())) flows.add(List.of(callee, target));
+            if (policy.callResults() && !isTypeVariable(callee.returnType())) addEdge(callee, target);
+        }
         String lib = libraryNullableReturn(callee);
         if (lib != null) {
             seedIndirect(target, "assigned " + lib);
@@ -1392,6 +1482,11 @@ public final class NullabilityPass {
                                LinkComputer.ListOfLinks list, List<Expression> arguments) {
         if (!(call instanceof MethodCall mc) || mc.object() == null || callee.isStatic()) return;
         if (!(NonNullFacts.unwrap(mc.object()) instanceof VariableExpression ve)) return;
+        // only a method that modifies its receiver stores what it is given: 'add', 'put', 'set'; not a consumer
+        // such as 'Comparator.compare(T, T)', 'Equivalence.equivalent', 'Predicate.test'
+        if (callee.analysis().getOrDefault(PropertyImpl.NON_MODIFYING_METHOD, ValueImpl.BoolImpl.FALSE).isTrue()) {
+            return;
+        }
         Object receiver = node(mi, scope, ve.variable());
         ParameterizedType type = receiver == null ? null : typeOf(receiver);
         int arity = callee.typeInfo().typeParameters().size();
@@ -1403,6 +1498,7 @@ public final class NullabilityPass {
             int index = pt.typeParameter().getIndex();
             if (index < arity) argument(mi, scope, statement, call, list, arguments, i, new Arg(receiver, index));
         }
+        contentCopies(mi, scope, receiver, callee, arguments);
     }
 
     // 'm(array)' for 'm(String... xs)': the one argument in the varargs position is itself the array
@@ -1455,7 +1551,12 @@ public final class NullabilityPass {
             if (node != null) flows.add(List.of(node, pi)); // an array known non-null: its elements still flow
             return;
         }
-        if (arrayCreatedWithNulls(arguments.get(i)) > 0) seedCreated(pi, arguments.get(i), mi);
+        seedCreated(pi, arguments.get(i), mi);
+        Expression unwrappedArgument = NonNullFacts.unwrap(arguments.get(i));
+        if (unwrappedArgument instanceof MethodCall amc && amc.methodInfo() != null
+            && analysed.contains(amc.methodInfo()) && !amc.methodInfo().returnType().isVoid()) {
+            if (concreteArguments(amc.methodInfo().returnType())) flows.add(List.of(amc.methodInfo(), pi));
+        }
         String lib = nullableLibraryCall(arguments.get(i));
         if (lib != null) {
             seedIndirect(pi, "argument " + lib + " in " + mi.fullyQualifiedName());

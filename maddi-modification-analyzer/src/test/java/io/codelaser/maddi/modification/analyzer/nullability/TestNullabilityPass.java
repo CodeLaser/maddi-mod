@@ -897,4 +897,80 @@ public class TestNullabilityPass extends CommonTest {
                 slots: String[]
                 viaLocal: List<String>""", verdicts(kotlin));
     }
+
+    @Language("java")
+    private static final String COPIES = """
+            package a.b;
+            import java.util.*;
+            class C {
+                private final List<String> holes = new ArrayList<>();
+                private final List<String> all = new ArrayList<>();
+                private final Map<String, String> source = new HashMap<>();
+                private final Map<String, String> target = new HashMap<>();
+                void fill() { holes.add(null); source.put("k", null); }
+                void copy() { all.addAll(holes); target.putAll(source); }
+                List<String> fresh() { return new ArrayList<>(holes); }
+                List<String> getHoles() { return holes; }
+                void viaCall(List<String> sink) { sink.add("x"); }
+                void pass() { viaCall(getHoles()); }
+                String find(int i) { return i > 0 ? "x" : null; }
+                String head;
+                void loop() { String r; if ((r = find(1)) != null) head = r; }
+            }
+            """;
+
+    @DisplayName("content copies (addAll, putAll, copy constructors) and call results tie the slots")
+    @Test
+    public void copies() {
+        NullabilityPass.Report report = run("a.b.C", COPIES, NullabilityPass.Policy.KOTLIN);
+        System.out.println(explain(report));
+        // 'head' by its default value (it is assigned only where 'r' is checked non-null); the local 'r' holds find's
+        // nullable result (Policy.callResults), also assigned inside the condition
+        assertEquals("""
+                all: List<String?>
+                find(): String?
+                find(0:i): int
+                fresh(): List<String?>
+                getHoles(): List<String?>
+                head: String?
+                holes: List<String?>
+                source: Map<String, String?>
+                target: Map<String, String?>
+                viaCall(0:sink): List<String?>""", verdicts(report));
+    }
+
+    @DisplayName("use sites: a loop condition sees what the loop assigns; an old-style case does not see the one before")
+    @Test
+    public void loopsAndCases() {
+        NullabilityPass.Report report = run("a.b.N", """
+                package a.b;
+                class N {
+                    N parent;
+                    String name = "";
+                    static String top(N n) {
+                        n.name.length();
+                        while (n.parent != null) { n = n.parent; }
+                        return n.name;
+                    }
+                    static int cases(int k, String s) {
+                        switch (k) {
+                            case 0: s.length(); break;
+                            case 2: return s.length();
+                        }
+                        return 0;
+                    }
+                }
+                """);
+        TypeInfo n = parsed;
+        MethodInfo top = n.findUniqueMethod("top", 1);
+        ParameterInfo np = top.parameters().getFirst();
+        io.codelaser.maddi.cst.api.statement.Statement loop = top.methodBody().statements().get(1);
+        assertEquals(false, report.useSites().nonNullAt(loop, np), "the loop assigns n: not known at its condition");
+        MethodInfo cases = n.findUniqueMethod("cases", 2);
+        ParameterInfo s = cases.parameters().get(1);
+        io.codelaser.maddi.cst.api.statement.Statement sw = cases.methodBody().statements().getFirst();
+        io.codelaser.maddi.cst.api.statement.Statement returnInCase2 = sw.subBlockStream().findFirst().orElseThrow()
+                .statements().get(2);
+        assertEquals(false, report.useSites().nonNullAt(returnInCase2, s), "case 2 is not reached through case 0");
+    }
 }

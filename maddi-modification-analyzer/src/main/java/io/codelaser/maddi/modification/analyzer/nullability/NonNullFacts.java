@@ -168,6 +168,15 @@ public final class NonNullFacts {
     }
 
     private Out statement(Statement statement, Set<Variable> in) {
+        if (statement instanceof LoopStatement && !(statement instanceof DoStatement)) {
+            // the condition is evaluated again after the body: what the loop assigns is not known at its start
+            // ('while (node.parent != null) { node = node.parent; }')
+            Set<Variable> stableIn = new HashSet<>(in);
+            stableIn.removeAll(assignedIn(statement));
+            if (containsCall(statement)) stableIn.removeIf(NonNullFacts::isNonFinalField);
+            before.put(statement, Set.copyOf(stableIn));
+            return loop(statement, stableIn);
+        }
         before.put(statement, Set.copyOf(in));
         Set<Variable> facts = new HashSet<>(in);
         switch (statement) {
@@ -227,8 +236,7 @@ public final class NonNullFacts {
                 return block(ss.block(), facts);
             }
             default -> {
-                // loops, try, switch, local type declarations, ...: the condition/selector is evaluated first (for
-                // a loop's header only the first time, which still holds afterwards: the loop may not run); each
+                // do-while, try, switch, local type declarations, ...: the selector is evaluated first; each
                 // sub-block starts with the facts of variables the statement does not assign; afterwards the same
                 if (statement.expression() != null && !(statement instanceof DoStatement)) {
                     effects(statement.expression(), facts);
@@ -237,17 +245,30 @@ public final class NonNullFacts {
                 Set<Variable> stable = new HashSet<>(facts);
                 stable.removeAll(assigned);
                 if (containsCall(statement)) stable.removeIf(NonNullFacts::isNonFinalField);
-                boolean loop = statement instanceof LoopStatement;
                 statement.subBlockStream().forEach(sb -> {
-                    Set<Variable> blockIn = new HashSet<>(stable);
-                    if (loop && !(statement instanceof DoStatement) && statement.expression() != null) {
-                        blockIn.addAll(whenTrue(statement.expression()));
+                    if (statement instanceof SwitchStatementOldStyle) {
+                        // every case label is a jump target: no statement inherits the facts of the one before it
+                        for (Statement s : sb.statements()) statement(s, new HashSet<>(stable));
+                    } else {
+                        block(sb, new HashSet<>(stable));
                     }
-                    block(sb, blockIn);
                 });
                 return new Out(stable, true);
             }
         }
+    }
+
+    // a while/for/for-each loop, with the facts that hold at every evaluation of its condition
+    private Out loop(Statement statement, Set<Variable> in) {
+        Set<Variable> facts = new HashSet<>(in);
+        if (statement.expression() != null) effects(statement.expression(), facts);
+        statement.subBlockStream().forEach(sb -> {
+            Set<Variable> blockIn = new HashSet<>(facts);
+            if (statement.expression() != null) blockIn.addAll(whenTrue(statement.expression()));
+            block(sb, blockIn);
+        });
+        // the condition is evaluated on every way out (but the last evaluation's 'false' is not known here)
+        return new Out(facts, true);
     }
 
     private static boolean containsCall(Statement statement) {
