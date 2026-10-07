@@ -799,3 +799,8 @@ redundantNullCheck:
 Not done yet, from the same report: trusted returns stay optimistic for a method that wraps an unhinted library
 call (`findConfigInfo4GrayState` returning `databaseOperate.queryOne(...)`). Also out of reach: a null that depends
 on the object's subclass.
+
+Trusted returns for library wrappers were tried: a method returning an unhinted library call's result (directly,
+through a local, or through another such method) was not trusted non-null at its call sites. Guava: +13 noise,
+unsafe unchanged. Not the default. diagnose's redundantNullCheck works around it with its own facts; an opt-in
+policy flag is possible if a consumer needs it.
