@@ -79,6 +79,13 @@ public class TestJavaToKotlinFernflowerNullability {
                                  io.codelaser.maddi.cst.api.variable.Variable variable) {
             return report.smartCasts().nonNullAt(statement, variable);
         }
+
+        /** The same at a call: also what the enclosing condition establishes, and final fields of this. */
+        @Override
+        public boolean nonNullAt(io.codelaser.maddi.cst.api.expression.Expression expression,
+                                 io.codelaser.maddi.cst.api.variable.Variable variable) {
+            return report.smartCasts().nonNullAt(expression, variable);
+        }
     }
 
     @Test
