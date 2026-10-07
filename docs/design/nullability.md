@@ -660,3 +660,34 @@ After the merge, the printer session's list of remaining fernflower errors point
     is a jump target.
 
 Guava, `CLOSED`, type arguments: 1,551 / 29 / 32 (was 1,526 / 29 / 57). Top level and elements are unchanged.
+
+### 2026-10-07 — lambdas, switch expressions, guards, returned nulls
+
+Further fernflower errors traced to the verdicts (154 → 160 compiling files, 133 → 109 errors):
+- **Lambdas:** a lambda's synthetic method overrides nothing in the model, so a null passed to
+  `ExprentIterator.processExprent` never reached the lambdas implementing it. Kotlin types those lambdas'
+  parameters by the functional method (`Exprent?`), and the unguarded dereferences failed. The pass now treats a
+  lambda as overriding its functional interface's single abstract method, which gives it the same override edges
+  as an anonymous class.
+- **Switch expressions (`NonNullFacts`):** each arm starts from the facts after the selector, and only what every
+  completing arm establishes is kept. Before, a dereference in one arm leaked into the next, and the printer
+  left out a `!!` that Kotlin needs (`cn.value` in `StructAnnotationAttribute`).
+- **Guards:**
+  - A branch of `?:` that is a call not given the variable cannot return it, so
+    `a == null ? Collections.emptyList() : a` no longer carries `a`'s null into the field.
+  - A local that reaches another object's field through a constructor argument is judged by the facts when that
+    call runs, as `argument()` judges the parameter.
+- **Returned nulls** (reported by the diagnose session): with `nullConstantReturns`, a callee's `return null`
+  crosses the call as the callee's own marker, and the pass seeded it as "null in" the caller. The pass now
+  finds the analysed method whose body holds that literal (by identity) and adds an edge from that method's
+  return. The cause chain reads `return relay <- return find <- null in find`. A marker whose literal isn't
+  found, such as one from a decoded summary, is still seeded where it arrives.
+
+Guava, `CLOSED`: unchanged, apart from +2 agreeing parameters. `OPEN`: top-level unsafe 109.
+
+Fernflower items left for the printer:
+- Diamond and `computeIfAbsent` constructor calls are spelled with nullability-free type arguments (about 25
+  errors).
+- `Objects.requireNonNull(x).m()` needs `x!!`.
+- `Map.of(k, new Integer[]{..., null})` gets `Array<Int>` values. This one is a verdict gap too: a library
+  factory's method type variables don't tie the arguments' content into the result's slots.

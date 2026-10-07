@@ -433,6 +433,22 @@ public final class NonNullFacts {
                     }
                     return false;
                 }
+                case SwitchExpression se -> {
+                    // each arm starts from the facts after the selector, not from the arm before it; afterwards,
+                    // what every completing arm establishes
+                    effects(se.selector(), facts);
+                    Set<Variable> after = null;
+                    for (SwitchEntry entry : se.entries()) {
+                        Set<Variable> in = new HashSet<>(facts);
+                        effects(entry.whenExpression(), in);
+                        Out out = block(entry.statementAsBlock(), in);
+                        if (!out.completes) continue;
+                        if (after == null) after = new HashSet<>(out.facts);
+                        else after.retainAll(out.facts);
+                    }
+                    if (after != null) facts.retainAll(after);
+                    return false;
+                }
                 case InlineConditional ic -> {
                     effects(ic.condition(), facts);
                     conditionally(ic.ifTrue(), facts, whenTrue(ic.condition()));

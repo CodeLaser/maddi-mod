@@ -23,8 +23,11 @@
 #
 # 2026-10-07, type-argument slots, Policy.KOTLIN (content writes asserted, call results tie slots), content copies
 # and reads, loop and case facts (6ed2c4de..7587b495; maddi 3ef44495c): 154 files compile, 133 type errors.
+#
+# 2026-10-07, a lambda takes its functional method's parameters (override edges), arms of a switch expression start
+# from the selector's facts, guards through constructor arguments and call branches of ?:: 160 files, 109 errors.
 types	199
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	199
-compilingFiles	154
+compilingFiles	160

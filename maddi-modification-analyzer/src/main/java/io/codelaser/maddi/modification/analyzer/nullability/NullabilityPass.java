@@ -238,6 +238,9 @@ public final class NullabilityPass {
     private final Policy policy;
     // analysed implementations per overridden method (any overridden method, also a library one)
     private final Map<MethodInfo, List<MethodInfo>> implementations = new HashMap<>();
+    // each null literal of an analysed body, by identity: a NullConstant equals every other, a Source only compares
+    // line and column; a marker whose literal is not found here (a decoded summary) is seeded where it arrives
+    private final Map<Expression, MethodInfo> nullOwners = new java.util.IdentityHashMap<>();
     // analysed methods whose return an earlier round found unreached by null (see go)
     private final Set<MethodInfo> trustedReturns;
     // analysed parameters an earlier round found non-null on every normal exit of their method: passing null throws
@@ -337,8 +340,9 @@ public final class NullabilityPass {
         List<FieldInfo> fields = analysisOrder.stream()
                 .filter(i -> i instanceof FieldInfo).map(i -> (FieldInfo) i).toList();
         analysed.addAll(methods);
+        methods.forEach(this::indexNullLiterals);
         for (MethodInfo mi : methods) {
-            for (MethodInfo overridden : mi.overrides()) {
+            for (MethodInfo overridden : overrides(mi)) {
                 implementations.computeIfAbsent(overridden, _ -> new java.util.ArrayList<>()).add(mi);
             }
         }
@@ -514,9 +518,26 @@ public final class NullabilityPass {
         return policy.contracts() ? NullAnnotations.explicitState(mi) : null;
     }
 
+    /**
+     * The methods {@code mi} overrides; for a lambda's synthetic method (which overrides nothing in the model) the
+     * functional interface's abstract method: a lambda runs where that method is called, and Kotlin types its
+     * parameters by it.
+     */
+    private static Set<MethodInfo> overrides(MethodInfo mi) {
+        Set<MethodInfo> overrides = mi.overrides();
+        if (!overrides.isEmpty() || mi.isConstructor() || !mi.typeInfo().isAnonymous()
+            || mi.typeInfo().interfacesImplemented().size() != 1) {
+            return overrides;
+        }
+        TypeInfo functional = mi.typeInfo().interfacesImplemented().getFirst().typeInfo();
+        MethodInfo sam = functional == null ? null : functional.singleAbstractMethod();
+        if (sam == null || sam == mi || sam.parameters().size() != mi.parameters().size()) return overrides;
+        return Set.of(sam);
+    }
+
     /** A library method, {@code mi} or one it overrides, whose return may be null; null when there is none. */
     private String libraryNullableReturn(MethodInfo mi) {
-        return java.util.stream.Stream.concat(java.util.stream.Stream.of(mi), mi.overrides().stream())
+        return java.util.stream.Stream.concat(java.util.stream.Stream.of(mi), overrides(mi).stream())
                 .filter(m -> !analysed.contains(m))
                 .filter(m -> stateOf(m, PropertyImpl.NULLABILITY_METHOD) == NullableState.NULLABLE)
                 .map(MethodInfo::fullyQualifiedName).findFirst().orElse(null);
@@ -524,7 +545,7 @@ public final class NullabilityPass {
 
     /** A library method, {@code mi} or one it overrides, whose parameter {@code index} accepts null. */
     private String libraryNullableParameter(MethodInfo mi, int index) {
-        return java.util.stream.Stream.concat(java.util.stream.Stream.of(mi), mi.overrides().stream())
+        return java.util.stream.Stream.concat(java.util.stream.Stream.of(mi), overrides(mi).stream())
                 .filter(m -> !analysed.contains(m) && index < m.parameters().size())
                 .filter(m -> stateOf(m.parameters().get(index), PropertyImpl.NULLABILITY_PARAMETER)
                              == NullableState.NULLABLE)
@@ -580,7 +601,7 @@ public final class NullabilityPass {
     private boolean externallyCallable(MethodInfo mi) {
         if (visibleOutside(mi)) return true;
         // an override is called through what it overrides: from outside, or by the library itself
-        return mi.overrides().stream().anyMatch(o -> !analysed.contains(o) || visibleOutside(o));
+        return overrides(mi).stream().anyMatch(o -> !analysed.contains(o) || visibleOutside(o));
     }
 
     private static boolean visibleOutside(MethodInfo mi) {
@@ -603,7 +624,7 @@ public final class NullabilityPass {
 
     /** A library method {@code mi} overrides declares parameter {@code index} non-null: its callers honour that. */
     private boolean libraryNonNullParameter(MethodInfo mi, int index) {
-        return mi.overrides().stream()
+        return overrides(mi).stream()
                 .filter(m -> !analysed.contains(m) && index < m.parameters().size())
                 .anyMatch(m -> stateOf(m.parameters().get(index), PropertyImpl.NULLABILITY_PARAMETER)
                                == NullableState.NONNULL);
@@ -967,6 +988,34 @@ public final class NullabilityPass {
         return declared.size() == 1 ? declared.getFirst() : new Local(mi, null, name);
     }
 
+    /*
+     A null marker reaches a node. With LinkComputer.Options.nullConstantReturns a callee's 'return null' crosses the
+     call as the callee's own marker: then the null is the callee's return, an edge (the cause chain names the
+     callee, 'return relay <- return find <- null in find'), not a null written here.
+     */
+    private void nullMarker(MethodInfo mi, Variable marker, Object target, String origin) {
+        MethodInfo owner = nullOwner(((LocalVariable) marker).assignmentExpression());
+        if (owner != null && !owner.equals(mi) && analysed.contains(owner) && !owner.returnType().isVoid()) {
+            addEdge(owner, target);
+        } else {
+            seed(target, origin);
+        }
+    }
+
+    // the analysed method whose body holds this null literal (a lambda's body is the lambda's method)
+    private MethodInfo nullOwner(Expression nullConstant) {
+        return nullOwners.get(nullConstant);
+    }
+
+    private void indexNullLiterals(MethodInfo mi) {
+        if (mi.methodBody() == null) return;
+        mi.methodBody().visit(e -> {
+            if (e instanceof Lambda) return false;
+            if (e instanceof NullConstant nc) nullOwners.put(nc, mi);
+            return true;
+        });
+    }
+
     // a constant marker ('$_ceN', the link module's MarkerVariable, seen through the API) holding the null constant
     private static boolean isNullMarker(Variable v) {
         return v instanceof LocalVariable lv && lv.simpleName().startsWith("$_ce")
@@ -981,7 +1030,7 @@ public final class NullabilityPass {
         // implementation of a generic interface one hub (guava: Function.apply's 'F input' tied
         // ToStringFunction.apply to a Map.remove key).
         if (!mi.isConstructor()) {
-            for (MethodInfo overridden : mi.overrides()) {
+            for (MethodInfo overridden : overrides(mi)) {
                 if (!isTypeVariable(overridden.returnType())) addEdge(mi, overridden);
                 int n = Math.min(mi.parameters().size(), overridden.parameters().size());
                 for (int i = 0; i < n; i++) {
@@ -1063,7 +1112,7 @@ public final class NullabilityPass {
             if (from instanceof Arg && link.linkNature().isIdenticalTo()) continue;
             if (link.linkNature().isIdenticalTo() || link.linkNature().isAssignedFrom()) {
                 if (isNullMarker(link.to())) {
-                    seed(from, "null in " + mi.fullyQualifiedName());
+                    nullMarker(mi, link.to(), from, "null in " + mi.fullyQualifiedName());
                 } else {
                     linkEdge(node(mi, scope, link.to()), from, link.to(), fromVar, statement);
                 }
@@ -1116,10 +1165,36 @@ public final class NullabilityPass {
         int[] count = linkEdges.computeIfAbsent(List.of(from, to), _ -> new int[2]);
         if (statement == null) return;
         Expression value = assignedValue(statement, recipientVar);
-        if (value == null) return;
-        Guard guard = guard(value, sourceVar, facts.before(statement));
+        Guard guard = value == null ? argumentGuard(statement, sourceVar)
+                : guard(value, sourceVar, facts.before(statement));
         if (guard == Guard.GUARDED) count[0]++;
         else if (guard == Guard.UNGUARDED) count[1]++;
+    }
+
+    /*
+     A recipient the statement does not assign itself: the source reaches it through a call it is passed to
+     ('converter = new IdentifierConverter(..., interceptor)' links the local to the new object's field). GUARDED when
+     the source is known non-null at every call that takes it as an argument, as argument() decides for the parameter.
+     */
+    private Guard argumentGuard(Statement statement, Variable source) {
+        if (statement.expression() == null) return Guard.ABSENT;
+        Guard[] guard = {Guard.ABSENT};
+        statement.expression().visit(e -> {
+            if (e instanceof Lambda) return false;
+            List<Expression> arguments = switch (e) {
+                case MethodCall mc -> mc.parameterExpressions();
+                case ConstructorCall cc -> cc.parameterExpressions();
+                default -> List.of();
+            };
+            for (Expression argument : arguments) {
+                if (NonNullFacts.unwrap(argument) instanceof VariableExpression ve && ve.variable().equals(source)) {
+                    guard[0] = combine(guard[0], facts.nonNullWhenCalled((Expression) e, source)
+                                                 || facts.nonNullAt(statement, source) ? Guard.GUARDED : Guard.UNGUARDED);
+                }
+            }
+            return true;
+        });
+        return guard[0];
     }
 
     // the value 'recipient' gets in this statement: 'recipient = v;', 'T recipient = v;', 'return v;'; else null
@@ -1169,10 +1244,23 @@ public final class NullabilityPass {
             case NullConstant _, ConstructorCall _, Lambda _, MethodReference _, ConstantExpression<?> _ -> {
                 return Guard.ABSENT;
             }
+            case MethodCall mc when !mentions(mc, source) -> {
+                // a call that is not given the source cannot return it ('a == null ? Collections.emptyList() : a')
+                return Guard.ABSENT;
+            }
             default -> {
                 return Guard.OPAQUE;
             }
         }
+    }
+
+    private static boolean mentions(Expression e, Variable v) {
+        boolean[] found = {false};
+        e.visit(x -> {
+            if (x instanceof VariableExpression ve && ve.variable().equals(v)) found[0] = true;
+            return !found[0];
+        });
+        return found[0];
     }
 
     private static Guard combine(Guard g1, Guard g2) {
@@ -1605,7 +1693,7 @@ public final class NullabilityPass {
         Variable primary = links.primary();
         if (primary == null) return;
         if (isNullMarker(primary)) {
-            seed(pi, "null argument in " + mi.fullyQualifiedName());
+            nullMarker(mi, primary, pi, "null argument in " + mi.fullyQualifiedName());
             return;
         }
         Object node = node(mi, scope, primary);
@@ -1619,7 +1707,8 @@ public final class NullabilityPass {
             if (!link.from().equals(primary)) continue;
             if (!(link.linkNature().isIdenticalTo() || link.linkNature().isAssignedFrom())) continue;
             if (isNullMarker(link.to())) {
-                seed(pi, "null argument (via " + primary.simpleName() + ") in " + mi.fullyQualifiedName());
+                nullMarker(mi, link.to(), pi,
+                        "null argument (via " + primary.simpleName() + ") in " + mi.fullyQualifiedName());
             } else {
                 addEdge(node(mi, scope, link.to()), pi);
             }

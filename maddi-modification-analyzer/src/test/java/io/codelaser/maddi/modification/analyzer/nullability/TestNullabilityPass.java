@@ -19,6 +19,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * The declaration pass (docs/design/nullability.md §4.2 M3, T3): one verdict per declaration, in Kotlin's
@@ -967,6 +968,9 @@ public class TestNullabilityPass extends CommonTest {
                         }
                         return 0;
                     }
+                    static int arms(int k, String s) {
+                        return switch (k) { case 0 -> s.length(); case 1 -> s.hashCode(); default -> 0; };
+                    }
                 }
                 """);
         TypeInfo n = parsed;
@@ -980,5 +984,101 @@ public class TestNullabilityPass extends CommonTest {
         io.codelaser.maddi.cst.api.statement.Statement returnInCase2 = sw.subBlockStream().findFirst().orElseThrow()
                 .statements().get(2);
         assertEquals(false, report.useSites().nonNullAt(returnInCase2, s), "case 2 is not reached through case 0");
+        MethodInfo arms = n.findUniqueMethod("arms", 2);
+        ParameterInfo armsS = arms.parameters().get(1);
+        List<io.codelaser.maddi.cst.api.expression.MethodCall> calls = new java.util.ArrayList<>();
+        arms.methodBody().statements().getFirst().expression().visit(e -> {
+            if (e instanceof io.codelaser.maddi.cst.api.expression.MethodCall mc) calls.add(mc);
+            return true;
+        });
+        assertEquals("hashCode", calls.get(1).methodInfo().name());
+        assertEquals(false, report.smartCasts().nonNullAt(calls.get(1), armsS), "an arm does not see the one before");
+    }
+
+    @DisplayName("lambdas: a lambda's parameter takes the nullability of the functional method's parameter")
+    @Test
+    public void lambdas() {
+        NullabilityPass.Report report = run("a.b.F", """
+                package a.b;
+                import java.util.*;
+                class F {
+                    interface I { int p(String s); }
+                    static void each(I i) { i.p(null); }
+                    static void use() {
+                        each(s -> s.length());
+                        each(new I() { public int p(String t) { return t.length(); } });
+                    }
+                }
+                """);
+        System.out.println(explain(report));
+        Map<String, String> byName = report.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+        assertEquals("String?", byName.get("a.b.F.I.p(String):0:s"));
+        assertEquals("String?", byName.get("a.b.F.$0.p(String):0:s"), "the lambda's parameter");
+        assertEquals("String?", byName.get("a.b.F.$1.p(String):0:t"), "the anonymous class's parameter");
+    }
+
+    @DisplayName("guards: a null-checked conditional with a call branch; a local passed to a constructor once assigned")
+    @Test
+    public void guards() {
+        NullabilityPass.Report report = run("a.b.G", """
+                package a.b;
+                import java.util.*;
+                class G {
+                    static class Holder {
+                        private final List<String> items;
+                        Holder(List<String> items) { this.items = items == null ? Collections.emptyList() : items; }
+                    }
+                    static class Box {
+                        private final Holder holder;
+                        Box(Holder holder) { this.holder = holder; }
+                    }
+                    static Holder make(boolean b) {
+                        if (b) return new Holder(null);
+                        return new Holder(new ArrayList<>());
+                    }
+                    static Box box(boolean b) {
+                        Holder h = null;
+                        Box box = null;
+                        if (b) {
+                            h = make(b);
+                            box = new Box(h);
+                        }
+                        return box;
+                    }
+                }
+                """);
+        System.out.println(explain(report));
+        Map<String, String> byName = report.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+        assertEquals("List<String>", byName.get("a.b.G.Holder.items"));
+        assertEquals("Holder", byName.get("a.b.G.Box.holder"));
+    }
+
+    @DisplayName("a null returned through a call: the chain names the callee, not a null written in the caller")
+    @Test
+    public void returnedNull() {
+        NullabilityPass.Report report = run("a.b.R", """
+                package a.b;
+                class R {
+                    String name = "n";
+                    String find(String key) { if (key.isEmpty()) return null; return key + name; }
+                    String relay(String key) { return find(key); }
+                    String relay2(String key) { String r = relay(key); return r; }
+                    void take(String s) { }
+                    void pass(String key) { take(find(key)); }
+                }
+                """);
+        System.out.println(explain(report));
+        TypeInfo r = parsed;
+        MethodInfo find = r.findUniqueMethod("find", 1);
+        MethodInfo relay = r.findUniqueMethod("relay", 1);
+        MethodInfo relay2 = r.findUniqueMethod("relay2", 1);
+        ParameterInfo s = r.findUniqueMethod("take", 1).parameters().getFirst();
+        assertEquals("return a.b.R.find(String) <- null in a.b.R.find(String)", report.explain(find));
+        assertEquals("return a.b.R.relay(String) <- return a.b.R.find(String) <- null in a.b.R.find(String)",
+                report.explain(relay));
+        assertTrue(report.explain(relay2).contains("null in a.b.R.find(String)"), report.explain(relay2));
+        assertTrue(report.explain(s).contains("null in a.b.R.find(String)"), report.explain(s));
     }
 }
