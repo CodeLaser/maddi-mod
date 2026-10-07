@@ -404,3 +404,95 @@ What is left of the noise:
 
 Next for M4 are field facts for `this.f` within a method, killed at calls, and the per-dereference decision for
 the printer.
+
+### 2026-10-07 — M4: facts inside a statement, and fields of `this`
+
+- **Inside a statement**: the right operand of `&&` sees the left true, the right operand of `||` sees it false,
+  and the branches of `?:` see the condition. Every call and every field or array access records the facts at
+  that point: `NonNullFacts.at(Expression)` and `nonNullAt(Expression, Variable)`. The declaration pass checks
+  call arguments there, so `v != null && accept(v)` and `w == null ? 0 : measure(w)` carry no null. The printer
+  can ask per dereference.
+- **Fields of `this`**: a non-final field is forgotten at any call, not carried into a lambda body, and forgotten
+  after a loop, `try` or `switch` that contains a call. So `if (lazy == null) lazy = "y"; return lazy;` returns
+  non-null, but not when a call sits between the check and the return. The Kotlin smart-cast view tracks only
+  final fields: Kotlin never smart-casts a `var` property.
+
+Guava: 13,006 agree / 346 unsafe / 546 noise (was 12,949 / 340 / 610). The noise drops by 64: 45 parameters,
+13 returns, 6 fields. The 6 new unsafe are parameters every analysed caller now visibly guards, such as
+`Lists.indexOfImpl`, called only as `object == null ? -1 : indexOfImpl(this, object)`. Guava annotates them
+`@Nullable` for its public API; that is the §8 question again.
+
+### 2026-10-07 — rounds: the pass trusts its own non-null returns
+
+`NullabilityPass.go` now runs in rounds. Round 1 trusts no analysed method's return. Each later round treats the
+analysed methods whose return the previous round found unreached by null as known non-null values. This is
+sound: a round's reachability over-approximates. Those methods are not degraded and do not return a type
+variable. Dropping edges only shrinks what null reaches, so the trusted set grows until it is stable (at most 5
+rounds). It catches guava's lazy getter with a factory method,
+`return r == null ? keySet = createKeySet() : r`, in which `createKeySet()` is not annotated.
+
+Guava: 13,085 agree / 346 unsafe / 467 noise (was 13,006 / 346 / 546): 79 fewer noise, no new unsafe.
+
+- A value known non-null as a whole guards every source that flows into it: `return requireNonNull(links)` and
+  `return checkNotNull(x)` (the call's contract or trusted return is non-null). Type-variable returns are trusted
+  too when unreached. Their verdict stays parametric, but no null of this program reaches them, so calls to them
+  here are non-null values: guava's own `checkNotNull(T)`.
+
+  Guava: **13,172 agree / 351 unsafe / 374 noise** (was 13,085 / 346 / 467). The +5 unsafe: 3 are the B1 array
+  gap (`requireKeys()` is declared `@Nullable Object[]`, meaning the elements, but read as a nullable array; the
+  array really is non-null), and 2 are public-API parameters (`StandardTable.containsMapping`/`removeMapping`).
+
+### 2026-10-07 — generic interfaces: no fan-out through a type variable, typed dispatch instead
+
+Null entering a generic interface method reached every implementation through the downward override edge:
+`Comparator<T>.compare` led to every `LexicographicalComparator.compare(boolean[], …)`, and `Funnel<T>.funnel`
+to `ByteArrayFunnel.funnel(byte[] …)`. The downward edge no longer goes from a type-variable parameter into an
+implementation that instantiates it with a concrete type other than `Object`; that mirrors the upward rule.
+Soundness comes back where the code tells: at a call whose receiver is the interface itself with a concrete type
+argument (`Fn<String, String> f; f.apply(x)`), the argument also flows straight into the implementations whose
+parameter is that type ("typed dispatch"). `Object` implementations (`IdentityFunction.apply(Object)`) stay on
+the chain. Still a heuristic: a receiver typed through a subtype or a wildcard (`Comparator<? super K>`) does
+not dispatch.
+
+Guava: **13,302 agree / 351 unsafe / 244 noise** (was 13,172 / 351 / 374): 130 fewer noise, no new unsafe.
+
+### 2026-10-07 — closed and open world; preconditions
+
+A parameter's verdict comes from the analysed invocations. That is right when they are all the invocations,
+and wrong for a library, whose users are callers the analysis does not see. `Policy.world` now makes that a
+choice:
+
+- `CLOSED` (the default, unchanged): no analysed call passes null, so the parameter is non-null. This is for an
+  application analysed together with its callers, and for whole-program Kotlin translation.
+- `OPEN_VISIBILITY`: a parameter that can be called from outside and that no null reaches is UNSPECIFIED. Every
+  declaration it flows into is UNSPECIFIED too: a second closure over the same edges, which stops at null
+  contracts. "Called from outside" means public, or protected in an extensible type, of a type reachable from
+  outside. It also covers overriding such a method, or overriding a library method whose hint does not declare
+  the parameter non-null. A library calls its overrides back, as the JDK calls `Comparator.compare`.
+- `OPEN`: the same, except for a parameter that the body makes non-null on every normal exit without assigning
+  it (`NonNullFacts.nonNullAtExit`). It may be dereferenced, passed to a non-null parameter, or rejected with
+  `if (p == null) throw`. A null argument then throws whoever passes it, so the parameter is a precondition and
+  non-null (§8).
+
+Preconditions also cross calls: in every world, a round hands the next one the analysed parameters it found to
+be preconditions, as `parameterContract` NONNULL. The argument is then non-null after the call. A precondition
+only counts at a call when no override can replace the body: the method is static, private, final, a
+constructor, or in a final type, or (closed world only) has no analysed override.
+
+Guava (top-level positions only; "undecided" is UNSPECIFIED):
+
+| world | agree | unsafe | noise | undecided |
+|---|---:|---:|---:|---:|
+| `CLOSED` | 13,306 | 354 | 233 | 1,894 |
+| `OPEN_VISIBILITY` | 9,640 | 158 | 236 | 5,753 |
+| `OPEN` | 11,133 | 166 | 236 | 4,252 |
+
+Preconditions crossing calls changed `CLOSED` by +3 unsafe and −11 noise. The 8 unsafe that `OPEN` adds over
+`OPEN_VISIBILITY` are all array and varargs parameters (`Joiner.join(…, Object... rest)`, `Invokable.invoke`).
+That is the B1 misread: guava's `@Nullable Object...` speaks about the elements. What remains in the open world
+is mostly arrays as well.
+
+Not yet done:
+- `IteratingAnalyzerImpl` still runs `CLOSED`: there is no configuration switch yet.
+- Under `@NullMarked`, the JSpecify output prints nothing for UNSPECIFIED, which reads as non-null. An open-world
+  verdict needs a different presentation there: `@NullUnmarked` on the member, or no `@NullMarked` scope.

@@ -73,7 +73,7 @@ public class TestNullabilityAnnotations extends CommonTest {
                     private final String fin;
                     private String [] arr;
                     X(String fin) { this.fin = fin; }
-                    @Nullable String getLazy() { if (lazy == null) { lazy = "y"; } return lazy; }
+                    String getLazy() { if (lazy == null) { lazy = "y"; } return lazy; }
                     @Nullable String find(Map<String, String> map, String key) { return map.get(key); }
                     int count(@Nullable String s) { return s.length(); }
                     void call() { System.out.println(count(null)); }
@@ -98,7 +98,7 @@ public class TestNullabilityAnnotations extends CommonTest {
                     @Nonnull private final String fin;
                     @Nullable private String [] arr;
                     X(@Nonnull String fin) { this.fin = fin; }
-                    @Nullable String getLazy() { if (lazy == null) { lazy = "y"; } return lazy; }
+                    @Nonnull String getLazy() { if (lazy == null) { lazy = "y"; } return lazy; }
                     @Nullable String find(@Nonnull Map<String, String> map, @Nonnull String key) { return map.get(key); }
                     int count(@Nullable String s) { return s.length(); }
                     void call() { System.out.println(count(null)); }

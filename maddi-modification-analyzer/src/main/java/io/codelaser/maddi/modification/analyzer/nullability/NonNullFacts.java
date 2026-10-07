@@ -24,6 +24,7 @@ import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.cst.api.variable.LocalVariable;
 import io.codelaser.maddi.cst.api.variable.Variable;
 
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
@@ -42,12 +43,18 @@ import java.util.function.Function;
  * Conservative where it must be: an assignment kills a fact unless the value is known non-null; a declaration kills
  * the facts of an earlier same-named local; a loop, a {@code try} and a {@code switch} keep only the facts of
  * variables they do not assign; facts established inside a branch that may continue (not ending in return, throw,
- * break or continue) are joined by intersection. Fields are not tracked (another call may change them). A lambda
- * body starts with the facts where it is written: it can only capture effectively final variables.
+ * break or continue) are joined by intersection. A field of {@code this} is tracked too, but a non-final one only
+ * until the next call (which may change it), and not into a lambda body; a lambda body otherwise starts with the
+ * facts where it is written: it can only capture effectively final variables.
+ * <p>
+ * Inside a statement the facts follow evaluation order: the right operand of {@code &&} sees the left one true,
+ * that of {@code ||} sees it false, the branches of {@code ?:} see the condition true or false. Every call and every
+ * field or array access records the facts at that point ({@link #at(Expression)}).
  * <p>
  * {@link #kotlinSmartCasts()} restricts the facts to what Kotlin's smart cast also derives, for a printer that drops
  * {@code !!} and relies on it: no fact from a Java parameter that demands non-null ({@code requireNonNull(v)}), from
- * {@code assert}, or from assigning a Java call's result (a platform type).
+ * {@code assert}, or from assigning a Java call's result (a platform type); of fields only the final ones (a
+ * {@code val}; Kotlin never smart-casts a {@code var} property).
  * <p>
  * Variables are compared as the CST compares them: a {@link LocalVariable} by name, which is safe at one statement
  * because Java forbids a local to shadow a local, and a declaration kills the facts of an earlier same-named one.
@@ -55,6 +62,10 @@ import java.util.function.Function;
 public final class NonNullFacts {
 
     private final Map<Statement, Set<Variable>> before = new IdentityHashMap<>();
+    private final Map<Expression, Set<Variable>> atExpression = new IdentityHashMap<>();
+    private final Map<MethodInfo, Set<Variable>> atExit = new IdentityHashMap<>();
+    // the facts at each normal exit (a return, the end of the body) of the method being walked; null in a lambda
+    private List<Set<Variable>> exits;
     private final Function<ParameterInfo, NullableState> parameterContract;
     private final Function<MethodInfo, NullableState> returnContract;
     private final boolean kotlinSmartCasts;
@@ -82,7 +93,27 @@ public final class NonNullFacts {
 
     /** Walks one method body; may be called for several methods. */
     public void walk(MethodInfo methodInfo) {
-        if (methodInfo.methodBody() != null) block(methodInfo.methodBody(), Set.of());
+        Block body = methodInfo.methodBody();
+        if (body == null) return;
+        exits = new ArrayList<>();
+        Out out = block(body, Set.of());
+        if (out.completes) exits.add(out.facts);
+        if (!exits.isEmpty()) {
+            Set<Variable> common = new HashSet<>(exits.getFirst());
+            exits.forEach(common::retainAll);
+            common.removeAll(assignedIn(body));
+            atExit.put(methodInfo, Set.copyOf(common));
+        }
+        exits = null;
+    }
+
+    /**
+     * Is {@code parameter} non-null whenever its method returns normally, without ever being assigned? Then a null
+     * argument throws before the method completes (a dereference, {@code requireNonNull}, an explicit
+     * {@code if (p == null) throw}): a precondition. False for a method that never completes normally.
+     */
+    public boolean nonNullAtExit(MethodInfo methodInfo, ParameterInfo parameter) {
+        return atExit.getOrDefault(methodInfo, Set.of()).contains(parameter);
     }
 
     /** The locals and parameters known non-null when {@code statement} starts; empty when it was not walked. */
@@ -92,6 +123,19 @@ public final class NonNullFacts {
 
     public boolean nonNullAt(Statement statement, Variable variable) {
         return before(statement).contains(variable);
+    }
+
+    /**
+     * The variables known non-null when {@code expression} is evaluated, for a method call, a constructor call, or
+     * a field or array access {@code v.f} / {@code v[i]}; empty when it was not walked. Includes what the enclosing
+     * condition establishes: in {@code v != null && v.m()} the call {@code v.m()} has {@code v}.
+     */
+    public Set<Variable> at(Expression expression) {
+        return atExpression.getOrDefault(expression, Set.of());
+    }
+
+    public boolean nonNullAt(Expression expression, Variable variable) {
+        return at(expression).contains(variable);
     }
 
     // ------------------------------------------------------------------ statements
@@ -123,6 +167,7 @@ public final class NonNullFacts {
             }
             case ReturnStatement rs -> {
                 effects(rs.expression(), facts);
+                if (exits != null) exits.add(Set.copyOf(facts));
                 return new Out(facts, false);
             }
             case ThrowStatement ts -> {
@@ -177,6 +222,7 @@ public final class NonNullFacts {
                 Set<Variable> assigned = assignedIn(statement);
                 Set<Variable> stable = new HashSet<>(facts);
                 stable.removeAll(assigned);
+                if (containsCall(statement)) stable.removeIf(NonNullFacts::isNonFinalField);
                 boolean loop = statement instanceof LoopStatement;
                 statement.subBlockStream().forEach(sb -> {
                     Set<Variable> blockIn = new HashSet<>(stable);
@@ -190,8 +236,17 @@ public final class NonNullFacts {
         }
     }
 
+    private static boolean containsCall(Statement statement) {
+        boolean[] call = {false};
+        statement.visit(e -> {
+            if (e instanceof MethodCall || e instanceof ConstructorCall) call[0] = true;
+            return !call[0];
+        });
+        return call[0];
+    }
+
     // every local or parameter assigned anywhere in the statement, its sub-blocks included (a loop's updaters too)
-    private static Set<Variable> assignedIn(Statement statement) {
+    private Set<Variable> assignedIn(Statement statement) {
         Set<Variable> assigned = new HashSet<>();
         statement.visit(e -> {
             if (e instanceof Assignment a && trackable(a.variableTarget())) assigned.add(a.variableTarget());
@@ -201,8 +256,21 @@ public final class NonNullFacts {
         return assigned;
     }
 
-    private static boolean trackable(Variable v) {
-        return v instanceof ParameterInfo || v instanceof LocalVariable lv && !lv.simpleName().startsWith("$");
+    // locals, parameters, and the instance fields of 'this' (Kotlin smart casts: only the final ones)
+    private boolean trackable(Variable v) {
+        return v instanceof ParameterInfo
+               || v instanceof LocalVariable lv && !lv.simpleName().startsWith("$")
+               || v instanceof FieldReference fr && fr.scopeIsRecursivelyThis() && !fr.fieldInfo().isStatic()
+                  && (!kotlinSmartCasts || fr.fieldInfo().isFinal());
+    }
+
+    private static boolean isNonFinalField(Variable v) {
+        return v instanceof FieldReference fr && !fr.fieldInfo().isFinal();
+    }
+
+    // a call may change any non-final field
+    private static void callMade(Set<Variable> facts) {
+        facts.removeIf(NonNullFacts::isNonFinalField);
     }
 
     // ------------------------------------------------------------------ conditions
@@ -217,7 +285,7 @@ public final class NonNullFacts {
     }
 
     // the variable compared with null in 'v == null' / 'v != null', or null
-    private static Variable nullCompared(BinaryOperator bo) {
+    private Variable nullCompared(BinaryOperator bo) {
         Expression other = bo.lhs() instanceof NullConstant ? bo.rhs()
                 : bo.rhs() instanceof NullConstant ? bo.lhs() : null;
         if (unwrap(other) instanceof VariableExpression ve && trackable(ve.variable())) return ve.variable();
@@ -310,63 +378,96 @@ public final class NonNullFacts {
 
     /**
      * What evaluating {@code e} establishes, whenever it completes: a dereferenced variable is not null, an argument
-     * to a parameter that demands non-null is not null, an assigned variable is non-null iff its value is. Only the
-     * parts evaluated unconditionally: not the branches of {@code ?:}, not the right operand of {@code &&}/{@code ||},
-     * not a lambda body (walked as its own block, starting from these facts).
+     * to a parameter that demands non-null is not null, an assigned variable is non-null iff its value is; a call
+     * forgets the non-final fields. A conditionally evaluated part (the right operand of {@code &&}/{@code ||}, a
+     * branch of {@code ?:}) is walked with its condition's facts on a copy: what it establishes is not kept. A
+     * lambda body is walked as its own block.
      */
     void effects(Expression e, Set<Variable> facts) {
         if (e == null) return;
         e.visit(element -> {
             switch (element) {
                 case Lambda lambda -> {
-                    if (lambda.methodBody() != null) block(lambda.methodBody(), Set.copyOf(facts));
+                    if (lambda.methodBody() != null) {
+                        Set<Variable> in = new HashSet<>(facts);
+                        in.removeIf(NonNullFacts::isNonFinalField); // the body runs later
+                        List<Set<Variable>> enclosing = exits;
+                        exits = null; // a return in the lambda does not leave the method
+                        block(lambda.methodBody(), in);
+                        exits = enclosing;
+                    }
                     return false;
                 }
                 case InlineConditional ic -> {
                     effects(ic.condition(), facts);
+                    conditionally(ic.ifTrue(), facts, whenTrue(ic.condition()));
+                    conditionally(ic.ifFalse(), facts, whenFalse(ic.condition()));
                     return false;
                 }
-                case BinaryOperator bo when isOperator(bo, "&&")
-                                            || isOperator(bo, "||") -> {
+                case BinaryOperator bo when isOperator(bo, "&&") -> {
                     effects(bo.lhs(), facts);
+                    conditionally(bo.rhs(), facts, whenTrue(bo.lhs()));
+                    return false;
+                }
+                case BinaryOperator bo when isOperator(bo, "||") -> {
+                    effects(bo.lhs(), facts);
+                    conditionally(bo.rhs(), facts, whenFalse(bo.lhs()));
                     return false;
                 }
                 case And and -> {
-                    if (!and.expressions().isEmpty()) effects(and.expressions().getFirst(), facts);
+                    sequence(and.expressions(), facts, true);
                     return false;
                 }
                 case Or or -> {
-                    if (!or.expressions().isEmpty()) effects(or.expressions().getFirst(), facts);
+                    sequence(or.expressions(), facts, false);
                     return false;
                 }
                 case Assignment a -> {
                     effects(a.value(), facts);
                     Variable target = a.variableTarget();
+                    if (target instanceof FieldReference fr && !fr.scopeIsRecursivelyThis()) {
+                        record(a.target(), facts);
+                        dereference(fr.scope(), facts);
+                    }
                     if (trackable(target)) {
                         boolean nonNull = a.assignmentOperator() == null && nonNull(a.value(), facts);
                         facts.remove(target);
                         if (nonNull) facts.add(target);
-                    } else if (target instanceof FieldReference fr) {
-                        dereference(fr.scope(), facts);
                     }
                     return false;
                 }
                 case MethodCall mc -> {
-                    if (mc.methodInfo() != null && !mc.methodInfo().isStatic()) dereference(mc.object(), facts);
+                    if (mc.object() != null) effects(mc.object(), facts);
                     List<Expression> arguments = mc.parameterExpressions();
                     for (Expression argument : arguments) effects(argument, facts);
-                    if (mc.object() != null) effects(mc.object(), facts);
+                    record(mc, facts);
+                    if (mc.methodInfo() != null && !mc.methodInfo().isStatic()) dereference(mc.object(), facts);
                     if (mc.methodInfo() != null) demanded(mc.methodInfo(), arguments, facts);
+                    callMade(facts);
                     return false;
                 }
                 case ConstructorCall cc -> {
                     for (Expression argument : cc.parameterExpressions()) effects(argument, facts);
+                    record(cc, facts);
                     if (cc.constructor() != null) demanded(cc.constructor(), cc.parameterExpressions(), facts);
+                    callMade(facts);
                     return false;
                 }
                 case VariableExpression ve -> {
-                    if (ve.variable() instanceof FieldReference fr && !fr.fieldInfo().isStatic()) dereference(fr.scope(), facts);
-                    else if (ve.variable() instanceof DependentVariable dv) dereference(dv.arrayExpression(), facts);
+                    if (ve.variable() instanceof FieldReference fr && !fr.fieldInfo().isStatic()
+                        && !fr.scopeIsRecursivelyThis()) {
+                        effects(fr.scope(), facts);
+                        record(ve, facts);
+                        dereference(fr.scope(), facts);
+                        return false;
+                    }
+                    if (ve.variable() instanceof DependentVariable dv) {
+                        effects(dv.arrayExpression(), facts);
+                        effects(dv.indexExpression(), facts);
+                        record(ve, facts);
+                        dereference(dv.arrayExpression(), facts);
+                        return false;
+                    }
                     return true;
                 }
                 default -> {
@@ -376,7 +477,29 @@ public final class NonNullFacts {
         });
     }
 
-    private static void dereference(Expression scope, Set<Variable> facts) {
+    // a part evaluated only when the condition holds: walked on a copy, so what it establishes is not kept
+    private void conditionally(Expression e, Set<Variable> facts, Set<Variable> condition) {
+        Set<Variable> copy = new HashSet<>(facts);
+        copy.addAll(condition);
+        effects(e, copy);
+    }
+
+    // the evaluated form of '&&' (and=true) or '||': each operand sees the previous ones true (false)
+    private void sequence(List<Expression> operands, Set<Variable> facts, boolean and) {
+        if (operands.isEmpty()) return;
+        effects(operands.getFirst(), facts);
+        Set<Variable> copy = new HashSet<>(facts);
+        for (int i = 1; i < operands.size(); i++) {
+            copy.addAll(and ? whenTrue(operands.get(i - 1)) : whenFalse(operands.get(i - 1)));
+            effects(operands.get(i), copy);
+        }
+    }
+
+    private void record(Expression e, Set<Variable> facts) {
+        atExpression.put(e, Set.copyOf(facts));
+    }
+
+    private void dereference(Expression scope, Set<Variable> facts) {
         if (unwrap(scope) instanceof VariableExpression ve && trackable(ve.variable())) facts.add(ve.variable());
     }
 

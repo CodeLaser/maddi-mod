@@ -32,6 +32,7 @@ import io.codelaser.maddi.cst.api.info.FieldInfo;
 import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.statement.Block;
 import io.codelaser.maddi.cst.api.statement.ExplicitConstructorInvocation;
 import io.codelaser.maddi.cst.api.statement.ForEachStatement;
@@ -114,15 +115,44 @@ public final class NullabilityPass {
      *                  public parameter no analysed caller passes null to; a lazily initialized field)
      * @param contracts the null annotations on source declarations are contracts (M2): a nullable one is a seed, a
      *                  non-null one stops null. Off to measure the inference against those annotations (the oracle).
+     * @param world     who else calls the analysed code: see {@link World}
      */
-    public record Policy(NullableState unreached, boolean nullTests, boolean contracts) {
-        public static final Policy NULL_MARKED = new Policy(NullableState.NONNULL, true, true);
-        public static final Policy NULL_MARKED_FLOW_ONLY = new Policy(NullableState.NONNULL, false, true);
-        public static final Policy CAUTIOUS = new Policy(NullableState.UNSPECIFIED, true, true);
+    public record Policy(NullableState unreached, boolean nullTests, boolean contracts, World world) {
+        public static final Policy NULL_MARKED = new Policy(NullableState.NONNULL, true, true, World.CLOSED);
+        public static final Policy NULL_MARKED_FLOW_ONLY = new Policy(NullableState.NONNULL, false, true,
+                World.CLOSED);
+        public static final Policy CAUTIOUS = new Policy(NullableState.UNSPECIFIED, true, true, World.CLOSED);
 
         public Policy withoutContracts() {
-            return new Policy(unreached, nullTests, false);
+            return new Policy(unreached, nullTests, false, world);
         }
+
+        public Policy withWorld(World world) {
+            return new Policy(unreached, nullTests, contracts, world);
+        }
+    }
+
+    /**
+     * Whether the analysed invocations are all the invocations. A parameter's verdict comes from the null that
+     * reaches it from the calls the pass sees; code outside the analysis (a library's users; the JDK calling back an
+     * override) may pass null where no analysed call does.
+     */
+    public enum World {
+        /** An application analysed with all its callers: a parameter no analysed call passes null to is non-null. */
+        CLOSED,
+        /**
+         * A library: a parameter of a method callable from outside (public, or protected in an extensible type, of a
+         * type reachable from outside; or overriding such a method, or a library method that does not declare its
+         * parameter non-null) that no null reaches is UNSPECIFIED, and so is every declaration that parameter flows
+         * into. For measurement: {@link #OPEN} is the useful form.
+         */
+        OPEN_VISIBILITY,
+        /**
+         * {@link #OPEN_VISIBILITY}, except that a parameter the body makes non-null on every normal exit (dereferenced,
+         * passed to a non-null parameter, rejected by {@code if (p == null) throw}) is non-null: a precondition,
+         * whoever the caller (docs/design/nullability.md §8).
+         */
+        OPEN
     }
 
     /**
@@ -172,6 +202,15 @@ public final class NullabilityPass {
     }
 
     private final Policy policy;
+    // analysed implementations per overridden method (any overridden method, also a library one)
+    private final Map<MethodInfo, List<MethodInfo>> implementations = new HashMap<>();
+    // analysed methods whose return an earlier round found unreached by null (see go)
+    private final Set<MethodInfo> trustedReturns;
+    // analysed parameters an earlier round found non-null on every normal exit of their method: passing null throws
+    private final Set<ParameterInfo> preconditions;
+    private Set<Object> reached = Set.of();
+    // not reached by null, but by a value of an outside caller (World.OPEN*): UNSPECIFIED
+    private Set<Object> external = Set.of();
     private final Map<Object, Set<Object>> successors = new LinkedHashMap<>();
     private final Map<Object, String> seedOrigin = new LinkedHashMap<>();
     private final Set<MethodInfo> degraded = new LinkedHashSet<>();
@@ -192,15 +231,78 @@ public final class NullabilityPass {
     private final Map<MethodInfo, Map<String, List<Local>>> declaredByName = new HashMap<>();
 
     public NullabilityPass(Policy policy) {
-        this.policy = policy;
+        this(policy, Set.of(), Set.of());
     }
 
+    private NullabilityPass(Policy policy, Set<MethodInfo> trustedReturns, Set<ParameterInfo> preconditions) {
+        this.policy = policy;
+        this.trustedReturns = trustedReturns;
+        this.preconditions = preconditions;
+    }
+
+    private static final int MAX_ROUNDS = 5;
+
+    /**
+     * Runs the pass in rounds. Round 1 trusts no analysed method's return. Each later round takes the analysed
+     * methods whose return the previous round found unreached by null (sound: that round's reachability
+     * over-approximates) as known non-null values: {@code field = create()} then carries no null. Dropping edges
+     * only shrinks what null reaches, so the trusted set grows until it is stable. Likewise the parameters an earlier
+     * round found to be preconditions ({@link NonNullFacts#nonNullAtExit}): an argument passed to one is non-null
+     * after the call, which may make the caller's own parameter a precondition.
+     */
     public Report go(List<Info> analysisOrder) {
+        Set<MethodInfo> trusted = Set.of();
+        Set<ParameterInfo> nonNullAtExit = Set.of();
+        for (int round = 1; ; round++) {
+            NullabilityPass pass = new NullabilityPass(policy, trusted, nonNullAtExit);
+            Report report = pass.once(analysisOrder);
+            Set<MethodInfo> next = pass.unreachedReturns();
+            Set<ParameterInfo> nextPreconditions = pass.preconditions();
+            if (next.equals(trusted) && nextPreconditions.equals(nonNullAtExit) || round == MAX_ROUNDS) return report;
+            trusted = next;
+            nonNullAtExit = nextPreconditions;
+        }
+    }
+
+    private Set<ParameterInfo> preconditions() {
+        Set<ParameterInfo> set = new HashSet<>();
+        for (MethodInfo mi : analysed) {
+            // a call runs this body only when no override replaces it: an analysed one; in an open world any
+            boolean overridable = !mi.isConstructor() && !mi.isStatic() && !mi.access().isPrivate()
+                                  && !mi.isFinal() && !mi.typeInfo().isFinal();
+            if (overridable && (policy.world() != World.CLOSED || implementations.containsKey(mi))) continue;
+            for (ParameterInfo pi : mi.parameters()) {
+                if (facts.nonNullAtExit(mi, pi)) set.add(pi);
+            }
+        }
+        return Set.copyOf(set);
+    }
+
+    // analysed methods with a reference return no null reached, not degraded. A type-variable return counts too:
+    // its verdict stays parametric, but no null of this program reaches it, so its calls here are non-null values
+    // (guava's own 'checkNotNull(T)')
+    private Set<MethodInfo> unreachedReturns() {
+        Set<MethodInfo> set = new HashSet<>();
+        for (MethodInfo mi : analysed) {
+            ParameterizedType rt = mi.returnType();
+            if (mi.isConstructor() || rt.isVoid() || rt.isPrimitiveExcludingVoid() && rt.arrays() == 0
+                || degraded.contains(mi) || reached.contains(mi) || external.contains(mi)) continue;
+            set.add(mi);
+        }
+        return Set.copyOf(set);
+    }
+
+    private Report once(List<Info> analysisOrder) {
         List<MethodInfo> methods = analysisOrder.stream()
                 .filter(i -> i instanceof MethodInfo).map(i -> (MethodInfo) i).toList();
         List<FieldInfo> fields = analysisOrder.stream()
                 .filter(i -> i instanceof FieldInfo).map(i -> (FieldInfo) i).toList();
         analysed.addAll(methods);
+        for (MethodInfo mi : methods) {
+            for (MethodInfo overridden : mi.overrides()) {
+                implementations.computeIfAbsent(overridden, _ -> new java.util.ArrayList<>()).add(mi);
+            }
+        }
         facts = new NonNullFacts(this::parameterContract, this::returnContract);
         if (policy.contracts()) {
             for (FieldInfo fi : fields) contract(fi, fi);
@@ -220,23 +322,26 @@ public final class NullabilityPass {
         });
 
         Map<Object, Object> cause = new LinkedHashMap<>();
-        Set<Object> reached = closure(cause);
+        reached = closure(cause);
+        if (policy.world() != World.CLOSED) external = externalClosure(methods);
 
         Map<Info, ParameterizedType> verdicts = new LinkedHashMap<>();
         Map<Local, ParameterizedType> locals = new LinkedHashMap<>();
         // an unreached local of a degraded method: its links are missing, so "no null reaches it" is not known
         declaredLocals.forEach((local, lv) -> locals.put(local, verdict(lv.parameterizedType(),
-                reached.contains(local), degraded.contains(localOwner.get(local)))));
+                reached.contains(local), degraded.contains(localOwner.get(local)) || external.contains(local))));
         for (FieldInfo fi : fields) {
-            verdicts.put(fi, contracted(fi, verdict(fi.type(), reached.contains(fi), false)));
+            verdicts.put(fi, contracted(fi, verdict(fi.type(), reached.contains(fi), external.contains(fi))));
         }
         for (MethodInfo mi : methods) {
             boolean deg = degraded.contains(mi);
             for (ParameterInfo pi : mi.parameters()) {
-                verdicts.put(pi, contracted(pi, verdict(pi.parameterizedType(), reached.contains(pi), false)));
+                verdicts.put(pi, contracted(pi, verdict(pi.parameterizedType(), reached.contains(pi),
+                        external.contains(pi))));
             }
             if (!mi.isConstructor() && !mi.returnType().isVoid()) {
-                verdicts.put(mi, contracted(mi, verdict(mi.returnType(), reached.contains(mi), deg)));
+                verdicts.put(mi, contracted(mi, verdict(mi.returnType(), reached.contains(mi),
+                        deg || external.contains(mi))));
             }
         }
         NonNullFacts smartCasts = facts.kotlinSmartCasts();
@@ -286,11 +391,13 @@ public final class NullabilityPass {
     // what a callee promises, for the use-site facts: a library method's hints; an analysed one's annotation
     private NullableState parameterContract(ParameterInfo pi) {
         if (!analysed.contains(pi.methodInfo())) return stateOf(pi, PropertyImpl.NULLABILITY_PARAMETER);
+        if (preconditions.contains(pi)) return NullableState.NONNULL;
         return policy.contracts() ? NullAnnotations.explicitState(pi) : null;
     }
 
     private NullableState returnContract(MethodInfo mi) {
         if (!analysed.contains(mi)) return stateOf(mi, PropertyImpl.NULLABILITY_METHOD);
+        if (trustedReturns.contains(mi)) return NullableState.NONNULL;
         return policy.contracts() ? NullAnnotations.explicitState(mi) : null;
     }
 
@@ -309,6 +416,65 @@ public final class NullabilityPass {
                 .filter(m -> stateOf(m.parameters().get(index), PropertyImpl.NULLABILITY_PARAMETER)
                              == NullableState.NULLABLE)
                 .map(MethodInfo::fullyQualifiedName).findFirst().orElse(null);
+    }
+
+    // ------------------------------------------------------------------ outside callers (World.OPEN*)
+
+    /*
+     The parameters an outside caller may pass anything to, and what they flow into, along the same edges as null.
+     Only the unreached ones matter: a reached node is nullable anyway.
+     */
+    private Set<Object> externalClosure(List<MethodInfo> methods) {
+        Set<Object> set = new LinkedHashSet<>();
+        for (MethodInfo mi : methods) {
+            if (!externallyCallable(mi)) continue;
+            for (ParameterInfo pi : mi.parameters()) {
+                if (reached.contains(pi) || nonNullContracts.contains(pi)
+                    || policy.world() == World.OPEN && facts.nonNullAtExit(mi, pi)
+                    || libraryNonNullParameter(mi, pi.index())) continue;
+                set.add(pi);
+            }
+        }
+        Deque<Object> queue = new ArrayDeque<>(set);
+        while (!queue.isEmpty()) {
+            Object n = queue.removeFirst();
+            for (Object s : successors.getOrDefault(n, Set.of())) {
+                if (!nonNullContracts.contains(s) && !reached.contains(s) && set.add(s)) queue.add(s);
+            }
+        }
+        return set;
+    }
+
+    private boolean externallyCallable(MethodInfo mi) {
+        if (visibleOutside(mi)) return true;
+        // an override is called through what it overrides: from outside, or by the library itself
+        return mi.overrides().stream().anyMatch(o -> !analysed.contains(o) || visibleOutside(o));
+    }
+
+    private static boolean visibleOutside(MethodInfo mi) {
+        TypeInfo owner = mi.typeInfo();
+        boolean access = mi.access().isPublic() || mi.access().isProtected() && extensible(owner);
+        return access && visibleOutside(owner);
+    }
+
+    private static boolean visibleOutside(TypeInfo ti) {
+        if (ti.isAnonymous()) return false;
+        if (ti.compilationUnitOrEnclosingType().isLeft()) return ti.access().isPublic();
+        TypeInfo enclosing = ti.compilationUnitOrEnclosingType().getRight();
+        boolean access = ti.access().isPublic() || ti.access().isProtected() && extensible(enclosing);
+        return access && visibleOutside(enclosing);
+    }
+
+    private static boolean extensible(TypeInfo ti) {
+        return !ti.isFinal() && !ti.isSealed() && !ti.typeNature().isEnum() && !ti.typeNature().isRecord();
+    }
+
+    /** A library method {@code mi} overrides declares parameter {@code index} non-null: its callers honour that. */
+    private boolean libraryNonNullParameter(MethodInfo mi, int index) {
+        return mi.overrides().stream()
+                .filter(m -> !analysed.contains(m) && index < m.parameters().size())
+                .anyMatch(m -> stateOf(m.parameters().get(index), PropertyImpl.NULLABILITY_PARAMETER)
+                               == NullableState.NONNULL);
     }
 
     private ParameterizedType verdict(ParameterizedType declared, boolean reached, boolean degradedOutput) {
@@ -447,7 +613,19 @@ public final class NullabilityPass {
                 if (!isTypeVariable(overridden.returnType())) addEdge(mi, overridden);
                 int n = Math.min(mi.parameters().size(), overridden.parameters().size());
                 for (int i = 0; i < n; i++) {
-                    addEdge(overridden.parameters().get(i), mi.parameters().get(i));
+                    // DOWNWARD not from a type-variable parameter into an implementation that instantiates it with a
+                    // concrete type other than Object: a null passed through the generic 'Comparator<T>.compare'
+                    // reaches 'compare(boolean[] ...)' only where T is boolean[], which nothing here tells. Measured
+                    // on guava (2026-10-07): -142 noise; keeping Object implementations ('IdentityFunction.apply')
+                    // keeps the unsafe count. A heuristic: a null passed to a Comparator<String> does reach a String
+                    // implementation.
+                    ParameterizedType implementationType = mi.parameters().get(i).parameterizedType();
+                    if (!isTypeVariable(overridden.parameters().get(i).parameterizedType())
+                        || isTypeVariable(implementationType)
+                        || implementationType.typeInfo() != null && implementationType.arrays() == 0
+                           && implementationType.typeInfo().isJavaLangObject()) {
+                        addEdge(overridden.parameters().get(i), mi.parameters().get(i));
+                    }
                     if (!isTypeVariable(overridden.parameters().get(i).parameterizedType())) {
                         addEdge(mi.parameters().get(i), overridden.parameters().get(i));
                     }
@@ -531,6 +709,8 @@ public final class NullabilityPass {
     private enum Guard {ABSENT, GUARDED, UNGUARDED, OPAQUE}
 
     private Guard guard(Expression value, Variable source, Set<Variable> known) {
+        // a value known non-null as a whole carries no null, whatever flows into it ('return requireNonNull(f)')
+        if (facts.nonNull(value, known)) return Guard.GUARDED;
         Expression e = NonNullFacts.unwrap(value);
         switch (e) {
             case VariableExpression ve -> {
@@ -615,15 +795,15 @@ public final class NullabilityPass {
                 if (e instanceof Block) return false; // nested statements are handled with their own vd
                 if (policy.nullTests() && e instanceof BinaryOperator bo) nullTest(mi, own, bo);
                 if (e instanceof MethodCall mc && mc.methodInfo() != null) {
-                    callSite(mi, own, statement, mc.methodInfo(), mc.analysis(), mc.parameterExpressions());
+                    callSite(mi, own, statement, mc, mc.methodInfo(), mc.analysis(), mc.parameterExpressions());
                 } else if (e instanceof ConstructorCall cc && cc.constructor() != null) {
-                    callSite(mi, own, statement, cc.constructor(), cc.analysis(), cc.parameterExpressions());
+                    callSite(mi, own, statement, cc, cc.constructor(), cc.analysis(), cc.parameterExpressions());
                 }
                 return true;
             });
             syntacticSeeds(mi, own, statement);
             if (statement instanceof ExplicitConstructorInvocation eci && eci.methodInfo() != null) {
-                callSite(mi, own, statement, eci.methodInfo(), eci.analysis(), eci.parameterExpressions());
+                callSite(mi, own, statement, null, eci.methodInfo(), eci.analysis(), eci.parameterExpressions());
             }
         }
         return scope;
@@ -689,40 +869,76 @@ public final class NullabilityPass {
         }
     }
 
-    private void callSite(MethodInfo mi, Scope scope, Statement statement, MethodInfo callee,
+    private void callSite(MethodInfo mi, Scope scope, Statement statement, Expression call, MethodInfo callee,
                           io.codelaser.maddi.cst.api.analysis.PropertyValueMap analysis, List<Expression> arguments) {
         List<ParameterInfo> parameters = callee.parameters();
         if (parameters.isEmpty()) return;
         LinkComputer.ListOfLinks list = analysis.getOrNull(LinkComputerImpl.LINKED_VARIABLES_ARGUMENTS,
                 LinkComputerImpl.ListOfLinksImpl.class);
         for (int i = 0; i < arguments.size(); i++) {
-            ParameterInfo pi = parameters.get(Math.min(i, parameters.size() - 1)); // varargs: the last parameter
-            if (pi.isVarArgs()) continue; // the array is never null; its elements are content (not yet)
-            if (arguments.get(i) instanceof NullConstant) {
-                seed(pi, "null argument in " + mi.fullyQualifiedName());
-                continue;
+            ParameterInfo parameter = parameters.get(Math.min(i, parameters.size() - 1)); // varargs: the last one
+            if (parameter.isVarArgs()) continue; // the array is never null; its elements are content (not yet)
+            for (ParameterInfo pi : typedDispatch(call, callee, parameter)) {
+                argument(mi, scope, statement, call, list, arguments, i, pi);
             }
-            // M4: a variable argument known non-null at this statement carries no null
-            if (NonNullFacts.unwrap(arguments.get(i)) instanceof VariableExpression ve
-                && facts.nonNullAt(statement, ve.variable())) continue;
-            String lib = nullableLibraryCall(arguments.get(i));
-            if (lib != null) {
-                seed(pi, "argument " + lib + " in " + mi.fullyQualifiedName());
-                continue;
-            }
-            if (list == null || i >= list.list().size()) continue;
-            Links links = list.list().get(i);
-            Variable primary = links.primary();
-            if (primary == null) continue;
-            if (isNullMarker(primary)) {
-                seed(pi, "null argument in " + mi.fullyQualifiedName());
-                continue;
-            }
-            Object node = node(mi, scope, primary);
-            if (node != null) addEdge(node, pi);
-            // an intermediate (or a local assigned in this very statement): its sources, in the argument's own links
-            sourcesOf(mi, scope, primary, links, pi);
         }
+    }
+
+    /**
+     * The parameter, and, where the override chain stops at a type variable (buildForMethod), the parameters of the
+     * implementations the receiver's type selects: for {@code Fn<String, String> f; f.apply(x)}, every
+     * {@code apply(String)} (and {@code apply(Object)}, which the chain still reaches).
+     */
+    private List<ParameterInfo> typedDispatch(Expression call, MethodInfo callee, ParameterInfo pi) {
+        if (!isTypeVariable(pi.parameterizedType()) || pi.parameterizedType().typeParameter().isMethodTypeParameter()
+            || !(call instanceof MethodCall mc) || mc.object() == null) {
+            return List.of(pi);
+        }
+        ParameterizedType receiver = mc.object().parameterizedType();
+        int index = pi.parameterizedType().typeParameter().getIndex();
+        if (receiver == null || receiver.typeInfo() != callee.typeInfo() || index >= receiver.parameters().size()) {
+            return List.of(pi);
+        }
+        ParameterizedType argumentType = receiver.parameters().get(index);
+        if (argumentType.typeInfo() == null || argumentType.typeInfo().isJavaLangObject()) return List.of(pi);
+        List<ParameterInfo> targets = new java.util.ArrayList<>(List.of(pi));
+        for (MethodInfo implementation : implementations.getOrDefault(callee, List.of())) {
+            ParameterizedType type = implementation.parameters().get(pi.index()).parameterizedType();
+            if (type.typeInfo() == argumentType.typeInfo() && type.arrays() == argumentType.arrays()) {
+                targets.add(implementation.parameters().get(pi.index()));
+            }
+        }
+        return targets;
+    }
+
+    private void argument(MethodInfo mi, Scope scope, Statement statement, Expression call,
+                          LinkComputer.ListOfLinks list, List<Expression> arguments, int i, ParameterInfo pi) {
+        if (arguments.get(i) instanceof NullConstant) {
+            seed(pi, "null argument in " + mi.fullyQualifiedName());
+            return;
+        }
+        // M4: a variable argument known non-null at the call (or when its statement starts) carries no null
+        if (NonNullFacts.unwrap(arguments.get(i)) instanceof VariableExpression ve
+            && (call != null && facts.nonNullAt(call, ve.variable()) || facts.nonNullAt(statement, ve.variable()))) {
+            return;
+        }
+        String lib = nullableLibraryCall(arguments.get(i));
+        if (lib != null) {
+            seed(pi, "argument " + lib + " in " + mi.fullyQualifiedName());
+            return;
+        }
+        if (list == null || i >= list.list().size()) return;
+        Links links = list.list().get(i);
+        Variable primary = links.primary();
+        if (primary == null) return;
+        if (isNullMarker(primary)) {
+            seed(pi, "null argument in " + mi.fullyQualifiedName());
+            return;
+        }
+        Object node = node(mi, scope, primary);
+        if (node != null) addEdge(node, pi);
+        // an intermediate (or a local assigned in this very statement): its sources, in the argument's own links
+        sourcesOf(mi, scope, primary, links, pi);
     }
 
     private void sourcesOf(MethodInfo mi, Scope scope, Variable primary, Links links, ParameterInfo pi) {

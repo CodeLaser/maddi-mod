@@ -144,7 +144,7 @@ public class TestNullabilityPass extends CommonTest {
                 fin: String
                 fromParam: String?
                 getFromParam(): String?
-                getLazy(): String?
+                getLazy(): String
                 initNull: String?
                 lazy: String?
                 setFromParam(0:s): String""", verdicts(report));
@@ -275,8 +275,9 @@ public class TestNullabilityPass extends CommonTest {
         // parametric
         assertEquals("F?", byLabel.get("a.b.G.Fn.apply(Object):0:input"));
         assertEquals("T!", byLabel.get("a.b.G.Fn.apply(Object)"));
-        // downward: f.apply(null) may run any implementation (sound; ToString cannot actually be an
-        // Fn<String,String>, which a type-aware dispatch would see)
+        // downward: the override chain does not carry null from the type variable F into a concrete 'String key';
+        // the call 'f.apply(null)' on an Fn<String, String> does, by its receiver's type (typed dispatch). An
+        // Object implementation stays reached through the chain.
         assertEquals("String?", byLabel.get("a.b.G.Lookup.apply(String):0:key"));
         assertEquals("Object?", byLabel.get("a.b.G.ToString.apply(Object):0:o"));
         // upward stops at the type variable: Lookup's null return does not make every implementation's nullable
@@ -552,5 +553,168 @@ public class TestNullabilityPass extends CommonTest {
         // the JDK hint: requireNonNull's parameter demands non-null, so Java knows; Kotlin does not smart-cast
         assertEquals(true, report.useSites().nonNullAt(ret2, r));
         assertEquals(false, report.smartCasts().nonNullAt(ret2, r));
+    }
+
+    @Language("java")
+    private static final String IN_STATEMENT = """
+            package a.b;
+            import java.util.HashMap;
+            import java.util.Map;
+            class S {
+                private final Map<String, String> map = new HashMap<>();
+                private String lazy;
+                private final String fin;
+                S(String fin) { this.fin = fin; }
+                boolean both(String k) { String v = map.get(k); return v != null && accept(v); }
+                boolean accept(String a) { return a.isEmpty(); }
+                int either(String k) { String w = map.get(k); return w == null ? 0 : measure(w); }
+                int measure(String m) { return m.length(); }
+                String getLazy() {
+                    if (lazy == null) {
+                        lazy = "computed";
+                    }
+                    return lazy;
+                }
+                String afterCall() {
+                    if (lazy == null) return "none";
+                    accept("x");
+                    return lazy;
+                }
+                private String cached;
+                String create() { return "fresh"; }
+                String cached() { String result = cached; return result == null ? cached = create() : result; }
+            }
+            """;
+
+    @DisplayName("inside a statement (&&, ?:) and fields of this (forgotten at a call)")
+    @Test
+    public void inStatementAndFields() {
+        NullabilityPass.Report report = run("a.b.S", IN_STATEMENT);
+        System.out.println(explain(report));
+        Map<String, String> byLabel = report.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> label(e.getKey()), e -> k(e.getValue())));
+        assertEquals("String", byLabel.get("accept(0:a)"), "'v != null && accept(v)'");
+        assertEquals("String", byLabel.get("measure(0:m)"), "'w == null ? 0 : measure(w)'");
+        assertEquals("String?", byLabel.get("lazy"));
+        assertEquals("String", byLabel.get("getLazy()"), "the field is non-null after 'if (lazy == null) lazy = ...'");
+        assertEquals("String?", byLabel.get("afterCall()"), "a call in between may have reset the field");
+        // round 2: create() was found non-null in round 1, so 'cached = create()' assigns a non-null value
+        assertEquals("String", byLabel.get("cached()"), "the lazy getter with a factory method");
+        assertEquals("String?", byLabel.get("cached"));
+        // the printer's view: in 'v != null && accept(v)', the call has v; Kotlin smart-casts it too
+        MethodInfo both = parsed.findUniqueMethod("both", 1);
+        io.codelaser.maddi.cst.api.statement.Statement ret = both.methodBody().statements().getLast();
+        java.util.List<io.codelaser.maddi.cst.api.expression.MethodCall> calls = new java.util.ArrayList<>();
+        ret.expression().visit(e -> {
+            if (e instanceof io.codelaser.maddi.cst.api.expression.MethodCall mc
+                && "accept".equals(mc.methodInfo().name())) calls.add(mc);
+            return true;
+        });
+        io.codelaser.maddi.cst.api.expression.MethodCall accept = calls.getFirst();
+        io.codelaser.maddi.cst.api.variable.Variable v = ((io.codelaser.maddi.cst.api.statement.LocalVariableCreation)
+                both.methodBody().statements().getFirst()).localVariable();
+        assertEquals(true, report.smartCasts().nonNullAt(accept, v));
+    }
+
+    @Language("java")
+    private static final String WORLD = """
+            package a.b;
+            import java.util.Comparator;
+            public class W {
+                private String stored = "";
+                public void store(String s) { this.stored = s; }
+                public int length(String s) { return s.length(); }
+                public String echo(String s) { return s; }
+                public String checked(String s) {
+                    if (s == null) throw new IllegalArgumentException();
+                    return s;
+                }
+                public String early(String s, boolean b) {
+                    if (b) return "x";
+                    return s.trim();
+                }
+                int internal(String s) { return 1; }
+                private String helper(String s) { return s; }
+                public String use() { return helper("y") + internal("z") + stored; }
+                static final class Hidden implements Comparator<String> {
+                    public int compare(String a, String b) { return 0; }
+                    public void m(String s) { }
+                }
+            }
+            """;
+
+    @DisplayName("world: closed decides from the analysed calls; open makes outside-callable parameters unspecified")
+    @Test
+    public void world() {
+        String closed = verdicts(run("a.b.W", WORLD));
+        assertEquals("""
+                checked(): String
+                checked(0:s): String?
+                compare(): int
+                compare(0:a): String
+                compare(1:b): String
+                early(): String
+                early(0:s): String
+                early(1:b): boolean
+                echo(): String
+                echo(0:s): String
+                helper(): String
+                helper(0:s): String
+                internal(): int
+                internal(0:s): String
+                length(): int
+                length(0:s): String
+                m(0:s): String
+                store(0:s): String
+                stored: String
+                use(): String""", closed);
+        // a public parameter no analysed call passes null to: unspecified, and so is what it flows into; the
+        // package-private and private methods, and the public method of a package-private type, stay closed-world; an
+        // override of a library method is called by the library
+        assertEquals("""
+                checked(): String
+                checked(0:s): String?
+                compare(): int
+                compare(0:a): String!
+                compare(1:b): String!
+                early(): String
+                early(0:s): String!
+                early(1:b): boolean
+                echo(): String!
+                echo(0:s): String!
+                helper(): String
+                helper(0:s): String
+                internal(): int
+                internal(0:s): String
+                length(): int
+                length(0:s): String!
+                m(0:s): String
+                store(0:s): String!
+                stored: String!
+                use(): String""", verdicts(new NullabilityPass(
+                NullabilityPass.Policy.NULL_MARKED.withWorld(NullabilityPass.World.OPEN_VISIBILITY)).go(analysisOrder)));
+        // with preconditions: dereferenced on every normal exit is non-null; 'early' returns before the dereference
+        assertEquals("""
+                checked(): String
+                checked(0:s): String?
+                compare(): int
+                compare(0:a): String!
+                compare(1:b): String!
+                early(): String
+                early(0:s): String!
+                early(1:b): boolean
+                echo(): String!
+                echo(0:s): String!
+                helper(): String
+                helper(0:s): String
+                internal(): int
+                internal(0:s): String
+                length(): int
+                length(0:s): String
+                m(0:s): String
+                store(0:s): String!
+                stored: String!
+                use(): String""", verdicts(new NullabilityPass(
+                NullabilityPass.Policy.NULL_MARKED.withWorld(NullabilityPass.World.OPEN)).go(analysisOrder)));
     }
 }
