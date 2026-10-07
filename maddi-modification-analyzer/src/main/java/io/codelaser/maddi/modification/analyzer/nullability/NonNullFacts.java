@@ -128,7 +128,10 @@ public final class NonNullFacts {
     /**
      * The variables known non-null when {@code expression} is evaluated, for a method call, a constructor call, or
      * a field or array access {@code v.f} / {@code v[i]}; empty when it was not walked. Includes what the enclosing
-     * condition establishes: in {@code v != null && v.m()} the call {@code v.m()} has {@code v}.
+     * condition establishes: in {@code v != null && v.m()} the call {@code v.m()} has {@code v}. For a call: when
+     * its evaluation BEGINS, before the receiver and the arguments (Kotlin smart-casts left to right, so in
+     * {@code s.add(v.f)} the receiver {@code s} must not see {@code v} as dereferenced); for a field or array
+     * access: after its scope, before its own dereference.
      */
     public Set<Variable> at(Expression expression) {
         return atExpression.getOrDefault(expression, Set.of());
@@ -437,18 +440,18 @@ public final class NonNullFacts {
                     return false;
                 }
                 case MethodCall mc -> {
+                    record(mc, facts); // when its evaluation begins: what a smart cast at the receiver sees
                     if (mc.object() != null) effects(mc.object(), facts);
                     List<Expression> arguments = mc.parameterExpressions();
                     for (Expression argument : arguments) effects(argument, facts);
-                    record(mc, facts);
                     if (mc.methodInfo() != null && !mc.methodInfo().isStatic()) dereference(mc.object(), facts);
                     if (mc.methodInfo() != null) demanded(mc.methodInfo(), arguments, facts);
                     callMade(facts);
                     return false;
                 }
                 case ConstructorCall cc -> {
-                    for (Expression argument : cc.parameterExpressions()) effects(argument, facts);
                     record(cc, facts);
+                    for (Expression argument : cc.parameterExpressions()) effects(argument, facts);
                     if (cc.constructor() != null) demanded(cc.constructor(), cc.parameterExpressions(), facts);
                     callMade(facts);
                     return false;
