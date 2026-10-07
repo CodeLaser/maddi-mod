@@ -124,12 +124,13 @@ public final class NullabilityPass {
      * @param contracts the null annotations on source declarations are contracts (M2): a nullable one is a seed, a
      *                  non-null one stops null. Off to measure the inference against those annotations (the oracle).
      * @param world     who else calls the analysed code: see {@link World}
-     * @param assertContentWrites the Kotlin translation's choice: a value that is nullable only because of a library
-     *                  contract ({@code Map.get}, ...) does not make an array's elements or a type argument nullable
-     *                  where it is written into them; the slot stays non-null and the printer asserts at the write
+     * @param assertContentWrites the Kotlin translation's choice: a value that is nullable only through indirect
+     *                  evidence (a library contract such as {@code Map.get}, a field's default value, a comparison
+     *                  with null) does not make an array's elements or a type argument nullable where it is written
+     *                  into them; the slot stays non-null and the printer asserts at the write
      *                  ({@code list.add(map.get(k)!!)}), instead of a {@code !!} at every read of a
-     *                  {@code List<X?>}. A null literal, and a source annotation, still make the slot nullable. Off
-     *                  for Java annotations, which say what can happen.
+     *                  {@code List<X?>}. A null literal, a null argument or initializer, and a source annotation,
+     *                  still make the slot nullable. Off for Java annotations, which say what can happen.
      */
     public record Policy(NullableState unreached, boolean nullTests, boolean contracts, World world,
                          boolean assertContentWrites) {
@@ -236,8 +237,8 @@ public final class NullabilityPass {
     private Set<Object> external = Set.of();
     // every flow between two nodes, also one dropped as known non-null: the array Contents they tie (coupleContent)
     private final List<List<Object>> flows = new ArrayList<>();
-    // nodes seeded other than by a library contract (a nullable library result assigned or passed):
-    // Policy.assertContentWrites
+    // nodes seeded by a null that is written (a literal, an argument, an initializer, an annotation), not by indirect
+    // evidence only (seedLibrary): Policy.assertContentWrites
     private final Set<Object> strictSeeds = new HashSet<>();
     private final Map<Object, Set<Object>> successors = new LinkedHashMap<>();
     private final Map<Object, String> seedOrigin = new LinkedHashMap<>();
@@ -650,8 +651,9 @@ public final class NullabilityPass {
         }
     }
 
-    // a seed from a library contract only: see Policy.assertContentWrites
-    private void seedLibrary(Object node, String origin) {
+    // indirect evidence (Policy.assertContentWrites): a library contract, a field's default value (the Kotlin
+    // reading is a 'lateinit' field), a comparison with null (the nullTests heuristic). Not a null that is written.
+    private void seedIndirect(Object node, String origin) {
         if (node != null) seedOrigin.putIfAbsent(node, origin);
     }
 
@@ -1323,7 +1325,7 @@ public final class NullabilityPass {
         MethodInfo callee = mc.methodInfo();
         String lib = libraryNullableReturn(callee);
         if (lib != null) {
-            seedLibrary(target, "assigned " + lib);
+            seedIndirect(target, "assigned " + lib);
         } else if (policy.contracts() && analysed.contains(callee)
                    && NullAnnotations.explicitState(callee) == NullableState.NULLABLE) {
             seed(target, "assigned " + callee.fullyQualifiedName() + ", annotated nullable");
@@ -1347,7 +1349,7 @@ public final class NullabilityPass {
         if (other instanceof VariableExpression ve) {
             Object node = node(mi, scope, ve.variable());
             if (node instanceof ParameterInfo || node instanceof FieldInfo) {
-                seed(node, "compared with null in " + mi.fullyQualifiedName());
+                seedIndirect(node, "compared with null in " + mi.fullyQualifiedName());
             }
         }
     }
@@ -1447,7 +1449,8 @@ public final class NullabilityPass {
         }
         // M4: a variable argument known non-null at the call (or when its statement starts) carries no null
         if (NonNullFacts.unwrap(arguments.get(i)) instanceof VariableExpression ve
-            && (call != null && facts.nonNullAt(call, ve.variable()) || facts.nonNullAt(statement, ve.variable()))) {
+            && (call != null && facts.nonNullWhenCalled(call, ve.variable())
+                || facts.nonNullAt(statement, ve.variable()))) {
             Object node = node(mi, scope, ve.variable());
             if (node != null) flows.add(List.of(node, pi)); // an array known non-null: its elements still flow
             return;
@@ -1455,7 +1458,7 @@ public final class NullabilityPass {
         if (arrayCreatedWithNulls(arguments.get(i)) > 0) seedCreated(pi, arguments.get(i), mi);
         String lib = nullableLibraryCall(arguments.get(i));
         if (lib != null) {
-            seedLibrary(pi, "argument " + lib + " in " + mi.fullyQualifiedName());
+            seedIndirect(pi, "argument " + lib + " in " + mi.fullyQualifiedName());
             return;
         }
         if (list == null || i >= list.list().size()) return;
@@ -1496,12 +1499,12 @@ public final class NullabilityPass {
         if (fi.isFinal() || initializer != null && !initializer.isEmpty()) return;
         List<MethodInfo> constructors = fi.owner().constructors();
         if (constructors.isEmpty()) {
-            seed(fi, "default value: no constructor assigns it");
+            seedIndirect(fi, "default value: no constructor assigns it");
             return;
         }
         for (MethodInfo constructor : constructors) {
             if (!assigns(constructor, fi)) {
-                seed(fi, "default value: not assigned in " + constructor.fullyQualifiedName());
+                seedIndirect(fi, "default value: not assigned in " + constructor.fullyQualifiedName());
                 return;
             }
         }

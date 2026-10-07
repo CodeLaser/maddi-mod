@@ -849,7 +849,13 @@ public class TestNullabilityPass extends CommonTest {
                 private final List<String> viaLocal = new ArrayList<>();
                 private final List<String> literal = new ArrayList<>();
                 private final String[] slots = {"a"};
+                private final List<String> lateList = new ArrayList<>();
+                private String late;
                 void a(String k) { fromMap.add(map.get(k)); }
+                void e() { lateList.add(late); }
+                private final Map<Integer, String> byLength = new HashMap<>();
+                void f(String maybe) { byLength.put(maybe.length(), maybe); }
+                void g() { f(null); }
                 void b(String k) { String v = map.get(k); viaLocal.add(v); }
                 void c() { literal.add(null); }
                 void d(String k) { slots[0] = map.get(k); }
@@ -863,19 +869,29 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("""
                 a(0:k): String
                 b(0:k): String
+                byLength: Map<Integer, String>
                 d(0:k): String
+                f(0:maybe): String?
                 fromMap: List<String?>
+                late: String?
+                lateList: List<String?>
                 literal: List<String?>
                 map: Map<String, String>
                 slots: String?[]
                 viaLocal: List<String?>""", verdicts(java));
-        // Kotlin: 'fromMap.add(map.get(k)!!)', 'viaLocal.add(v!!)', 'slots[0] = map.get(k)!!'; the literal null stays
+        // Kotlin: 'fromMap.add(map.get(k)!!)', 'viaLocal.add(v!!)', 'slots[0] = map.get(k)!!', 'lateList.add(late!!)'
+        // (a field nullable only by its default value); the literal null stays. 'byLength.put(maybe.length(), maybe)':
+        // the put only happens with a non-null 'maybe', dereferenced by the first argument
         NullabilityPass.Report kotlin = new NullabilityPass(NullabilityPass.Policy.KOTLIN).go(analysisOrder);
         assertEquals("""
                 a(0:k): String
                 b(0:k): String
+                byLength: Map<Integer, String>
                 d(0:k): String
+                f(0:maybe): String?
                 fromMap: List<String>
+                late: String?
+                lateList: List<String>
                 literal: List<String?>
                 map: Map<String, String>
                 slots: String[]

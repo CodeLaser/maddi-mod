@@ -63,6 +63,8 @@ public final class NonNullFacts {
 
     private final Map<Statement, Set<Variable>> before = new IdentityHashMap<>();
     private final Map<Expression, Set<Variable>> atExpression = new IdentityHashMap<>();
+    // per call: the facts once the receiver and all arguments are evaluated, when the callee runs
+    private final Map<Expression, Set<Variable>> whenCalled = new IdentityHashMap<>();
     private final Map<MethodInfo, Set<Variable>> atExit = new IdentityHashMap<>();
     // the facts at each normal exit (a return, the end of the body) of the method being walked; null in a lambda
     private List<Set<Variable>> exits;
@@ -139,6 +141,15 @@ public final class NonNullFacts {
 
     public boolean nonNullAt(Expression expression, Variable variable) {
         return at(expression).contains(variable);
+    }
+
+    /**
+     * Is {@code variable} known non-null when the callee of {@code call} starts: after the receiver and every argument
+     * have been evaluated. In {@code s.add(x, x.id)} the call only happens with a non-null {@code x}, although
+     * {@link #at(Expression)} (when the call's evaluation begins) does not have it.
+     */
+    public boolean nonNullWhenCalled(Expression call, Variable variable) {
+        return whenCalled.getOrDefault(call, Set.of()).contains(variable);
     }
 
     // ------------------------------------------------------------------ statements
@@ -445,6 +456,7 @@ public final class NonNullFacts {
                     List<Expression> arguments = mc.parameterExpressions();
                     for (Expression argument : arguments) effects(argument, facts);
                     if (mc.methodInfo() != null && !mc.methodInfo().isStatic()) dereference(mc.object(), facts);
+                    whenCalled.put(mc, Set.copyOf(facts));
                     if (mc.methodInfo() != null) demanded(mc.methodInfo(), arguments, facts);
                     callMade(facts);
                     return false;
@@ -452,6 +464,7 @@ public final class NonNullFacts {
                 case ConstructorCall cc -> {
                     record(cc, facts);
                     for (Expression argument : cc.parameterExpressions()) effects(argument, facts);
+                    whenCalled.put(cc, Set.copyOf(facts));
                     if (cc.constructor() != null) demanded(cc.constructor(), cc.parameterExpressions(), facts);
                     callMade(facts);
                     return false;
