@@ -707,3 +707,30 @@ engine's hidden content, so it is unchanged.
 
 Guava: unchanged in every row. Fernflower: unchanged at 160 / 109. `SecondaryFunctionsHelper.mapNumComparisons` is
 now `MutableMap<Int, Array<Int?>>`, and its four remaining errors are the printer's explicit `arrayOf<Int>`.
+
+### 2026-10-07 — a class's type variable: the receiver's slot
+
+`ListStack<T>.push(T item)` is passed null by its callers (`stack.push(null)`). The pass made `item` nullable, and
+the printer wrote `push(item: T?)`, which then failed at `add(item)` (`T?` is not the `ArrayList<T>`'s `E`). Both
+outputs want something else:
+- JSpecify: `ListStack<T extends @Nullable Object>` with `push(T)`, and a `ListStack<@Nullable X>` at the use;
+- Kotlin: `push(item: T)` and a `ListStack<X?>`.
+
+The null belongs to the instantiation. So a call with a receiver variable now writes such an argument into the
+receiver's slot (`receiverSlots`), as it already did for library classes, and not into the parameter. This applies
+only to a concrete method that nothing overrides. An abstract method such as guava's `Function.apply(F)` is a
+consumer, and its null must still reach the implementations; without this restriction guava had +5 unsafe. A call
+on `this`, or one to a non-modifying method, still makes the parameter nullable. A null of the class's own
+(`T peek() { return ... ? null : ... }`) stays `T?`.
+
+This also removes the holder over-approximation from the type-arguments test: `boxNull(Box<String> b)` makes only
+its own box `Box<String?>`. Before, the null reached `Box.t`, and from there the slot of every `Box` (`intBox`,
+`unbox`).
+
+Guava, `NULL_MARKED`: parameters 6147 / 248 / 147, undecided 44 (was 6150 / 247 / 147, 42). The new unsafe one is
+`LocalCache.hash(@Nullable Object)`: its null used to come through `put(K key, ...)`, whose `K` guava annotates
+non-null. Fernflower: 161 files, 102 errors (was 160, 109).
+
+A related fernflower error that the verdicts can't fix: `FastSparseSetIterator.next()` really returns null, which
+breaks `Iterator.next(): E`. Kotlin can't override with `E?`, so the printer has to keep `E` and write
+`null as E`.

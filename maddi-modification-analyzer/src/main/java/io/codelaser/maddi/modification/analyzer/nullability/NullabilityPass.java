@@ -1633,9 +1633,18 @@ public final class NullabilityPass {
             // a library parameter typed by its class's type variable ('Map.put(K, V)') does not take the argument: the
             // write is the receiver's slot (receiverSlots), and the parameter would carry it down into every analysed
             // implementation of the library type
-            if (!analysed.contains(callee) && parameter.parameterizedType().typeParameter() != null
+            // The same for an analysed generic class, where the receiver's slot takes the write: 'stack.push(null)' on a
+            // 'ListStack<T>' makes the stack a 'ListStack<X?>', not 'push(T?)' (JSpecify: 'T extends @Nullable
+            // Object'; Kotlin: 'push(item: T)' and a 'ListStack<X?>'). Only for a concrete method nothing overrides: an
+            // abstract one is not known to store ('Function.apply(F)' is a consumer, and its null must reach the
+            // implementations; guava 2026-10-07: +5 unsafe without this). A call on 'this' or a consumer method
+            // still makes the parameter nullable.
+            if (parameter.parameterizedType().typeParameter() != null
                 && !parameter.parameterizedType().typeParameter().isMethodTypeParameter()
-                && parameter.parameterizedType().arrays() == 0) {
+                && parameter.parameterizedType().arrays() == 0
+                && (!analysed.contains(callee)
+                    || !callee.isAbstract() && !implementations.containsKey(callee)
+                       && slotReceiver(mi, scope, call, callee) != null)) {
                 continue;
             }
             for (ParameterInfo pi : typedDispatch(call, callee, parameter)) {
@@ -1652,17 +1661,9 @@ public final class NullabilityPass {
      */
     private void receiverSlots(MethodInfo mi, Scope scope, Statement statement, Expression call, MethodInfo callee,
                                LinkComputer.ListOfLinks list, List<Expression> arguments) {
-        if (!(call instanceof MethodCall mc) || mc.object() == null || callee.isStatic()) return;
-        if (!(NonNullFacts.unwrap(mc.object()) instanceof VariableExpression ve)) return;
-        // only a method that modifies its receiver stores what it is given: 'add', 'put', 'set'; not a consumer
-        // such as 'Comparator.compare(T, T)', 'Equivalence.equivalent', 'Predicate.test'
-        if (callee.analysis().getOrDefault(PropertyImpl.NON_MODIFYING_METHOD, ValueImpl.BoolImpl.FALSE).isTrue()) {
-            return;
-        }
-        Object receiver = node(mi, scope, ve.variable());
-        ParameterizedType type = receiver == null ? null : typeOf(receiver);
+        Object receiver = slotReceiver(mi, scope, call, callee);
+        if (receiver == null) return;
         int arity = callee.typeInfo().typeParameters().size();
-        if (type == null || type.arrays() > 0 || arity == 0 || type.parameters().size() != arity) return;
         List<ParameterInfo> parameters = callee.parameters();
         for (int i = 0; i < arguments.size() && i < parameters.size(); i++) {
             ParameterizedType pt = parameters.get(i).parameterizedType();
@@ -1671,6 +1672,22 @@ public final class NullabilityPass {
             if (index < arity) argument(mi, scope, statement, call, list, arguments, i, new Arg(receiver, index));
         }
         contentCopies(mi, scope, receiver, callee, arguments);
+    }
+
+    // the receiver whose slots a call writes: a variable of the callee's generic class, with as many type arguments
+    private Object slotReceiver(MethodInfo mi, Scope scope, Expression call, MethodInfo callee) {
+        if (!(call instanceof MethodCall mc) || mc.object() == null || callee.isStatic()) return null;
+        if (!(NonNullFacts.unwrap(mc.object()) instanceof VariableExpression ve)) return null;
+        // only a method that modifies its receiver stores what it is given: 'add', 'put', 'set'; not a consumer
+        // such as 'Comparator.compare(T, T)', 'Equivalence.equivalent', 'Predicate.test'
+        if (callee.analysis().getOrDefault(PropertyImpl.NON_MODIFYING_METHOD, ValueImpl.BoolImpl.FALSE).isTrue()) {
+            return null;
+        }
+        Object receiver = node(mi, scope, ve.variable());
+        ParameterizedType type = receiver == null ? null : typeOf(receiver);
+        int arity = callee.typeInfo().typeParameters().size();
+        if (type == null || type.arrays() > 0 || arity == 0 || type.parameters().size() != arity) return null;
+        return receiver;
     }
 
     // 'm(array)' for 'm(String... xs)': the one argument in the varargs position is itself the array

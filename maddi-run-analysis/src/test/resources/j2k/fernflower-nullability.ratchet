@@ -26,8 +26,12 @@
 #
 # 2026-10-07, a lambda takes its functional method's parameters (override edges), arms of a switch expression start
 # from the selector's facts, guards through constructor arguments and call branches of ?:: 160 files, 109 errors.
+#
+# 2026-10-07, a null passed through a receiver to an analysed generic class's T parameter is the receiver's slot
+# ('ListStack<X?>', not 'push(item: T?)'), library factories tie their arguments into the result's slots: 161 files,
+# 102 errors.
 types	199
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	199
-compilingFiles	160
+compilingFiles	161

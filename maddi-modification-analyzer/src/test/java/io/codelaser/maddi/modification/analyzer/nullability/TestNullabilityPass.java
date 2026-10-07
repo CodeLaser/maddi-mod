@@ -813,7 +813,8 @@ public class TestNullabilityPass extends CommonTest {
     public void typeArguments() {
         NullabilityPass.Report report = run("a.b.G", GENERICS);
         System.out.println(explain(report));
-        // 'intBox' is an over-approximation: a null in Box.t (from 'boxNull') reaches the slot of every Box
+        // 'boxNull' writes its null into its own receiver's slot, not into 'Box.set(T)': 'intBox' and 'unbox' stay
+        // clean (before 2026-10-07 the null reached Box.t and from there the slot of every Box)
         assertEquals("""
                 <init>(0:t): T!
                 addClean(0:s): String
@@ -827,17 +828,17 @@ public class TestNullabilityPass extends CommonTest {
                 firstClean(): String
                 generic(): List<X!>
                 generic(0:in): List<X!>
-                get(): T?
-                intBox(): Box<Integer?>
+                get(): T!
+                intBox(): Box<Integer>
                 loop(): String?
                 names: List<String?>
                 opt(): Optional<String>
                 opt(0:s): String
                 putNull(0:k): String
-                set(0:t): T?
-                t: T?
-                unbox(): String?
-                unbox(0:b): Box<String?>""", verdicts(report));
+                set(0:t): T!
+                t: T!
+                unbox(): String
+                unbox(0:b): Box<String>""", verdicts(report));
     }
 
     @Language("java")
@@ -1102,5 +1103,36 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("List<String?>", byName.get("a.b.Y.NAMES"));
         assertEquals("List<String>", byName.get("a.b.Y.CLEAN"));
         assertEquals("List<String?>", byName.get("a.b.Y.wrap(String)"));
+    }
+
+    @DisplayName("an analysed generic class: a null written through a receiver goes to its slot, not to 'T?'")
+    @Test
+    public void classTypeVariables() {
+        NullabilityPass.Report report = run("a.b.Q", """
+                package a.b;
+                import java.util.*;
+                class Q {
+                    static class Stack<T> {
+                        private final List<T> items = new ArrayList<>();
+                        void push(T item) { items.add(item); }
+                        T peek() { return items.isEmpty() ? null : items.get(items.size() - 1); }
+                        void pushTwice(T item) { push(item); push(item); }
+                    }
+                    static class Holder<T> {
+                        T value;
+                        void set(T t) { value = t; }
+                    }
+                    private final Stack<String> names = new Stack<>();
+                    private final Holder<String> self = new Holder<>();
+                    void fill() { names.push(null); names.push("x"); }
+                    void inner(Holder<String> h) { h.set("a"); }
+                }
+                """);
+        System.out.println(explain(report));
+        Map<String, String> byName = report.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+        assertEquals("T!", byName.get("a.b.Q.Stack.push(Object):0:item"), "the null is the receiver's");
+        assertEquals("Stack<String?>", byName.get("a.b.Q.names"));
+        assertEquals("T?", byName.get("a.b.Q.Stack.peek()"), "a null of the class's own");
     }
 }
