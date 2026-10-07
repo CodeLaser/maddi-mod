@@ -30,14 +30,13 @@ import java.io.IOException;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.NullabilityImpl.UNSPECIFIED;
 import static io.codelaser.maddi.modification.prepwork.io.LoadAnalysisResults.ANALYZED_RESULTS;
 import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.*;
 import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.ImmutableImpl.IMMUTABLE;
 import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.ImmutableImpl.MUTABLE;
 import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.DEPENDENT;
 import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.INDEPENDENT;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.NotNullImpl.NOT_NULL;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.NotNullImpl.NULLABLE;
 import static org.junit.jupiter.api.Assertions.*;
 
 public class TestLoadAnalyzedPackageFiles {
@@ -61,7 +60,7 @@ public class TestLoadAnalyzedPackageFiles {
         assertNotNull(object);
         MethodInfo objectToString = object.findUniqueMethod("toString", 0);
         // assertSame(TRUE, methodInfo.analysis().getOrDefault(CONTAINER_METHOD, FALSE));
-        assertSame(NOT_NULL, objectToString.analysis().getOrDefault(NOT_NULL_METHOD, NULLABLE));
+        assertEquals("N", objectToString.analysis().getOrDefault(NULLABILITY_METHOD, UNSPECIFIED).toString());
         assertFalse(objectToString.isModifying());
         assertSame(IMMUTABLE, objectToString.analysis().getOrDefault(IMMUTABLE_METHOD, MUTABLE));
         assertSame(INDEPENDENT, objectToString.analysis().getOrDefault(INDEPENDENT_METHOD, DEPENDENT));

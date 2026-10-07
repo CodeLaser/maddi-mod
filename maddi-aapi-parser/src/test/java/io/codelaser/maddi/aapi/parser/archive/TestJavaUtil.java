@@ -26,13 +26,13 @@ import org.junit.jupiter.api.Test;
 import java.util.*;
 import java.util.stream.Collectors;
 
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.NullabilityImpl.UNSPECIFIED;
 import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.*;
 import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.FALSE;
 import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.TRUE;
 import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.ImmutableImpl.*;
 import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.ImmutableImpl.NO_VALUE;
 import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.*;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.NotNullImpl.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 public class TestJavaUtil extends CommonTest {
@@ -184,7 +184,7 @@ public class TestJavaUtil extends CommonTest {
         assertFalse(methodInfo.isModifying());
         assertSame(INDEPENDENT_HC, methodInfo.analysis().getOrDefault(INDEPENDENT_METHOD, DEPENDENT));
         assertSame(MUTABLE, methodInfo.analysis().getOrDefault(IMMUTABLE_METHOD, MUTABLE));
-        assertSame(CONTENT_NOT_NULL, methodInfo.analysis().getOrDefault(NOT_NULL_METHOD, NULLABLE));
+        assertEquals("N(N)", methodInfo.analysis().getOrDefault(NULLABILITY_METHOD, UNSPECIFIED).toString());
     }
 
     @Test
@@ -467,13 +467,13 @@ public class TestJavaUtil extends CommonTest {
 
         ParameterInfo p0 = methodInfo.parameters().getFirst();
         assertFalse(p0.isModified());
-        assertSame(NULLABLE, p0.analysis().getOrDefault(NOT_NULL_PARAMETER, NULLABLE));
+        assertEquals("U", p0.analysis().getOrDefault(NULLABILITY_PARAMETER, UNSPECIFIED).toString());
         assertSame(IMMUTABLE_HC, p0.analysis().getOrDefault(IMMUTABLE_PARAMETER, MUTABLE));
         assertSame(INDEPENDENT_HC, p0.analysis().getOrDefault(INDEPENDENT_PARAMETER, DEPENDENT));
 
         ParameterInfo p1 = methodInfo.parameters().get(1);
         assertFalse(p1.isModified());
-        assertSame(NULLABLE, p1.analysis().getOrDefault(NOT_NULL_PARAMETER, NULLABLE));
+        assertEquals("U", p1.analysis().getOrDefault(NULLABILITY_PARAMETER, UNSPECIFIED).toString());
         assertSame(IMMUTABLE_HC, p1.analysis().getOrDefault(IMMUTABLE_PARAMETER, MUTABLE));
         assertSame(INDEPENDENT_HC, p1.analysis().getOrDefault(INDEPENDENT_PARAMETER, DEPENDENT));
     }
@@ -489,13 +489,13 @@ public class TestJavaUtil extends CommonTest {
 
         ParameterInfo p0 = methodInfo.parameters().getFirst();
         assertFalse(p0.isModified());
-        assertSame(NULLABLE, p0.analysis().getOrDefault(NOT_NULL_PARAMETER, NULLABLE));
+        assertEquals("Q", p0.analysis().getOrDefault(NULLABILITY_PARAMETER, UNSPECIFIED).toString());
         assertSame(IMMUTABLE_HC, p0.analysis().getOrDefault(IMMUTABLE_PARAMETER, MUTABLE));
         assertSame(INDEPENDENT, p0.analysis().getOrDefault(INDEPENDENT_PARAMETER, DEPENDENT));
 
         ParameterInfo p1 = methodInfo.parameters().get(1);
         assertFalse(p1.isModified());
-        assertSame(NULLABLE, p1.analysis().getOrDefault(NOT_NULL_PARAMETER, NULLABLE));
+        assertEquals("U", p1.analysis().getOrDefault(NULLABILITY_PARAMETER, UNSPECIFIED).toString());
         assertSame(IMMUTABLE_HC, p1.analysis().getOrDefault(IMMUTABLE_PARAMETER, MUTABLE));
         assertEquals("@Independent(hc=true, hcReturnValue=true)",
                 p1.analysis().getOrDefault(INDEPENDENT_PARAMETER, DEPENDENT).toString());
@@ -513,7 +513,7 @@ public class TestJavaUtil extends CommonTest {
 
         ParameterInfo p0 = methodInfo.parameters().getFirst();
         assertFalse(p0.isModified());
-        assertSame(NOT_NULL, p0.analysis().getOrDefault(NOT_NULL_PARAMETER, NULLABLE));
+        assertEquals("N", p0.analysis().getOrDefault(NULLABILITY_PARAMETER, UNSPECIFIED).toString());
         assertSame(MUTABLE, p0.analysis().getOrDefault(IMMUTABLE_PARAMETER, MUTABLE));
         assertSame(INDEPENDENT_HC, p0.analysis().getOrDefault(INDEPENDENT_PARAMETER, DEPENDENT));
     }
@@ -575,7 +575,7 @@ public class TestJavaUtil extends CommonTest {
         ParameterInfo p0 = methodInfo.parameters().getFirst();
         assertFalse(p0.isModified());
         assertSame(INDEPENDENT_HC, p0.analysis().getOrDefault(INDEPENDENT_PARAMETER, DEPENDENT));
-        assertSame(NOT_NULL, p0.analysis().getOrDefault(NOT_NULL_PARAMETER, NULLABLE));
+        assertEquals("N", p0.analysis().getOrDefault(NULLABILITY_PARAMETER, UNSPECIFIED).toString());
     }
 
     @Test
@@ -586,7 +586,7 @@ public class TestJavaUtil extends CommonTest {
         ParameterInfo p0 = methodInfo.parameters().getFirst();
         assertFalse(p0.isModified());
         assertSame(INDEPENDENT_HC, p0.analysis().getOrDefault(INDEPENDENT_PARAMETER, DEPENDENT));
-        assertSame(NOT_NULL, p0.analysis().getOrDefault(NOT_NULL_PARAMETER, NULLABLE));
+        assertEquals("N", p0.analysis().getOrDefault(NULLABILITY_PARAMETER, UNSPECIFIED).toString());
     }
 
     // LinkedHashMap was absent; it extends HashMap and must be a @Container like it.
@@ -697,13 +697,13 @@ public class TestJavaUtil extends CommonTest {
         assertFalse(methodInfo.isModifying());
         assertTrue(methodInfo.isStatic());
 
-        assertSame(NOT_NULL, methodInfo.analysis().getOrDefault(NOT_NULL_METHOD, NULLABLE));
+        assertEquals("N", methodInfo.analysis().getOrDefault(NULLABILITY_METHOD, UNSPECIFIED).toString());
         assertSame(INDEPENDENT, methodInfo.analysis().getOrDefault(INDEPENDENT_METHOD, DEPENDENT));
         assertSame(IMMUTABLE_HC, methodInfo.analysis().getOrDefault(IMMUTABLE_METHOD, MUTABLE));
 
         ParameterInfo p0 = methodInfo.parameters().getFirst();
         assertFalse(p0.isModified());
-        assertSame(NOT_NULL, p0.analysis().getOrDefault(NOT_NULL_PARAMETER, NULLABLE));
+        assertEquals("N", p0.analysis().getOrDefault(NULLABILITY_PARAMETER, UNSPECIFIED).toString());
     }
 
     @Test
@@ -717,13 +717,13 @@ public class TestJavaUtil extends CommonTest {
         assertFalse(methodInfo.isModifying());
 
         // int
-        assertSame(NOT_NULL, methodInfo.analysis().getOrDefault(NOT_NULL_METHOD, NULLABLE));
+        assertEquals("N", methodInfo.analysis().getOrDefault(NULLABILITY_METHOD, UNSPECIFIED).toString());
         assertSame(INDEPENDENT, methodInfo.analysis().getOrDefault(INDEPENDENT_METHOD, DEPENDENT));
         assertSame(IMMUTABLE, methodInfo.analysis().getOrDefault(IMMUTABLE_METHOD, MUTABLE));
 
         ParameterInfo p0 = methodInfo.parameters().getFirst();
         assertFalse(p0.isModified());
-        assertSame(NULLABLE, p0.analysis().getOrDefault(NOT_NULL_PARAMETER, NULLABLE));
+        assertEquals("U", p0.analysis().getOrDefault(NULLABILITY_PARAMETER, UNSPECIFIED).toString());
         assertSame(TRUE, p0.analysis().getOrDefault(CONTAINER_PARAMETER, FALSE));
     }
 
@@ -792,7 +792,7 @@ public class TestJavaUtil extends CommonTest {
         assertTrue(p0.isModified());
         assertTrue(p0.isIgnoreModifications());
         assertSame(INDEPENDENT_HC, p0.analysis().getOrDefault(INDEPENDENT_PARAMETER, DEPENDENT));
-        assertSame(NOT_NULL, p0.analysis().getOrDefault(NOT_NULL_PARAMETER, NULLABLE));
+        assertEquals("N", p0.analysis().getOrDefault(NULLABILITY_PARAMETER, UNSPECIFIED).toString());
     }
 
     @Test

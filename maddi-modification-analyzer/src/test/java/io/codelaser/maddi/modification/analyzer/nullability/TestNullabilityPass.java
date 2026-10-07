@@ -29,14 +29,21 @@ public class TestNullabilityPass extends CommonTest {
 
     private TypeInfo parsed;
 
+    private List<Info> analysisOrder;
+
     private NullabilityPass.Report run(String fqn, String src) {
+        return run(fqn, src, NullabilityPass.Policy.NULL_MARKED);
+    }
+
+    private NullabilityPass.Report run(String fqn, String src, NullabilityPass.Policy policy) {
         TypeInfo t = javaInspector.parse(fqn, src);
         parsed = t;
         List<Info> ao = prepWork(t);
         ModAnalyzerForTesting analyzer = new SingleIterationAnalyzerImpl(javaInspector,
                 new IteratingAnalyzerImpl.ConfigurationBuilder().setNullability(true).build());
         analyzer.go(ao, 3);
-        return new NullabilityPass(NullabilityPass.Policy.NULL_MARKED).go(ao);
+        analysisOrder = ao;
+        return new NullabilityPass(policy).go(ao);
     }
 
     static String k(ParameterizedType pt) {
@@ -170,10 +177,9 @@ public class TestNullabilityPass extends CommonTest {
                 never(0:n): String
                 passLocal(0:b): boolean
                 take(0:s): String?
-                tolerant(): String?
+                tolerant(): String
                 tolerant(0:t): String?""", verdicts(report));
-        // tolerant(): String? is the flow-insensitivity of the pass: after the test, t is not null where it is
-        // returned. The use-site pass (M4) is where that is seen.
+        // tolerant(): after 'if (t == null) return ""', t is known non-null where it is returned (M4)
     }
 
     @Language("java")
@@ -336,5 +342,215 @@ public class TestNullabilityPass extends CommonTest {
                 .findFirst().orElseThrow().statements().getFirst();
         assertEquals("String?", k(report.local(sibling, first, first.localVariable())));
         assertEquals("String", k(report.local(sibling, second, second.localVariable())));
+    }
+
+    @Language("java")
+    private static final String NESTED_LOCALS = """
+            package a.b;
+            import java.util.ArrayList;
+            import java.util.LinkedList;
+            import java.util.List;
+            class N {
+                static class Node { List<Node> succ = new ArrayList<>(); Node next; }
+                void flatten(Node root) {
+                    class StackEntry {
+                        final Node node;
+                        StackEntry(Node node) { this.node = node; }
+                    }
+                    LinkedList<StackEntry> stack = new LinkedList<>();
+                    stack.add(new StackEntry(root));
+                    mainloop:
+                    while (!stack.isEmpty()) {
+                        StackEntry statEntry = stack.removeFirst();
+                        if (statEntry == null) continue mainloop;
+                        Node source = statEntry.node;
+                        if (source != null) {
+                            for (int i = 0; i < source.succ.size(); i++) {
+                                Node shortEntry = null;
+                                Node longEntry = null;
+                                if (i > 2) { shortEntry = source.succ.get(i); longEntry = source; }
+                                while (true) {
+                                    StackEntry entry = null;
+                                    if (shortEntry != null) entry = new StackEntry(shortEntry);
+                                    if (entry == null || longEntry == null) break;
+                                    stack.add(entry);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            """;
+
+    @DisplayName("locals initialized null, nested in loops after a local class declaration (fernflower)")
+    @Test
+    public void nestedLocals() {
+        NullabilityPass.Report report = run("a.b.N", NESTED_LOCALS);
+        String all = locals(report);
+        System.out.println(all);
+        org.junit.jupiter.api.Assertions.assertTrue(all.contains("flatten.shortEntry: Node?"), all);
+        org.junit.jupiter.api.Assertions.assertTrue(all.contains("flatten.longEntry: Node?"), all);
+        org.junit.jupiter.api.Assertions.assertTrue(all.contains("flatten.entry: StackEntry?"), all);
+    }
+
+    @Language("java")
+    private static final String CONTRACTS = """
+            package a.b;
+            import io.codelaser.maddi.annotation.NotNull;
+            import io.codelaser.maddi.annotation.Nullable;
+            class C {
+                private final String guarded;
+                C(@NotNull String t) { this.guarded = t; }
+                static C make() { return new C(null); }
+                String echo(@Nullable String s) { return s; }
+                @Nullable String maybe() { return "x"; }
+                String viaMaybe() { return maybe(); }
+                String getGuarded() { return guarded; }
+            }
+            """;
+
+    @DisplayName("contracts (M2): a nullable annotation seeds, a non-null one stops null and keeps its verdict")
+    @Test
+    public void contracts() {
+        NullabilityPass.Report report = run("a.b.C", CONTRACTS);
+        System.out.println(explain(report));
+        // make() passes null to the non-null constructor parameter: the caller's error, which does not travel on
+        assertEquals("""
+                <init>(0:t): String
+                echo(): String?
+                echo(0:s): String?
+                getGuarded(): String
+                guarded: String
+                make(): C
+                maybe(): String?
+                viaMaybe(): String?""", verdicts(report));
+    }
+
+    @DisplayName("without contracts (the oracle's view): annotations are ignored, the inference alone decides")
+    @Test
+    public void withoutContracts() {
+        NullabilityPass.Report report = run("a.b.C", CONTRACTS, NullabilityPass.Policy.NULL_MARKED.withoutContracts());
+        Map<String, String> byLabel = report.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> label(e.getKey()), e -> k(e.getValue())));
+        assertEquals("String", byLabel.get("echo(0:s)"));
+        assertEquals("String?", byLabel.get("<init>(0:t)"));
+        assertEquals("String?", byLabel.get("guarded"));
+        assertEquals("String", byLabel.get("maybe()"));
+    }
+
+    @Language("java")
+    private static final String DEGRADED = """
+            package a.b;
+            class D {
+                String compute() { return "c"; }
+                void big(boolean b) {
+                    String known = compute();
+                    String none = null;
+                    if (b) none = known;
+                    System.out.println(none);
+                }
+            }
+            """;
+
+    @DisplayName("a degraded method (no links): a local assigned null is still seen, the others are unspecified")
+    @Test
+    public void degradedLocals() {
+        TypeInfo t = javaInspector.parse("a.b.D", DEGRADED);
+        List<Info> ao = prepWork(t);
+        new SingleIterationAnalyzerImpl(javaInspector,
+                new IteratingAnalyzerImpl.ConfigurationBuilder().setNullability(true).build()).go(ao, 3);
+        MethodInfo big = t.findUniqueMethod("big", 1);
+        // what LinkComputerImpl writes when it gives up on a method; its variable data then carries no links
+        big.analysis().setAllowControlledOverwrite(io.codelaser.maddi.cst.impl.analysis.PropertyImpl.DEGRADED_ANALYSIS_METHOD,
+                io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.TRUE);
+        NullabilityPass.Report report = new NullabilityPass(NullabilityPass.Policy.NULL_MARKED).go(ao);
+        String all = locals(report);
+        org.junit.jupiter.api.Assertions.assertTrue(all.contains("big.none: String?"), all);
+        org.junit.jupiter.api.Assertions.assertTrue(all.contains("big.known: String!"), all);
+    }
+
+    @Language("java")
+    private static final String USE_SITES = """
+            package a.b;
+            import java.util.HashMap;
+            import java.util.Map;
+            class U {
+                private final Map<String, String> map = new HashMap<>();
+                private String cache;
+                U() { cache = "c"; }
+                String lookup(String k) {
+                    String v = map.get(k);
+                    if (v == null) return "default";
+                    cache = v;
+                    return v;
+                }
+                void passOn(String k) {
+                    String v = map.get(k);
+                    if (v != null) {
+                        take(v);
+                    }
+                }
+                void take(String t) { System.out.println(t); }
+                int deref(String s) {
+                    String w = map.get(s);
+                    int n = w.length();
+                    keep(w);
+                    return n;
+                }
+                void keep(String x) { System.out.println(x); }
+                void requireIt(String p) {
+                    if (p == null) throw new IllegalArgumentException();
+                    System.out.println(p);
+                }
+                String unguarded(String k) { String u = map.get(k); return u; }
+                private String lazy;
+                String getLazy() { String result = lazy; return result == null ? lazy = "z" : result; }
+            }
+            """;
+
+    @DisplayName("use sites (M4): a null checked away, dereferenced away, or thrown on does not travel")
+    @Test
+    public void useSites() {
+        NullabilityPass.Report report = run("a.b.U", USE_SITES);
+        System.out.println(explain(report));
+        Map<String, String> byLabel = report.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> label(e.getKey()), e -> k(e.getValue())));
+        assertEquals("String", byLabel.get("cache"), "assigned after 'if (v == null) return'");
+        assertEquals("String", byLabel.get("lookup()"), "returned after the guard");
+        assertEquals("String", byLabel.get("take(0:t)"), "passed inside 'if (v != null)'");
+        assertEquals("String", byLabel.get("keep(0:x)"), "passed after 'w.length()'");
+        // a null test is an expectation of null, even when its branch throws (guava's checking methods)
+        assertEquals("String?", byLabel.get("requireIt(0:p)"));
+        assertEquals("String?", byLabel.get("unguarded()"), "no check: Map.get's null travels");
+        assertEquals("String?", byLabel.get("lazy"), "Java's default value");
+        assertEquals("String", byLabel.get("getLazy()"), "the lazy getter: null only in the branch that assigns");
+        String locals = locals(report);
+        org.junit.jupiter.api.Assertions.assertTrue(locals.contains("lookup.v: String?"), locals);
+    }
+
+    @Language("java")
+    private static final String SMART_CASTS = """
+            package a.b;
+            import java.util.Objects;
+            class K {
+                int checked(String s) { if (s == null) return 0; return s.length(); }
+                int required(String r) { Objects.requireNonNull(r); return r.length(); }
+            }
+            """;
+
+    @DisplayName("smart casts: only what Kotlin derives too; requireNonNull is Java's, not Kotlin's")
+    @Test
+    public void smartCasts() {
+        NullabilityPass.Report report = run("a.b.K", SMART_CASTS);
+        io.codelaser.maddi.cst.api.info.MethodInfo checked = parsed.findUniqueMethod("checked", 1);
+        io.codelaser.maddi.cst.api.statement.Statement ret = checked.methodBody().statements().getLast();
+        assertEquals(true, report.useSites().nonNullAt(ret, checked.parameters().getFirst()));
+        assertEquals(true, report.smartCasts().nonNullAt(ret, checked.parameters().getFirst()));
+        io.codelaser.maddi.cst.api.info.MethodInfo required = parsed.findUniqueMethod("required", 1);
+        io.codelaser.maddi.cst.api.statement.Statement ret2 = required.methodBody().statements().getLast();
+        ParameterInfo r = required.parameters().getFirst();
+        // the JDK hint: requireNonNull's parameter demands non-null, so Java knows; Kotlin does not smart-cast
+        assertEquals(true, report.useSites().nonNullAt(ret2, r));
+        assertEquals(false, report.smartCasts().nonNullAt(ret2, r));
     }
 }

@@ -17,7 +17,9 @@ dereference, whether the value can be null at that point. Two applications consu
 
 What to do with a value the analysis cannot decide is a **policy parameter**, not a design decision (§5).
 
-## 2. What exists today
+## 2. What existed at the start (2026-10-06)
+
+(`NOT_NULL_*` and `NotNullImpl` have since been removed; see B2 and the §9 log.)
 
 | piece | where | state |
 |---|---|---|
@@ -82,9 +84,10 @@ has the edges needed (argument → parameter via `LINKED_VARIABLES_ARGUMENTS`, f
   answers "can this be null", the arguments answer "can its elements / keys / values be null"
   (`Map<String, String?>`). Nullability is already a per-use dimension of the type
   (`TestTypeUseAnnotationDistinguishesUses`), and the Kotlin printer already prints it. New properties on
-  `FieldInfo`, `ParameterInfo` and `MethodInfo` (return), e.g. `NULLABILITY_TYPE_FIELD/PARAMETER/METHOD`. The
-  existing `NOT_NULL_*` stay, derived from the outer state, so `DecoratorImpl`, `MethodInfo.isNotNull…` and the
-  hint files keep working. `UNSPECIFIED` means *undecided* (input to the policy, §5).
+  `FieldInfo`, `ParameterInfo` and `MethodInfo` (return): `NULLABILITY_FIELD/PARAMETER/METHOD`, the ONLY
+  nullness properties (decision 2026-10-06: `NOT_NULL_*` removed, no backward compatibility). `UNSPECIFIED`, the
+  default, means *nobody said* (input to the policy, §5); the old properties' default was NULLABLE, which could
+  not tell "may be null" from "unknown".
 - **B3 — printers**: the Kotlin printer reads the property for declarations, falling back to
   `NullableState`, and reads a per-expression use-site decision (M4) for `?.` / `!!` / `?:`. The Java side
   is `DecoratorImpl`, which is in maddi-mod (§D1). No base → mod dependency arises: the properties live in base.
@@ -296,3 +299,108 @@ verdict. A lambda resolves captured locals in its enclosing scope. The guava dec
   elements) and nested types (`@Nullable Map.Entry` does not compile). Both, and type arguments, need the
   annotation inside the printed type: next. `TestNullabilityAnnotations` pins JSpecify `@NullMarked` and JSR-305
   with non-null output end to end.
+
+### 2026-10-06 — NOT_NULL_* removed; NULLABILITY_* is the only nullness property
+
+Decision (Bart): `NOT_NULL_*` was a relic of an older analyzer; remove it, no backward compatibility.
+
+- **Gone**: `NOT_NULL_FIELD/_METHOD/_PARAMETER`, `ValueImpl.NotNullImpl`, `Value.NotNullProperty`,
+  `MethodInfo.isPropertyNullable` (unused). `isPropertyNotNull` (Lombok uses it) now reads `NULLABILITY_*`.
+- **Contracts** (`AnnotationToProperty`): maddi's `@NotNull` → N, `@NotNull(content = true)` → N with every type
+  argument N, `@Nullable` → Q (it was not read at all before), `absent = true` → U explicitly (it stops a default).
+  B1 now reads `content = true` the same way: the value is non-null too. The 38 such hints are all
+  `List.of`/`Map.of`/`stream()`, which are non-null themselves, so the earlier "content only" reading was wrong.
+- **Library defaults** (`ShallowMethodAnalyzer`/`ShallowTypeAnalyzer`): primitive, fluent and enum-constant → N.
+  A return inherits N from an overridden method, else Q; a parameter inherits Q from an overridden method, else N
+  (Kotlin's one-nullability-per-chain rule). Otherwise U, where the old default was NULLABLE. Constructors and void
+  methods get no value (they used to get a meaningless NOT_NULL).
+- **Hint archives** regenerated (`compileAnalysisHints`, on JDK 26, the recorded release, via
+  `-Dorg.gradle.java.home`): 4,641 `nullabilityMethod` N, 27 N(N), 11 N(N,N), 4,630 parameter N, 304 field N. The
+  libs/support results were regenerated with `GenerateSupportAnalysisResults`; the file name had been stale since
+  the e2immu → maddi rename.
+- **Printing**: `DecoratorImpl` prints maddi's `@NotNull`/`@Nullable` from `NULLABILITY_*` in explicit mode only
+  (the hints round-trip). User-facing null annotations are `NullabilityDecorator`'s, in the chosen flavour.
+- **The pass** does not overwrite a declaration that carries a null annotation (contract wins). Using contracts as
+  seeds is still M2 work. The simple-name lists moved to `cst-analysis` `NullAnnotations`, shared by B1, the pass
+  and the decorator.
+- **IDE daemon** (maddi-dist `AnnotationTagger`): `@Nullable` tag from state Q.
+- Not touched: `maddi-run-analysis/src/test/resources/json/JavaIo.json`, `JavaLang.json`, fixtures of a
+  `@Disabled` test that already use other obsolete keys.
+
+Test suites: maddi 2,388 tests, maddi-mod 1,568, all passing, `TestAnalysisHintsCompiler` included. Guava oracle
+unchanged.
+
+### 2026-10-06 — M2: contracts; the JDK null contracts move into the hints
+
+- **Decision (Bart)**: an array gets an element slot in B2. Proposed shape: for an array type, `arguments()`
+  holds the element state, so `String?[]` is `N(Q)`; no new format. Implemented with content inference.
+- **Library contracts from the hints**: `LibraryNullness` is gone. Its entries are maddi `@Nullable` in the JDK
+  shadows (`Map.get/put/remove/...`, `NavigableMap`/`NavigableSet` lookups and polls, `Queue.poll/peek`, `Deque`,
+  `BlockingQueue`/`BlockingDeque` timed polls, `comparator()`, `Reference.get`, `ThreadLocal.get`,
+  `System.getProperty/getenv`, `Class`/`Throwable` getters, `readLine`, `InvocationHandler.invoke`; parameters of
+  `equals`, `contains`, `indexOf`, `Map.get/containsKey/...`). The pass reads a library method's
+  `NULLABILITY_*` (state Q) for itself and the methods it overrides. Only methods outside the analysis count:
+  the analysed ones' properties may be an earlier run's output. Override inheritance in the shallow analyzer makes
+  every `equals(Object)` parameter Q, among others: 156 returns and 169 parameters in the JDK archive. Apart from
+  that, the regenerated archive changed no verdict except the "annotated" marker on the 5 added `poll` methods,
+  plus the newly shadowed types (`DataInput`, `ThreadLocal`, `InvocationHandler`, `Blocking{Queue,Deque}`,
+  `PriorityBlockingQueue`, `Reference`) with their defaults.
+- **Source contracts** (`Policy.contracts`, on in every preset; the oracle turns it off with
+  `withoutContracts()`, since it measures the inference against those very annotations): a declaration annotated
+  nullable (any family, `NullAnnotations.explicitState`) seeds, and so does a call to it used directly; one
+  annotated non-null stops null: a seed or an edge into it is dropped (the caller's error, an M5 finding), and its
+  verdict is the annotation's.
+- **The literal `null`** assigned to a local or field is seeded from the code, not from the links. Fernflower's
+  `FlattenStatementsHelper.flattenStatement` is DEGRADED (too big for the link engine, so no links), and its
+  `X x = null` locals came out non-null; the Kotlin printer then failed on them. An unreached local of a
+  degraded method is now UNSPECIFIED, like its outputs.
+- **Rejected**: a general edge from an analysed callee's return to wherever its result is used directly.
+  On guava it gave -27 unsafe for +947 noise: the flow-insensitivity of `v = get(k); if (v == null) ...` carried
+  into callers. Revisit with M4.
+
+Guava (NULL_MARKED, contracts off): 12,772 agree / 315 unsafe / 817 noise (was 12,766 / 321 / 817); field
+unsafe 14 → 8 from the literal-null seeds.
+
+### 2026-10-06 — M4, first cut: use sites cut the flow-insensitive edges
+
+`NonNullFacts` walks each method body (lambda bodies included) in statement order. For every statement it records
+the locals and parameters known non-null when the statement starts:
+- after `if (v == null) return/throw/break/continue;`;
+- inside `if (v != null)`, and in the `else` of `v == null`, with `&&`, `||`, `!` and `instanceof` handled;
+- after a dereference `v.m()`, `v.f`, `v[i]`;
+- after passing `v` to a parameter that demands non-null (a library `@NotNull`, or a source contract);
+- after `assert v != null`;
+- after `v = <non-null expression>` (`new`, a literal, a non-null variable, a call whose contract is non-null).
+
+It is conservative where it has to be. An assignment kills a fact. Loops, `try` and `switch` keep only the facts
+of variables they do not assign. Two branches that both continue are joined by intersection. Fields are not
+tracked.
+
+The declaration pass uses the facts in two places.
+- **Link edges** are decided after all statements have been seen. An edge is dropped when, at every statement
+  that assigns the recipient, the source can only become the assigned value where it is known non-null. This is
+  analysed structurally through `?:`, nested assignments and casts, so the lazy getter
+  `return r == null ? field = new X() : r` counts as guarded.
+- **An argument** that is a variable known non-null at the call carries nothing to the parameter.
+
+`Report.useSites()` exposes the facts per statement, for the Kotlin printer's `!!` / `?.` decisions.
+
+Measured on guava and rejected: treating `if (p == null) throw` as a non-null precondition rather than a null
+test. Guava's own checking methods (`checkEntryNotNull`, `checkElementNotNull`, …) annotate such parameters
+`@Nullable`, because their job is to accept null and throw; the rule cost 28 agreements and +3 unsafe.
+
+Guava (NULL_MARKED, contracts off): **12,949 agree / 340 unsafe / 610 noise**. Before M4 it was 12,772 / 315 / 817.
+The +25 unsafe are almost all one pattern: `this.mutex = (mutex == null) ? this : mutex`. The field is now
+rightly non-null. Before, it was wrongly nullable, and that made the `mutex` parameters of every `Synchronized`
+factory nullable "by accident". Guava declares those parameters `@Nullable` by API design: it is the open
+public-API-parameter question (§8), not an M4 error.
+
+What is left of the noise:
+- 97 parameters compared with null, where the test is not a guard;
+- about 85 nulls fanning out through JDK interface parameters to every implementation (`Comparator.compare`,
+  `Collection.addAll`, `Map.put`);
+- lazy fields read without a local (fields are not tracked);
+- no relation between two variables (`if (map.containsKey(k)) map.get(k)`).
+
+Next for M4 are field facts for `this.f` within a method, killed at calls, and the per-dereference decision for
+the printer.

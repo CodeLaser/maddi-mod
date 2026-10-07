@@ -60,8 +60,8 @@ class AnnotationToProperty {
     protected static final ValueOrigin FROM_METHOD_TRUE = new ValueOrigin(TRUE, FROM_METHOD);
     protected static final ValueOrigin FROM_OVERRIDE_TRUE = new ValueOrigin(TRUE, FROM_OVERRIDE);
     protected static final ValueOrigin FROM_TYPE_TRUE = new ValueOrigin(TRUE, FROM_TYPE);
-    protected static final ValueOrigin NULLABLE_DEFAULT = new ValueOrigin(ValueImpl.NotNullImpl.NULLABLE, DEFAULT);
-    protected static final ValueOrigin NOT_NULL_FROM_OVERRIDE = new ValueOrigin(ValueImpl.NotNullImpl.NOT_NULL, FROM_OVERRIDE);
+    protected static final ValueOrigin UNSPECIFIED_DEFAULT = new ValueOrigin(ValueImpl.NullabilityImpl.UNSPECIFIED,
+            DEFAULT);
 
     protected final AnnotationProvider annotationProvider;
     protected final Runtime runtime;
@@ -79,10 +79,19 @@ class AnnotationToProperty {
                 .reduce(bestValue, (t1, t2) -> (T) t1.min(t2));
     }
 
+    private static io.codelaser.maddi.cst.api.type.ParameterizedType declaredType(Info info) {
+        return switch (info) {
+            case MethodInfo mi -> mi.returnType();
+            case FieldInfo fi -> fi.type();
+            case ParameterInfo pi -> pi.parameterizedType();
+            default -> null;
+        };
+    }
+
     protected Map<Property, Value> annotationsToMap(Info info, List<AnnotationExpression> annotations) {
         Value.Immutable immutable = null;
         Value.Independent independent = null;
-        Value.NotNullProperty notNull = null;
+        Value.Nullability nullability = null;
         Value.Bool container = null;
         Value.Bool fluent = null;
         Value.Bool identity = null;
@@ -210,12 +219,16 @@ class AnnotationToProperty {
             } else if (Fluent.class.getCanonicalName().equals(fqn)) {
                 fluent = valueForTrue;
             } else if (NotNull.class.getCanonicalName().equals(fqn)) {
+                // absent: explicitly not claimed, which also stops a default (an inherited non-null) from applying
                 if (isAbsent) {
-                    notNull = ValueImpl.NotNullImpl.NULLABLE;
+                    nullability = ValueImpl.NullabilityImpl.UNSPECIFIED;
+                } else if (ae.extractBoolean("content") && declaredType(info) != null) {
+                    nullability = ValueImpl.NullabilityImpl.contentNonNull(declaredType(info));
                 } else {
-                    boolean content = ae.extractBoolean("content");
-                    notNull = content ? ValueImpl.NotNullImpl.CONTENT_NOT_NULL : ValueImpl.NotNullImpl.NOT_NULL;
+                    nullability = ValueImpl.NullabilityImpl.NONNULL;
                 }
+            } else if (Nullable.class.getCanonicalName().equals(fqn)) {
+                nullability = isAbsent ? ValueImpl.NullabilityImpl.UNSPECIFIED : ValueImpl.NullabilityImpl.NULLABLE;
             } else if (Final.class.getCanonicalName().equals(fqn)) {
                 isFinal = valueForTrue;
                 if (!isAbsent) finalAfter = ae.extractString("after", "");
@@ -308,7 +321,7 @@ class AnnotationToProperty {
                 map.put(PropertyImpl.INDEPENDENT_METHOD, independent);
             }
             if (container != null) map.put(PropertyImpl.CONTAINER_METHOD, container);
-            if (notNull != null) map.put(PropertyImpl.NOT_NULL_METHOD, notNull);
+            if (nullability != null) map.put(PropertyImpl.NULLABILITY_METHOD, nullability);
             if (unmodified != null) map.put(PropertyImpl.NON_MODIFYING_METHOD, unmodified);
             if (allowInterrupt != null) map.put(PropertyImpl.METHOD_ALLOWS_INTERRUPTS, allowInterrupt);
             if (ignoreModifications != null) map.put(PropertyImpl.IGNORE_MODIFICATION_METHOD, ignoreModifications);
@@ -330,7 +343,7 @@ class AnnotationToProperty {
                 map.put(PropertyImpl.INDEPENDENT_FIELD, independent);
             }
             if (container != null) map.put(PropertyImpl.CONTAINER_FIELD, container);
-            if (notNull != null) map.put(PropertyImpl.NOT_NULL_FIELD, notNull);
+            if (nullability != null) map.put(PropertyImpl.NULLABILITY_FIELD, nullability);
             if (unmodified != null) map.put(PropertyImpl.UNMODIFIED_FIELD, unmodified);
             if (isFinal != null) map.put(PropertyImpl.FINAL_FIELD, isFinal);
             if (ignoreModifications != null) map.put(PropertyImpl.IGNORE_MODIFICATIONS_FIELD, ignoreModifications);
@@ -344,7 +357,7 @@ class AnnotationToProperty {
             if (immutable != null) map.put(PropertyImpl.IMMUTABLE_PARAMETER, immutable);
             if (independent != null) map.put(PropertyImpl.INDEPENDENT_PARAMETER, independent);
             if (container != null) map.put(PropertyImpl.CONTAINER_PARAMETER, container);
-            if (notNull != null) map.put(PropertyImpl.NOT_NULL_PARAMETER, notNull);
+            if (nullability != null) map.put(PropertyImpl.NULLABILITY_PARAMETER, nullability);
             if (unmodified != null) map.put(PropertyImpl.UNMODIFIED_PARAMETER, unmodified);
             if (ignoreModifications != null) map.put(PropertyImpl.IGNORE_MODIFICATIONS_PARAMETER, ignoreModifications);
             if (eventual != null) map.put(PropertyImpl.EVENTUAL_PARAMETER, eventual);
