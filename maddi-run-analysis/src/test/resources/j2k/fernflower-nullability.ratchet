@@ -29,8 +29,12 @@
 #
 # 2026-10-07, maddi 1bef3fff0 (constructor type arguments follow the target's states at any depth, requireNonNull(x)
 # as x!!, a type variable's override keeps E and casts its null): 169 files, 83 errors.
+#
+# 2026-10-07, merged with the verdicts of 0527c81c (170 files, 76 errors), and maddi d44ccb06f (constructed types from
+# their targets through ?:, also and lambda results; raw arrays; protected as public; Cloneable; Kotlin's collection
+# override signatures): 176 files, 54 errors.
 types	199
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	199
-compilingFiles	169
+compilingFiles	176
