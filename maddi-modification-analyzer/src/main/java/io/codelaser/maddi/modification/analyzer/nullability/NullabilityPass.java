@@ -1149,7 +1149,15 @@ public final class NullabilityPass {
             if (from instanceof Arg && link.linkNature().isIdenticalTo()) continue;
             if (link.linkNature().isIdenticalTo() || link.linkNature().isAssignedFrom()) {
                 if (isNullMarker(link.to())) {
-                    nullMarker(mi, link.to(), from, "null in " + mi.fullyQualifiedName());
+                    // a variable becomes null only where it is assigned: '≡' is transitive in the links, so in
+                    // 'checked = check(key)' with 'check' returning its argument or null, 'key ≡ return ≡ null'
+                    // reaches 'key' (nacos SystemEnvPropertySource, reported by the diagnose session). A slot
+                    // (Content, Arg) is written by calls too.
+                    boolean slot = from instanceof Content || from instanceof Arg;
+                    if (slot || statement == null || fromVar instanceof ReturnVariable
+                        || assignsHere(statement, fromVar)) {
+                        nullMarker(mi, link.to(), from, "null in " + mi.fullyQualifiedName());
+                    }
                 } else {
                     linkEdge(node(mi, scope, link.to()), from, link.to(), fromVar, statement);
                 }

@@ -1232,4 +1232,39 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("String?[]", byName.get("a.b.A.early(int)"), "a break");
         assertEquals("String?[]", byName.get("a.b.A.later(int)"), "not the next statement");
     }
+
+    @DisplayName("a null returned by a method that may return its argument does not flow back into the argument")
+    @Test
+    public void identityReturn() {
+        NullabilityPass.Report report = run("a.b.I", """
+                package a.b;
+                import java.util.*;
+                class I {
+                    private final Map<String, String> map = new HashMap<>();
+                    private String check(String name) {
+                        if (map.containsKey(name)) return name;
+                        String noDot = name.replace('.', '_');
+                        if (!name.equals(noDot) && map.containsKey(noDot)) return noDot;
+                        return null;
+                    }
+                    String get(String key) {
+                        String checked = check(key);
+                        if (checked == null) {
+                            final String upper = key.toUpperCase();
+                            if (!upper.equals(key)) {
+                                checked = check(upper);
+                            }
+                        }
+                        if (checked == null) return null;
+                        return map.get(checked);
+                    }
+                }
+                """);
+        System.out.println(explain(report));
+        Map<String, String> byName = report.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+        assertEquals("String?", byName.get("a.b.I.check(String)"));
+        assertEquals("String", byName.get("a.b.I.get(String):0:key"), "the return's null is not the argument's");
+        assertEquals("String", byName.get("a.b.I.check(String):0:name"));
+    }
 }
