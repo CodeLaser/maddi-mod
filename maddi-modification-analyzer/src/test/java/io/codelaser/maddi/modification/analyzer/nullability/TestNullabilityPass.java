@@ -246,12 +246,12 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("""
                 equals(): boolean
                 equals(0:other): Object?
-                first(): Entry<String!, String!>?
+                first(): Entry<String, String>?
                 hashCode(): int
                 lookup(): String?
                 lookup(0:k): String
-                map: Map<String!, String!>
-                nav: NavigableMap<String!, String!>
+                map: Map<String, String>
+                nav: NavigableMap<String, String>
                 size(): int
                 viaLocal(): String?
                 viaLocal(0:k): String""", verdicts(report));
@@ -773,5 +773,69 @@ public class TestNullabilityPass extends CommonTest {
                 setNull(1:i): int
                 table: int[]?[]?[]
                 varargs(0:xs): String?[]""", verdicts(report));
+    }
+
+    @Language("java")
+    private static final String GENERICS = """
+            package a.b;
+            import java.util.*;
+            class G {
+                static class Box<T> {
+                    private T t;
+                    Box(T t) { this.t = t; }
+                    void set(T t) { this.t = t; }
+                    T get() { return t; }
+                }
+                private final List<String> names = new ArrayList<>();
+                private final List<String> clean = new ArrayList<>();
+                private final Map<String, Integer> counts = new HashMap<>();
+                void addNull(List<String> list) { list.add(null); }
+                void useAddNull() { addNull(names); }
+                void addClean(String s) { clean.add(s); }
+                String first() { return names.get(0); }
+                String firstClean() { return clean.get(0); }
+                void putNull(String k) { counts.put(k, null); }
+                String loop() { for (String s : names) { return s; } return ""; }
+                void boxNull(Box<String> b) { b.set(null); }
+                void useBox() { boxNull(new Box<>("x")); }
+                String unbox(Box<String> b) { return b.get(); }
+                Box<Integer> intBox() { return new Box<>(1); }
+                List<String> copy() { List<String> out = new ArrayList<>(names); return out; }
+                List<String> copyClean() { return new ArrayList<>(clean); }
+                Optional<String> opt(String s) { return Optional.ofNullable(s); }
+                <X> List<X> generic(List<X> in) { return in; }
+            }
+            """;
+
+    @DisplayName("type arguments: a slot per type argument, from content links, holder fields, and invariance")
+    @Test
+    public void typeArguments() {
+        NullabilityPass.Report report = run("a.b.G", GENERICS);
+        System.out.println(explain(report));
+        // 'intBox' is an over-approximation: a null in Box.t (from 'boxNull') reaches the slot of every Box
+        assertEquals("""
+                <init>(0:t): T!
+                addClean(0:s): String
+                addNull(0:list): List<String?>
+                boxNull(0:b): Box<String?>
+                clean: List<String>
+                copy(): List<String?>
+                copyClean(): List<String>
+                counts: Map<String, Integer?>
+                first(): String?
+                firstClean(): String
+                generic(): List<X!>
+                generic(0:in): List<X!>
+                get(): T?
+                intBox(): Box<Integer?>
+                loop(): String?
+                names: List<String?>
+                opt(): Optional<String>
+                opt(0:s): String
+                putNull(0:k): String
+                set(0:t): T?
+                t: T?
+                unbox(): String?
+                unbox(0:b): Box<String?>""", verdicts(report));
     }
 }

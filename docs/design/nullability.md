@@ -565,3 +565,49 @@ Element disagreements:
 - A local experiment that only let `KotlinTypeName` print the component state made it worse (120 files, 525
   errors). The `arrayOf<…>` type arguments, element reads (`a[i]!!`) and calls (invariant `Array<T?>`) must follow
   the element state as well. That is printer work.
+
+### 2026-10-07 — type arguments (content inference, second part)
+
+A node with declared type `C<A0, …>` has a slot `Arg(node, i)` per type argument, recursively. An array's type
+arguments are its element's. The link engine's hidden content gives the facts:
+- a one-parameter type's virtual field (`list.§$s`, `opt.§$`) is `Arg(list, 0)`;
+- a multi-parameter container's slice (`map.§$$s[-1]` keys, `[-2]` values) is `Arg(map, k-1)`;
+- a generic holder's field typed by its class's type variable, seen on another object (`b.t` for `Box<String> b`),
+  is `Arg(b, index of T)`.
+
+**Writes.** An argument passed to a parameter typed by a type variable of the callee's class (`add(E)`,
+`put(K, V)`, `set(T)`) flows into the receiver's slot. The receiver's arguments are matched to the class's by
+position, so only when the arities agree (`receiverSlots`). A library parameter typed that way no longer takes
+the argument itself: it carried every `Map.put(k, null)` down into all analysed `Map` implementations.
+
+**Reads.** Membership links (`∈`/`∋`) count only as reads: into a return value, or into a local or field in the
+statement that assigns it. The engine writes membership both ways for reads and writes alike, and derives more by
+transitivity. `Maps.safeGet`'s `return null` came out as "null is an element of the map", 238 noise. Content copied
+between slots (`⊆`/`⊇`: `new ArrayList<>(in)`) flows one way. A slot is never written through `≡`. A for-each
+over an `Iterable<T>` reads `Arg(…, 0)`.
+
+**Invariance.** Every flow between two values of generic types with the same number of type arguments ties their
+slots by position, both ways (one way into a `? extends` argument). Slots typed by a generic method's own type
+variable are not tied: each call instantiates it anew, and `ImmutableMap.copyOf` otherwise joined the maps of all
+its callers.
+
+**Other rules:**
+- **Holder fields:** a null in a holder field (`T t` in `Box<T>`: its default value, `set(null)`) reaches the slot
+  of every `Box<…>`. This over-approximates (`Box<Integer>` elsewhere becomes `Box<Integer?>`).
+- **Contracts:** `List<@Nullable String>` seeds a slot and `@NonNull` stops null there; the written annotations
+  override the inferred states.
+- **Open world:** the type-argument slots of an outside-callable parameter are UNSPECIFIED.
+- **`Void`:** a `Void` position is always nullable (`Future<Void>`).
+
+Guava, `CLOSED`:
+
+| depth | agree | unsafe | noise |
+|---|---:|---:|---:|
+| top | 13,342 | 293 | 264 |
+| type argument | 1,526 | 29 | 57 |
+| element | 173 | 33 | 90 |
+
+The top level is unchanged (13,349 / 294 / 255 before type arguments). Of the 29 type-argument unsafe, most are
+guava's API choices that no analysed caller shows: `Ordering<@Nullable Object>` from `allEqual()`/`arbitrary()`,
+`MultimapBuilder`'s nullable key and value bounds, `Functions.constant`. `OPEN`: type arguments
+1,026 / 28 / 57, with 627 undecided.

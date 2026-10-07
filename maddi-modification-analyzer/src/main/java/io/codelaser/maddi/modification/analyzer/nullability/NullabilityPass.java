@@ -53,8 +53,10 @@ import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 import io.codelaser.maddi.modification.link.LinkComputer;
 import io.codelaser.maddi.modification.link.impl.LinkComputerImpl;
+import io.codelaser.maddi.modification.link.impl.LinkNatureImpl;
 import io.codelaser.maddi.modification.prepwork.Util;
 import io.codelaser.maddi.modification.prepwork.variable.Link;
+import io.codelaser.maddi.modification.prepwork.variable.LinkNature;
 import io.codelaser.maddi.modification.prepwork.variable.Links;
 import io.codelaser.maddi.modification.prepwork.variable.ReturnVariable;
 import io.codelaser.maddi.modification.prepwork.variable.VariableData;
@@ -100,8 +102,12 @@ import java.util.Set;
  * <p>
  * <b>Verdict</b>: reached is {@link NullableState#NULLABLE}; not reached is {@link Policy#unreached()}; a primitive
  * is {@link NullableState#NONNULL}; a type-variable type and the outputs of a degraded method (no links) are
- * {@link NullableState#UNSPECIFIED}, as are the unreached locals of a degraded method. Locals get a verdict too ({@link Report#local}). Type arguments are not inferred yet (content slots, §4.2 M3): they stay
- * UNSPECIFIED.
+ * {@link NullableState#UNSPECIFIED}, as are the unreached locals of a degraded method. Locals get a verdict too ({@link Report#local}).
+ * <p>
+ * <b>Content</b>: an array's elements ({@link Content}) and each type argument ({@link Arg}) are nodes of their own,
+ * from the link engine's element and hidden-content variables ({@code a[i]}, {@code list.§$s},
+ * {@code map.§$$s[-2]}, {@code box.t}), from writes into a generic receiver ({@code list.add(x)}), and from
+ * invariance: wherever an array or a generic value flows, both ends' slots are tied both ways.
  * <p>
  * Requires the analyzer to have run with {@code Configuration.nullability()}: without
  * {@code LinkComputer.Options.nullConstantReturns} a null does not cross a call, and without
@@ -197,6 +203,7 @@ public final class NullabilityPass {
         static String label(Object node) {
             return switch (node) {
                 case Content c -> "elements of " + label(c.of());
+                case Arg a -> "type argument " + a.index() + " of " + label(a.of());
                 case MethodInfo mi -> "return " + mi.fullyQualifiedName();
                 case Info info -> info.fullyQualifiedName();
                 default -> String.valueOf(node);
@@ -331,6 +338,7 @@ public final class NullabilityPass {
             if (count[1] > 0 || count[0] == 0) addEdge(edge.get(0), edge.get(1));
             else flows.add(List.of(edge.get(0), edge.get(1))); // the array is not null there; its elements may be
         });
+        holderFields(methods, fields);
         coupleContent();
 
         Map<Object, Object> cause = new LinkedHashMap<>();
@@ -388,34 +396,76 @@ public final class NullabilityPass {
 
     private ParameterizedType contracted(Info info, ParameterizedType verdict) {
         if (!policy.contracts() || verdict.isPrimitiveExcludingVoid() && verdict.arrays() == 0) return verdict;
-        ParameterizedType v = verdict;
-        if (v.arrays() > 0) {
-            NullableState element = explicitElementState(v);
-            if (element != null && !(v.componentType().isPrimitiveExcludingVoid() && v.arrays() == 1)) {
-                v = v.withComponentType(v.componentType().withNullable(element));
-            }
-        }
+        ParameterizedType declared = switch (info) {
+            case FieldInfo fi -> fi.type();
+            case ParameterInfo pi -> pi.parameterizedType();
+            case MethodInfo mi -> mi.returnType();
+            default -> verdict;
+        };
+        ParameterizedType v = nestedContracted(declared, verdict);
         NullableState state = NullAnnotations.explicitState(info);
         return state == null ? v : v.withNullable(state);
     }
 
+    // the annotations written on an array's elements and on type arguments, over the inferred states
+    private static ParameterizedType nestedContracted(ParameterizedType declared, ParameterizedType verdict) {
+        if (declared.arrays() > 0 && verdict.arrays() == declared.arrays()) {
+            ParameterizedType component = nestedContracted(declared.componentType(), verdict.componentType());
+            NullableState element = explicitElementState(declared);
+            if (element != null && !(component.isPrimitiveExcludingVoid() && component.arrays() == 0)) {
+                component = component.withNullable(element);
+            }
+            return verdict.withComponentType(component);
+        }
+        if (declared.parameters().isEmpty() || declared.parameters().size() != verdict.parameters().size()) {
+            return verdict;
+        }
+        List<ParameterizedType> args = new ArrayList<>();
+        for (int i = 0; i < declared.parameters().size(); i++) {
+            ParameterizedType d = declared.parameters().get(i);
+            ParameterizedType a = nestedContracted(d, verdict.parameters().get(i));
+            NullableState state = explicit(d.annotations());
+            args.add(state == null ? a : a.withNullable(state));
+        }
+        ParameterizedType withArgs = verdict.withParameters(args);
+        return withArgs;
+    }
+
     // the null annotation on an array's elements, as the front end placed it (ParameterizedType.componentType)
     private static NullableState explicitElementState(ParameterizedType declared) {
+        return explicit(declared.componentType().annotations());
+    }
+
+    // Policy.contracts, for an array's elements and the type arguments ('List<@Nullable String>'), recursively: a
+    // nullable one is a seed, a non-null one stops null
+    private void elementContract(ParameterizedType declared, Object node) {
+        if (declared.arrays() > 0) {
+            Content content = new Content(node);
+            nestedContract(explicitElementState(declared), content);
+            elementContract(declared.componentType(), content);
+            return;
+        }
+        for (int i = 0; i < declared.parameters().size(); i++) {
+            ParameterizedType argument = declared.parameters().get(i);
+            Arg arg = new Arg(node, i);
+            nestedContract(explicit(argument.annotations()), arg);
+            elementContract(argument, arg);
+        }
+    }
+
+    private void nestedContract(NullableState state, Object slot) {
+        if (state == NullableState.NULLABLE) seed(slot, "annotated nullable");
+        else if (state == NullableState.NONNULL) nonNullContracts.add(slot);
+    }
+
+    private static NullableState explicit(List<io.codelaser.maddi.cst.api.expression.AnnotationExpression> list) {
         boolean nonNull = false;
-        for (io.codelaser.maddi.cst.api.expression.AnnotationExpression ae : declared.componentType().annotations()) {
+        for (io.codelaser.maddi.cst.api.expression.AnnotationExpression ae : list) {
             String name = ae.typeInfo().simpleName();
             if (NullAnnotations.NULLABLE.contains(name)) return NullableState.NULLABLE;
             if (NullAnnotations.NON_NULL.contains(name)) nonNull = true;
         }
         return nonNull ? NullableState.NONNULL : null;
-    }
-
-    // Policy.contracts, for an array's elements: a nullable one is a seed, a non-null one stops null
-    private void elementContract(ParameterizedType declared, Object node) {
-        if (declared.arrays() == 0) return;
-        NullableState state = explicitElementState(declared);
-        if (state == NullableState.NULLABLE) seed(new Content(node), "elements annotated nullable");
-        else if (state == NullableState.NONNULL) nonNullContracts.add(new Content(node));
     }
 
     // ------------------------------------------------------------------ library contracts (the analysis hints)
@@ -487,10 +537,17 @@ public final class NullabilityPass {
 
     // an outside caller chooses the elements of an array it passes, whatever it does with the array itself
     private void addContent(Set<Object> set, Object node, ParameterizedType type) {
-        if (type.arrays() == 0) return;
-        Content content = new Content(node);
-        if (!reached.contains(content) && !nonNullContracts.contains(content)) set.add(content);
-        addContent(set, content, type.componentType());
+        if (type.arrays() > 0) {
+            Content content = new Content(node);
+            if (!reached.contains(content) && !nonNullContracts.contains(content)) set.add(content);
+            addContent(set, content, type.componentType());
+            return;
+        }
+        for (int i = 0; i < type.parameters().size(); i++) {
+            Arg arg = new Arg(node, i);
+            if (!reached.contains(arg) && !nonNullContracts.contains(arg)) set.add(arg);
+            addContent(set, arg, type.parameters().get(i));
+        }
     }
 
     private boolean externallyCallable(MethodInfo mi) {
@@ -531,15 +588,24 @@ public final class NullabilityPass {
      Content, recursively.
      */
     private ParameterizedType verdict(ParameterizedType declared, Object node, boolean degradedOutput) {
-        ParameterizedType arguments = declared.parameters().isEmpty() ? declared
-                : declared.withParameters(declared.parameters().stream()
-                .map(p -> unspecified(p)).toList());
+        ParameterizedType arguments = declared;
+        if (!declared.parameters().isEmpty()) {
+            List<ParameterizedType> args = new ArrayList<>();
+            for (int i = 0; i < declared.parameters().size(); i++) {
+                ParameterizedType p = declared.parameters().get(i);
+                // an array's type arguments are its element's (componentType); a wildcard's bound is not a value
+                args.add(declared.arrays() > 0 || p.wildcard() != null && p.wildcard().isUnbound() ? unspecified(p)
+                        : verdict(p, new Arg(node, i), degradedOutput));
+            }
+            arguments = declared.withParameters(args);
+        }
         if (declared.arrays() > 0) {
             arguments = arguments.withComponentType(verdict(declared.componentType(), new Content(node),
                     degradedOutput));
         }
         NullableState state;
         if (declared.isPrimitiveExcludingVoid() && declared.arrays() == 0) state = NullableState.NONNULL;
+        else if (isBoxedVoid(declared)) state = NullableState.NULLABLE; // its only value is null: Future<Void>
         else if (reached.contains(node)) state = NullableState.NULLABLE; // also a type variable: '@Nullable V get(Object)'
         else if (degradedOutput || external.contains(node) || isTypeVariable(declared)) {
             state = NullableState.UNSPECIFIED; // parametric
@@ -600,9 +666,22 @@ public final class NullabilityPass {
         }
     }
 
+    /** Type argument {@code index} of a node's declared type: the elements of a {@code List<String>}, a map's values. */
+    public record Arg(Object of, int index) {
+        @Override
+        public String toString() {
+            return "type argument " + index + " of " + Report.label(of);
+        }
+    }
+
     // the declared type of a node; null when unknown (a local the pass did not see declared)
     private ParameterizedType typeOf(Object node) {
         return switch (node) {
+            case Arg a -> {
+                ParameterizedType outer = typeOf(a.of());
+                yield outer == null || outer.arrays() > 0 || a.index() >= outer.parameters().size() ? null
+                        : outer.parameters().get(a.index());
+            }
             case ParameterInfo pi -> pi.parameterizedType();
             case FieldInfo fi -> fi.type();
             case MethodInfo mi -> mi.returnType();
@@ -613,6 +692,33 @@ public final class NullabilityPass {
             }
             default -> null;
         };
+    }
+
+    /*
+     A field typed by its class's type variable ('T t' in 'Box<T>') holds, in each box, a value of that box's type
+     argument: null in the field (its default value, 'this.t = null', a 'set(null)') reaches the argument slot of
+     every node typed 'Box<…>'.
+     */
+    private void holderFields(List<MethodInfo> methods, List<FieldInfo> fields) {
+        Map<TypeInfo, List<FieldInfo>> byOwner = new HashMap<>();
+        for (FieldInfo fi : fields) {
+            if (classTypeVariable(fi) >= 0) byOwner.computeIfAbsent(fi.owner(), _ -> new ArrayList<>()).add(fi);
+        }
+        if (byOwner.isEmpty()) return;
+        List<Object> nodes = new ArrayList<>(fields);
+        for (MethodInfo mi : methods) {
+            nodes.addAll(mi.parameters());
+            if (!mi.isConstructor() && !mi.returnType().isVoid()) nodes.add(mi);
+        }
+        nodes.addAll(declaredLocals.keySet());
+        for (Object n : nodes) {
+            ParameterizedType type = typeOf(n);
+            if (type == null || type.arrays() > 0 || type.typeInfo() == null) continue;
+            for (FieldInfo fi : byOwner.getOrDefault(type.typeInfo(), List.of())) {
+                int index = classTypeVariable(fi);
+                if (index < type.parameters().size()) addEdge(fi, new Arg(n, index));
+            }
+        }
     }
 
     /*
@@ -631,18 +737,51 @@ public final class NullabilityPass {
             if (library(flow.get(0)) || library(flow.get(1))) continue;
             ParameterizedType t0 = typeOf(flow.get(0));
             ParameterizedType t1 = typeOf(flow.get(1));
-            if (t0 == null || t1 == null || t0.arrays() == 0 || t1.arrays() == 0) continue;
-            Content c0 = new Content(flow.get(0));
-            Content c1 = new Content(flow.get(1));
-            successors.computeIfAbsent(c0, _ -> new LinkedHashSet<>()).add(c1);
-            successors.computeIfAbsent(c1, _ -> new LinkedHashSet<>()).add(c0);
-            queue.add(List.of(c0, c1));
+            if (t0 == null || t1 == null) continue;
+            if (t0.arrays() > 0 && t1.arrays() > 0) {
+                Content c0 = new Content(flow.get(0));
+                Content c1 = new Content(flow.get(1));
+                successors.computeIfAbsent(c0, _ -> new LinkedHashSet<>()).add(c1);
+                successors.computeIfAbsent(c1, _ -> new LinkedHashSet<>()).add(c0);
+                queue.add(List.of(c0, c1));
+            } else if (t0.arrays() == 0 && t1.arrays() == 0 && !t0.parameters().isEmpty()
+                       && t0.parameters().size() == t1.parameters().size()) {
+                // generic types are invariant too (List<String?> is not a List<String>), except into a
+                // '? extends' argument, which only receives; matched by position (ArrayList<E> -> List<E>)
+                for (int i = 0; i < t0.parameters().size(); i++) {
+                    // not through a generic method's own type variable: each call instantiates it anew
+                    // ('ImmutableMap.copyOf(Map<? extends K, ? extends V>)' would tie the maps of all its callers)
+                    if (isMethodTypeVariable(t0.parameters().get(i)) || isMethodTypeVariable(t1.parameters().get(i))) {
+                        continue;
+                    }
+                    Arg a0 = new Arg(flow.get(0), i);
+                    Arg a1 = new Arg(flow.get(1), i);
+                    successors.computeIfAbsent(a0, _ -> new LinkedHashSet<>()).add(a1);
+                    if (!isExtendsWildcard(t1.parameters().get(i))) {
+                        successors.computeIfAbsent(a1, _ -> new LinkedHashSet<>()).add(a0);
+                    }
+                    queue.add(List.of(a0, a1));
+                }
+            }
         }
+    }
+
+    private static boolean isBoxedVoid(ParameterizedType pt) {
+        return pt.arrays() == 0 && pt.typeInfo() != null && "java.lang.Void".equals(pt.typeInfo().fullyQualifiedName());
+    }
+
+    private static boolean isMethodTypeVariable(ParameterizedType pt) {
+        return pt.typeParameter() != null && pt.typeParameter().isMethodTypeParameter();
+    }
+
+    private static boolean isExtendsWildcard(ParameterizedType pt) {
+        return pt.wildcard() != null && pt.wildcard().isExtends();
     }
 
     private boolean library(Object node) {
         return switch (node) {
             case Content c -> library(c.of());
+            case Arg a -> library(a.of());
             case ParameterInfo pi -> !analysed.contains(pi.methodInfo());
             case MethodInfo mi -> !analysed.contains(mi);
             default -> false;
@@ -697,15 +836,66 @@ public final class NullabilityPass {
     private Object node(MethodInfo mi, Scope scope, Variable v) {
         return switch (v) {
             case ParameterInfo pi -> pi;
+            case DependentVariable dv when dv.arrayVariable() instanceof FieldReference fr && Util.virtual(fr) -> {
+                // a slice of a multi-parameter container, 'map.§$$s[-2]': type argument 1 (the value)
+                Object base = node(mi, scope, fr.scopeVariable());
+                int slice = sliceIndex(dv);
+                yield base == null || slice < 0 ? null : argSlot(base, slice);
+            }
             case DependentVariable dv -> {
                 Object array = node(mi, scope, dv.arrayVariable());
                 yield array == null ? null : new Content(array);
             }
             case ReturnVariable rv -> rv.methodInfo();
+            case FieldReference fr when Util.virtual(fr) -> {
+                // the hidden content of a one-parameter type: 'list.§$s', 'opt.§$' (not '§m', the modification marker)
+                if (fr.fieldInfo().name().startsWith("§m")) yield null;
+                Object base = node(mi, scope, fr.scopeVariable());
+                ParameterizedType type = base == null ? null : typeOf(base);
+                yield type == null || type.arrays() > 0 || type.parameters().size() != 1 ? null : argSlot(base, 0);
+            }
+            case FieldReference fr when !fr.scopeIsRecursivelyThis() && fr.scopeVariable() != null
+                                        && classTypeVariable(fr.fieldInfo()) >= 0 -> {
+                // 'b.t' of a generic holder 'Box<String> b': its type argument, not the field shared by all boxes
+                Object base = node(mi, scope, fr.scopeVariable());
+                ParameterizedType type = base == null ? null : typeOf(base);
+                int index = classTypeVariable(fr.fieldInfo());
+                yield type != null && type.arrays() == 0 && type.typeInfo() == fr.fieldInfo().owner()
+                      && index < type.parameters().size() ? argSlot(base, index) : fr.fieldInfo();
+            }
             case FieldReference fr when !Util.virtual(fr) -> fr.fieldInfo();
             case LocalVariable lv when !lv.simpleName().startsWith("$") -> local(mi, scope, lv.simpleName());
             case null, default -> null;
         };
+    }
+
+    // 'x.§$$s[-k]' is the k-th type argument's slice; -1 when the index is not such a constant
+    private static int sliceIndex(DependentVariable dv) {
+        Expression index = dv.indexExpression();
+        if (index instanceof io.codelaser.maddi.cst.api.expression.UnaryOperator uo
+            && uo.expression() instanceof io.codelaser.maddi.cst.api.expression.IntConstant ic) {
+            return ic.constant() - 1;
+        }
+        if (index instanceof io.codelaser.maddi.cst.api.expression.IntConstant ic && ic.constant() < 0) {
+            return -ic.constant() - 1;
+        }
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("\\[-(\\d+)]$").matcher(dv.simpleName());
+        return m.find() ? Integer.parseInt(m.group(1)) - 1 : -1;
+    }
+
+    // the index of the owner's type parameter that is the field's type ('T t' in 'Box<T>'); -1 otherwise
+    private static int classTypeVariable(FieldInfo fi) {
+        ParameterizedType type = fi.type();
+        if (type.arrays() > 0 || type.typeParameter() == null || type.typeParameter().isMethodTypeParameter()) return -1;
+        return type.typeParameter().getOwner().isLeft() && type.typeParameter().getOwner().getLeft() == fi.owner()
+                ? type.typeParameter().getIndex() : -1;
+    }
+
+    // the slot of type argument 'index' of 'base', when its declared type has one there
+    private Object argSlot(Object base, int index) {
+        ParameterizedType type = typeOf(base);
+        if (type == null || type.arrays() > 0 || index >= type.parameters().size()) return null;
+        return new Arg(base, index);
     }
 
     private Local local(MethodInfo mi, Scope scope, String name) {
@@ -781,12 +971,34 @@ public final class NullabilityPass {
         if (recipient == null || links == null) return;
         for (Link link : links) {
             // links about a face of v ('this.f.g') are not about v; an element of v ('r[1] <- null', an initializer)
-            // is v's Content
-            Object from = link.from().equals(v) ? recipient
-                    : link.from() instanceof DependentVariable dv && dv.arrayVariableBase().equals(v)
-                    ? node(mi, scope, dv) : null;
+            // is v's Content, its hidden content ('l.§$s', 'm.§$$s[-2]', 'b.t') a type argument's slot
+            Object from;
+            if (link.from().equals(v)) {
+                from = recipient;
+            } else {
+                Object face = node(mi, scope, link.from());
+                from = face instanceof Content || face instanceof Arg ? face : null;
+            }
             if (from == null) continue;
             Variable fromVar = link.from();
+            LinkNature nature = link.linkNature();
+            if (nature == LinkNatureImpl.CONTAINS_AS_MEMBER || nature == LinkNatureImpl.IS_ELEMENT_OF) {
+                membership(mi, scope, from, fromVar, nature == LinkNatureImpl.CONTAINS_AS_MEMBER, link.to(),
+                        statement);
+                continue;
+            }
+            if (nature == LinkNatureImpl.IS_SUBSET_OF || nature == LinkNatureImpl.IS_SUPERSET_OF) {
+                // content copied: 'copy.§$s ⊆ in.§$s', the elements of 'in' flow into those of 'copy'
+                Object other = node(mi, scope, link.to());
+                if ((other instanceof Arg || other instanceof Content) && (from instanceof Arg || from instanceof Content)) {
+                    if (nature == LinkNatureImpl.IS_SUBSET_OF) addEdge(other, from);
+                    else addEdge(from, other);
+                }
+                continue;
+            }
+            // a type argument's slot is written by an assignment ('b.t ← null') or at a call site, never by identity:
+            // a '≡' between a local and a slot's value runs both ways and would carry the local's other sources in
+            if (from instanceof Arg && link.linkNature().isIdenticalTo()) continue;
             if (link.linkNature().isIdenticalTo() || link.linkNature().isAssignedFrom()) {
                 if (isNullMarker(link.to())) {
                     seed(from, "null in " + mi.fullyQualifiedName());
@@ -798,6 +1010,40 @@ public final class NullabilityPass {
                 linkEdge(from, node(mi, scope, link.to()), fromVar, link.to(), statement);
             }
         }
+    }
+
+    /*
+     'container ∋ member' / 'member ∈ container', where the container side is a slot (Arg or Content). The link
+     engine writes membership both ways for both a write ('list.add(p)') and a read ('x = list.get(0)'), and derives
+     more by transitivity (the null that 'Maps.safeGet' returns besides 'map.get(k)' comes out as a null element of
+     the map). So membership is read only as a READ: into a return value, and into a local or field in the statement
+     that assigns it (a statement's data carries the variable's earlier links too). Writes come from the call site
+     (receiverSlots: 'add(E)', 'put(K, V)', a helper's parameter through invariance).
+     */
+    private void membership(MethodInfo mi, Scope scope, Object side, Variable sideVar, boolean sideIsContainer,
+                            Variable otherVar, Statement statement) {
+        Object other = node(mi, scope, otherVar);
+        Object container = sideIsContainer ? side : other;
+        Variable memberVar = sideIsContainer ? otherVar : sideVar;
+        Object member = sideIsContainer ? other : side;
+        if (!(container instanceof Arg || container instanceof Content)) return;
+        if (member == null || member instanceof Arg || member instanceof Content) return;
+        switch (memberVar) {
+            case ParameterInfo _ -> {
+            }
+            case ReturnVariable _ -> addEdge(container, member);
+            default -> {
+                if (statement != null && assignsHere(statement, memberVar)) addEdge(container, member);
+            }
+        }
+    }
+
+    // does the statement give 'variable' its value: a declaration with initializer, an assignment, a for-each variable
+    private static boolean assignsHere(Statement statement, Variable variable) {
+        if (statement instanceof ForEachStatement fe && fe.initializer() != null) {
+            return fe.initializer().localVariableStream().anyMatch(lv -> lv.equals(variable));
+        }
+        return assignedValue(statement, variable) != null;
     }
 
     // an edge from a link: sourceVar's value flows into recipientVar. Counted per statement that assigns the
@@ -962,11 +1208,13 @@ public final class NullabilityPass {
             Object array = iterated instanceof VariableExpression ve ? node(mi, scope, ve.variable())
                     : iterated instanceof MethodCall mc && mc.methodInfo() != null && analysed.contains(mc.methodInfo())
                     ? mc.methodInfo() : null;
-            ParameterizedType type = iterated.parameterizedType();
-            if (array != null && type != null && type.arrays() > 0) {
-                // the statement's own scope declares the loop variable
+            ParameterizedType type = array == null ? null : typeOf(array);
+            if (type != null && (type.arrays() > 0 || type.parameters().size() == 1)) {
+                // over an array its elements, over an Iterable<T> its one type argument; the statement's own scope
+                // declares the loop variable
+                Object elements = type.arrays() > 0 ? new Content(array) : new Arg(array, 0);
                 fe.initializer().localVariableStream()
-                        .forEach(lv -> addEdge(new Content(array), local(mi, scope, lv.simpleName())));
+                        .forEach(lv -> addEdge(elements, local(mi, scope, lv.simpleName())));
             }
         }
     }
@@ -1069,6 +1317,7 @@ public final class NullabilityPass {
         if (parameters.isEmpty()) return;
         LinkComputer.ListOfLinks list = analysis.getOrNull(LinkComputerImpl.LINKED_VARIABLES_ARGUMENTS,
                 LinkComputerImpl.ListOfLinksImpl.class);
+        receiverSlots(mi, scope, statement, call, callee, list, arguments);
         for (int i = 0; i < arguments.size(); i++) {
             ParameterInfo parameter = parameters.get(Math.min(i, parameters.size() - 1)); // varargs: the last one
             if (parameter.isVarArgs() && !passesTheArray(arguments, parameters, i)) {
@@ -1076,9 +1325,40 @@ public final class NullabilityPass {
                 argument(mi, scope, statement, call, list, arguments, i, new Content(parameter));
                 continue;
             }
+            // a library parameter typed by its class's type variable ('Map.put(K, V)') does not take the argument: the
+            // write is the receiver's slot (receiverSlots), and the parameter would carry it down into every analysed
+            // implementation of the library type
+            if (!analysed.contains(callee) && parameter.parameterizedType().typeParameter() != null
+                && !parameter.parameterizedType().typeParameter().isMethodTypeParameter()
+                && parameter.parameterizedType().arrays() == 0) {
+                continue;
+            }
             for (ParameterInfo pi : typedDispatch(call, callee, parameter)) {
                 argument(mi, scope, statement, call, list, arguments, i, pi);
             }
+        }
+    }
+
+    /*
+     A write into a generic receiver: an argument to a parameter typed by a type variable of the callee's class
+     ('add(E)', 'put(K, V)', 'set(T)') flows into that type argument's slot of the receiver ('list', 'this.names').
+     The receiver's type arguments are matched to the class's by position (ArrayList<E> -> List<E>), so only when the
+     receiver's declared type has as many as the callee's class.
+     */
+    private void receiverSlots(MethodInfo mi, Scope scope, Statement statement, Expression call, MethodInfo callee,
+                               LinkComputer.ListOfLinks list, List<Expression> arguments) {
+        if (!(call instanceof MethodCall mc) || mc.object() == null || callee.isStatic()) return;
+        if (!(NonNullFacts.unwrap(mc.object()) instanceof VariableExpression ve)) return;
+        Object receiver = node(mi, scope, ve.variable());
+        ParameterizedType type = receiver == null ? null : typeOf(receiver);
+        int arity = callee.typeInfo().typeParameters().size();
+        if (type == null || type.arrays() > 0 || arity == 0 || type.parameters().size() != arity) return;
+        List<ParameterInfo> parameters = callee.parameters();
+        for (int i = 0; i < arguments.size() && i < parameters.size(); i++) {
+            ParameterizedType pt = parameters.get(i).parameterizedType();
+            if (pt.arrays() > 0 || pt.typeParameter() == null || pt.typeParameter().isMethodTypeParameter()) continue;
+            int index = pt.typeParameter().getIndex();
+            if (index < arity) argument(mi, scope, statement, call, list, arguments, i, new Arg(receiver, index));
         }
     }
 

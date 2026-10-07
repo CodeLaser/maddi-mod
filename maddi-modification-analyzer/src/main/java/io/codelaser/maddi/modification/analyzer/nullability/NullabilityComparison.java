@@ -71,7 +71,7 @@ public final class NullabilityComparison {
         }
     }
 
-    static Outcome outcome(NullableState reference, NullableState verdict) {
+    public static Outcome outcome(NullableState reference, NullableState verdict) {
         if (reference == NullableState.UNSPECIFIED) return Outcome.UNSCORED;
         if (verdict == NullableState.UNSPECIFIED) return Outcome.UNDECIDED;
         if (reference == verdict) return Outcome.AGREE;
