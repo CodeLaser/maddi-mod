@@ -421,3 +421,14 @@ Guava: 13,006 agree / 346 unsafe / 546 noise (was 12,949 / 340 / 610). The noise
 13 returns, 6 fields. The 6 new unsafe are parameters every analysed caller now visibly guards, such as
 `Lists.indexOfImpl`, called only as `object == null ? -1 : indexOfImpl(this, object)`. Guava annotates them
 `@Nullable` for its public API; that is the §8 question again.
+
+### 2026-10-07 — rounds: the pass trusts its own non-null returns
+
+`NullabilityPass.go` now runs in rounds. Round 1 trusts no analysed method's return. Each later round treats the
+analysed methods whose return the previous round found unreached by null as known non-null values. This is
+sound: a round's reachability over-approximates. Those methods are not degraded and do not return a type
+variable. Dropping edges only shrinks what null reaches, so the trusted set grows until it is stable (at most 5
+rounds). It catches guava's lazy getter with a factory method,
+`return r == null ? keySet = createKeySet() : r`, in which `createKeySet()` is not annotated.
+
+Guava: 13,085 agree / 346 unsafe / 467 noise (was 13,006 / 346 / 546): 79 fewer noise, no new unsafe.

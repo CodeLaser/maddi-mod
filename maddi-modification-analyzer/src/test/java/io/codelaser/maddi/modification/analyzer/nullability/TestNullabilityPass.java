@@ -579,6 +579,9 @@ public class TestNullabilityPass extends CommonTest {
                     accept("x");
                     return lazy;
                 }
+                private String cached;
+                String create() { return "fresh"; }
+                String cached() { String result = cached; return result == null ? cached = create() : result; }
             }
             """;
 
@@ -594,6 +597,9 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("String?", byLabel.get("lazy"));
         assertEquals("String", byLabel.get("getLazy()"), "the field is non-null after 'if (lazy == null) lazy = ...'");
         assertEquals("String?", byLabel.get("afterCall()"), "a call in between may have reset the field");
+        // round 2: create() was found non-null in round 1, so 'cached = create()' assigns a non-null value
+        assertEquals("String", byLabel.get("cached()"), "the lazy getter with a factory method");
+        assertEquals("String?", byLabel.get("cached"));
         // the printer's view: in 'v != null && accept(v)', the call has v; Kotlin smart-casts it too
         MethodInfo both = parsed.findUniqueMethod("both", 1);
         io.codelaser.maddi.cst.api.statement.Statement ret = both.methodBody().statements().getLast();

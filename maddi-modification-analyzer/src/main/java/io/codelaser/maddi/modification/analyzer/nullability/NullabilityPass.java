@@ -172,6 +172,9 @@ public final class NullabilityPass {
     }
 
     private final Policy policy;
+    // analysed methods whose return an earlier round found unreached by null (see go)
+    private final Set<MethodInfo> trustedReturns;
+    private Set<Object> reached = Set.of();
     private final Map<Object, Set<Object>> successors = new LinkedHashMap<>();
     private final Map<Object, String> seedOrigin = new LinkedHashMap<>();
     private final Set<MethodInfo> degraded = new LinkedHashSet<>();
@@ -192,10 +195,46 @@ public final class NullabilityPass {
     private final Map<MethodInfo, Map<String, List<Local>>> declaredByName = new HashMap<>();
 
     public NullabilityPass(Policy policy) {
-        this.policy = policy;
+        this(policy, Set.of());
     }
 
+    private NullabilityPass(Policy policy, Set<MethodInfo> trustedReturns) {
+        this.policy = policy;
+        this.trustedReturns = trustedReturns;
+    }
+
+    private static final int MAX_ROUNDS = 5;
+
+    /**
+     * Runs the pass in rounds. Round 1 trusts no analysed method's return. Each later round takes the analysed
+     * methods whose return the previous round found unreached by null (sound: that round's reachability
+     * over-approximates) as known non-null values: {@code field = create()} then carries no null. Dropping edges
+     * only shrinks what null reaches, so the trusted set grows until it is stable.
+     */
     public Report go(List<Info> analysisOrder) {
+        Set<MethodInfo> trusted = Set.of();
+        for (int round = 1; ; round++) {
+            NullabilityPass pass = new NullabilityPass(policy, trusted);
+            Report report = pass.once(analysisOrder);
+            Set<MethodInfo> next = pass.unreachedReturns();
+            if (next.equals(trusted) || round == MAX_ROUNDS) return report;
+            trusted = next;
+        }
+    }
+
+    // analysed methods with a reference return no null reached (not degraded, not a type variable)
+    private Set<MethodInfo> unreachedReturns() {
+        Set<MethodInfo> set = new HashSet<>();
+        for (MethodInfo mi : analysed) {
+            ParameterizedType rt = mi.returnType();
+            if (mi.isConstructor() || rt.isVoid() || rt.isPrimitiveExcludingVoid() && rt.arrays() == 0
+                || isTypeVariable(rt) || degraded.contains(mi) || reached.contains(mi)) continue;
+            set.add(mi);
+        }
+        return Set.copyOf(set);
+    }
+
+    private Report once(List<Info> analysisOrder) {
         List<MethodInfo> methods = analysisOrder.stream()
                 .filter(i -> i instanceof MethodInfo).map(i -> (MethodInfo) i).toList();
         List<FieldInfo> fields = analysisOrder.stream()
@@ -220,7 +259,7 @@ public final class NullabilityPass {
         });
 
         Map<Object, Object> cause = new LinkedHashMap<>();
-        Set<Object> reached = closure(cause);
+        reached = closure(cause);
 
         Map<Info, ParameterizedType> verdicts = new LinkedHashMap<>();
         Map<Local, ParameterizedType> locals = new LinkedHashMap<>();
@@ -291,6 +330,7 @@ public final class NullabilityPass {
 
     private NullableState returnContract(MethodInfo mi) {
         if (!analysed.contains(mi)) return stateOf(mi, PropertyImpl.NULLABILITY_METHOD);
+        if (trustedReturns.contains(mi)) return NullableState.NONNULL;
         return policy.contracts() ? NullAnnotations.explicitState(mi) : null;
     }
 
