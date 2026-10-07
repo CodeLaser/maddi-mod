@@ -15,8 +15,13 @@
 #
 # 2026-10-07, the printer's `!!` decided by NullabilityPass's smart-cast facts (Report.smartCasts(), 53a96a27, M4
 # first cut), with maddi's declare-then-assign and nullable-array fixes: 125 files compile, 446 type errors.
+#
+# 2026-10-07, array element slots in the pass (c93bc7e9; maddi 4f6bcb3fa) and call facts where evaluation begins
+# (cff104ec), with maddi 9339a09bb (calls and types: varargs spread, raw types, char labels, ...), 23923cfbf (val)
+# and 0aca7a1de (the printer follows element states: Array<IntArray?>, `!!` on a[i], no smart cast of a var
+# property): 139 files compile, 209 type errors (merged devel without 0aca7a1de: 132 files, 396).
 types	199
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	199
-compilingFiles	125
+compilingFiles	139
