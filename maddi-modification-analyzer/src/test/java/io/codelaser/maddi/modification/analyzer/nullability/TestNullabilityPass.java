@@ -838,4 +838,47 @@ public class TestNullabilityPass extends CommonTest {
                 unbox(): String?
                 unbox(0:b): Box<String?>""", verdicts(report));
     }
+
+    @Language("java")
+    private static final String CONTENT_WRITES = """
+            package a.b;
+            import java.util.*;
+            class W {
+                private final Map<String, String> map = new HashMap<>();
+                private final List<String> fromMap = new ArrayList<>();
+                private final List<String> viaLocal = new ArrayList<>();
+                private final List<String> literal = new ArrayList<>();
+                private final String[] slots = {"a"};
+                void a(String k) { fromMap.add(map.get(k)); }
+                void b(String k) { String v = map.get(k); viaLocal.add(v); }
+                void c() { literal.add(null); }
+                void d(String k) { slots[0] = map.get(k); }
+            }
+            """;
+
+    @DisplayName("Policy.assertContentWrites: a library-nullable value written into content is asserted, not spread")
+    @Test
+    public void assertContentWrites() {
+        NullabilityPass.Report java = run("a.b.W", CONTENT_WRITES);
+        assertEquals("""
+                a(0:k): String
+                b(0:k): String
+                d(0:k): String
+                fromMap: List<String?>
+                literal: List<String?>
+                map: Map<String, String>
+                slots: String?[]
+                viaLocal: List<String?>""", verdicts(java));
+        // Kotlin: 'fromMap.add(map.get(k)!!)', 'viaLocal.add(v!!)', 'slots[0] = map.get(k)!!'; the literal null stays
+        NullabilityPass.Report kotlin = new NullabilityPass(NullabilityPass.Policy.KOTLIN).go(analysisOrder);
+        assertEquals("""
+                a(0:k): String
+                b(0:k): String
+                d(0:k): String
+                fromMap: List<String>
+                literal: List<String?>
+                map: Map<String, String>
+                slots: String[]
+                viaLocal: List<String>""", verdicts(kotlin));
+    }
 }

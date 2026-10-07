@@ -107,7 +107,7 @@ public class TestJavaToKotlinFernflowerNullability {
                         .setNullability(true)
                         .build());
         analyzer.analyze(order, prep.callGraph().graph());
-        NullabilityPass.Report report = new NullabilityPass(NullabilityPass.Policy.NULL_MARKED).go(order);
+        NullabilityPass.Report report = new NullabilityPass(NullabilityPass.Policy.KOTLIN).go(order);
 
         new JavaToKotlinRatchet("fernflower-nullability", Path.of("src/test/resources/j2k/fernflower-nullability.ratchet"))
                 .run(corpus, new KotlinPrintOptions(new Verdicts(report), KotlinPrintOptions.NullCheck.ASSERT));

@@ -124,19 +124,32 @@ public final class NullabilityPass {
      * @param contracts the null annotations on source declarations are contracts (M2): a nullable one is a seed, a
      *                  non-null one stops null. Off to measure the inference against those annotations (the oracle).
      * @param world     who else calls the analysed code: see {@link World}
+     * @param assertContentWrites the Kotlin translation's choice: a value that is nullable only because of a library
+     *                  contract ({@code Map.get}, ...) does not make an array's elements or a type argument nullable
+     *                  where it is written into them; the slot stays non-null and the printer asserts at the write
+     *                  ({@code list.add(map.get(k)!!)}), instead of a {@code !!} at every read of a
+     *                  {@code List<X?>}. A null literal, and a source annotation, still make the slot nullable. Off
+     *                  for Java annotations, which say what can happen.
      */
-    public record Policy(NullableState unreached, boolean nullTests, boolean contracts, World world) {
-        public static final Policy NULL_MARKED = new Policy(NullableState.NONNULL, true, true, World.CLOSED);
+    public record Policy(NullableState unreached, boolean nullTests, boolean contracts, World world,
+                         boolean assertContentWrites) {
+        public static final Policy NULL_MARKED = new Policy(NullableState.NONNULL, true, true, World.CLOSED, false);
         public static final Policy NULL_MARKED_FLOW_ONLY = new Policy(NullableState.NONNULL, false, true,
-                World.CLOSED);
-        public static final Policy CAUTIOUS = new Policy(NullableState.UNSPECIFIED, true, true, World.CLOSED);
+                World.CLOSED, false);
+        public static final Policy CAUTIOUS = new Policy(NullableState.UNSPECIFIED, true, true, World.CLOSED, false);
+        /** {@link #NULL_MARKED} for the Java→Kotlin translation: content writes are asserted. */
+        public static final Policy KOTLIN = new Policy(NullableState.NONNULL, true, true, World.CLOSED, true);
 
         public Policy withoutContracts() {
-            return new Policy(unreached, nullTests, false, world);
+            return new Policy(unreached, nullTests, false, world, assertContentWrites);
         }
 
         public Policy withWorld(World world) {
-            return new Policy(unreached, nullTests, contracts, world);
+            return new Policy(unreached, nullTests, contracts, world, assertContentWrites);
+        }
+
+        public Policy withAssertContentWrites(boolean assertContentWrites) {
+            return new Policy(unreached, nullTests, contracts, world, assertContentWrites);
         }
     }
 
@@ -223,6 +236,9 @@ public final class NullabilityPass {
     private Set<Object> external = Set.of();
     // every flow between two nodes, also one dropped as known non-null: the array Contents they tie (coupleContent)
     private final List<List<Object>> flows = new ArrayList<>();
+    // nodes seeded other than by a library contract (a nullable library result assigned or passed):
+    // Policy.assertContentWrites
+    private final Set<Object> strictSeeds = new HashSet<>();
     private final Map<Object, Set<Object>> successors = new LinkedHashMap<>();
     private final Map<Object, String> seedOrigin = new LinkedHashMap<>();
     private final Set<MethodInfo> degraded = new LinkedHashSet<>();
@@ -628,17 +644,42 @@ public final class NullabilityPass {
     }
 
     private void seed(Object node, String origin) {
+        if (node != null) {
+            seedOrigin.putIfAbsent(node, origin);
+            strictSeeds.add(node);
+        }
+    }
+
+    // a seed from a library contract only: see Policy.assertContentWrites
+    private void seedLibrary(Object node, String origin) {
         if (node != null) seedOrigin.putIfAbsent(node, origin);
     }
 
     private Set<Object> closure(Map<Object, Object> cause) {
+        if (!policy.assertContentWrites()) return closure(cause, seedOrigin.keySet(), null);
+        // Policy.assertContentWrites: first what null reaches without the library contracts; a value outside it
+        // enters a slot only as an asserted write, so that edge is not followed, and a library seed on a slot itself
+        // is an asserted write too
+        Set<Object> strict = closure(new HashMap<>(), strictSeeds, null);
+        Set<Object> seeds = new LinkedHashSet<>(seedOrigin.keySet());
+        seeds.removeIf(n -> isSlot(n) && !strictSeeds.contains(n));
+        return closure(cause, seeds, strict);
+    }
+
+    private static boolean isSlot(Object node) {
+        return node instanceof Arg || node instanceof Content;
+    }
+
+    // strict: when not null, an edge from a value into a slot is followed only from a node in it
+    private Set<Object> closure(Map<Object, Object> cause, Set<Object> seeds, Set<Object> strict) {
         // a seed on a non-null contract is the caller's error (an M5 finding), not a source of null
-        Set<Object> reached = new LinkedHashSet<>(seedOrigin.keySet());
+        Set<Object> reached = new LinkedHashSet<>(seeds);
         reached.removeAll(nonNullContracts);
         Deque<Object> queue = new ArrayDeque<>(reached);
         while (!queue.isEmpty()) {
             Object n = queue.removeFirst();
             for (Object s : successors.getOrDefault(n, Set.of())) {
+                if (strict != null && isSlot(s) && !isSlot(n) && !strict.contains(n)) continue;
                 if (!nonNullContracts.contains(s) && reached.add(s)) {
                     cause.put(s, n);
                     queue.addLast(s);
@@ -1282,7 +1323,7 @@ public final class NullabilityPass {
         MethodInfo callee = mc.methodInfo();
         String lib = libraryNullableReturn(callee);
         if (lib != null) {
-            seed(target, "assigned " + lib);
+            seedLibrary(target, "assigned " + lib);
         } else if (policy.contracts() && analysed.contains(callee)
                    && NullAnnotations.explicitState(callee) == NullableState.NULLABLE) {
             seed(target, "assigned " + callee.fullyQualifiedName() + ", annotated nullable");
@@ -1414,7 +1455,7 @@ public final class NullabilityPass {
         if (arrayCreatedWithNulls(arguments.get(i)) > 0) seedCreated(pi, arguments.get(i), mi);
         String lib = nullableLibraryCall(arguments.get(i));
         if (lib != null) {
-            seed(pi, "argument " + lib + " in " + mi.fullyQualifiedName());
+            seedLibrary(pi, "argument " + lib + " in " + mi.fullyQualifiedName());
             return;
         }
         if (list == null || i >= list.list().size()) return;
