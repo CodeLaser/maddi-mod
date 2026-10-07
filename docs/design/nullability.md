@@ -611,3 +611,29 @@ The top level is unchanged (13,349 / 294 / 255 before type arguments). Of the 29
 guava's API choices that no analysed caller shows: `Ordering<@Nullable Object>` from `allEqual()`/`arbitrary()`,
 `MultimapBuilder`'s nullable key and value bounds, `Functions.constant`. `OPEN`: type arguments
 1,026 / 28 / 57, with 627 undecided.
+
+### 2026-10-07 — Kotlin: content writes are asserted (`Policy.KOTLIN`)
+
+Decision (Bart): when a value enters a container, the `?`-vs-`!!` choice is made at the write. Under
+`Policy.assertContentWrites` (`Policy.KOTLIN`), a value that is nullable only because of a library contract
+(`Map.get`, …) does not make a type argument or an array's elements nullable where it is written. The slot stays
+non-null, and the printer asserts there (`list.add(map.get(k)!!)`). A null literal and a source annotation still
+make the slot nullable. A second, strict closure from the seeds that are not library contracts decides which
+writes count. Java annotation output keeps the faithful policy.
+
+Fernflower with type arguments, printer not yet adapted:
+
+| verdicts | compiling files | errors |
+|---|---:|---:|
+| faithful (`NULL_MARKED`) | 87 | 1,123 |
+| `KOTLIN` | 89 | 1,074 |
+
+Of the 232 nullable type-argument slots under `KOTLIN`:
+- 96 come from a null literal, 63 from a `null` argument, 13 from an `@Nullable` element type in fernflower's own
+  source (`DoStatement.initExprent`), 17 from comparison with null, and only 11 from `Map.get`.
+- Fernflower does store nulls in its lists (`IfStatement.<init>` puts null into `headexprent`), so these slots are
+  genuinely `List<X?>`.
+
+The errors are two printer gaps, both on the printer side:
+- a read from a `List<X?>` needs `!!`;
+- a constructor call's type arguments must follow the target (`ArrayList<Exprent?>()`).
