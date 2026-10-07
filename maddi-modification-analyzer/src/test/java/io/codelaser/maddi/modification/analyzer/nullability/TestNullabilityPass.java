@@ -144,7 +144,7 @@ public class TestNullabilityPass extends CommonTest {
                 fin: String
                 fromParam: String?
                 getFromParam(): String?
-                getLazy(): String?
+                getLazy(): String
                 initNull: String?
                 lazy: String?
                 setFromParam(0:s): String""", verdicts(report));
@@ -552,5 +552,60 @@ public class TestNullabilityPass extends CommonTest {
         // the JDK hint: requireNonNull's parameter demands non-null, so Java knows; Kotlin does not smart-cast
         assertEquals(true, report.useSites().nonNullAt(ret2, r));
         assertEquals(false, report.smartCasts().nonNullAt(ret2, r));
+    }
+
+    @Language("java")
+    private static final String IN_STATEMENT = """
+            package a.b;
+            import java.util.HashMap;
+            import java.util.Map;
+            class S {
+                private final Map<String, String> map = new HashMap<>();
+                private String lazy;
+                private final String fin;
+                S(String fin) { this.fin = fin; }
+                boolean both(String k) { String v = map.get(k); return v != null && accept(v); }
+                boolean accept(String a) { return a.isEmpty(); }
+                int either(String k) { String w = map.get(k); return w == null ? 0 : measure(w); }
+                int measure(String m) { return m.length(); }
+                String getLazy() {
+                    if (lazy == null) {
+                        lazy = "computed";
+                    }
+                    return lazy;
+                }
+                String afterCall() {
+                    if (lazy == null) return "none";
+                    accept("x");
+                    return lazy;
+                }
+            }
+            """;
+
+    @DisplayName("inside a statement (&&, ?:) and fields of this (forgotten at a call)")
+    @Test
+    public void inStatementAndFields() {
+        NullabilityPass.Report report = run("a.b.S", IN_STATEMENT);
+        System.out.println(explain(report));
+        Map<String, String> byLabel = report.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> label(e.getKey()), e -> k(e.getValue())));
+        assertEquals("String", byLabel.get("accept(0:a)"), "'v != null && accept(v)'");
+        assertEquals("String", byLabel.get("measure(0:m)"), "'w == null ? 0 : measure(w)'");
+        assertEquals("String?", byLabel.get("lazy"));
+        assertEquals("String", byLabel.get("getLazy()"), "the field is non-null after 'if (lazy == null) lazy = ...'");
+        assertEquals("String?", byLabel.get("afterCall()"), "a call in between may have reset the field");
+        // the printer's view: in 'v != null && accept(v)', the call has v; Kotlin smart-casts it too
+        MethodInfo both = parsed.findUniqueMethod("both", 1);
+        io.codelaser.maddi.cst.api.statement.Statement ret = both.methodBody().statements().getLast();
+        java.util.List<io.codelaser.maddi.cst.api.expression.MethodCall> calls = new java.util.ArrayList<>();
+        ret.expression().visit(e -> {
+            if (e instanceof io.codelaser.maddi.cst.api.expression.MethodCall mc
+                && "accept".equals(mc.methodInfo().name())) calls.add(mc);
+            return true;
+        });
+        io.codelaser.maddi.cst.api.expression.MethodCall accept = calls.getFirst();
+        io.codelaser.maddi.cst.api.variable.Variable v = ((io.codelaser.maddi.cst.api.statement.LocalVariableCreation)
+                both.methodBody().statements().getFirst()).localVariable();
+        assertEquals(true, report.smartCasts().nonNullAt(accept, v));
     }
 }

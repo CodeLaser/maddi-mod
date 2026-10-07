@@ -615,15 +615,15 @@ public final class NullabilityPass {
                 if (e instanceof Block) return false; // nested statements are handled with their own vd
                 if (policy.nullTests() && e instanceof BinaryOperator bo) nullTest(mi, own, bo);
                 if (e instanceof MethodCall mc && mc.methodInfo() != null) {
-                    callSite(mi, own, statement, mc.methodInfo(), mc.analysis(), mc.parameterExpressions());
+                    callSite(mi, own, statement, mc, mc.methodInfo(), mc.analysis(), mc.parameterExpressions());
                 } else if (e instanceof ConstructorCall cc && cc.constructor() != null) {
-                    callSite(mi, own, statement, cc.constructor(), cc.analysis(), cc.parameterExpressions());
+                    callSite(mi, own, statement, cc, cc.constructor(), cc.analysis(), cc.parameterExpressions());
                 }
                 return true;
             });
             syntacticSeeds(mi, own, statement);
             if (statement instanceof ExplicitConstructorInvocation eci && eci.methodInfo() != null) {
-                callSite(mi, own, statement, eci.methodInfo(), eci.analysis(), eci.parameterExpressions());
+                callSite(mi, own, statement, null, eci.methodInfo(), eci.analysis(), eci.parameterExpressions());
             }
         }
         return scope;
@@ -689,7 +689,7 @@ public final class NullabilityPass {
         }
     }
 
-    private void callSite(MethodInfo mi, Scope scope, Statement statement, MethodInfo callee,
+    private void callSite(MethodInfo mi, Scope scope, Statement statement, Expression call, MethodInfo callee,
                           io.codelaser.maddi.cst.api.analysis.PropertyValueMap analysis, List<Expression> arguments) {
         List<ParameterInfo> parameters = callee.parameters();
         if (parameters.isEmpty()) return;
@@ -702,9 +702,11 @@ public final class NullabilityPass {
                 seed(pi, "null argument in " + mi.fullyQualifiedName());
                 continue;
             }
-            // M4: a variable argument known non-null at this statement carries no null
+            // M4: a variable argument known non-null at the call (or when its statement starts) carries no null
             if (NonNullFacts.unwrap(arguments.get(i)) instanceof VariableExpression ve
-                && facts.nonNullAt(statement, ve.variable())) continue;
+                && (call != null && facts.nonNullAt(call, ve.variable()) || facts.nonNullAt(statement, ve.variable()))) {
+                continue;
+            }
             String lib = nullableLibraryCall(arguments.get(i));
             if (lib != null) {
                 seed(pi, "argument " + lib + " in " + mi.fullyQualifiedName());

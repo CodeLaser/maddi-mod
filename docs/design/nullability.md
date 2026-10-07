@@ -404,3 +404,20 @@ What is left of the noise:
 
 Next for M4 are field facts for `this.f` within a method, killed at calls, and the per-dereference decision for
 the printer.
+
+### 2026-10-07 — M4: facts inside a statement, and fields of `this`
+
+- **Inside a statement**: the right operand of `&&` sees the left true, the right operand of `||` sees it false,
+  and the branches of `?:` see the condition. Every call and every field or array access records the facts at
+  that point: `NonNullFacts.at(Expression)` and `nonNullAt(Expression, Variable)`. The declaration pass checks
+  call arguments there, so `v != null && accept(v)` and `w == null ? 0 : measure(w)` carry no null. The printer
+  can ask per dereference.
+- **Fields of `this`**: a non-final field is forgotten at any call, not carried into a lambda body, and forgotten
+  after a loop, `try` or `switch` that contains a call. So `if (lazy == null) lazy = "y"; return lazy;` returns
+  non-null, but not when a call sits between the check and the return. The Kotlin smart-cast view tracks only
+  final fields: Kotlin never smart-casts a `var` property.
+
+Guava: 13,006 agree / 346 unsafe / 546 noise (was 12,949 / 340 / 610). The noise drops by 64: 45 parameters,
+13 returns, 6 fields. The 6 new unsafe are parameters every analysed caller now visibly guards, such as
+`Lists.indexOfImpl`, called only as `object == null ? -1 : indexOfImpl(this, object)`. Guava annotates them
+`@Nullable` for its public API; that is the §8 question again.
