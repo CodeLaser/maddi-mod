@@ -916,6 +916,11 @@ public class TestNullabilityPass extends CommonTest {
                 String find(int i) { return i > 0 ? "x" : null; }
                 String head;
                 void loop() { String r; if ((r = find(1)) != null) head = r; }
+                private final Map<String, Map<String, List<String>>> nested = new HashMap<>();
+                void nestedNull(String a, String b) {
+                    List<String> mask = nested.get(a).get(b);
+                    mask.set(0, null);
+                }
             }
             """;
 
@@ -934,6 +939,9 @@ public class TestNullabilityPass extends CommonTest {
                 getHoles(): List<String?>
                 head: String?
                 holes: List<String?>
+                nested: Map<String, Map<String, List<String?>>>
+                nestedNull(0:a): String
+                nestedNull(1:b): String
                 source: Map<String, String?>
                 target: Map<String, String?>
                 viaCall(0:sink): List<String?>""", verdicts(report));

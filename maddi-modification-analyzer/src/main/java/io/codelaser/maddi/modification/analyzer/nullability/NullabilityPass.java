@@ -1246,7 +1246,22 @@ public final class NullabilityPass {
     // read from the code, not from the links: the literal null assigned to a local or field (so also in a degraded
     // method, which has no links), and a library call whose result may be null USED DIRECTLY: returned, assigned,
     // initializing a local (its value reaches the link graph only as an opaque '$_v')
+    // the method and scope of the statement syntacticSeeds is reading, for callResult
+    private record ReadScope(MethodInfo mi, Scope scope) {
+    }
+
+    private ReadScope readScope;
+
     private void syntacticSeeds(MethodInfo mi, Scope scope, Statement statement) {
+        readScope = new ReadScope(mi, scope);
+        try {
+            syntacticSeedsIn(mi, scope, statement);
+        } finally {
+            readScope = null;
+        }
+    }
+
+    private void syntacticSeedsIn(MethodInfo mi, Scope scope, Statement statement) {
         nestedAssignments(mi, scope, statement);
         if (statement instanceof ReturnStatement rs && !mi.isConstructor() && !mi.returnType().isVoid()) {
             callResult(mi, rs.expression());
@@ -1337,12 +1352,29 @@ public final class NullabilityPass {
         }
     }
 
-    // the node an argument expression denotes: a variable, or an analysed method's result
+    /*
+     The node an expression denotes: a variable; an analysed method's result; or a read of a generic receiver's
+     content, 'recv.get(k)' where the method returns a type variable of its class ('Map.get' returns V): that slot
+     of the receiver, at any depth ('map.get(a).get(b)').
+     */
     private Object argumentNode(MethodInfo mi, Scope scope, Expression argument) {
         Expression e = NonNullFacts.unwrap(argument);
         if (e instanceof VariableExpression ve) return node(mi, scope, ve.variable());
-        if (e instanceof MethodCall mc && mc.methodInfo() != null && analysed.contains(mc.methodInfo())
-            && !mc.methodInfo().returnType().isVoid()) return mc.methodInfo();
+        if (!(e instanceof MethodCall mc) || mc.methodInfo() == null) return null;
+        MethodInfo callee = mc.methodInfo();
+        ParameterizedType rt = callee.returnType();
+        if (!callee.isStatic() && mc.object() != null && rt.arrays() == 0 && rt.typeParameter() != null
+            && !rt.typeParameter().isMethodTypeParameter()) {
+            Object receiver = argumentNode(mi, scope, mc.object());
+            ParameterizedType type = receiver == null ? null : typeOf(receiver);
+            int arity = callee.typeInfo().typeParameters().size();
+            int index = rt.typeParameter().getIndex();
+            if (type != null && type.arrays() == 0 && type.parameters().size() == arity && index < arity) {
+                return new Arg(receiver, index);
+            }
+            return null;
+        }
+        if (analysed.contains(callee) && !rt.isVoid()) return callee;
         return null;
     }
 
@@ -1412,6 +1444,10 @@ public final class NullabilityPass {
             // type variables, which each call instantiates anew
             if (concreteArguments(callee.returnType())) flows.add(List.of(callee, target));
             if (policy.callResults() && !isTypeVariable(callee.returnType())) addEdge(callee, target);
+        }
+        if (readScope != null && !analysed.contains(callee)
+            && argumentNode(readScope.mi(), readScope.scope(), unwrapped) instanceof Arg slot) {
+            flows.add(List.of(slot, target)); // 'x = map.get(k)': x is the map's value, its slots are the value's
         }
         String lib = libraryNullableReturn(callee);
         if (lib != null) {
@@ -1553,9 +1589,11 @@ public final class NullabilityPass {
         }
         seedCreated(pi, arguments.get(i), mi);
         Expression unwrappedArgument = NonNullFacts.unwrap(arguments.get(i));
-        if (unwrappedArgument instanceof MethodCall amc && amc.methodInfo() != null
-            && analysed.contains(amc.methodInfo()) && !amc.methodInfo().returnType().isVoid()) {
-            if (concreteArguments(amc.methodInfo().returnType())) flows.add(List.of(amc.methodInfo(), pi));
+        if (unwrappedArgument instanceof MethodCall amc && amc.methodInfo() != null) {
+            Object source = argumentNode(mi, scope, unwrappedArgument);
+            if (source instanceof Arg || source instanceof MethodInfo m && concreteArguments(m.returnType())) {
+                flows.add(List.of(source, pi)); // the same object: content slots tied (coupleContent)
+            }
         }
         String lib = nullableLibraryCall(arguments.get(i));
         if (lib != null) {

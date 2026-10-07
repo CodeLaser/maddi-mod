@@ -637,3 +637,26 @@ Of the 232 nullable type-argument slots under `KOTLIN`:
 The errors are two printer gaps, both on the printer side:
 - a read from a `List<X?>` needs `!!`;
 - a constructor call's type arguments must follow the target (`ArrayList<Exprent?>()`).
+
+### 2026-10-07 — after the merge: fernflower feedback
+
+After the merge, the printer session's list of remaining fernflower errors pointed at gaps in the verdicts:
+- **Content copies:** `addAll(Collection<? extends E>)`, `putAll`, `new ArrayList<>(c)`: the argument's slots now
+  flow into the receiver's, or into the new object's target.
+- **Writes need a modifying method.** Only a method that modifies its receiver writes into its slots
+  (`NON_MODIFYING_METHOD`). `Comparator.compare(T, T)` had made comparators' type arguments nullable, and from
+  there 266 guava positions.
+- **Call results:** an analysed method's result ties content slots, except where its type arguments are type
+  variables. A read of a generic receiver (`map.get(a).get(b)`) is that receiver's slot, at any depth.
+  `Policy.callResults` (on in `KOTLIN`) also makes a variable assigned a nullable result nullable, including
+  inside an expression (`(res = f()) != null`).
+- **Indirect evidence under `KOTLIN`:** a field's default value and a comparison with null now count like a
+  library contract, so they are asserted at a content write instead of spreading.
+- **Argument guard:** it uses the facts at the moment the callee runs. In `stats.addWithKey(x, x.id)` the call
+  happens only with a non-null `x`.
+- **`NonNullFacts`:**
+  - A while/for loop's condition no longer sees facts about variables the loop assigns.
+  - Each statement of an old-style switch starts from the facts before the switch, because every case label
+    is a jump target.
+
+Guava, `CLOSED`, type arguments: 1,551 / 29 / 32 (was 1,526 / 29 / 57). Top level and elements are unchanged.
