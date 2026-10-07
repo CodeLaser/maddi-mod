@@ -12,8 +12,11 @@
 # super() arguments, verdicts from the NULLABILITY_* properties, array initializers typed by their target,
 # constructor locals): 123 files compile, 497 type errors. What remains of null into non-null is mostly array
 # elements (one int[][][] table with null rows carries most of them) and type arguments: the pass's next choices.
+#
+# 2026-10-07, the printer's `!!` decided by NullabilityPass's smart-cast facts (Report.smartCasts(), 53a96a27, M4
+# first cut), with maddi's declare-then-assign and nullable-array fixes: 125 files compile, 446 type errors.
 types	199
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	199
-compilingFiles	123
+compilingFiles	125

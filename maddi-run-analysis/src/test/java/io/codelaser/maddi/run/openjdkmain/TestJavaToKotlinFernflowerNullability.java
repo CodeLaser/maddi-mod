@@ -72,6 +72,13 @@ public class TestJavaToKotlinFernflowerNullability {
         public ParameterizedType local(MethodInfo method, Element declaration, LocalVariable variable) {
             return report.local(method, declaration, variable);
         }
+
+        /** Kotlin's smart casts only: useSites() also counts requireNonNull and contracts, which Kotlin does not. */
+        @Override
+        public boolean nonNullAt(io.codelaser.maddi.cst.api.statement.Statement statement,
+                                 io.codelaser.maddi.cst.api.variable.Variable variable) {
+            return report.smartCasts().nonNullAt(statement, variable);
+        }
     }
 
     @Test
