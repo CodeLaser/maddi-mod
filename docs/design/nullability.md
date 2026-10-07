@@ -776,3 +776,26 @@ through, directly (`a[i] = v`, a null stored into its elements) or via an array 
 Guava `NULL_MARKED`: noise 422 → 414, unsafe unchanged (339). Dropping the backward edge altogether gave
 noise 386 but unsafe 346: those 7 come from writes that this rule doesn't recognise (library writes such as
 `System.arraycopy` are one possibility, not confirmed). Fernflower uses `KOTLIN` and is not affected.
+
+### 2026-10-07 — diagnose feedback (nacos): identity returns, null-check predicates
+
+From the diagnose session's first corpus run (nacos) of its rules nullIntoNonNull, nullDereference and
+redundantNullCheck:
+- **Identity returns:** the links' `≡` is transitive. In `checked = check(key)`, with `check` returning its
+  argument or null, `key ≡ return ≡ null` attached the callee's null to the argument, and from there to the
+  callee's parameter (`SystemEnvPropertySource.getProperty`). A top-level variable now takes a null marker only in
+  a statement that assigns it, or as a return. Slots keep their call-side writes. Guava: unchanged.
+- **Null-check predicates (`NullPredicates`):** `if (StringUtils.isNotBlank(s)) s.trim()` and the like.
+  - Library predicates come from a table: commons-lang and Spring `StringUtils`, `Objects.nonNull`/`isNull`,
+    guava's `Strings.isNullOrEmpty`, the `CollectionUtils`/`MapUtils`/`ArrayUtils` families.
+  - Analysed boolean methods are inferred by evaluating the body with the parameter null. Every path must return
+    the same constant; a `throw` counts for neither. This runs to a fixed point, so
+    `isNotBlank(s) { return !isBlank(s); }` follows `isBlank`.
+  - `NonNullFacts.whenTrue`/`whenFalse` treat them like `s != null`, but not for Kotlin's smart casts: Kotlin
+    doesn't see a Java method as a null check.
+  - Guava: noise 414 → 410, unsafe +1 (`StandardTable.removeColumn`). That parameter's callers now guard it with a
+    predicate, but guava annotates it `@Nullable` anyway.
+
+Not done yet, from the same report: trusted returns stay optimistic for a method that wraps an unhinted library
+call (`findConfigInfo4GrayState` returning `databaseOperate.queryOne(...)`). Also out of reach: a null that depends
+on the object's subclass.

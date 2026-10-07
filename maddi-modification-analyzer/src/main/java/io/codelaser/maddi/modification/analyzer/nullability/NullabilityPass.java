@@ -351,7 +351,8 @@ public final class NullabilityPass {
                 implementations.computeIfAbsent(overridden, _ -> new java.util.ArrayList<>()).add(mi);
             }
         }
-        facts = new NonNullFacts(this::parameterContract, this::returnContract);
+        facts = new NonNullFacts(this::parameterContract, this::returnContract)
+                .withPredicates(NullPredicates.infer(methods));
         if (policy.contracts()) {
             for (FieldInfo fi : fields) contract(fi, fi);
             for (MethodInfo mi : methods) {
