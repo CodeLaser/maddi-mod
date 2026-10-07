@@ -492,7 +492,11 @@ Preconditions crossing calls changed `CLOSED` by +3 unsafe and −11 noise. The 
 That is the B1 misread: guava's `@Nullable Object...` speaks about the elements. What remains in the open world
 is mostly arrays as well.
 
-Not yet done:
-- `IteratingAnalyzerImpl` still runs `CLOSED`: there is no configuration switch yet.
-- Under `@NullMarked`, the JSpecify output prints nothing for UNSPECIFIED, which reads as non-null. An open-world
-  verdict needs a different presentation there: `@NullUnmarked` on the member, or no `@NullMarked` scope.
+Wiring:
+- `Configuration.nullabilityOpenWorld()` (`setNullabilityOpenWorld`) makes the analyzer run `OPEN`.
+- In the `@NullMarked` style, a missing annotation reads as non-null, so `NullabilityDecorator` cannot leave an
+  undecided position out. A method or constructor with an UNSPECIFIED parameter or return (other than a type
+  variable, which is parametric already) gets `@NullUnmarked`, and its non-null positions get an explicit
+  `@NonNull`. A field cannot be unmarked on its own, so an undecided field gets `@Nullable`, the reading that is
+  safe for whoever reads it. Only JSpecify has an unmarked annotation; the other flavours still leave
+  UNSPECIFIED out.

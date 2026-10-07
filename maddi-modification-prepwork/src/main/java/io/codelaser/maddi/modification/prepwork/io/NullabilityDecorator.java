@@ -52,31 +52,44 @@ import java.util.stream.Stream;
  * array itself needs {@code String @Nullable []}), and a NESTED type ({@code @Nullable Map.Entry} does not compile;
  * it needs {@code Map.@Nullable Entry}). Both need the annotation inside the printed type, as do type arguments
  * ({@code List<@Nullable String>}): not yet.
+ * <p>
+ * In the {@code @NullMarked} style ({@code writeNonNull} false) a missing annotation reads as non-null, so an
+ * UNSPECIFIED verdict cannot simply be left out: the analysis did not decide it (an open-world parameter that no
+ * analysed call passes null to, what it flows into, a degraded method's return). A method or constructor with such a
+ * parameter or return gets the flavour's {@link Flavour#nullUnmarked} annotation, and then its non-null positions
+ * need the explicit non-null annotation. A field cannot be unmarked on its own: it gets {@code @Nullable}, the
+ * reading that is safe for whoever reads the field. A type variable is not affected: under {@code @NullMarked} it is
+ * parametric already. A flavour without an unmarked annotation leaves UNSPECIFIED out, as before.
  */
 public class NullabilityDecorator implements Qualification.Decorator {
 
     /**
      * The annotation family to write.
      *
-     * @param typeUse the annotations are TYPE_USE (JSpecify, Checker Framework, JetBrains since 20.0): see the class
-     *                comment for what is skipped
+     * @param typeUse     the annotations are TYPE_USE (JSpecify, Checker Framework, JetBrains since 20.0): see the
+     *                    class comment for what is skipped
+     * @param nullUnmarked the annotation that leaves a method's nullness unspecified inside a {@code @NullMarked}
+     *                    scope; null when the family has none
      */
     public enum Flavour {
-        JSPECIFY("org.jspecify.annotations.Nullable", "org.jspecify.annotations.NonNull", true),
+        JSPECIFY("org.jspecify.annotations.Nullable", "org.jspecify.annotations.NonNull", true,
+                "org.jspecify.annotations.NullUnmarked"),
         CHECKER("org.checkerframework.checker.nullness.qual.Nullable",
-                "org.checkerframework.checker.nullness.qual.NonNull", true),
-        JETBRAINS("org.jetbrains.annotations.Nullable", "org.jetbrains.annotations.NotNull", true),
-        JSR305("javax.annotation.Nullable", "javax.annotation.Nonnull", false),
-        MADDI("io.codelaser.maddi.annotation.Nullable", "io.codelaser.maddi.annotation.NotNull", false);
+                "org.checkerframework.checker.nullness.qual.NonNull", true, null),
+        JETBRAINS("org.jetbrains.annotations.Nullable", "org.jetbrains.annotations.NotNull", true, null),
+        JSR305("javax.annotation.Nullable", "javax.annotation.Nonnull", false, null),
+        MADDI("io.codelaser.maddi.annotation.Nullable", "io.codelaser.maddi.annotation.NotNull", false, null);
 
         public final String nullable;
         public final String nonNull;
         public final boolean typeUse;
+        public final String nullUnmarked;
 
-        Flavour(String nullable, String nonNull, boolean typeUse) {
+        Flavour(String nullable, String nonNull, boolean typeUse, String nullUnmarked) {
             this.nullable = nullable;
             this.nonNull = nonNull;
             this.typeUse = typeUse;
+            this.nullUnmarked = nullUnmarked;
         }
     }
 
@@ -93,6 +106,7 @@ public class NullabilityDecorator implements Qualification.Decorator {
     private final Qualification.Decorator delegate;
     private final AnnotationExpression nullableAnnotation;
     private final AnnotationExpression nonNullAnnotation;
+    private final AnnotationExpression nullUnmarkedAnnotation;
     private final Set<String> importsNeeded = new TreeSet<>();
     private final Runtime runtime;
 
@@ -105,6 +119,8 @@ public class NullabilityDecorator implements Qualification.Decorator {
         this.delegate = delegate;
         nullableAnnotation = annotation(runtime, options.flavour.nullable);
         nonNullAnnotation = annotation(runtime, options.flavour.nonNull);
+        nullUnmarkedAnnotation = options.flavour.nullUnmarked == null ? null
+                : annotation(runtime, options.flavour.nullUnmarked);
     }
 
     // the annotation's type need not be on the analysed classpath: a stub carries the name for printing and import
@@ -137,6 +153,10 @@ public class NullabilityDecorator implements Qualification.Decorator {
     public List<AnnotationExpression> annotations(Element element) {
         List<AnnotationExpression> list = new ArrayList<>();
         if (delegate != null) list.addAll(delegate.annotations(element));
+        if (element instanceof MethodInfo mi && unmarked(mi)) {
+            importsNeeded.add(nullUnmarkedAnnotation.typeInfo().fullyQualifiedName());
+            list.add(nullUnmarkedAnnotation);
+        }
         AnnotationExpression ae = nullness(element);
         if (ae != null && list.stream().noneMatch(NullAnnotations::isNullnessAnnotation)) {
             importsNeeded.add(ae.typeInfo().fullyQualifiedName());
@@ -146,6 +166,49 @@ public class NullabilityDecorator implements Qualification.Decorator {
     }
 
     private AnnotationExpression nullness(Element element) {
+        NullableState state = state(element);
+        if (state == null) return null;
+        return switch (state) {
+            case NULLABLE -> nullableAnnotation;
+            case NONNULL -> options.writeNonNull || unmarkedPosition(element) ? nonNullAnnotation : null;
+            // a field cannot be unmarked: in the @NullMarked style its safe reading is nullable
+            case UNSPECIFIED -> !options.writeNonNull && nullUnmarkedAnnotation != null
+                                && element instanceof FieldInfo fi && !isTypeVariable(fi.type())
+                    ? nullableAnnotation : null;
+        };
+    }
+
+    // the method of a parameter or return in a method that gets the unmarked annotation
+    private boolean unmarkedPosition(Element element) {
+        return switch (element) {
+            case ParameterInfo pi -> unmarked(pi.methodInfo());
+            case MethodInfo mi -> unmarked(mi);
+            default -> false;
+        };
+    }
+
+    // in the @NullMarked style, a method with an undecided parameter or return (not a type variable: parametric)
+    private boolean unmarked(MethodInfo mi) {
+        if (options.writeNonNull || nullUnmarkedAnnotation == null) return false;
+        return java.util.stream.Stream.concat(mi.parameters().stream(), Stream.of(mi))
+                .anyMatch(e -> state(e) == NullableState.UNSPECIFIED && !isTypeVariable(type(e)));
+    }
+
+    private static boolean isTypeVariable(ParameterizedType type) {
+        return type.typeParameter() != null && type.arrays() == 0;
+    }
+
+    private static ParameterizedType type(Element element) {
+        return switch (element) {
+            case ParameterInfo pi -> pi.parameterizedType();
+            case MethodInfo mi -> mi.returnType();
+            case FieldInfo fi -> fi.type();
+            default -> throw new UnsupportedOperationException();
+        };
+    }
+
+    // the verdict to print at this position; null where nothing can be printed
+    private NullableState state(Element element) {
         ParameterizedType type;
         Property property;
         switch (element) {
@@ -168,12 +231,7 @@ public class NullabilityDecorator implements Qualification.Decorator {
         if (type.isPrimitiveExcludingVoid() && type.arrays() == 0) return null;
         if (options.flavour.typeUse && (type.arrays() > 0 || isNested(type))) return null;
         if (alreadyAnnotated(element, type)) return null;
-        NullableState state = element.analysis().getOrDefault(property, ValueImpl.NullabilityImpl.UNSPECIFIED).state();
-        return switch (state) {
-            case NULLABLE -> nullableAnnotation;
-            case NONNULL -> options.writeNonNull ? nonNullAnnotation : null;
-            case UNSPECIFIED -> null;
-        };
+        return element.analysis().getOrDefault(property, ValueImpl.NullabilityImpl.UNSPECIFIED).state();
     }
 
     private static boolean isNested(ParameterizedType type) {

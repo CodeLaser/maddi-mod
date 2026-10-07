@@ -107,4 +107,40 @@ public class TestNullabilityAnnotations extends CommonTest {
                 }
                 """, print(x, new NullabilityDecorator.Options(NullabilityDecorator.Flavour.JSR305, true)));
     }
+
+    @Language("java")
+    private static final String LIBRARY = """
+            package a.b;
+            public class L {
+                private String name = "";
+                public void setName(String name) { this.name = name; }
+                public int length(String s) { return s.length(); }
+                public String greet(String s, String t) { return t.trim() + s; }
+                public String getName() { return name; }
+            }
+            """;
+
+    @DisplayName("open world under @NullMarked: an undecided method is @NullUnmarked, an undecided field @Nullable")
+    @Test
+    public void openWorldNullUnmarked() {
+        TypeInfo l = javaInspector.parse("a.b.L", LIBRARY);
+        List<Info> ao = prepWork(l);
+        new IteratingAnalyzerImpl(javaInspector, new IteratingAnalyzerImpl.ConfigurationBuilder()
+                .setMaxIterations(10).setNullability(true).setNullabilityOpenWorld(true).build()).analyze(ao);
+        // setName's parameter may be null from outside, and so may the field it is stored in; 'length' and 't'
+        // dereference their parameter (a precondition); 'greet' still has 's' undecided: explicit @NonNull for 't'
+        assertEquals("""
+                package a.b;
+                import org.jspecify.annotations.NonNull;
+                import org.jspecify.annotations.NullUnmarked;
+                import org.jspecify.annotations.Nullable;
+                public class L {
+                    @Nullable private String name = "";
+                    @NullUnmarked public void setName(String name) { this.name = name; }
+                    public int length(String s) { return s.length(); }
+                    @NullUnmarked @NonNull public String greet(String s, @NonNull String t) { return t.trim() + s; }
+                    @NullUnmarked public String getName() { return name; }
+                }
+                """, print(l, NullabilityDecorator.Options.JSPECIFY_NULL_MARKED));
+    }
 }

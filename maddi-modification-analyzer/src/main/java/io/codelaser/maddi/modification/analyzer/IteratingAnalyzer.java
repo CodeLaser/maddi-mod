@@ -109,6 +109,15 @@ public interface IteratingAnalyzer {
         }
 
         /**
+         * With {@link #nullability()}: the analysed code has callers the analysis does not see (a library), so a
+         * parameter callable from outside is not non-null merely because no analysed call passes null to it
+         * ({@code NullabilityPass.World.OPEN}). Off: the analysed calls are all the calls (an application).
+         */
+        default boolean nullabilityOpenWorld() {
+            return false;
+        }
+
+        /**
          * The wall-clock budget of one {@link #analyze} call; {@code null} (the default) is unlimited. When the run
          * outlives it, the analyzer throws {@link AnalysisBudgetExceededException} naming the pass and the element
          * count it reached. Checked before every element of every pass, not at pass boundaries only, because a pass

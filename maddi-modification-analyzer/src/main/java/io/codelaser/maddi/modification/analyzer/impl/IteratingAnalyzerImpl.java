@@ -91,7 +91,8 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                                     boolean modificationViaReachability,
                                     boolean flattenVariableData,
                                     Duration maxDuration,
-                                    boolean nullability) implements Configuration {
+                                    boolean nullability,
+                                    boolean nullabilityOpenWorld) implements Configuration {
     }
 
     public static class ConfigurationBuilder {
@@ -104,6 +105,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
         private boolean modificationViaReachability;
         private boolean flattenVariableData;
         private boolean nullability;
+        private boolean nullabilityOpenWorld;
         private Duration maxDuration; // null = unlimited
         private NearMissPolicy nearMissPolicy = NearMissPolicy.STRICT;
         private CycleBreakingStrategy cycleBreakingStrategy = CycleBreakingStrategy.NONE;
@@ -160,6 +162,11 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
             return this;
         }
 
+        public ConfigurationBuilder setNullabilityOpenWorld(boolean nullabilityOpenWorld) {
+            this.nullabilityOpenWorld = nullabilityOpenWorld;
+            return this;
+        }
+
         public ConfigurationBuilder setFlattenVariableData(boolean flattenVariableData) {
             this.flattenVariableData = flattenVariableData;
             return this;
@@ -174,7 +181,8 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
         public Configuration build() {
             return new ConfigurationImpl(maxIterations, stopWhenCycleDetectedAndNoImprovements, cycleBreakingStrategy,
                     trackObjectCreations, guardContracts, faultTolerant, warnNearMisses, nearMissPolicy,
-                    modificationViaReachability, flattenVariableData, maxDuration, nullability);
+                    modificationViaReachability, flattenVariableData, maxDuration, nullability,
+                    nullabilityOpenWorld);
         }
     }
 
@@ -409,8 +417,11 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
         iterate(analysisOrder, dependencyGraph, initialDirty, beforeFirstRecompute);
         if (configuration.nullability()) {
             // docs/design/nullability.md M3/B2: one-shot, over the converged link facts
-            var pass = new io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass(
-                    io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass.Policy.NULL_MARKED);
+            var policy = io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass.Policy.NULL_MARKED;
+            if (configuration.nullabilityOpenWorld()) {
+                policy = policy.withWorld(io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass.World.OPEN);
+            }
+            var pass = new io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass(policy);
             io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass.write(pass.go(analysisOrder));
         }
     }
