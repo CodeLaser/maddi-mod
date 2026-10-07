@@ -1081,4 +1081,26 @@ public class TestNullabilityPass extends CommonTest {
         assertTrue(report.explain(relay2).contains("null in a.b.R.find(String)"), report.explain(relay2));
         assertTrue(report.explain(s).contains("null in a.b.R.find(String)"), report.explain(s));
     }
+
+    @DisplayName("library factories: an argument for the method's type variable is a value of the result's slot")
+    @Test
+    public void factories() {
+        NullabilityPass.Report report = run("a.b.Y", """
+                package a.b;
+                import java.util.*;
+                class Y {
+                    private static final Map<Integer, Integer[]> TABLE = Map.of(1, new Integer[]{2, null}, 3, new Integer[]{4});
+                    private static final List<String> NAMES = Arrays.asList("a", null);
+                    private static final List<String> CLEAN = List.of("a", "b");
+                    static List<String> wrap(String s) { String t = s.isEmpty() ? null : s; return Arrays.asList(t, "x"); }
+                }
+                """);
+        System.out.println(explain(report));
+        Map<String, String> byName = report.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+        assertEquals("Map<Integer, Integer?[]>", byName.get("a.b.Y.TABLE"));
+        assertEquals("List<String?>", byName.get("a.b.Y.NAMES"));
+        assertEquals("List<String>", byName.get("a.b.Y.CLEAN"));
+        assertEquals("List<String?>", byName.get("a.b.Y.wrap(String)"));
+    }
 }

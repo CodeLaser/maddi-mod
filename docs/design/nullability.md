@@ -689,5 +689,21 @@ Fernflower items left for the printer:
 - Diamond and `computeIfAbsent` constructor calls are spelled with nullability-free type arguments (about 25
   errors).
 - `Objects.requireNonNull(x).m()` needs `x!!`.
-- `Map.of(k, new Integer[]{..., null})` gets `Array<Int>` values. This one is a verdict gap too: a library
-  factory's method type variables don't tie the arguments' content into the result's slots.
+- `Map.of(k, new Integer[]{..., null})` is printed as `arrayOf<Int>(..., null)`. Since the next entry, the field
+  itself is `MutableMap<Int, Array<Int?>>`.
+
+### 2026-10-07 — library factories
+
+The pass now handles a library method whose return type argument `j` is a method type variable `T`, such as
+`Map.of(K, V, ...)`, `List.of(E...)`, `Arrays.asList(T...)` or `Map.entry`. Each argument passed for a `T`, or as
+an element of a `T...`, is a value of slot `j` of the result, which is the target's slot. This covers:
+- a null literal;
+- an array created with null elements, at any depth;
+- a variable or analysed result: an edge into the slot, and its content slots coupled.
+
+It applies to assignments, returns and field initializers. A parameter the library declares nullable is skipped,
+because accepting null is not storing it as a `T`. `Optional.ofNullable(t)` already got its slot from the link
+engine's hidden content, so it is unchanged.
+
+Guava: unchanged in every row. Fernflower: unchanged at 160 / 109. `SecondaryFunctionsHelper.mapNumComparisons` is
+now `MutableMap<Int, Array<Int?>>`, and its four remaining errors are the printer's explicit `arrayOf<Int>`.

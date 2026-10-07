@@ -1527,6 +1527,7 @@ public final class NullabilityPass {
         Expression unwrapped = value instanceof Cast c ? c.expression() : value;
         if (target == null || !(unwrapped instanceof MethodCall mc) || mc.methodInfo() == null) return;
         MethodInfo callee = mc.methodInfo();
+        if (readScope != null) factorySlots(target, value, readScope.mi());
         if (analysed.contains(callee) && !callee.isConstructor() && !callee.returnType().isVoid()) {
             // the same object: its content slots are one (coupleContent); not where the callee's type arguments are
             // type variables, which each call instantiates anew
@@ -1543,6 +1544,53 @@ public final class NullabilityPass {
         } else if (policy.contracts() && analysed.contains(callee)
                    && NullAnnotations.explicitState(callee) == NullableState.NULLABLE) {
             seed(target, "assigned " + callee.fullyQualifiedName() + ", annotated nullable");
+        }
+    }
+
+    /*
+     A library factory: the return type's argument j is a method type variable T ('Map.of(K, V, ...)' returns
+     Map<K, V>, 'List.of(E...)', 'Arrays.asList(T...)', 'Optional.of(T)'). Each argument passed for a T (or as an
+     element of a 'T...') is a value of the result's slot j, which is the target's ('Map<Integer, Integer[]> m =
+     Map.of(k, new Integer[]{null})': the target's value elements are nullable). An analysed callee's result is
+     tied by callResult instead.
+     */
+    private void factorySlots(Object target, Expression value, MethodInfo mi) {
+        if (target == null || !(NonNullFacts.unwrap(value) instanceof MethodCall mc) || mc.methodInfo() == null) {
+            return;
+        }
+        MethodInfo callee = mc.methodInfo();
+        if (analysed.contains(callee)) return;
+        ParameterizedType returnType = callee.returnType();
+        ParameterizedType targetType = typeOf(target);
+        if (returnType.arrays() > 0 || returnType.parameters().isEmpty() || targetType == null
+            || targetType.arrays() > 0 || targetType.parameters().size() != returnType.parameters().size()) {
+            return;
+        }
+        List<ParameterInfo> parameters = callee.parameters();
+        List<Expression> arguments = mc.parameterExpressions();
+        for (int j = 0; j < returnType.parameters().size(); j++) {
+            ParameterizedType r = returnType.parameters().get(j);
+            if (r.arrays() > 0 || r.typeParameter() == null || !r.typeParameter().isMethodTypeParameter()) continue;
+            Arg slot = new Arg(target, j);
+            for (int a = 0; a < arguments.size() && !parameters.isEmpty(); a++) {
+                ParameterInfo p = parameters.get(Math.min(a, parameters.size() - 1));
+                ParameterizedType pt = p.parameterizedType();
+                boolean element = p.isVarArgs() && !passesTheArray(arguments, parameters, a);
+                if (!r.typeParameter().equals(pt.typeParameter()) || pt.arrays() != (element ? 1 : 0)) continue;
+                // a parameter the library declares nullable accepts null; that is not storing it as a T
+                if (stateOf(p, PropertyImpl.NULLABILITY_PARAMETER) == NullableState.NULLABLE) continue;
+                Expression argument = arguments.get(a);
+                if (NonNullFacts.unwrap(argument) instanceof NullConstant) {
+                    seed(slot, "null passed to " + callee.fullyQualifiedName() + " in " + where(mi));
+                    continue;
+                }
+                seedCreated(slot, argument, mi);
+                Object source = readScope == null ? null : argumentNode(readScope.mi(), readScope.scope(), argument);
+                if (source != null) {
+                    addEdge(source, slot);
+                    flows.add(List.of(source, slot)); // the same object: its content slots are the slot's
+                }
+            }
         }
     }
 
@@ -1719,7 +1767,10 @@ public final class NullabilityPass {
     private void seedDefaultValue(FieldInfo fi) {
         if (fi.type().isPrimitiveExcludingVoid() && fi.type().arrays() == 0) return;
         Expression initializer = fi.initializer();
-        if (initializer != null) seedCreated(fi, initializer, null);
+        if (initializer != null) {
+            seedCreated(fi, initializer, null);
+            factorySlots(fi, initializer, null);
+        }
         if (initializer instanceof NullConstant) {
             seed(fi, "initializer null");
             return;
