@@ -747,3 +747,20 @@ Guava, `NULL_MARKED`: unsafe 348 → 339 (parameters 248 → 241, fields 8 → 6
 The new noise is real flow from imprecision further upstream (`TypeToken.of(Class)` fed by
 `Class.getComponentType()`; `ImmutableSortedSet`'s comparator chain). Fernflower not measured: the printer session
 was updating the ratchet at the time.
+
+### 2026-10-07 — arrays filled by the next loop
+
+`T[] a = new T[n]; for (int i = 0; i < n; i++) { ... a[i] = v; ... }` (also with `i < a.length`): every element is
+written before anything reads the array, so the creation leaves no null, and each `v` flows into the elements
+through the links. The rule is narrow on purpose:
+- a one-dimensional creation;
+- followed directly by the loop: from 0, one step at a time, with no other assignment to `i`;
+- `a[i] = ...` is a statement of the loop body itself (not under an `if`);
+- the body has no `break`, `continue` or `return`.
+
+Guava: −3 noise (`AbstractCompositeHashFunction`'s hashers). Most of guava's "array created with null elements"
+noise comes from elsewhere: `ImmutableMap.Builder.entries` (guava annotates it `@Nullable Entry<K, V>[]` and casts
+the nulls away once it is full), coupled both ways with `ImmutableList.array`, `Joiner.join(Object[])` and
+`TypeToken`'s `Type[]`. A cast barrier on content (`(Entry<K, V>[]) entries`) was tried and dropped. It made no
+difference: the link engine's transitive links bypass the cast, and cutting those too lost a real flow
+(`HashBiMap.hashTableVToK`).

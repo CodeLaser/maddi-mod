@@ -1182,4 +1182,54 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("Map<String?, Integer>", byName.get("a.b.M.Member.attributes"));
         assertEquals("String", byName.get("a.b.M.Constant.getString()"));
     }
+
+    @DisplayName("an array created and filled by the next loop has no null elements")
+    @Test
+    public void filledArrays() {
+        NullabilityPass.Report report = run("a.b.A", """
+                package a.b;
+                class A {
+                    static String[] filled(String[] in) {
+                        String[] out = new String[in.length];
+                        for (int i = 0; i < in.length; i++) { out[i] = in[i].trim(); }
+                        return out;
+                    }
+                    static String[] byLength(int n) {
+                        String[] out = new String[n];
+                        for (int i = 0; i < out.length; i++) out[i] = "x" + i;
+                        return out;
+                    }
+                    static String[] half(int n) {
+                        String[] out = new String[n];
+                        for (int i = 0; i < n; i += 2) { out[i] = "x"; }
+                        return out;
+                    }
+                    static String[] conditional(int n) {
+                        String[] out = new String[n];
+                        for (int i = 0; i < n; i++) { if (i > 1) out[i] = "x"; }
+                        return out;
+                    }
+                    static String[] early(int n) {
+                        String[] out = new String[n];
+                        for (int i = 0; i < n; i++) { if (i > 3) break; out[i] = "x"; }
+                        return out;
+                    }
+                    static String[] later(int n) {
+                        String[] out = new String[n];
+                        System.out.println(n);
+                        for (int i = 0; i < n; i++) { out[i] = "x"; }
+                        return out;
+                    }
+                }
+                """);
+        System.out.println(explain(report));
+        Map<String, String> byName = report.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+        assertEquals("String[]", byName.get("a.b.A.filled(String[])"));
+        assertEquals("String[]", byName.get("a.b.A.byLength(int)"));
+        assertEquals("String?[]", byName.get("a.b.A.half(int)"), "every other element");
+        assertEquals("String?[]", byName.get("a.b.A.conditional(int)"), "not a statement of the body");
+        assertEquals("String?[]", byName.get("a.b.A.early(int)"), "a break");
+        assertEquals("String?[]", byName.get("a.b.A.later(int)"), "not the next statement");
+    }
 }
