@@ -441,3 +441,17 @@ Guava: 13,085 agree / 346 unsafe / 467 noise (was 13,006 / 346 / 546): 79 fewer 
   Guava: **13,172 agree / 351 unsafe / 374 noise** (was 13,085 / 346 / 467). The +5 unsafe: 3 are the B1 array
   gap (`requireKeys()` is declared `@Nullable Object[]`, meaning the elements, but read as a nullable array; the
   array really is non-null), and 2 are public-API parameters (`StandardTable.containsMapping`/`removeMapping`).
+
+### 2026-10-07 — generic interfaces: no fan-out through a type variable, typed dispatch instead
+
+Null entering a generic interface method reached every implementation through the downward override edge:
+`Comparator<T>.compare` led to every `LexicographicalComparator.compare(boolean[], …)`, and `Funnel<T>.funnel`
+to `ByteArrayFunnel.funnel(byte[] …)`. The downward edge no longer goes from a type-variable parameter into an
+implementation that instantiates it with a concrete type other than `Object`; that mirrors the upward rule.
+Soundness comes back where the code tells: at a call whose receiver is the interface itself with a concrete type
+argument (`Fn<String, String> f; f.apply(x)`), the argument also flows straight into the implementations whose
+parameter is that type ("typed dispatch"). `Object` implementations (`IdentityFunction.apply(Object)`) stay on
+the chain. Still a heuristic: a receiver typed through a subtype or a wildcard (`Comparator<? super K>`) does
+not dispatch.
+
+Guava: **13,302 agree / 351 unsafe / 244 noise** (was 13,172 / 351 / 374): 130 fewer noise, no new unsafe.

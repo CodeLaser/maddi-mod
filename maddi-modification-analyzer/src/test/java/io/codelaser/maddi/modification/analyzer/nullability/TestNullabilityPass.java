@@ -275,8 +275,9 @@ public class TestNullabilityPass extends CommonTest {
         // parametric
         assertEquals("F?", byLabel.get("a.b.G.Fn.apply(Object):0:input"));
         assertEquals("T!", byLabel.get("a.b.G.Fn.apply(Object)"));
-        // downward: f.apply(null) may run any implementation (sound; ToString cannot actually be an
-        // Fn<String,String>, which a type-aware dispatch would see)
+        // downward: the override chain does not carry null from the type variable F into a concrete 'String key';
+        // the call 'f.apply(null)' on an Fn<String, String> does, by its receiver's type (typed dispatch). An
+        // Object implementation stays reached through the chain.
         assertEquals("String?", byLabel.get("a.b.G.Lookup.apply(String):0:key"));
         assertEquals("Object?", byLabel.get("a.b.G.ToString.apply(Object):0:o"));
         // upward stops at the type variable: Lookup's null return does not make every implementation's nullable

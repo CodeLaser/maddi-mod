@@ -172,6 +172,8 @@ public final class NullabilityPass {
     }
 
     private final Policy policy;
+    // analysed implementations per overridden method (any overridden method, also a library one)
+    private final Map<MethodInfo, List<MethodInfo>> implementations = new HashMap<>();
     // analysed methods whose return an earlier round found unreached by null (see go)
     private final Set<MethodInfo> trustedReturns;
     private Set<Object> reached = Set.of();
@@ -242,6 +244,11 @@ public final class NullabilityPass {
         List<FieldInfo> fields = analysisOrder.stream()
                 .filter(i -> i instanceof FieldInfo).map(i -> (FieldInfo) i).toList();
         analysed.addAll(methods);
+        for (MethodInfo mi : methods) {
+            for (MethodInfo overridden : mi.overrides()) {
+                implementations.computeIfAbsent(overridden, _ -> new java.util.ArrayList<>()).add(mi);
+            }
+        }
         facts = new NonNullFacts(this::parameterContract, this::returnContract);
         if (policy.contracts()) {
             for (FieldInfo fi : fields) contract(fi, fi);
@@ -489,7 +496,19 @@ public final class NullabilityPass {
                 if (!isTypeVariable(overridden.returnType())) addEdge(mi, overridden);
                 int n = Math.min(mi.parameters().size(), overridden.parameters().size());
                 for (int i = 0; i < n; i++) {
-                    addEdge(overridden.parameters().get(i), mi.parameters().get(i));
+                    // DOWNWARD not from a type-variable parameter into an implementation that instantiates it with a
+                    // concrete type other than Object: a null passed through the generic 'Comparator<T>.compare'
+                    // reaches 'compare(boolean[] ...)' only where T is boolean[], which nothing here tells. Measured
+                    // on guava (2026-10-07): -142 noise; keeping Object implementations ('IdentityFunction.apply')
+                    // keeps the unsafe count. A heuristic: a null passed to a Comparator<String> does reach a String
+                    // implementation.
+                    ParameterizedType implementationType = mi.parameters().get(i).parameterizedType();
+                    if (!isTypeVariable(overridden.parameters().get(i).parameterizedType())
+                        || isTypeVariable(implementationType)
+                        || implementationType.typeInfo() != null && implementationType.arrays() == 0
+                           && implementationType.typeInfo().isJavaLangObject()) {
+                        addEdge(overridden.parameters().get(i), mi.parameters().get(i));
+                    }
                     if (!isTypeVariable(overridden.parameters().get(i).parameterizedType())) {
                         addEdge(mi.parameters().get(i), overridden.parameters().get(i));
                     }
@@ -740,35 +759,69 @@ public final class NullabilityPass {
         LinkComputer.ListOfLinks list = analysis.getOrNull(LinkComputerImpl.LINKED_VARIABLES_ARGUMENTS,
                 LinkComputerImpl.ListOfLinksImpl.class);
         for (int i = 0; i < arguments.size(); i++) {
-            ParameterInfo pi = parameters.get(Math.min(i, parameters.size() - 1)); // varargs: the last parameter
-            if (pi.isVarArgs()) continue; // the array is never null; its elements are content (not yet)
-            if (arguments.get(i) instanceof NullConstant) {
-                seed(pi, "null argument in " + mi.fullyQualifiedName());
-                continue;
+            ParameterInfo parameter = parameters.get(Math.min(i, parameters.size() - 1)); // varargs: the last one
+            if (parameter.isVarArgs()) continue; // the array is never null; its elements are content (not yet)
+            for (ParameterInfo pi : typedDispatch(call, callee, parameter)) {
+                argument(mi, scope, statement, call, list, arguments, i, pi);
             }
-            // M4: a variable argument known non-null at the call (or when its statement starts) carries no null
-            if (NonNullFacts.unwrap(arguments.get(i)) instanceof VariableExpression ve
-                && (call != null && facts.nonNullAt(call, ve.variable()) || facts.nonNullAt(statement, ve.variable()))) {
-                continue;
-            }
-            String lib = nullableLibraryCall(arguments.get(i));
-            if (lib != null) {
-                seed(pi, "argument " + lib + " in " + mi.fullyQualifiedName());
-                continue;
-            }
-            if (list == null || i >= list.list().size()) continue;
-            Links links = list.list().get(i);
-            Variable primary = links.primary();
-            if (primary == null) continue;
-            if (isNullMarker(primary)) {
-                seed(pi, "null argument in " + mi.fullyQualifiedName());
-                continue;
-            }
-            Object node = node(mi, scope, primary);
-            if (node != null) addEdge(node, pi);
-            // an intermediate (or a local assigned in this very statement): its sources, in the argument's own links
-            sourcesOf(mi, scope, primary, links, pi);
         }
+    }
+
+    /**
+     * The parameter, and, where the override chain stops at a type variable (buildForMethod), the parameters of the
+     * implementations the receiver's type selects: for {@code Fn<String, String> f; f.apply(x)}, every
+     * {@code apply(String)} (and {@code apply(Object)}, which the chain still reaches).
+     */
+    private List<ParameterInfo> typedDispatch(Expression call, MethodInfo callee, ParameterInfo pi) {
+        if (!isTypeVariable(pi.parameterizedType()) || pi.parameterizedType().typeParameter().isMethodTypeParameter()
+            || !(call instanceof MethodCall mc) || mc.object() == null) {
+            return List.of(pi);
+        }
+        ParameterizedType receiver = mc.object().parameterizedType();
+        int index = pi.parameterizedType().typeParameter().getIndex();
+        if (receiver == null || receiver.typeInfo() != callee.typeInfo() || index >= receiver.parameters().size()) {
+            return List.of(pi);
+        }
+        ParameterizedType argumentType = receiver.parameters().get(index);
+        if (argumentType.typeInfo() == null || argumentType.typeInfo().isJavaLangObject()) return List.of(pi);
+        List<ParameterInfo> targets = new java.util.ArrayList<>(List.of(pi));
+        for (MethodInfo implementation : implementations.getOrDefault(callee, List.of())) {
+            ParameterizedType type = implementation.parameters().get(pi.index()).parameterizedType();
+            if (type.typeInfo() == argumentType.typeInfo() && type.arrays() == argumentType.arrays()) {
+                targets.add(implementation.parameters().get(pi.index()));
+            }
+        }
+        return targets;
+    }
+
+    private void argument(MethodInfo mi, Scope scope, Statement statement, Expression call,
+                          LinkComputer.ListOfLinks list, List<Expression> arguments, int i, ParameterInfo pi) {
+        if (arguments.get(i) instanceof NullConstant) {
+            seed(pi, "null argument in " + mi.fullyQualifiedName());
+            return;
+        }
+        // M4: a variable argument known non-null at the call (or when its statement starts) carries no null
+        if (NonNullFacts.unwrap(arguments.get(i)) instanceof VariableExpression ve
+            && (call != null && facts.nonNullAt(call, ve.variable()) || facts.nonNullAt(statement, ve.variable()))) {
+            return;
+        }
+        String lib = nullableLibraryCall(arguments.get(i));
+        if (lib != null) {
+            seed(pi, "argument " + lib + " in " + mi.fullyQualifiedName());
+            return;
+        }
+        if (list == null || i >= list.list().size()) return;
+        Links links = list.list().get(i);
+        Variable primary = links.primary();
+        if (primary == null) return;
+        if (isNullMarker(primary)) {
+            seed(pi, "null argument in " + mi.fullyQualifiedName());
+            return;
+        }
+        Object node = node(mi, scope, primary);
+        if (node != null) addEdge(node, pi);
+        // an intermediate (or a local assigned in this very statement): its sources, in the argument's own links
+        sourcesOf(mi, scope, primary, links, pi);
     }
 
     private void sourcesOf(MethodInfo mi, Scope scope, Variable primary, Links links, ParameterInfo pi) {
