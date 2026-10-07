@@ -16,6 +16,7 @@ package io.codelaser.maddi.modification.analyzer.nullability;
 
 import io.codelaser.maddi.cst.api.analysis.Property;
 import io.codelaser.maddi.cst.api.element.Element;
+import io.codelaser.maddi.cst.api.expression.ArrayInitializer;
 import io.codelaser.maddi.cst.api.expression.Assignment;
 import io.codelaser.maddi.cst.api.expression.BinaryOperator;
 import io.codelaser.maddi.cst.api.expression.Cast;
@@ -43,6 +44,7 @@ import io.codelaser.maddi.cst.api.statement.Statement;
 import io.codelaser.maddi.cst.api.statement.TryStatement;
 import io.codelaser.maddi.cst.api.type.NullableState;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
+import io.codelaser.maddi.cst.api.variable.DependentVariable;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.cst.api.variable.LocalVariable;
 import io.codelaser.maddi.cst.api.variable.Variable;
@@ -194,6 +196,7 @@ public final class NullabilityPass {
 
         static String label(Object node) {
             return switch (node) {
+                case Content c -> "elements of " + label(c.of());
                 case MethodInfo mi -> "return " + mi.fullyQualifiedName();
                 case Info info -> info.fullyQualifiedName();
                 default -> String.valueOf(node);
@@ -211,6 +214,8 @@ public final class NullabilityPass {
     private Set<Object> reached = Set.of();
     // not reached by null, but by a value of an outside caller (World.OPEN*): UNSPECIFIED
     private Set<Object> external = Set.of();
+    // every flow between two nodes, also one dropped as known non-null: the array Contents they tie (coupleContent)
+    private final List<List<Object>> flows = new ArrayList<>();
     private final Map<Object, Set<Object>> successors = new LinkedHashMap<>();
     private final Map<Object, String> seedOrigin = new LinkedHashMap<>();
     private final Set<MethodInfo> degraded = new LinkedHashSet<>();
@@ -310,6 +315,11 @@ public final class NullabilityPass {
                 for (ParameterInfo pi : mi.parameters()) contract(pi, pi);
                 if (!mi.isConstructor() && !mi.returnType().isVoid()) contract(mi, mi);
             }
+            for (FieldInfo fi : fields) elementContract(fi.type(), fi);
+            for (MethodInfo mi : methods) {
+                for (ParameterInfo pi : mi.parameters()) elementContract(pi.parameterizedType(), pi);
+                if (!mi.isConstructor() && !mi.returnType().isVoid()) elementContract(mi.returnType(), mi);
+            }
         }
         for (MethodInfo mi : methods) {
             owner = mi;
@@ -319,7 +329,9 @@ public final class NullabilityPass {
         linkEdges.forEach((edge, count) -> {
             // [0] assigned directly where the source is known non-null, [1] assigned directly otherwise
             if (count[1] > 0 || count[0] == 0) addEdge(edge.get(0), edge.get(1));
+            else flows.add(List.of(edge.get(0), edge.get(1))); // the array is not null there; its elements may be
         });
+        coupleContent();
 
         Map<Object, Object> cause = new LinkedHashMap<>();
         reached = closure(cause);
@@ -328,20 +340,18 @@ public final class NullabilityPass {
         Map<Info, ParameterizedType> verdicts = new LinkedHashMap<>();
         Map<Local, ParameterizedType> locals = new LinkedHashMap<>();
         // an unreached local of a degraded method: its links are missing, so "no null reaches it" is not known
-        declaredLocals.forEach((local, lv) -> locals.put(local, verdict(lv.parameterizedType(),
-                reached.contains(local), degraded.contains(localOwner.get(local)) || external.contains(local))));
+        declaredLocals.forEach((local, lv) -> locals.put(local, verdict(lv.parameterizedType(), local,
+                degraded.contains(localOwner.get(local)))));
         for (FieldInfo fi : fields) {
-            verdicts.put(fi, contracted(fi, verdict(fi.type(), reached.contains(fi), external.contains(fi))));
+            verdicts.put(fi, contracted(fi, verdict(fi.type(), fi, false)));
         }
         for (MethodInfo mi : methods) {
             boolean deg = degraded.contains(mi);
             for (ParameterInfo pi : mi.parameters()) {
-                verdicts.put(pi, contracted(pi, verdict(pi.parameterizedType(), reached.contains(pi),
-                        external.contains(pi))));
+                verdicts.put(pi, contracted(pi, verdict(pi.parameterizedType(), pi, false)));
             }
             if (!mi.isConstructor() && !mi.returnType().isVoid()) {
-                verdicts.put(mi, contracted(mi, verdict(mi.returnType(), reached.contains(mi),
-                        deg || external.contains(mi))));
+                verdicts.put(mi, contracted(mi, verdict(mi.returnType(), mi, deg)));
             }
         }
         NonNullFacts smartCasts = facts.kotlinSmartCasts();
@@ -378,8 +388,34 @@ public final class NullabilityPass {
 
     private ParameterizedType contracted(Info info, ParameterizedType verdict) {
         if (!policy.contracts() || verdict.isPrimitiveExcludingVoid() && verdict.arrays() == 0) return verdict;
+        ParameterizedType v = verdict;
+        if (v.arrays() > 0) {
+            NullableState element = explicitElementState(v);
+            if (element != null && !(v.componentType().isPrimitiveExcludingVoid() && v.arrays() == 1)) {
+                v = v.withComponentType(v.componentType().withNullable(element));
+            }
+        }
         NullableState state = NullAnnotations.explicitState(info);
-        return state == null ? verdict : verdict.withNullable(state);
+        return state == null ? v : v.withNullable(state);
+    }
+
+    // the null annotation on an array's elements, as the front end placed it (ParameterizedType.componentType)
+    private static NullableState explicitElementState(ParameterizedType declared) {
+        boolean nonNull = false;
+        for (io.codelaser.maddi.cst.api.expression.AnnotationExpression ae : declared.componentType().annotations()) {
+            String name = ae.typeInfo().simpleName();
+            if (NullAnnotations.NULLABLE.contains(name)) return NullableState.NULLABLE;
+            if (NullAnnotations.NON_NULL.contains(name)) nonNull = true;
+        }
+        return nonNull ? NullableState.NONNULL : null;
+    }
+
+    // Policy.contracts, for an array's elements: a nullable one is a seed, a non-null one stops null
+    private void elementContract(ParameterizedType declared, Object node) {
+        if (declared.arrays() == 0) return;
+        NullableState state = explicitElementState(declared);
+        if (state == NullableState.NULLABLE) seed(new Content(node), "elements annotated nullable");
+        else if (state == NullableState.NONNULL) nonNullContracts.add(new Content(node));
     }
 
     // ------------------------------------------------------------------ library contracts (the analysis hints)
@@ -431,8 +467,12 @@ public final class NullabilityPass {
             for (ParameterInfo pi : mi.parameters()) {
                 if (reached.contains(pi) || nonNullContracts.contains(pi)
                     || policy.world() == World.OPEN && facts.nonNullAtExit(mi, pi)
-                    || libraryNonNullParameter(mi, pi.index())) continue;
+                    || libraryNonNullParameter(mi, pi.index())) {
+                    addContent(set, pi, pi.parameterizedType());
+                    continue;
+                }
                 set.add(pi);
+                addContent(set, pi, pi.parameterizedType());
             }
         }
         Deque<Object> queue = new ArrayDeque<>(set);
@@ -443,6 +483,14 @@ public final class NullabilityPass {
             }
         }
         return set;
+    }
+
+    // an outside caller chooses the elements of an array it passes, whatever it does with the array itself
+    private void addContent(Set<Object> set, Object node, ParameterizedType type) {
+        if (type.arrays() == 0) return;
+        Content content = new Content(node);
+        if (!reached.contains(content) && !nonNullContracts.contains(content)) set.add(content);
+        addContent(set, content, type.componentType());
     }
 
     private boolean externallyCallable(MethodInfo mi) {
@@ -477,15 +525,25 @@ public final class NullabilityPass {
                                == NullableState.NONNULL);
     }
 
-    private ParameterizedType verdict(ParameterizedType declared, boolean reached, boolean degradedOutput) {
+    /*
+     The verdict of a node of type 'declared': reached is NULLABLE; a degraded output, one an outside caller reaches
+     (World.OPEN*), and a type variable are UNSPECIFIED; else Policy.unreached. An array's elements are the node's
+     Content, recursively.
+     */
+    private ParameterizedType verdict(ParameterizedType declared, Object node, boolean degradedOutput) {
         ParameterizedType arguments = declared.parameters().isEmpty() ? declared
                 : declared.withParameters(declared.parameters().stream()
                 .map(p -> unspecified(p)).toList());
+        if (declared.arrays() > 0) {
+            arguments = arguments.withComponentType(verdict(declared.componentType(), new Content(node),
+                    degradedOutput));
+        }
         NullableState state;
         if (declared.isPrimitiveExcludingVoid() && declared.arrays() == 0) state = NullableState.NONNULL;
-        else if (reached) state = NullableState.NULLABLE; // also a type variable: '@Nullable V get(Object)'
-        else if (degradedOutput || isTypeVariable(declared)) state = NullableState.UNSPECIFIED; // parametric
-        else state = policy.unreached();
+        else if (reached.contains(node)) state = NullableState.NULLABLE; // also a type variable: '@Nullable V get(Object)'
+        else if (degradedOutput || external.contains(node) || isTypeVariable(declared)) {
+            state = NullableState.UNSPECIFIED; // parametric
+        } else state = policy.unreached();
         return arguments.withNullable(state);
     }
 
@@ -499,6 +557,7 @@ public final class NullabilityPass {
 
     private void addEdge(Object from, Object to) {
         if (from == null || to == null || from.equals(to)) return;
+        flows.add(List.of(from, to));
         successors.computeIfAbsent(from, _ -> new LinkedHashSet<>()).add(to);
     }
 
@@ -533,6 +592,63 @@ public final class NullabilityPass {
      * different methods are different variables. The method is for display; a key without a declaration (a pattern
      * variable, a name no scope resolved) is per method and name.
      */
+    /** The elements of an array node (a field, parameter, return, local, or the elements of an outer array). */
+    public record Content(Object of) {
+        @Override
+        public String toString() {
+            return "elements of " + Report.label(of);
+        }
+    }
+
+    // the declared type of a node; null when unknown (a local the pass did not see declared)
+    private ParameterizedType typeOf(Object node) {
+        return switch (node) {
+            case ParameterInfo pi -> pi.parameterizedType();
+            case FieldInfo fi -> fi.type();
+            case MethodInfo mi -> mi.returnType();
+            case Local local -> declaredLocals.containsKey(local) ? declaredLocals.get(local).parameterizedType() : null;
+            case Content c -> {
+                ParameterizedType outer = typeOf(c.of());
+                yield outer == null || outer.arrays() == 0 ? null : outer.componentType();
+            }
+            default -> null;
+        };
+    }
+
+    /*
+     Arrays are invariant in what they hold (Kotlin's Array<T>; Java's covariance is a store check at run time, not a
+     licence): wherever an array flows, both ends denote the same objects, so their elements are one slot. Every
+     flow between two array nodes, also one the top-level verdict drops because the array is known non-null there,
+     ties their Contents both ways, recursively for nested arrays.
+     */
+    private void coupleContent() {
+        Deque<List<Object>> queue = new ArrayDeque<>(flows);
+        Set<List<Object>> seen = new HashSet<>();
+        while (!queue.isEmpty()) {
+            List<Object> flow = queue.removeFirst();
+            if (!seen.add(flow)) continue;
+            // not through a library method: its parameter would tie together the arrays of all its callers
+            if (library(flow.get(0)) || library(flow.get(1))) continue;
+            ParameterizedType t0 = typeOf(flow.get(0));
+            ParameterizedType t1 = typeOf(flow.get(1));
+            if (t0 == null || t1 == null || t0.arrays() == 0 || t1.arrays() == 0) continue;
+            Content c0 = new Content(flow.get(0));
+            Content c1 = new Content(flow.get(1));
+            successors.computeIfAbsent(c0, _ -> new LinkedHashSet<>()).add(c1);
+            successors.computeIfAbsent(c1, _ -> new LinkedHashSet<>()).add(c0);
+            queue.add(List.of(c0, c1));
+        }
+    }
+
+    private boolean library(Object node) {
+        return switch (node) {
+            case Content c -> library(c.of());
+            case ParameterInfo pi -> !analysed.contains(pi.methodInfo());
+            case MethodInfo mi -> !analysed.contains(mi);
+            default -> false;
+        };
+    }
+
     public record Local(MethodInfo methodInfo, Element declaration, String name) {
         @Override
         public boolean equals(Object o) {
@@ -581,6 +697,10 @@ public final class NullabilityPass {
     private Object node(MethodInfo mi, Scope scope, Variable v) {
         return switch (v) {
             case ParameterInfo pi -> pi;
+            case DependentVariable dv -> {
+                Object array = node(mi, scope, dv.arrayVariable());
+                yield array == null ? null : new Content(array);
+            }
             case ReturnVariable rv -> rv.methodInfo();
             case FieldReference fr when !Util.virtual(fr) -> fr.fieldInfo();
             case LocalVariable lv when !lv.simpleName().startsWith("$") -> local(mi, scope, lv.simpleName());
@@ -660,16 +780,22 @@ public final class NullabilityPass {
         Links links = vi.linkedVariables();
         if (recipient == null || links == null) return;
         for (Link link : links) {
-            if (!link.from().equals(v)) continue; // links about a face of v ('this.f.g') are not about v
+            // links about a face of v ('this.f.g') are not about v; an element of v ('r[1] <- null', an initializer)
+            // is v's Content
+            Object from = link.from().equals(v) ? recipient
+                    : link.from() instanceof DependentVariable dv && dv.arrayVariableBase().equals(v)
+                    ? node(mi, scope, dv) : null;
+            if (from == null) continue;
+            Variable fromVar = link.from();
             if (link.linkNature().isIdenticalTo() || link.linkNature().isAssignedFrom()) {
                 if (isNullMarker(link.to())) {
-                    seed(recipient, "null in " + mi.fullyQualifiedName());
+                    seed(from, "null in " + mi.fullyQualifiedName());
                 } else {
-                    linkEdge(node(mi, scope, link.to()), recipient, link.to(), v, statement);
+                    linkEdge(node(mi, scope, link.to()), from, link.to(), fromVar, statement);
                 }
             } else if (link.linkNature().isIdenticalToOrAssignedFromTo()) {
                 // '→': v is assigned to link.to()
-                linkEdge(recipient, node(mi, scope, link.to()), v, link.to(), statement);
+                linkEdge(from, node(mi, scope, link.to()), fromVar, link.to(), statement);
             }
         }
     }
@@ -815,6 +941,7 @@ public final class NullabilityPass {
     private void syntacticSeeds(MethodInfo mi, Scope scope, Statement statement) {
         if (statement instanceof ReturnStatement rs && !mi.isConstructor() && !mi.returnType().isVoid()) {
             callResult(mi, rs.expression());
+            seedCreated(mi, rs.expression(), mi);
         } else if (statement instanceof LocalVariableCreation lvc) {
             lvc.localVariableStream().forEach(lv -> {
                 Object local = local(mi, scope, lv.simpleName());
@@ -822,12 +949,79 @@ public final class NullabilityPass {
                     seed(local, "initialized null in " + mi.fullyQualifiedName());
                 }
                 callResult(local, lv.assignmentExpression());
+                seedCreated(local, lv.assignmentExpression(), mi);
             });
         } else if (statement.expression() instanceof Assignment a && a.variableTarget() != null) {
             Object target = node(mi, scope, a.variableTarget());
             if (a.value() instanceof NullConstant) seed(target, "assigned null in " + mi.fullyQualifiedName());
             callResult(target, a.value());
+            seedCreated(target, a.value(), mi);
+        } else if (statement instanceof ForEachStatement fe && fe.initializer() != null) {
+            // for (T x : array): the elements flow into x
+            Expression iterated = NonNullFacts.unwrap(fe.expression());
+            Object array = iterated instanceof VariableExpression ve ? node(mi, scope, ve.variable())
+                    : iterated instanceof MethodCall mc && mc.methodInfo() != null && analysed.contains(mc.methodInfo())
+                    ? mc.methodInfo() : null;
+            ParameterizedType type = iterated.parameterizedType();
+            if (array != null && type != null && type.arrays() > 0) {
+                // the statement's own scope declares the loop variable
+                fe.initializer().localVariableStream()
+                        .forEach(lv -> addEdge(new Content(array), local(mi, scope, lv.simpleName())));
+            }
         }
+    }
+
+    /*
+     'new T[n]' (no initializer) holds nulls until filled: Kotlin's arrayOfNulls. With fewer dimension expressions
+     than dimensions ('new T[n][]') the inner arrays are null; else the innermost reference elements are. Returns the
+     depth of the Content that is null, 0 when the expression is not such a creation.
+     */
+    private static int arrayCreatedWithNulls(Expression value) {
+        // the front end's array creation is a ConstructorCall of a synthetic constructor, with the array's type
+        if (!(NonNullFacts.unwrap(value) instanceof ConstructorCall cc) || cc.arrayInitializer() != null) return 0;
+        ParameterizedType type = cc.parameterizedType();
+        if (type == null || type.arrays() == 0) return 0;
+        List<Expression> sizes = cc.parameterExpressions().stream().filter(e -> !e.isEmpty()).toList();
+        // 'new T[0]': no elements (guava's EMPTY_ARRAY)
+        if (!sizes.isEmpty() && sizes.getFirst() instanceof io.codelaser.maddi.cst.api.expression.IntConstant ic
+            && ic.constant() == 0) return 0;
+        int dimensions = sizes.size();
+        if (dimensions > 0 && dimensions < type.arrays()) return dimensions;
+        boolean primitive = type.copyWithoutArrays().isPrimitiveExcludingVoid();
+        return primitive ? 0 : type.arrays();
+    }
+
+    private void seedCreated(Object target, Expression value, MethodInfo mi) {
+        if (target == null || value == null) return;
+        int depth = arrayCreatedWithNulls(value);
+        if (depth > 0) {
+            Object content = target;
+            for (int d = 0; d < depth; d++) content = new Content(content);
+            seed(content, "array created with null elements in " + where(mi));
+        }
+        Expression unwrapped = NonNullFacts.unwrap(value);
+        ArrayInitializer initializer = unwrapped instanceof ArrayInitializer ai ? ai
+                : unwrapped instanceof ConstructorCall cc ? cc.arrayInitializer() : null;
+        if (initializer != null) seedInitializer(new Content(target), initializer, mi);
+    }
+
+    /*
+     An array initializer, at any depth: a null element seeds the elements, a nested initializer or creation is
+     walked one level down. The links have this index-precisely for a method's own arrays, but not for a field
+     initializer ('int[][][] t = {{null, null}, null}'), which no method's variable data holds.
+     */
+    private void seedInitializer(Content elements, ArrayInitializer initializer, MethodInfo mi) {
+        for (Expression e : initializer.expressions()) {
+            if (NonNullFacts.unwrap(e) instanceof NullConstant) {
+                seed(elements, "null in an array initializer in " + where(mi));
+            } else {
+                seedCreated(elements, e, mi);
+            }
+        }
+    }
+
+    private static String where(MethodInfo mi) {
+        return mi == null ? "a field initializer" : mi.fullyQualifiedName();
     }
 
     // a call's result used directly: a library method that may return null, or (Policy.contracts) an analysed one
@@ -877,11 +1071,23 @@ public final class NullabilityPass {
                 LinkComputerImpl.ListOfLinksImpl.class);
         for (int i = 0; i < arguments.size(); i++) {
             ParameterInfo parameter = parameters.get(Math.min(i, parameters.size() - 1)); // varargs: the last one
-            if (parameter.isVarArgs()) continue; // the array is never null; its elements are content (not yet)
+            if (parameter.isVarArgs() && !passesTheArray(arguments, parameters, i)) {
+                // an element of the array the call creates: the array is never null, the argument is an element
+                argument(mi, scope, statement, call, list, arguments, i, new Content(parameter));
+                continue;
+            }
             for (ParameterInfo pi : typedDispatch(call, callee, parameter)) {
                 argument(mi, scope, statement, call, list, arguments, i, pi);
             }
         }
+    }
+
+    // 'm(array)' for 'm(String... xs)': the one argument in the varargs position is itself the array
+    private static boolean passesTheArray(List<Expression> arguments, List<ParameterInfo> parameters, int i) {
+        if (arguments.size() != parameters.size()) return false;
+        if (arguments.get(i) instanceof NullConstant) return true; // 'm((String[]) null)' would be a cast; javac warns
+        ParameterizedType type = arguments.get(i).parameterizedType();
+        return type != null && type.arrays() == parameters.get(i).parameterizedType().arrays();
     }
 
     /**
@@ -911,8 +1117,9 @@ public final class NullabilityPass {
         return targets;
     }
 
+    // pi: the parameter, or the Content of a varargs parameter
     private void argument(MethodInfo mi, Scope scope, Statement statement, Expression call,
-                          LinkComputer.ListOfLinks list, List<Expression> arguments, int i, ParameterInfo pi) {
+                          LinkComputer.ListOfLinks list, List<Expression> arguments, int i, Object pi) {
         if (arguments.get(i) instanceof NullConstant) {
             seed(pi, "null argument in " + mi.fullyQualifiedName());
             return;
@@ -920,8 +1127,11 @@ public final class NullabilityPass {
         // M4: a variable argument known non-null at the call (or when its statement starts) carries no null
         if (NonNullFacts.unwrap(arguments.get(i)) instanceof VariableExpression ve
             && (call != null && facts.nonNullAt(call, ve.variable()) || facts.nonNullAt(statement, ve.variable()))) {
+            Object node = node(mi, scope, ve.variable());
+            if (node != null) flows.add(List.of(node, pi)); // an array known non-null: its elements still flow
             return;
         }
+        if (arrayCreatedWithNulls(arguments.get(i)) > 0) seedCreated(pi, arguments.get(i), mi);
         String lib = nullableLibraryCall(arguments.get(i));
         if (lib != null) {
             seed(pi, "argument " + lib + " in " + mi.fullyQualifiedName());
@@ -941,7 +1151,7 @@ public final class NullabilityPass {
         sourcesOf(mi, scope, primary, links, pi);
     }
 
-    private void sourcesOf(MethodInfo mi, Scope scope, Variable primary, Links links, ParameterInfo pi) {
+    private void sourcesOf(MethodInfo mi, Scope scope, Variable primary, Links links, Object pi) {
         for (Link link : links) {
             if (!link.from().equals(primary)) continue;
             if (!(link.linkNature().isIdenticalTo() || link.linkNature().isAssignedFrom())) continue;
@@ -957,6 +1167,7 @@ public final class NullabilityPass {
     private void seedDefaultValue(FieldInfo fi) {
         if (fi.type().isPrimitiveExcludingVoid() && fi.type().arrays() == 0) return;
         Expression initializer = fi.initializer();
+        if (initializer != null) seedCreated(fi, initializer, null);
         if (initializer instanceof NullConstant) {
             seed(fi, "initializer null");
             return;

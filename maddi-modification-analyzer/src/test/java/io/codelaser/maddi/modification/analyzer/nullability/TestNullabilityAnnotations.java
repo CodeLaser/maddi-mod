@@ -36,6 +36,7 @@ public class TestNullabilityAnnotations extends CommonTest {
                 int count(String s) { return s.length(); }
                 void call() { System.out.println(count(null)); }
                 String[] getArr() { return arr; }
+                String[] fresh(int n) { return new String[n]; }
                 @io.codelaser.maddi.annotation.NotNull String declared() { return null; }
             }
             """;
@@ -62,8 +63,9 @@ public class TestNullabilityAnnotations extends CommonTest {
                 .getOrDefault(PropertyImpl.NULLABILITY_FIELD, ValueImpl.NullabilityImpl.UNSPECIFIED).toString());
         assertEquals("N(U,U)", x.findUniqueMethod("find", 2).parameters().getFirst().analysis()
                 .getOrDefault(PropertyImpl.NULLABILITY_PARAMETER, ValueImpl.NullabilityImpl.UNSPECIFIED).toString());
-        // arrays are skipped in TYPE_USE flavours (declaration position would annotate the elements); a source
-        // annotation is a contract and is left alone
+        // in a TYPE_USE flavour, declaration position annotates an array's ELEMENTS: 'fresh' returns a non-null
+        // array of nullable elements; a nullable array ('arr', 'getArr') cannot be said there and is left out. A
+        // source annotation is a contract and is left alone
         assertEquals("""
                 package a.b;
                 import java.util.Map;
@@ -78,6 +80,7 @@ public class TestNullabilityAnnotations extends CommonTest {
                     int count(@Nullable String s) { return s.length(); }
                     void call() { System.out.println(count(null)); }
                     String [] getArr() { return arr; }
+                    @Nullable String [] fresh(int n) { return new String[n]; }
                     @io.codelaser.maddi.annotation.NotNull String declared() { return null; }
                 }
                 """, print(x, NullabilityDecorator.Options.JSPECIFY_NULL_MARKED));
@@ -87,7 +90,8 @@ public class TestNullabilityAnnotations extends CommonTest {
     @Test
     public void jsr305WithNonNull() {
         TypeInfo x = analyze();
-        // a declaration annotation on an array speaks about the array: written; the source's contract stays
+        // a declaration annotation on an array speaks about the array: written ('fresh' is a non-null array; its
+        // nullable elements cannot be said in this flavour); the source's contract stays
         assertEquals("""
                 package a.b;
                 import java.util.Map;
@@ -103,6 +107,7 @@ public class TestNullabilityAnnotations extends CommonTest {
                     int count(@Nullable String s) { return s.length(); }
                     void call() { System.out.println(count(null)); }
                     @Nullable String [] getArr() { return arr; }
+                    @Nonnull String [] fresh(int n) { return new String[n]; }
                     @io.codelaser.maddi.annotation.NotNull String declared() { return null; }
                 }
                 """, print(x, new NullabilityDecorator.Options(NullabilityDecorator.Flavour.JSR305, true)));

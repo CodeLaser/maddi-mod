@@ -48,10 +48,11 @@ import java.util.stream.Stream;
  * annotation (by simple name, {@link NullAnnotations}): a source annotation is a contract.
  * <p>
  * Only the top-level state is written, in declaration position. For a TYPE_USE flavour that position is wrong in two
- * cases, which are therefore skipped: an ARRAY ({@code @Nullable String[] a} would speak about the elements; the
- * array itself needs {@code String @Nullable []}), and a NESTED type ({@code @Nullable Map.Entry} does not compile;
- * it needs {@code Map.@Nullable Entry}). Both need the annotation inside the printed type, as do type arguments
- * ({@code List<@Nullable String>}): not yet.
+ * cases: an ARRAY ({@code @Nullable String[] a} speaks about the ELEMENTS, JLS 9.7.4; the array itself needs
+ * {@code String @Nullable []}), and a NESTED type ({@code @Nullable Map.Entry} does not compile; it needs
+ * {@code Map.@Nullable Entry}). A nested type is skipped. On an array the ELEMENTS' state is written, unless the array
+ * itself is nullable, which declaration position cannot say: then nothing is written. Both need the annotation
+ * inside the printed type, as do type arguments ({@code List<@Nullable String>}): not yet.
  * <p>
  * In the {@code @NullMarked} style ({@code writeNonNull} false) a missing annotation reads as non-null, so an
  * UNSPECIFIED verdict cannot simply be left out: the analysis did not decide it (an open-world parameter that no
@@ -229,9 +230,17 @@ public class NullabilityDecorator implements Qualification.Decorator {
             }
         }
         if (type.isPrimitiveExcludingVoid() && type.arrays() == 0) return null;
-        if (options.flavour.typeUse && (type.arrays() > 0 || isNested(type))) return null;
+        if (options.flavour.typeUse && isNested(type)) return null;
         if (alreadyAnnotated(element, type)) return null;
-        return element.analysis().getOrDefault(property, ValueImpl.NullabilityImpl.UNSPECIFIED).state();
+        ValueImpl.NullabilityImpl value = element.analysis().getOrDefault(property, ValueImpl.NullabilityImpl.UNSPECIFIED);
+        if (options.flavour.typeUse && type.arrays() > 0) {
+            // declaration position is the elements' (JLS 9.7.4); a nullable array cannot be said there
+            if (value.state() == NullableState.NULLABLE || value.arguments().isEmpty()) return null;
+            ParameterizedType component = type.componentType();
+            if (component.isPrimitiveExcludingVoid() && component.arrays() == 0) return null;
+            return value.arguments().getFirst().state();
+        }
+        return value.state();
     }
 
     private static boolean isNested(ParameterizedType type) {

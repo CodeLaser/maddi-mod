@@ -47,6 +47,14 @@ public class TestNullabilityPass extends CommonTest {
     }
 
     static String k(ParameterizedType pt) {
+        if (pt.arrays() > 0) {
+            String own = switch (pt.nullable()) {
+                case NULLABLE -> "?";
+                case NONNULL -> "";
+                case UNSPECIFIED -> "!";
+            };
+            return k(pt.componentType()) + "[]" + own;
+        }
         String base = pt.typeParameter() != null ? pt.typeParameter().simpleName() : pt.typeInfo().simpleName();
         String args = pt.parameters().isEmpty() ? ""
                 : pt.parameters().stream().map(TestNullabilityPass::k).collect(Collectors.joining(", ", "<", ">"));
@@ -55,7 +63,7 @@ public class TestNullabilityPass extends CommonTest {
             case NONNULL -> "";
             case UNSPECIFIED -> "!";
         };
-        return base + args + "[]".repeat(pt.arrays()) + suffix;
+        return base + args + suffix;
     }
 
     // every verdict of the type, sorted: 'f: String?', 'm(0:s): String?' for a parameter, 'm(): String' for a return
@@ -716,5 +724,54 @@ public class TestNullabilityPass extends CommonTest {
                 stored: String!
                 use(): String""", verdicts(new NullabilityPass(
                 NullabilityPass.Policy.NULL_MARKED.withWorld(NullabilityPass.World.OPEN)).go(analysisOrder)));
+    }
+
+    @Language("java")
+    private static final String ARRAYS = """
+            package a.b;
+            class A {
+                private String[] filled = {"a"};
+                private String[] holes = new String[3];
+                private static final int[][][] table = {{null, {1}}, null, {{2}}};
+                void setNull(String[] a, int i) { a[i] = null; }
+                void callSetNull() { String[] b = {"x"}; setNull(b, 0); }
+                String get(String[] a) { return a[0]; } // nothing passes it an array holding null
+                String fromHoles() { return holes[0]; }
+                String fromFilled() { return filled[0]; }
+                String[] fresh(int n) { return new String[n]; }
+                String[] literal() { return new String[]{"a", null}; }
+                void varargs(String... xs) { }
+                void callVarargs() { varargs("a", null); }
+                void plainVarargs(String... ys) { }
+                void callPlain() { plainVarargs("a", "b"); }
+                String loop(String[] zs) { for (String z : zs) { return z; } return ""; }
+                void callLoop() { loop(new String[2]); }
+                int[] primitive() { return new int[3]; }
+            }
+            """;
+
+    @DisplayName("arrays: an element slot per array, tied along every flow of the array; new T[n] holds nulls")
+    @Test
+    public void arrays() {
+        NullabilityPass.Report report = run("a.b.A", ARRAYS);
+        System.out.println(explain(report));
+        assertEquals("""
+                filled: String[]
+                fresh(): String?[]
+                fresh(0:n): int
+                fromFilled(): String
+                fromHoles(): String?
+                get(): String
+                get(0:a): String[]
+                holes: String?[]
+                literal(): String?[]
+                loop(): String?
+                loop(0:zs): String?[]
+                plainVarargs(0:ys): String[]
+                primitive(): int[]
+                setNull(0:a): String?[]
+                setNull(1:i): int
+                table: int[]?[]?[]
+                varargs(0:xs): String?[]""", verdicts(report));
     }
 }

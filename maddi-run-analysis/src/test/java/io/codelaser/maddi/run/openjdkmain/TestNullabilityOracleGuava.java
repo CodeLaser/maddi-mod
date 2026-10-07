@@ -122,6 +122,7 @@ public class TestNullabilityOracleGuava {
     static ParameterizedType everywhere(ParameterizedType pt, NullableState state) {
         ParameterizedType withArguments = pt.parameters().isEmpty() ? pt
                 : pt.withParameters(pt.parameters().stream().map(p -> everywhere(p, state)).toList());
+        if (pt.arrays() > 0) withArguments = withArguments.withComponentType(everywhere(pt.componentType(), state));
         boolean primitive = pt.isPrimitiveExcludingVoid() && pt.arrays() == 0;
         return withArguments.withNullable(primitive ? NullableState.NONNULL : state);
     }
@@ -225,13 +226,19 @@ public class TestNullabilityOracleGuava {
             }
             int unsafeBefore = comparison.count(Outcome.UNSAFE);
             int noiseBefore = comparison.count(Outcome.NOISE);
+            int elementBefore = comparison.count(kind, NullabilityComparison.Depth.ELEMENT, Outcome.UNSAFE)
+                                + comparison.count(kind, NullabilityComparison.Depth.ELEMENT, Outcome.NOISE);
             comparison.add(kind, declared, verdict);
+            boolean element = comparison.count(kind, NullabilityComparison.Depth.ELEMENT, Outcome.UNSAFE)
+                              + comparison.count(kind, NullabilityComparison.Depth.ELEMENT, Outcome.NOISE)
+                              > elementBefore;
             boolean unsafe = comparison.count(Outcome.UNSAFE) > unsafeBefore;
             if (unsafe || comparison.count(Outcome.NOISE) > noiseBefore) {
                 String shape = declared.arrays() > 0 ? (info instanceof ParameterInfo pi && pi.isVarArgs()
                         ? "varargs" : "array") : "plain";
-                disagreements.add((unsafe ? "UNSAFE" : "NOISE") + "\t" + kind + "\t" + shape + "\t"
-                                  + info.fullyQualifiedName() + "\t" + report.explain(info));
+                disagreements.add((unsafe ? "UNSAFE" : "NOISE") + "\t" + kind + "\t" + shape
+                                  + (element ? "/element" : "") + "\t" + info.fullyQualifiedName() + "\t"
+                                  + report.explain(element ? new NullabilityPass.Content(info) : info));
             }
         });
         LOGGER.info("INFERENCE ({} policy), {} declarations without a verdict\n{}", name, missing[0],

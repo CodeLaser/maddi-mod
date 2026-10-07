@@ -41,7 +41,8 @@ public final class NullabilityComparison {
 
     public enum Kind {FIELD, PARAMETER, RETURN}
 
-    public enum Depth {TOP, ARGUMENT}
+    /** TOP: the declaration's own type; ARGUMENT: a type argument, at any depth; ELEMENT: an array's elements. */
+    public enum Depth {TOP, ARGUMENT, ELEMENT}
 
     public enum Outcome {AGREE, UNSAFE, NOISE, UNDECIDED, UNSCORED}
 
@@ -59,6 +60,10 @@ public final class NullabilityComparison {
     private void add(Kind kind, Depth depth, ParameterizedType reference, ParameterizedType verdict) {
         if (!(reference.isPrimitiveExcludingVoid() && reference.arrays() == 0)) {
             increment(kind, depth, outcome(reference.nullable(), verdict.nullable()));
+        }
+        if (reference.arrays() > 0 && verdict.arrays() == reference.arrays()) {
+            add(kind, Depth.ELEMENT, reference.componentType(), verdict.componentType());
+            return; // the type arguments are the element's
         }
         int n = Math.min(reference.parameters().size(), verdict.parameters().size());
         for (int i = 0; i < n; i++) {

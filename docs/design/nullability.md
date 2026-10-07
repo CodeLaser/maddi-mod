@@ -500,3 +500,68 @@ Wiring:
   `@NonNull`. A field cannot be unmarked on its own, so an undecided field gets `@Nullable`, the reading that is
   safe for whoever reads it. Only JSpecify has an unmarked annotation; the other flavours still leave
   UNSPECIFIED out.
+
+### 2026-10-07 — array element slot (content inference, first part)
+
+Implements the decision recorded at M2 (an element slot for arrays).
+
+**Model** (maddi `4f6bcb3fa`):
+- `ParameterizedType.componentType()` is the element type as this use states it: its own `nullable()` and
+  TYPE-USE annotations, recursively for nested arrays. `withComponentType` sets it. Like `nullable()`, it is part
+  of `equals` and not of `hashCode`.
+- `NullabilityImpl` gives an array its element as its one argument: `String?[]` is `N(Q)`, and `List<String>[]`
+  is `N(N(N))`.
+- The front end puts a type-use annotation that is about the elements on the element type (JLS 9.7.4). That
+  covers `@Nullable String[]` in declaration position on a parameter or return, and `List<@Nullable String[]>`.
+  `String @Nullable []` stays on the array. The Java printer prints each one in its place.
+- `DeclaredNullability` reads the array and its elements apart, which ends the B1 array misread. On a field, a
+  type-use annotation that stays with the declaration is read as the elements'.
+
+**Pass**:
+- Nodes: `Content(node)` stands for the elements of an array node; `a[i]` is `Content(a)`.
+- Seeds:
+  - element writes (`a[i] = null`, an initializer's `{…, null}`);
+  - `new T[n]` without initializer (Kotlin's `arrayOfNulls`), but not `new T[0]`;
+  - `null` in a varargs position;
+  - element contracts (Policy.contracts).
+- Edges:
+  - element reads (`x = a[i]`, `for (T x : a)`);
+  - varargs arguments into the parameter's elements.
+- Arrays are invariant in what they hold, so every flow between two array nodes ties their Contents both ways.
+  That includes a flow that the top-level verdict drops because the array is non-null there. The tie does not
+  pass through a library method, whose parameter would join the arrays of all its callers.
+- In the open world, the elements of an outside-callable array parameter are UNSPECIFIED.
+- `NullabilityComparison` scores elements as `Depth.ELEMENT`. `NullabilityDecorator` writes the element state in
+  declaration position for a TYPE_USE flavour, which is where JLS puts the elements. It writes nothing when the
+  array itself is nullable.
+
+Guava, `CLOSED` (top level; was 13,306 / 354 / 233):
+
+| depth | agree | unsafe | noise |
+|---|---:|---:|---:|
+| top | 13,349 | 294 | 255 |
+| element | 181 | 33 | 82 |
+
+`OPEN`, top level: 11,138 / 112 / 258 (was 11,133 / 166 / 236).
+
+The B1 fix accounts for most of the top-level change (−60 unsafe). Element reads (`x = queue[i]` in a
+`MinMaxPriorityQueue` with holes) carry some null into parameters guava declares non-null (+22 noise).
+
+Element disagreements:
+- **Unsafe:**
+  - 18 are `toArray()` overrides. `Collection.toArray()` has nullable elements in JSpecify's JDK, but the hints
+    have no element states, and maddi's `@Nullable` has no way to say "the elements" (open).
+  - The rest are public varargs, `Object... args`. That's the closed world again; in `OPEN` they are UNSPECIFIED.
+- **Noise:** mostly `new T[n]` arrays filled before they escape. Kotlin would need a non-null element type there
+  too: `Array(n) { … }`, not `arrayOfNulls`.
+
+**Fernflower (Kotlin printer)**: the ratchet goes from 125 to 121 compiling files (446 → 463 errors).
+- Element states do not reach the output: `KotlinTypeName` prints an array's elements without a state, so the
+  144 `Array<IntArray>` errors from `int[][][] stack_impact = {{null, null}, null, …}` remain. The pass now has
+  `stack_impact: int[]?[]?[]`.
+- The loss comes from top-level verdicts that element reads now make nullable (`int[] row = table[i]`). The
+  printer then needs a `!!` it does not write (nullable receivers 17 → 24; "smart cast impossible" on `var` array
+  fields).
+- A local experiment that only let `KotlinTypeName` print the component state made it worse (120 files, 525
+  errors). The `arrayOf<…>` type arguments, element reads (`a[i]!!`) and calls (invariant `Array<T?>`) must follow
+  the element state as well. That is printer work.
