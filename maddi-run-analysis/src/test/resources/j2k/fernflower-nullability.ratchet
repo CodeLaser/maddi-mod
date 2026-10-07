@@ -35,8 +35,10 @@
 # override signatures): 176 files, 54 errors.
 # 2026-10-07, maddi b5d0b7cee (unchecked casts for raw values, kotlin.run { }, type-parameter bounds, missing imports,
 # target-typed locals and lambda results): 180 files, 34 errors.
+# 2026-10-07, maddi e5720bf24 (`!!` where Java unboxes, out-projected receivers, if-branch assignments as blocks):
+# 184 files, 28 errors.
 types	199
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	199
-compilingFiles	180
+compilingFiles	184
