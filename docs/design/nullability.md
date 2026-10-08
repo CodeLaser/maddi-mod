@@ -853,3 +853,17 @@ ASSERT_INTO_NON_NULL count, which the printer session will measure after the mer
 
 Guava unchanged. Fernflower, merged with the printer's latest: 190 files, 20 type errors; the printer's
 ASSERT_INTO_NON_NULL 510 → 348 (with cba2d20a).
+
+### 2026-10-08 — checked array elements; what is left of the printer's list
+
+- **Checked array elements.** The Java facts now track an element with a constant index of a local or parameter
+  array: `Object[] res = f(); if (res[0] != null) g((X) res[0]);` (fernflower's `AssertProcessor`). The fact is
+  forgotten at any call (one may write the array) and when the array variable is assigned. Kotlin does not
+  smart-cast an element, so the printer asserts there instead. That adds 2 ASSERT_INTO_NON_NULL (`varmaparr[1]`),
+  which are correct. Guava and fernflower are otherwise unchanged.
+- **What is left of ASSERT_INTO_NON_NULL (350) is mostly policy, not inconsistency:**
+  - `for (Statement st : stat.getStats()) recurse(st)` (34): `Statement.stats` is nullable only by indirect
+    evidence (`Statement.first`'s default value), which `KOTLIN` asserts where it meets a non-null declaration.
+  - `FunctionExprent.lstOperands` reads (32): `IfExprent(int, ListStack, BitSet)` delegates `this(null, ...)` and
+    then assigns `condition`. In Java the null is never seen from outside, but in Kotlin the private constructor
+    stores it, so the field stays nullable unless the printer restructures the constructors.

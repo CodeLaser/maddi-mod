@@ -1470,4 +1470,35 @@ public class TestNullabilityPass extends CommonTest {
                     "fernflower ContextUnit.reload, " + policy);
         }
     }
+
+    @DisplayName("a null-checked array element (constant index) guards the argument it is passed as")
+    @Test
+    public void checkedElements() {
+        NullabilityPass.Report report = run("a.b.E2", """
+                package a.b;
+                import java.util.*;
+                class E2 {
+                    static class Op { final List<String> operands = new ArrayList<>(); Op(String o) { operands.add(o); } }
+                    static Object[] find(boolean b) { Object[] r = new Object[2]; if (b) r[0] = "x"; return r; }
+                    static Op guarded(boolean b) {
+                        Object[] res = find(b);
+                        if (res[0] != null) return new Op((String) res[0]);
+                        return null;
+                    }
+                    static Op afterCall(boolean b) {
+                        Object[] res = find(b);
+                        if (res[0] != null) { find(!b); return new Op2((String) res[0]).op; }
+                        return null;
+                    }
+                    static class Op2 { final Op op; Op2(String s) { op = new Op("y"); take(s); } }
+                    static void take(String s) { }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        System.out.println(explain(report));
+        Map<String, String> byName = report.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+        assertEquals("String", byName.get("a.b.E2.Op.<init>(String):0:o"), "fernflower AssertProcessor:186");
+        assertEquals("List<String>", byName.get("a.b.E2.Op.operands"));
+        assertEquals("String?", byName.get("a.b.E2.Op2.<init>(String):0:s"), "a call in between may write the array");
+    }
 }
