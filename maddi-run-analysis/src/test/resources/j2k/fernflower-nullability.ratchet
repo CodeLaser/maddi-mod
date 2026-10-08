@@ -37,8 +37,10 @@
 # target-typed locals and lambda results): 180 files, 34 errors.
 # 2026-10-07, maddi e5720bf24 (`!!` where Java unboxes, out-projected receivers, if-branch assignments as blocks):
 # 184 files, 28 errors.
+# 2026-10-08, maddi ba006b665 (an overriding clone() returning null throws CloneNotSupportedException, deliberately):
+# 188 files, 23 errors.
 types	199
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	199
-compilingFiles	184
+compilingFiles	188
