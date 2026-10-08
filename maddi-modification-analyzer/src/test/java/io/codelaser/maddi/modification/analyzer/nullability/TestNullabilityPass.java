@@ -1583,4 +1583,83 @@ public class TestNullabilityPass extends CommonTest {
                 hole.r: String?
                 hole.s: String?""", locals(report));
     }
+
+    @DisplayName("a library call's nullable result as an alternative of the value: a switch arm, a conditional branch")
+    @Test
+    public void callResultAlternatives() {
+        NullabilityPass.Report report = run("a.b.SC", """
+                package a.b;
+                import java.util.Map;
+                class SC {
+                    private static final Map<String, Integer> TYPES = Map.of("a", 1);
+                    static void rule(int k, String s) {
+                        Object value;
+                        value = switch (k) {
+                            case 0 -> TYPES.get(s);
+                            default -> s;
+                        };
+                        take(value);
+                    }
+                    static void branch(boolean b, String s) {
+                        Object value = b ? TYPES.get(s) : s;
+                        put(value);
+                    }
+                    static Object returned(int k, String s) {
+                        return switch (k) {
+                            case 0 -> s;
+                            default -> {
+                                String t = s.trim();
+                                yield TYPES.get(t);
+                            }
+                        };
+                    }
+                    static void take(Object o) { }
+                    static void put(Object o) { }
+                }
+                """);
+        System.out.println(explain(report));
+        Map<String, String> byName = report.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+        assertEquals("Object?", byName.get("a.b.SC.take(Object):0:o"), "fernflower MatchEngine:124");
+        assertEquals("Object?", byName.get("a.b.SC.put(Object):0:o"));
+        assertEquals("Object?", byName.get("a.b.SC.returned(int,String)"));
+        assertEquals("""
+                branch.value: Object?
+                returned.t: String
+                rule.value: Object?""", locals(report));
+    }
+
+    @DisplayName("a null written through a getter's result goes to the receiver's slot, as through a variable")
+    @Test
+    public void slotThroughGetter() {
+        NullabilityPass.Report report = run("a.b.SG", """
+                package a.b;
+                import java.util.*;
+                class SG {
+                    static class Keyed<E, K> extends ArrayList<E> {
+                        private final Map<K, Integer> map = new HashMap<>();
+                        void addWithKey(E element, K key) {
+                            map.put(key, size());
+                            super.add(element);
+                        }
+                    }
+                    static class Wrapper {
+                        private final Keyed<String, String> inits = new Keyed<>();
+                        Keyed<String, String> getInits() { return inits; }
+                    }
+                    static void extract(Wrapper wrapper, String key) {
+                        String value = null;
+                        if (key.length() > 2) value = key;
+                        wrapper.getInits().addWithKey(value, key);
+                    }
+                }
+                """);
+        System.out.println(explain(report));
+        Map<String, String> byName = report.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+        assertEquals("E!", byName.get("a.b.SG.Keyed.addWithKey(Object,Object):0:element"),
+                "fernflower VBStyleCollection.addWithKey via InitializerProcessor");
+        assertEquals("Keyed<String?, String>", byName.get("a.b.SG.Wrapper.inits"));
+        assertEquals("Keyed<String?, String>", byName.get("a.b.SG.Wrapper.getInits()"));
+    }
 }
