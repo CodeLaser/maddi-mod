@@ -804,3 +804,37 @@ Trusted returns for library wrappers were tried: a method returning an unhinted 
 through a local, or through another such method) was not trusted non-null at its call sites. Guava: +13 noise,
 unsafe unchanged. Not the default. diagnose's redundantNullCheck works around it with its own facts; an opt-in
 policy flag is possible if a consumer needs it.
+
+### 2026-10-08 — the printer's "nullable into non-null" list
+
+The printer session listed 512 places where `!!` asserts a nullable value into a declaration the verdicts keep
+non-null (ASSERT_INTO_NON_NULL). Many follow from rules the pass has on purpose: KOTLIN asserts indirect
+evidence at content writes, and an element read passed as an argument is asserted there. Some were verdict gaps:
+- **Generic results (`Policy.callResults`).**
+  - A class type variable's own null (`E getWithKey(K k) { ... return null; }`, `E?`) holds for every
+    instantiation, so the call result now reaches the variable it is assigned to (`BasicBlock block =
+    blocks.getWithKey(j)`).
+  - The same holds for a method type variable, unless a parameter of that very type could carry the caller's null
+    back out (`<X> X id(X x)`): `<T> T getAttribute(Key<T>)` returns a map lookup.
+  - A read of the receiver's slot (`st = stat.getStats().get(0)`) is an edge into the target.
+- **Slots through supertypes (`slotIndex`).** On a `VBStyleCollection<Statement, Integer>`, which extends
+  `ArrayList<E>`, `get` returns ArrayList's `E`, which is the receiver's argument 0. Reads (`argumentNode`) and
+  writes (`receiverSlots`) used to require the receiver to have exactly as many type arguments as the callee's
+  class.
+- **Closure-only edges.** The links' `≡` is transitive and repeats through later statements and method summaries.
+  In `ImportCollector.getNestedName`, `node.simpleName` (compared with null) was linked to
+  `node.parent.classStruct.qualifiedName` in every statement, with no assignment between them, and from
+  `StructClass.qualifiedName` the null reached most of fernflower.
+  - An edge into a top-level node now needs an observation: a statement that assigns the recipient (guarded,
+    unguarded, or with a value not seen through), or that passes the source as an argument.
+  - A call value counts as not seen through even when it does not mention the source, because an alias can carry
+    it (`table = this.table; return table.get(i)`).
+  - Slots keep their unobserved edges, since calls write them.
+  - The `qualifiedName` hub is not gone yet: it now arrives through `getNestedName`'s local `outerShortName`, the
+    same artefact by another route. It is to be traced further.
+- **Lookup arguments.** `contains(child)` does not make `child` known non-null afterwards (a regression test). That
+  coupling was the printer's: its `kotlin.run { }` scopes blocked kotlinc's smart casts.
+
+Guava `NULL_MARKED`: noise 405 → 397, unsafe 340 → 341 (`AbstractFuture.appendUserObject`). Fernflower on this
+branch, without the printer's latest commits: 184 files, 28 errors, unchanged. The effect is on the printer's
+ASSERT_INTO_NON_NULL count, which the printer session will measure after the merge.
