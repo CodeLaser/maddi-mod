@@ -71,6 +71,8 @@ public final class NonNullFacts {
     private final Function<ParameterInfo, NullableState> parameterContract;
     private final Function<MethodInfo, NullableState> returnContract;
     private final boolean kotlinSmartCasts;
+    // null-check predicates ('StringUtils.isNotBlank(s)'), as conditions; never for Kotlin's smart casts
+    private NullPredicates predicates;
 
     /**
      * @param parameterContract the contract on a callee's parameter (NONNULL: passing null throws), or null
@@ -86,6 +88,12 @@ public final class NonNullFacts {
         this.parameterContract = parameterContract;
         this.returnContract = returnContract;
         this.kotlinSmartCasts = kotlinSmartCasts;
+    }
+
+    /** Null-check predicates count as conditions ({@link NullPredicates}); not in {@link #kotlinSmartCasts()}. */
+    public NonNullFacts withPredicates(NullPredicates predicates) {
+        this.predicates = predicates;
+        return this;
     }
 
     /** The same walk, restricted to what Kotlin's smart cast derives (class comment); walk it before use. */
@@ -349,7 +357,22 @@ public final class NonNullFacts {
             case Negation n -> set.addAll(whenFalse(n.expression()));
             case InstanceOf io when unwrap(io.expression()) instanceof VariableExpression ve
                                     && trackable(ve.variable()) -> set.add(ve.variable());
+            case MethodCall mc -> set.addAll(predicated(mc, NullPredicates.When.FALSE_IF_NULL));
             default -> {
+            }
+        }
+        return set;
+    }
+
+    // the arguments a null-check predicate tells non-null when its result is the one it never has for a null
+    private Set<Variable> predicated(MethodCall mc, NullPredicates.When when) {
+        if (predicates == null || kotlinSmartCasts || mc.methodInfo() == null) return Set.of();
+        Set<Variable> set = new HashSet<>();
+        List<Expression> arguments = mc.parameterExpressions();
+        for (int i = 0; i < arguments.size(); i++) {
+            if (unwrap(arguments.get(i)) instanceof VariableExpression ve && trackable(ve.variable())
+                && predicates.of(mc.methodInfo(), i) == when) {
+                set.add(ve.variable());
             }
         }
         return set;
@@ -375,6 +398,7 @@ public final class NonNullFacts {
             case Or or -> or.expressions().forEach(e -> set.addAll(whenFalse(e)));
             case UnaryOperator uo when isNot(uo) -> set.addAll(whenTrue(uo.expression()));
             case Negation n -> set.addAll(whenTrue(n.expression()));
+            case MethodCall mc -> set.addAll(predicated(mc, NullPredicates.When.TRUE_IF_NULL));
             default -> {
             }
         }

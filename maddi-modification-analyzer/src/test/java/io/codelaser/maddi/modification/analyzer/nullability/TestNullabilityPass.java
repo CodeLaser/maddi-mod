@@ -14,6 +14,8 @@ import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import io.codelaser.maddi.cst.api.statement.IfElseStatement;
+import io.codelaser.maddi.cst.api.statement.Statement;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -1134,5 +1136,188 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("T!", byName.get("a.b.Q.Stack.push(Object):0:item"), "the null is the receiver's");
         assertEquals("Stack<String?>", byName.get("a.b.Q.names"));
         assertEquals("T?", byName.get("a.b.Q.Stack.peek()"), "a null of the class's own");
+    }
+
+    @DisplayName("super(...) and this(...) arguments carry no links: their slots are still tied to the parameter's")
+    @Test
+    public void explicitConstructorInvocation() {
+        NullabilityPass.Report report = run("a.b.M", """
+                package a.b;
+                import java.util.*;
+                class M {
+                    static class Constant {
+                        Object value;
+                        Constant(Object v) { value = v; }
+                        String getString() { return (String) value; }
+                    }
+                    static class Member {
+                        protected Map<String, Integer> attributes;
+                        Member(Map<String, Integer> attributes) { this.attributes = attributes; }
+                    }
+                    static class Field extends Member {
+                        Field(Map<String, Integer> attributes) { super(attributes); }
+                        static Field create(Constant c) {
+                            Map<String, Integer> attributes = read(c);
+                            return new Field(attributes);
+                        }
+                    }
+                    static Map<String, Integer> read(Constant c) {
+                        Map<String, Integer> attributes = new HashMap<>();
+                        String name = c.getString();
+                        attributes.put(name, 1);
+                        return attributes;
+                    }
+                    static Map<String, Integer> nulls() {
+                        Map<String, Integer> m = new HashMap<>();
+                        m.put(null, 1);
+                        return m;
+                    }
+                    static Field viaNulls() { return new Field(nulls()); }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        System.out.println(explain(report));
+        Map<String, String> byName = report.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+        assertEquals("Map<String?, Integer>", byName.get("a.b.M.Field.<init>(java.util.Map):0:attributes"));
+        // invariance: what reaches Field's map reaches Member's, and every map passed to Field (read's too)
+        assertEquals("Map<String?, Integer>", byName.get("a.b.M.Member.<init>(java.util.Map):0:attributes"));
+        assertEquals("Map<String?, Integer>", byName.get("a.b.M.Member.attributes"));
+        assertEquals("String", byName.get("a.b.M.Constant.getString()"));
+    }
+
+    @DisplayName("an array created and filled by the next loop has no null elements")
+    @Test
+    public void filledArrays() {
+        NullabilityPass.Report report = run("a.b.A", """
+                package a.b;
+                class A {
+                    static String[] filled(String[] in) {
+                        String[] out = new String[in.length];
+                        for (int i = 0; i < in.length; i++) { out[i] = in[i].trim(); }
+                        return out;
+                    }
+                    static String[] byLength(int n) {
+                        String[] out = new String[n];
+                        for (int i = 0; i < out.length; i++) out[i] = "x" + i;
+                        return out;
+                    }
+                    static String[] half(int n) {
+                        String[] out = new String[n];
+                        for (int i = 0; i < n; i += 2) { out[i] = "x"; }
+                        return out;
+                    }
+                    static String[] conditional(int n) {
+                        String[] out = new String[n];
+                        for (int i = 0; i < n; i++) { if (i > 1) out[i] = "x"; }
+                        return out;
+                    }
+                    static String[] early(int n) {
+                        String[] out = new String[n];
+                        for (int i = 0; i < n; i++) { if (i > 3) break; out[i] = "x"; }
+                        return out;
+                    }
+                    static String[] later(int n) {
+                        String[] out = new String[n];
+                        System.out.println(n);
+                        for (int i = 0; i < n; i++) { out[i] = "x"; }
+                        return out;
+                    }
+                }
+                """);
+        System.out.println(explain(report));
+        Map<String, String> byName = report.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+        assertEquals("String[]", byName.get("a.b.A.filled(String[])"));
+        assertEquals("String[]", byName.get("a.b.A.byLength(int)"));
+        assertEquals("String?[]", byName.get("a.b.A.half(int)"), "every other element");
+        assertEquals("String?[]", byName.get("a.b.A.conditional(int)"), "not a statement of the body");
+        assertEquals("String?[]", byName.get("a.b.A.early(int)"), "a break");
+        assertEquals("String?[]", byName.get("a.b.A.later(int)"), "not the next statement");
+    }
+
+    @DisplayName("a null returned by a method that may return its argument does not flow back into the argument")
+    @Test
+    public void identityReturn() {
+        NullabilityPass.Report report = run("a.b.I", """
+                package a.b;
+                import java.util.*;
+                class I {
+                    private final Map<String, String> map = new HashMap<>();
+                    private String check(String name) {
+                        if (map.containsKey(name)) return name;
+                        String noDot = name.replace('.', '_');
+                        if (!name.equals(noDot) && map.containsKey(noDot)) return noDot;
+                        return null;
+                    }
+                    String get(String key) {
+                        String checked = check(key);
+                        if (checked == null) {
+                            final String upper = key.toUpperCase();
+                            if (!upper.equals(key)) {
+                                checked = check(upper);
+                            }
+                        }
+                        if (checked == null) return null;
+                        return map.get(checked);
+                    }
+                }
+                """);
+        System.out.println(explain(report));
+        Map<String, String> byName = report.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+        assertEquals("String?", byName.get("a.b.I.check(String)"));
+        assertEquals("String", byName.get("a.b.I.get(String):0:key"), "the return's null is not the argument's");
+        assertEquals("String", byName.get("a.b.I.check(String):0:name"));
+    }
+
+    @DisplayName("null-check predicates: an analysed one inferred, as a condition; not for Kotlin's smart casts")
+    @Test
+    public void predicates() {
+        NullabilityPass.Report report = run("a.b.P", """
+                package a.b;
+                import java.util.*;
+                class P {
+                    static boolean isBlank(CharSequence cs) {
+                        int len;
+                        if (cs == null || (len = cs.length()) == 0) return true;
+                        for (int i = 0; i < len; i++) { if (!Character.isWhitespace(cs.charAt(i))) return false; }
+                        return true;
+                    }
+                    static boolean isNotBlank(String s) { return !isBlank(s); }
+                    static boolean isEmpty(String s) { return s == null || s.length() == 0; }
+                    static boolean hasText(String s) { return s != null && !s.isEmpty(); }
+                    static String trimmed(String in) {
+                        if (isNotBlank(in)) return in.trim();
+                        return "";
+                    }
+                    static String other(String in) {
+                        return isEmpty(in) ? "" : in.trim();
+                    }
+                    static int viaObjects(String in) {
+                        if (Objects.isNull(in)) return 0;
+                        return in.length();
+                    }
+                }
+                """);
+        TypeInfo p = parsed;
+        MethodInfo trimmed = p.findUniqueMethod("trimmed", 1);
+        ParameterInfo in = trimmed.parameters().getFirst();
+        IfElseStatement ifElse = (IfElseStatement) trimmed.methodBody().statements().getFirst();
+        Statement then = ifElse.block().statements().getFirst();
+        assertEquals(true, report.useSites().nonNullAt(then, in), "isNotBlank is false for null");
+        assertEquals(false, report.smartCasts().nonNullAt(then, in), "Kotlin does not see it");
+        MethodInfo viaObjects = p.findUniqueMethod("viaObjects", 1);
+        Statement last = viaObjects.methodBody().statements().getLast();
+        assertEquals(true, report.useSites().nonNullAt(last, viaObjects.parameters().getFirst()),
+                "Objects.isNull, from the table");
+        MethodInfo other = p.findUniqueMethod("other", 1);
+        List<io.codelaser.maddi.cst.api.expression.MethodCall> calls = new java.util.ArrayList<>();
+        other.methodBody().statements().getFirst().expression().visit(e -> {
+            if (e instanceof io.codelaser.maddi.cst.api.expression.MethodCall mc) calls.add(mc);
+            return true;
+        });
+        io.codelaser.maddi.cst.api.expression.MethodCall trim = calls.stream()
+                .filter(c -> "trim".equals(c.methodInfo().name())).findFirst().orElseThrow();
+        assertEquals(true, report.useSites().nonNullAt(trim, other.parameters().getFirst()), "isEmpty is true for null");
     }
 }

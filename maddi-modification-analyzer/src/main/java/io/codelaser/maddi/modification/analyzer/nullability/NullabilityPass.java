@@ -35,7 +35,9 @@ import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.statement.Block;
+import io.codelaser.maddi.cst.api.statement.BreakOrContinueStatement;
 import io.codelaser.maddi.cst.api.statement.ExplicitConstructorInvocation;
+import io.codelaser.maddi.cst.api.statement.ExpressionAsStatement;
 import io.codelaser.maddi.cst.api.statement.ForEachStatement;
 import io.codelaser.maddi.cst.api.statement.ForStatement;
 import io.codelaser.maddi.cst.api.statement.LocalVariableCreation;
@@ -241,6 +243,8 @@ public final class NullabilityPass {
     // each null literal of an analysed body, by identity: a NullConstant equals every other, a Source only compares
     // line and column; a marker whose literal is not found here (a decoded summary) is seeded where it arrives
     private final Map<Expression, MethodInfo> nullOwners = new java.util.IdentityHashMap<>();
+    // array creations ('new T[n]') the next statement fills completely before anything reads them (indexFills)
+    private final Set<Expression> filledCreations = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
     // analysed methods whose return an earlier round found unreached by null (see go)
     private final Set<MethodInfo> trustedReturns;
     // analysed parameters an earlier round found non-null on every normal exit of their method: passing null throws
@@ -341,12 +345,14 @@ public final class NullabilityPass {
                 .filter(i -> i instanceof FieldInfo).map(i -> (FieldInfo) i).toList();
         analysed.addAll(methods);
         methods.forEach(this::indexNullLiterals);
+        for (MethodInfo mi : methods) if (mi.methodBody() != null) indexFills(mi.methodBody());
         for (MethodInfo mi : methods) {
             for (MethodInfo overridden : overrides(mi)) {
                 implementations.computeIfAbsent(overridden, _ -> new java.util.ArrayList<>()).add(mi);
             }
         }
-        facts = new NonNullFacts(this::parameterContract, this::returnContract);
+        facts = new NonNullFacts(this::parameterContract, this::returnContract)
+                .withPredicates(NullPredicates.infer(methods));
         if (policy.contracts()) {
             for (FieldInfo fi : fields) contract(fi, fi);
             for (MethodInfo mi : methods) {
@@ -802,6 +808,7 @@ public final class NullabilityPass {
      ties their Contents both ways, recursively for nested arrays.
      */
     private void coupleContent() {
+        Set<Object> writtenThrough = writtenThrough();
         Deque<List<Object>> queue = new ArrayDeque<>(flows);
         Set<List<Object>> seen = new HashSet<>();
         while (!queue.isEmpty()) {
@@ -816,7 +823,9 @@ public final class NullabilityPass {
                 Content c0 = new Content(flow.get(0));
                 Content c1 = new Content(flow.get(1));
                 successors.computeIfAbsent(c0, _ -> new LinkedHashSet<>()).add(c1);
-                successors.computeIfAbsent(c1, _ -> new LinkedHashSet<>()).add(c0);
+                if (policy.assertContentWrites() || writtenThrough.contains(flow.get(1))) {
+                    successors.computeIfAbsent(c1, _ -> new LinkedHashSet<>()).add(c0);
+                }
                 queue.add(List.of(c0, c1));
             } else if (t0.arrays() == 0 && t1.arrays() == 0 && !t0.parameters().isEmpty()
                        && t0.parameters().size() == t1.parameters().size()) {
@@ -838,6 +847,35 @@ public final class NullabilityPass {
                 }
             }
         }
+    }
+
+    /*
+     For Java annotations an array's elements need to flow only forward: Java arrays are covariant, and so is
+     JSpecify. Backward only where the downstream array is written through ('void f(Object[] a) { a[0] = null; }'
+     puts the null in the caller's array), directly or via another array it flows on into. Kotlin's Array<T> is
+     invariant, so under Policy.assertContentWrites both ways regardless. Guava 2026-10-07: coupling both ways made
+     ImmutableMap.Builder.entries, ImmutableList.array, Joiner.join(Object[]) and TypeToken's Type[] one slot.
+     */
+    private Set<Object> writtenThrough() {
+        Set<Object> written = new HashSet<>();
+        successors.forEach((from, tos) -> {
+            if (from instanceof Content) return;
+            for (Object to : tos) if (to instanceof Content c) written.add(c.of());
+        });
+        seedOrigin.forEach((node, origin) -> {
+            if (node instanceof Content c && !origin.startsWith("array created") && !origin.startsWith("null in an array initializer")) {
+                written.add(c.of());
+            }
+        });
+        Map<Object, List<Object>> upstream = new HashMap<>();
+        for (List<Object> flow : flows) upstream.computeIfAbsent(flow.get(1), _ -> new ArrayList<>()).add(flow.get(0));
+        Deque<Object> queue = new ArrayDeque<>(written);
+        while (!queue.isEmpty()) {
+            for (Object up : upstream.getOrDefault(queue.removeFirst(), List.of())) {
+                if (written.add(up)) queue.add(up);
+            }
+        }
+        return written;
     }
 
     // no type variable among the type arguments (or an array's element), at any depth
@@ -1112,7 +1150,15 @@ public final class NullabilityPass {
             if (from instanceof Arg && link.linkNature().isIdenticalTo()) continue;
             if (link.linkNature().isIdenticalTo() || link.linkNature().isAssignedFrom()) {
                 if (isNullMarker(link.to())) {
-                    nullMarker(mi, link.to(), from, "null in " + mi.fullyQualifiedName());
+                    // a variable becomes null only where it is assigned: '≡' is transitive in the links, so in
+                    // 'checked = check(key)' with 'check' returning its argument or null, 'key ≡ return ≡ null'
+                    // reaches 'key' (nacos SystemEnvPropertySource, reported by the diagnose session). A slot
+                    // (Content, Arg) is written by calls too.
+                    boolean slot = from instanceof Content || from instanceof Arg;
+                    if (slot || statement == null || fromVar instanceof ReturnVariable
+                        || assignsHere(statement, fromVar)) {
+                        nullMarker(mi, link.to(), from, "null in " + mi.fullyQualifiedName());
+                    }
                 } else {
                     linkEdge(node(mi, scope, link.to()), from, link.to(), fromVar, statement);
                 }
@@ -1486,9 +1532,71 @@ public final class NullabilityPass {
         return primitive ? 0 : type.arrays();
     }
 
+    /*
+     'T[] a = new T[n]; for (int i = 0; i < n; i++) { ... a[i] = v; ... }': every element is written before anything
+     reads the array, so the creation leaves no null; each 'v' flows into the elements through the links. Only a
+     one-dimensional creation, followed directly by the loop: from 0, while i < n (the same size expression) or
+     i < a.length, one step at a time, with 'a[i] = ...' as a statement of the body itself, and no break, continue
+     or return in the body, and no other assignment to i. Guava 2026-10-07: 'TypeResolver.resolveTypes' and the like.
+     */
+    private void indexFills(Block block) {
+        List<Statement> statements = block.statements();
+        for (int i = 0; i < statements.size(); i++) {
+            Statement statement = statements.get(i);
+            if (i + 1 < statements.size() && statement instanceof LocalVariableCreation lvc
+                && statements.get(i + 1) instanceof ForStatement loop) {
+                List<LocalVariable> locals = lvc.localVariableStream().toList();
+                Expression init = locals.size() == 1 ? locals.getFirst().assignmentExpression() : null;
+                if (init != null && arrayCreatedWithNulls(init) == 1
+                    && NonNullFacts.unwrap(init) instanceof ConstructorCall cc
+                    && fills(loop, locals.getFirst(), cc.parameterExpressions().getFirst())) {
+                    filledCreations.add(init);
+                }
+            }
+            statement.subBlockStream().forEach(this::indexFills);
+        }
+    }
+
+    private static boolean fills(ForStatement loop, LocalVariable array,
+                                 Expression size) {
+        if (loop.initializers().size() != 1 || !(loop.initializers().getFirst() instanceof LocalVariableCreation init)
+            || init.localVariableStream().count() != 1) return false;
+        LocalVariable index = init.localVariableStream().findFirst().orElseThrow();
+        if (!(index.assignmentExpression() instanceof io.codelaser.maddi.cst.api.expression.IntConstant zero)
+            || zero.constant() != 0) return false;
+        if (!(NonNullFacts.unwrap(loop.expression()) instanceof BinaryOperator bo) || bo.operator() == null
+            || !"<".equals(bo.operator().name()) || !isVariable(bo.lhs(), index)) return false;
+        Expression bound = NonNullFacts.unwrap(bo.rhs());
+        boolean sameBound = bound.equals(NonNullFacts.unwrap(size))
+                            || bound instanceof io.codelaser.maddi.cst.api.expression.ArrayLength length
+                               && isVariable(length.scope(), array);
+        if (!sameBound || loop.updaters().size() != 1 || !(loop.updaters().getFirst() instanceof Assignment step)
+            || !index.equals(step.variableTarget()) || !step.assignmentOperatorIsPlus()
+            || step.prefixPrimitiveOperator() == null
+               && !(step.value() instanceof io.codelaser.maddi.cst.api.expression.IntConstant one && one.constant() == 1)) {
+            return false;
+        }
+        boolean[] escapes = {false};
+        loop.block().visit(e -> {
+            if (e instanceof Lambda) return false;
+            if (e instanceof BreakOrContinueStatement || e instanceof ReturnStatement
+                || e instanceof Assignment a && index.equals(a.variableTarget())) escapes[0] = true;
+            return !escapes[0];
+        });
+        if (escapes[0]) return false;
+        return loop.block().statements().stream().anyMatch(st -> st instanceof ExpressionAsStatement eas
+                && eas.expression() instanceof Assignment a && a.assignmentOperator() == null
+                && a.variableTarget() instanceof DependentVariable dv
+                && isVariable(dv.arrayExpression(), array) && isVariable(dv.indexExpression(), index));
+    }
+
+    private static boolean isVariable(Expression e, Variable v) {
+        return NonNullFacts.unwrap(e) instanceof VariableExpression ve && ve.variable().equals(v);
+    }
+
     private void seedCreated(Object target, Expression value, MethodInfo mi) {
         if (target == null || value == null) return;
-        int depth = arrayCreatedWithNulls(value);
+        int depth = filledCreations.contains(value) ? 0 : arrayCreatedWithNulls(value);
         if (depth > 0) {
             Object content = target;
             for (int d = 0; d < depth; d++) content = new Content(content);
@@ -1753,7 +1861,11 @@ public final class NullabilityPass {
             seedIndirect(pi, "argument " + lib + " in " + mi.fullyQualifiedName());
             return;
         }
-        if (list == null || i >= list.list().size()) return;
+        if (list == null || i >= list.list().size()) {
+            // no argument links ('super(attributes)', 'this(...)' carry none): the argument's own node
+            if (!(unwrappedArgument instanceof MethodCall)) addEdge(argumentNode(mi, scope, arguments.get(i)), pi);
+            return;
+        }
         Links links = list.list().get(i);
         Variable primary = links.primary();
         if (primary == null) return;

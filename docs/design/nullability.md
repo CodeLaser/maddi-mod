@@ -734,3 +734,73 @@ non-null. Fernflower: 161 files, 102 errors (was 160, 109).
 A related fernflower error that the verdicts can't fix: `FastSparseSetIterator.next()` really returns null, which
 breaks `Iterator.next(): E`. Kotlin can't override with `E?`, so the printer has to keep `E` and write
 `null as E`.
+
+### 2026-10-07 — `super(...)` and `this(...)` arguments
+
+An explicit constructor invocation carries no argument links (`LINKED_VARIABLES_ARGUMENTS`), so `argument()`
+returned before adding any edge. A variable passed to `super(...)` or `this(...)` therefore never reached the
+called constructor's parameter, at the top level or in its slots. In fernflower, `StructField(Map<String?, ...>)`
+called `super(accessFlags, attributes)` while `StructMember(Map<String, ...>)` stayed clean. When there are no
+links, the argument's own node (`argumentNode`) now flows into the parameter. That also couples their slots.
+
+Guava, `NULL_MARKED`: unsafe 348 → 339 (parameters 248 → 241, fields 8 → 6, returns 39 → 38); noise 403 → 425.
+The new noise is real flow from imprecision further upstream (`TypeToken.of(Class)` fed by
+`Class.getComponentType()`; `ImmutableSortedSet`'s comparator chain). Fernflower not measured: the printer session
+was updating the ratchet at the time.
+
+### 2026-10-07 — arrays filled by the next loop
+
+`T[] a = new T[n]; for (int i = 0; i < n; i++) { ... a[i] = v; ... }` (also with `i < a.length`): every element is
+written before anything reads the array, so the creation leaves no null, and each `v` flows into the elements
+through the links. The rule is narrow on purpose:
+- a one-dimensional creation;
+- followed directly by the loop: from 0, one step at a time, with no other assignment to `i`;
+- `a[i] = ...` is a statement of the loop body itself (not under an `if`);
+- the body has no `break`, `continue` or `return`.
+
+Guava: −3 noise (`AbstractCompositeHashFunction`'s hashers). Most of guava's "array created with null elements"
+noise comes from elsewhere: `ImmutableMap.Builder.entries` (guava annotates it `@Nullable Entry<K, V>[]` and casts
+the nulls away once it is full), coupled both ways with `ImmutableList.array`, `Joiner.join(Object[])` and
+`TypeToken`'s `Type[]`. A cast barrier on content (`(Entry<K, V>[]) entries`) was tried and dropped. It made no
+difference: the link engine's transitive links bypass the cast, and cutting those too lost a real flow
+(`HashBiMap.hashTableVToK`).
+
+### 2026-10-07 — array content: backward only where written through
+
+`coupleContent` tied two arrays' elements both ways on every flow, because Kotlin's `Array<T>` is invariant. Java
+arrays are covariant, and so is JSpecify, so for Java annotations an element only needs to flow forward. The
+exception is aliasing: in `void f(Object[] a) { a[0] = null; }` the null lands in the caller's array. Outside
+`Policy.assertContentWrites` (`KOTLIN`), the backward edge is now added only when the downstream array is written
+through, directly (`a[i] = v`, a null stored into its elements) or via an array it flows on into.
+
+Guava `NULL_MARKED`: noise 422 → 414, unsafe unchanged (339). Dropping the backward edge altogether gave
+noise 386 but unsafe 346: those 7 come from writes that this rule doesn't recognise (library writes such as
+`System.arraycopy` are one possibility, not confirmed). Fernflower uses `KOTLIN` and is not affected.
+
+### 2026-10-07 — diagnose feedback (nacos): identity returns, null-check predicates
+
+From the diagnose session's first corpus run (nacos) of its rules nullIntoNonNull, nullDereference and
+redundantNullCheck:
+- **Identity returns:** the links' `≡` is transitive. In `checked = check(key)`, with `check` returning its
+  argument or null, `key ≡ return ≡ null` attached the callee's null to the argument, and from there to the
+  callee's parameter (`SystemEnvPropertySource.getProperty`). A top-level variable now takes a null marker only in
+  a statement that assigns it, or as a return. Slots keep their call-side writes. Guava: unchanged.
+- **Null-check predicates (`NullPredicates`):** `if (StringUtils.isNotBlank(s)) s.trim()` and the like.
+  - Library predicates come from a table: commons-lang and Spring `StringUtils`, `Objects.nonNull`/`isNull`,
+    guava's `Strings.isNullOrEmpty`, the `CollectionUtils`/`MapUtils`/`ArrayUtils` families.
+  - Analysed boolean methods are inferred by evaluating the body with the parameter null. Every path must return
+    the same constant; a `throw` counts for neither. This runs to a fixed point, so
+    `isNotBlank(s) { return !isBlank(s); }` follows `isBlank`.
+  - `NonNullFacts.whenTrue`/`whenFalse` treat them like `s != null`, but not for Kotlin's smart casts: Kotlin
+    doesn't see a Java method as a null check.
+  - Guava: noise 414 → 410, unsafe +1 (`StandardTable.removeColumn`). That parameter's callers now guard it with a
+    predicate, but guava annotates it `@Nullable` anyway.
+
+Not done yet, from the same report: trusted returns stay optimistic for a method that wraps an unhinted library
+call (`findConfigInfo4GrayState` returning `databaseOperate.queryOne(...)`). Also out of reach: a null that depends
+on the object's subclass.
+
+Trusted returns for library wrappers were tried: a method returning an unhinted library call's result (directly,
+through a local, or through another such method) was not trusted non-null at its call sites. Guava: +13 noise,
+unsafe unchanged. Not the default. diagnose's redundantNullCheck works around it with its own facts; an opt-in
+policy flag is possible if a consumer needs it.
