@@ -1538,12 +1538,11 @@ public final class NullabilityPass {
                 Links links = vic.best().linkedVariables();
                 if (links == null) return false;
                 for (Link link : links) {
-                    // an alias of the local's value ('≡', '←', '→'): reading it reads the local. Membership
-                    // ('from' is an element of 'instrBlocks') is not: reading the container does not refer to it
-                    LinkNature nature = link.linkNature();
-                    boolean alias = nature.isIdenticalTo() || nature.isAssignedFrom()
-                                    || nature.isIdenticalToOrAssignedFromTo();
-                    if (alias && (refersTo(link.from(), lv) || refersTo(link.to(), lv))) return false;
+                    // only the identity family of the link algebra ('≡', '←', '→') makes a variable the local's
+                    // value; the others leave them possibly unrelated: 'from ∈ instrBlocks' and 'to ∈ instrBlocks'
+                    // say nothing of 'from' against 'to'
+                    if (link.linkNature().isIdenticalToOrAssignedFromTo()
+                        && (refersTo(link.from(), lv) || refersTo(link.to(), lv))) return false;
                 }
             }
         }

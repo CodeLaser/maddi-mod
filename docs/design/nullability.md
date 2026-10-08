@@ -950,11 +950,12 @@ rather than BEHAVIOUR_CHANGE, but only when the linking engine proves that the s
 and the dereference do not refer to the local. `Report.unobservedBeforeDereference` answers that for an asserted
 local:
 - no statement strictly in between refers to the local directly;
-- no variable such a statement uses is linked to it, or to a variable built on it (`block.f`), by an alias link
-  (`≡`, `←`, `→`);
+- no variable such a statement uses is linked to it, or to a variable built on it (`block.f`), by a link of the
+  identity family (`≡`, `←`, `→`). The other natures of the link algebra (`∈`, `∋`, `~`, `⊆`, `≺`, `≈`, …) leave
+  the two variables possibly unrelated;
 - every statement in between has its links, so a degraded method gets no proof.
 
-Membership does not count. In fernflower's ControlFlowGraph:337, `from = instrBlocks.get(a); to =
-instrBlocks.get(b); … from.id`, reading the container is not referring to `from`. ControlFlowGraph:351
+So in fernflower's ControlFlowGraph:337, `from = instrBlocks.get(a); to =
+instrBlocks.get(b); … from.id`, `from ∈ instrBlocks` and `to ∈ instrBlocks` relate neither to the other. ControlFlowGraph:351
 (`protectedRange.add(block)` before `block.addSuccessorException`) refers to it, so it stays a behaviour change.
 No verdict changes.
