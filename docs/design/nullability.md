@@ -838,3 +838,18 @@ evidence at content writes, and an element read passed as an argument is asserte
 Guava `NULL_MARKED`: noise 405 → 397, unsafe 340 → 341 (`AbstractFuture.appendUserObject`). Fernflower on this
 branch, without the printer's latest commits: 184 files, 28 errors, unchanged. The effect is on the printer's
 ASSERT_INTO_NON_NULL count, which the printer session will measure after the merge.
+
+### 2026-10-08 — the `qualifiedName` hub; try-with-resources
+
+- **Argument observations.** `linkEdge` counted a statement that passes the source as a call argument as an
+  observation of the edge, for any recipient. In `getNestedName`, `mapSimpleNames.put(outerShortName, ...)` thereby
+  confirmed the closure link `outerShortName → node.parent.classStruct.qualifiedName`. It now counts only when the
+  call can reach the recipient: a field whose base object the statement assigns (`converter = new X(..., v)`) or
+  hands to the call as receiver or argument. A local, a parameter or a return is never written by a call.
+- **Try-with-resources.** A resource (`try (In in = open(name))`) is a statement of its own, with its own variable
+  data. The pass read neither its links nor its declaration seeds. Since 42ccad18 (a null marker sets a variable
+  only where it is assigned) the null from `getClassStream` therefore never reached `in`, which fernflower's
+  `ContextUnit.reload` passes on. Each resource is now handled as a declaration statement.
+
+Guava unchanged. Fernflower, merged with the printer's latest: 190 files, 20 type errors; the printer's
+ASSERT_INTO_NON_NULL 510 → 348 (with cba2d20a).

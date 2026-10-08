@@ -1437,4 +1437,37 @@ public class TestNullabilityPass extends CommonTest {
         System.out.println("SMART " + report.smartCasts().before(use) + " JAVA " + report.useSites().before(use));
         assertEquals(null, child, "contains(Object) accepts null: Kotlin knows nothing about child");
     }
+
+    @DisplayName("a try-with-resources resource is a declaration: its initializer's null reaches what it is passed to")
+    @Test
+    public void tryResources() {
+        List<NullabilityPass.Policy> policies = List.of(NullabilityPass.Policy.NULL_MARKED, NullabilityPass.Policy.KOTLIN);
+        for (int p = 0; p < policies.size(); p++) {
+            NullabilityPass.Policy policy = policies.get(p);
+            String name = "W" + p; // one parse per type and test
+            NullabilityPass.Report report = run("a.b." + name, """
+                    package a.b;
+                    import java.io.*;
+                    import java.util.*;
+                    class %s {
+                        private final Map<String, byte[]> links = new HashMap<>();
+                        InputStream open(String name) {
+                            byte[] data = links.get(name);
+                            return data == null ? null : new ByteArrayInputStream(data);
+                        }
+                        static int create(InputStream in) throws IOException { return in.read(); }
+                        int reload(String name) throws IOException {
+                            try (InputStream in = open(name)) {
+                                return create(in);
+                            }
+                        }
+                    }
+                    """.formatted(name), policy);
+            Map<String, String> byName = report.verdicts().entrySet().stream()
+                    .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+            assertEquals("InputStream?", byName.get("a.b." + name + ".open(String)"), policy.toString());
+            assertEquals("InputStream?", byName.get("a.b." + name + ".create(java.io.InputStream):0:in"),
+                    "fernflower ContextUnit.reload, " + policy);
+        }
+    }
 }

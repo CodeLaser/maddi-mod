@@ -1224,7 +1224,7 @@ public final class NullabilityPass {
             return;
         }
         Expression value = assignedValue(statement, recipientVar);
-        Guard guard = value == null ? argumentGuard(statement, sourceVar)
+        Guard guard = value == null ? argumentGuard(statement, sourceVar, recipientVar)
                 : guard(value, sourceVar, facts.before(statement));
         if (guard == Guard.GUARDED) count[0]++;
         else if (guard == Guard.UNGUARDED) count[1]++;
@@ -1239,8 +1239,17 @@ public final class NullabilityPass {
      ('converter = new IdentifierConverter(..., interceptor)' links the local to the new object's field). GUARDED when
      the source is known non-null at every call that takes it as an argument, as argument() decides for the parameter.
      */
-    private Guard argumentGuard(Statement statement, Variable source) {
+    private Guard argumentGuard(Statement statement, Variable source, Variable recipient) {
         if (statement.expression() == null) return Guard.ABSENT;
+        // only a call that can reach the recipient: a field of an object the statement assigns ('converter = new
+        // X(..., interceptor)') or hands to the call; never a local, a parameter or a return. In fernflower's
+        // 'mapSimpleNames.put(outerShortName, ...)' the link engine's closure linked 'outerShortName' to an
+        // unrelated 'node.parent.classStruct.qualifiedName'.
+        if (!(recipient instanceof FieldReference fr)) return Guard.ABSENT;
+        Variable base = fr;
+        while (base instanceof FieldReference f && f.scopeVariable() != null) base = f.scopeVariable();
+        Variable recipientBase = base;
+        boolean assignsBase = assignsHere(statement, recipientBase);
         Guard[] guard = {Guard.ABSENT};
         statement.expression().visit(e -> {
             if (e instanceof Lambda) return false;
@@ -1249,7 +1258,10 @@ public final class NullabilityPass {
                 case ConstructorCall cc -> cc.parameterExpressions();
                 default -> List.of();
             };
+            boolean reaches = assignsBase || e instanceof MethodCall mc && mc.object() != null && mentions(mc.object(), recipientBase)
+                              || arguments.stream().anyMatch(a -> mentions(a, recipientBase));
             for (Expression argument : arguments) {
+                if (!reaches) break;
                 if (NonNullFacts.unwrap(argument) instanceof VariableExpression ve && ve.variable().equals(source)) {
                     guard[0] = combine(guard[0], facts.nonNullWhenCalled((Expression) e, source)
                                                  || facts.nonNullAt(statement, source) ? Guard.GUARDED : Guard.UNGUARDED);
@@ -1372,6 +1384,15 @@ public final class NullabilityPass {
             });
             VariableData vd = VariableDataImpl.of(statement);
             if (vd != null) vd.variableInfoStream().forEach(vi -> linksOf(mi, own, vi, statement));
+            if (statement instanceof TryStatement ts) {
+                // 'try (In in = open(name))': each resource is a statement with its own variable data, a declaration
+                // like any other (fernflower ContextUnit.reload passed a nullable resource on unnoticed)
+                for (Statement resource : ts.resources()) {
+                    VariableData rvd = VariableDataImpl.of(resource);
+                    if (rvd != null) rvd.variableInfoStream().forEach(vi -> linksOf(mi, own, vi, resource));
+                    syntacticSeeds(mi, own, resource);
+                }
+            }
             statement.visit(e -> {
                 if (e instanceof Lambda lambda) {
                     if (lambda.methodBody() != null) handleBlock(lambda.methodInfo(), lambda.methodBody(), own);
