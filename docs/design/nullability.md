@@ -929,9 +929,3 @@ Guava (all four policies) unchanged.
   `protectedRange`'s nullable elements are genuine flow-insensitivity: `FinallyProcessor.getUniqueNext` starts
   `next = null` and only its correlation with `multiple` makes `arr[0].addSuccessor(next)` non-null. Guava
   unchanged.
-- **A class's type variable is instantiated per call.** `coupleContent` skipped a method's type variables but
-  not a class's. `Set<Statement> flagged = factory.spawnEmptySet()` therefore tied the caller's
-  `Set<Statement?>` to `FastFixedSetFactory<E>.spawnEmptySet()`'s `Set<E>`, which printed as `FastFixedSet<E?>`
-  (FastFixedSetFactory.kt:19/33). That came from 5c817266/32f0a688 moving where fernflower's nulls land. A slot
-  typed by a type variable is no longer tied to one with a concrete argument. Guava: NULL_MARKED +2 agree / -2
-  noise; OPEN and OPEN_VISIBILITY +185 agree / -183 undecided; unsafe unchanged.
