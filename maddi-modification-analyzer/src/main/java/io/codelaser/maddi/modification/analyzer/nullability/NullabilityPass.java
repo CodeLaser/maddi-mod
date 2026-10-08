@@ -16,19 +16,21 @@ package io.codelaser.maddi.modification.analyzer.nullability;
 
 import io.codelaser.maddi.cst.api.analysis.Property;
 import io.codelaser.maddi.cst.api.element.Element;
+import io.codelaser.maddi.cst.api.expression.And;
 import io.codelaser.maddi.cst.api.expression.ArrayInitializer;
 import io.codelaser.maddi.cst.api.expression.Assignment;
 import io.codelaser.maddi.cst.api.expression.BinaryOperator;
-import io.codelaser.maddi.cst.api.expression.SwitchExpression;
 import io.codelaser.maddi.cst.api.expression.Cast;
-import io.codelaser.maddi.cst.api.expression.ConstructorCall;
 import io.codelaser.maddi.cst.api.expression.ConstantExpression;
+import io.codelaser.maddi.cst.api.expression.ConstructorCall;
 import io.codelaser.maddi.cst.api.expression.Expression;
 import io.codelaser.maddi.cst.api.expression.InlineConditional;
 import io.codelaser.maddi.cst.api.expression.Lambda;
 import io.codelaser.maddi.cst.api.expression.MethodCall;
 import io.codelaser.maddi.cst.api.expression.MethodReference;
 import io.codelaser.maddi.cst.api.expression.NullConstant;
+import io.codelaser.maddi.cst.api.expression.Or;
+import io.codelaser.maddi.cst.api.expression.SwitchExpression;
 import io.codelaser.maddi.cst.api.expression.VariableExpression;
 import io.codelaser.maddi.cst.api.info.FieldInfo;
 import io.codelaser.maddi.cst.api.info.Info;
@@ -37,6 +39,7 @@ import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.statement.Block;
 import io.codelaser.maddi.cst.api.statement.BreakOrContinueStatement;
+import io.codelaser.maddi.cst.api.statement.DoStatement;
 import io.codelaser.maddi.cst.api.statement.ExplicitConstructorInvocation;
 import io.codelaser.maddi.cst.api.statement.ExpressionAsStatement;
 import io.codelaser.maddi.cst.api.statement.ForEachStatement;
@@ -44,8 +47,9 @@ import io.codelaser.maddi.cst.api.statement.ForStatement;
 import io.codelaser.maddi.cst.api.statement.LocalVariableCreation;
 import io.codelaser.maddi.cst.api.statement.ReturnStatement;
 import io.codelaser.maddi.cst.api.statement.Statement;
-import io.codelaser.maddi.cst.api.statement.YieldStatement;
+import io.codelaser.maddi.cst.api.statement.ThrowStatement;
 import io.codelaser.maddi.cst.api.statement.TryStatement;
+import io.codelaser.maddi.cst.api.statement.YieldStatement;
 import io.codelaser.maddi.cst.api.type.NullableState;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.api.variable.DependentVariable;
@@ -140,31 +144,38 @@ public final class NullabilityPass {
      *                  carried the flow-insensitivity of 'v = get(k); if (v == null) ...' into the callers (+947 noise,
      *                  2026-10-06); on for Kotlin, which does not compile a non-null variable holding a nullable
      *                  result.
+     * @param assertAtDeclaration the Kotlin translation's choice for a local that null reaches, but that its own
+     *                  block dereferences unconditionally further on (before any jump out, never reassigned):
+     *                  the printer asserts at the declaration ({@code val block = blocks.getWithKey(j)!!}), so
+     *                  the local is non-null and no null flows on from it (fernflower's
+     *                  {@code protectedRange.add(block); block.addSuccessorException(handle)}). It moves the NPE
+     *                  forward, from the dereference to the declaration. Off for Java annotations.
      */
     public record Policy(NullableState unreached, boolean nullTests, boolean contracts, World world,
-                         boolean assertContentWrites, boolean callResults) {
+                         boolean assertContentWrites, boolean callResults, boolean assertAtDeclaration) {
         public static final Policy NULL_MARKED = new Policy(NullableState.NONNULL, true, true, World.CLOSED, false,
-                false);
+                false, false);
         public static final Policy NULL_MARKED_FLOW_ONLY = new Policy(NullableState.NONNULL, false, true,
-                World.CLOSED, false, false);
+                World.CLOSED, false, false, false);
         public static final Policy CAUTIOUS = new Policy(NullableState.UNSPECIFIED, true, true, World.CLOSED, false,
-                false);
+                false, false);
         /**
          * {@link #NULL_MARKED} for the Java→Kotlin translation: content writes are asserted, and a variable assigned an
          * analysed method's nullable result is nullable (Kotlin will not compile it otherwise).
          */
-        public static final Policy KOTLIN = new Policy(NullableState.NONNULL, true, true, World.CLOSED, true, true);
+        public static final Policy KOTLIN = new Policy(NullableState.NONNULL, true, true, World.CLOSED, true, true,
+                true);
 
         public Policy withoutContracts() {
-            return new Policy(unreached, nullTests, false, world, assertContentWrites, callResults);
+            return new Policy(unreached, nullTests, false, world, assertContentWrites, callResults, assertAtDeclaration);
         }
 
         public Policy withWorld(World world) {
-            return new Policy(unreached, nullTests, contracts, world, assertContentWrites, callResults);
+            return new Policy(unreached, nullTests, contracts, world, assertContentWrites, callResults, assertAtDeclaration);
         }
 
         public Policy withAssertContentWrites(boolean assertContentWrites) {
-            return new Policy(unreached, nullTests, contracts, world, assertContentWrites, callResults);
+            return new Policy(unreached, nullTests, contracts, world, assertContentWrites, callResults, assertAtDeclaration);
         }
     }
 
@@ -200,7 +211,16 @@ public final class NullabilityPass {
      */
     public record Report(Map<Info, ParameterizedType> verdicts, Map<Local, ParameterizedType> locals,
                          Map<Object, Object> cause, Map<Object, String> seedOrigin, NonNullFacts useSites,
-                         NonNullFacts smartCasts) {
+                         NonNullFacts smartCasts, Set<Local> asserted) {
+
+        /**
+         * Whether the printer asserts this local at its declaration ({@link Policy#assertAtDeclaration}): null reaches
+         * its initializer, the block dereferences it unconditionally further on, and its verdict is non-null.
+         * Same arguments as {@link #local}.
+         */
+        public boolean assertedAtDeclaration(MethodInfo methodInfo, Element declaration, LocalVariable variable) {
+            return asserted.contains(new Local(methodInfo, declaration, variable.simpleName()));
+        }
 
         /**
          * The verdict of a local variable, or null when there is none (a pattern variable; a declaration the pass
@@ -252,6 +272,9 @@ public final class NullabilityPass {
     // analysed parameters an earlier round found non-null on every normal exit of their method: passing null throws
     private final Set<ParameterInfo> preconditions;
     private Set<Object> reached = Set.of();
+    // locals their block dereferences unconditionally further on (Policy.assertAtDeclaration), and those null reaches
+    private final Set<Local> assertCandidates = new HashSet<>();
+    private final Set<Local> asserted = new HashSet<>();
     // not reached by null, but by a value of an outside caller (World.OPEN*): UNSPECIFIED
     private Set<Object> external = Set.of();
     // every flow between two nodes, also one dropped as known non-null: the array Contents they tie (coupleContent)
@@ -392,6 +415,17 @@ public final class NullabilityPass {
 
         Map<Object, Object> cause = new LinkedHashMap<>();
         reached = closure(cause);
+        if (policy.assertAtDeclaration()) {
+            // only where null arrives: elsewhere the assertion would be a '!!' on a non-null value
+            assertCandidates.forEach(local -> {
+                if (reached.contains(local)) asserted.add(local);
+            });
+            if (!asserted.isEmpty()) {
+                nonNullContracts.addAll(asserted);
+                cause.clear();
+                reached = closure(cause);
+            }
+        }
         if (policy.world() != World.CLOSED) external = externalClosure(methods);
 
         Map<Info, ParameterizedType> verdicts = new LinkedHashMap<>();
@@ -413,7 +447,7 @@ public final class NullabilityPass {
         }
         NonNullFacts smartCasts = facts.kotlinSmartCasts();
         methods.forEach(smartCasts::walk);
-        return new Report(verdicts, locals, cause, seedOrigin, facts, smartCasts);
+        return new Report(verdicts, locals, cause, seedOrigin, facts, smartCasts, Set.copyOf(asserted));
     }
 
     /**
@@ -1350,7 +1384,12 @@ public final class NullabilityPass {
     // returns the block's scope at its end
     private Scope handleBlock(MethodInfo mi, Block block, Scope parent) {
         Scope scope = new Scope(parent);
-        for (Statement statement : block.statements()) {
+        List<Statement> statements = block.statements();
+        for (int index = 0; index < statements.size(); index++) {
+            Statement statement = statements.get(index);
+            if (policy.assertAtDeclaration() && statement instanceof LocalVariableCreation lvc) {
+                assertCandidates(mi, lvc, statements, index);
+            }
             // a statement's own declarations are visible in the statement only; a local variable creation's in the
             // rest of the block
             Scope own = new Scope(scope);
@@ -1422,6 +1461,110 @@ public final class NullabilityPass {
             }
         }
         return scope;
+    }
+
+    /*
+     A local declared with an initializer that the rest of its block dereferences before anything may leave the block,
+     and that is never assigned again: in Java a null there throws at the dereference anyway (Policy
+     .assertAtDeclaration). 'BasicBlock block = blocks.getWithKey(j); protectedRange.add(block);
+     block.addSuccessorException(handle);' (fernflower ControlFlowGraph.setExceptionEdges).
+     */
+    private void assertCandidates(MethodInfo mi, LocalVariableCreation lvc, List<Statement> statements, int index) {
+        lvc.localVariableStream().forEach(lv -> {
+            Expression init = lv.assignmentExpression();
+            if (init == null || init.isEmpty() || NonNullFacts.unwrap(init) instanceof NullConstant
+                || lv.parameterizedType().isPrimitiveExcludingVoid()) return;
+            List<Statement> rest = statements.subList(index + 1, statements.size());
+            if (rest.stream().anyMatch(st -> assigns(st, lv))) return;
+            for (Statement st : rest) {
+                if (dereferencesFirst(st, lv)) {
+                    assertCandidates.add(new Local(mi, lvc, lv.simpleName()));
+                    return;
+                }
+                if (mayLeave(st)) return;
+            }
+        });
+    }
+
+    private static boolean assigns(Statement statement, LocalVariable lv) {
+        boolean[] found = {false};
+        statement.visit(e -> {
+            if (e instanceof Assignment a && lv.equals(a.variableTarget())) found[0] = true;
+            return !found[0];
+        });
+        return found[0];
+    }
+
+    // a return, throw, yield, break or continue anywhere in the statement, outside lambdas and nested classes
+    private static boolean mayLeave(Statement statement) {
+        boolean[] found = {false};
+        statement.visit(e -> {
+            if (e instanceof Lambda || e instanceof ConstructorCall cc && cc.anonymousClass() != null) return false;
+            if (e instanceof ReturnStatement || e instanceof ThrowStatement || e instanceof YieldStatement
+                || e instanceof BreakOrContinueStatement) found[0] = true;
+            return !found[0];
+        });
+        return found[0];
+    }
+
+    // the statement's first evaluated expressions dereference lv, whatever their values
+    private static boolean dereferencesFirst(Statement statement, LocalVariable lv) {
+        return switch (statement) {
+            case LocalVariableCreation lvc -> lvc.localVariableStream()
+                    .anyMatch(v -> v.assignmentExpression() != null && dereferences(v.assignmentExpression(), lv));
+            case ForEachStatement fe -> isVariable(fe.expression(), lv) || dereferences(fe.expression(), lv);
+            case DoStatement _, ForStatement _, TryStatement _, Block _ -> false;
+            default -> statement.expression() != null && dereferences(statement.expression(), lv);
+        };
+    }
+
+    // evaluating e certainly dereferences lv: not in a conditionally evaluated part, a lambda, or a switch arm
+    private static boolean dereferences(Expression e, LocalVariable lv) {
+        boolean[] found = {false};
+        e.visit(x -> {
+            if (found[0]) return false;
+            switch (x) {
+                case Lambda _ -> {
+                    return false;
+                }
+                case InlineConditional ic -> {
+                    found[0] = dereferences(ic.condition(), lv);
+                    return false;
+                }
+                case BinaryOperator bo when NonNullFacts.isOperator(bo, "&&") || NonNullFacts.isOperator(bo, "||") -> {
+                    found[0] = dereferences(bo.lhs(), lv);
+                    return false;
+                }
+                case And and -> {
+                    found[0] = !and.expressions().isEmpty() && dereferences(and.expressions().getFirst(), lv);
+                    return false;
+                }
+                case Or or -> {
+                    found[0] = !or.expressions().isEmpty() && dereferences(or.expressions().getFirst(), lv);
+                    return false;
+                }
+                case SwitchExpression se -> {
+                    found[0] = dereferences(se.selector(), lv);
+                    return false;
+                }
+                case ConstructorCall cc when cc.anonymousClass() != null -> {
+                    found[0] = cc.parameterExpressions().stream().anyMatch(a -> dereferences(a, lv));
+                    return false;
+                }
+                case MethodCall mc when mc.methodInfo() != null && !mc.methodInfo().isStatic()
+                                        && mc.object() != null && isVariable(mc.object(), lv) -> found[0] = true;
+                case VariableExpression ve when ve.variable() instanceof FieldReference fr && !fr.fieldInfo().isStatic()
+                                                && fr.scope() != null && isVariable(fr.scope(), lv) -> found[0] = true;
+                case VariableExpression ve when ve.variable() instanceof DependentVariable dv
+                                                && isVariable(dv.arrayExpression(), lv) -> found[0] = true;
+                case io.codelaser.maddi.cst.api.expression.ArrayLength al when isVariable(al.scope(), lv) ->
+                        found[0] = true;
+                default -> {
+                }
+            }
+            return !found[0];
+        });
+        return found[0];
     }
 
     // read from the code, not from the links: the literal null assigned to a local or field (so also in a degraded

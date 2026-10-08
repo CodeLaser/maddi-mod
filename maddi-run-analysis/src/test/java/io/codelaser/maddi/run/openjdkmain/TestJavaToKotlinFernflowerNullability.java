@@ -73,6 +73,11 @@ public class TestJavaToKotlinFernflowerNullability {
             return report.local(method, declaration, variable);
         }
 
+        // NullabilityVerdicts.assertedAtDeclaration (maddi 9942ae3d0); no @Override until maddi has it
+        public boolean assertedAtDeclaration(MethodInfo method, Element declaration, LocalVariable variable) {
+            return report.assertedAtDeclaration(method, declaration, variable);
+        }
+
         /** Kotlin's smart casts only: useSites() also counts requireNonNull and contracts, which Kotlin does not. */
         @Override
         public boolean nonNullAt(io.codelaser.maddi.cst.api.statement.Statement statement,

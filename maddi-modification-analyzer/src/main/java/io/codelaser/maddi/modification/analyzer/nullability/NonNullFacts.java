@@ -331,7 +331,7 @@ public final class NonNullFacts {
     // ------------------------------------------------------------------ conditions
 
     // the predefined operators, by name: '==' and '!=' on objects (a null operand is checked separately), '&&', '||'
-    private static boolean isOperator(BinaryOperator bo, String name) {
+    static boolean isOperator(BinaryOperator bo, String name) {
         return bo.operator() != null && name.equals(bo.operator().name());
     }
 
