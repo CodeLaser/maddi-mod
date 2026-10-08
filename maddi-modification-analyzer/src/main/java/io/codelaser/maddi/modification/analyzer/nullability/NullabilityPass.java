@@ -1731,16 +1731,37 @@ public final class NullabilityPass {
         for (int i = 0; i < arguments.size() && i < parameters.size(); i++) {
             ParameterizedType pt = parameters.get(i).parameterizedType();
             if (pt.arrays() > 0 || pt.parameters().isEmpty()) continue;
-            Object source = argumentNode(mi, scope, arguments.get(i));
-            if (source == null) continue;
             for (int j = 0; j < pt.parameters().size(); j++) {
                 ParameterizedType a = pt.parameters().get(j);
                 if (a.typeParameter() == null || a.typeParameter().isMethodTypeParameter()
                     || a.typeParameter().getOwner().getLeft() != callee.typeInfo()) continue;
                 int index = a.typeParameter().getIndex();
-                if (index < arity) addEdge(new Arg(source, j), new Arg(receiver, index));
+                Object source = slotOf(mi, scope, arguments.get(i), j);
+                if (source != null && index < arity) addEdge(source, new Arg(receiver, index));
             }
         }
+    }
+
+    /*
+     Type argument j of what an expression denotes: of its node (argumentNode), or of a library view of a generic
+     receiver, whose own type arguments are the receiver's class's type variables ('mapNext.values()' is a
+     Collection<V>: its argument 0 is the map's V; fernflower FinallyProcessor 'new HashSet<>(mapNext.values())').
+     */
+    private Object slotOf(MethodInfo mi, Scope scope, Expression expression, int j) {
+        Object node = argumentNode(mi, scope, expression);
+        if (node != null) return new Arg(node, j);
+        if (!(NonNullFacts.unwrap(expression) instanceof MethodCall mc) || mc.methodInfo() == null
+            || mc.methodInfo().isStatic() || mc.object() == null || analysed.contains(mc.methodInfo())) return null;
+        ParameterizedType rt = mc.methodInfo().returnType();
+        if (rt.arrays() > 0 || j >= rt.parameters().size()) return null;
+        ParameterizedType a = rt.parameters().get(j);
+        if (!isTypeVariable(a) || a.typeParameter().isMethodTypeParameter()
+            || a.typeParameter().getOwner().getLeft() != mc.methodInfo().typeInfo()) return null;
+        Object receiver = argumentNode(mi, scope, mc.object());
+        ParameterizedType receiverType = receiver == null ? null : typeOf(receiver);
+        int index = receiverType == null ? -1
+                : slotIndex(receiverType, mc.methodInfo().typeInfo(), a.typeParameter().getIndex());
+        return index < 0 ? null : new Arg(receiver, index);
     }
 
     /*
@@ -2208,6 +2229,13 @@ public final class NullabilityPass {
         }
         seedCreated(pi, arguments.get(i), mi);
         Expression unwrappedArgument = NonNullFacts.unwrap(arguments.get(i));
+        // 'getUniqueNext(graph, new HashSet<>(mapNext.values()))': a library copy constructor as the argument copies
+        // its argument's content into the parameter's slots (fernflower FinallyProcessor)
+        if (unwrappedArgument instanceof ConstructorCall copy && copy.constructor() != null
+            && !analysed.contains(copy.constructor()) && copy.parameterizedType() != null
+            && copy.parameterizedType().arrays() == 0) {
+            contentCopies(mi, scope, pi, copy.constructor(), copy.parameterExpressions());
+        }
         if (unwrappedArgument instanceof MethodCall amc && amc.methodInfo() != null) {
             Object source = argumentNode(mi, scope, unwrappedArgument);
             if (source instanceof Arg || source instanceof MethodInfo m && concreteArguments(m.returnType())) {

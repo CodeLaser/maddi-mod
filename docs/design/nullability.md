@@ -976,3 +976,13 @@ asserted (`!!`) where Java carries a null on, so the translation threw an NPE:
 - `JarFile.getManifest()` (nullable) has no JDK hint yet, so `ContextUnit.setManifest` stays non-null.
 
 Guava unchanged under all four policies.
+- **A library copy as an argument.** `getUniqueNext(graph, new HashSet<>(mapNext.values()))` now copies the
+  map's values into the parameter's slots. `slotOf` reads a library view of a generic receiver
+  (`values()`: `Collection<V>`, slot 0 is the map's V), and a library copy constructor passed as the argument
+  ties its argument's slots to the parameter's. Without that, mapNext's nullable components (above) stopped at the
+  call and FinallyProcessor.kt:358 failed. Guava: NULL_MARKED unchanged; OPEN* -1 agree / +1 undecided.
+- **Still open:** with 06fc1e65 the write `mapStates.get(type).set(index, value)` in `Statement.changeEdgeNode` is
+  seen. It carries `IfStatement.ifstat`'s null (through `replaceStatement(first, firstif.getIfstat())`) into the
+  statement graph's lists. From there it reaches DomHelper's FastFixedSets and `FastFixedSetFactory.spawnEmptySet()`
+  as `E?` (FastFixedSetFactory.kt:19/33). In Java a null `newstat` throws in `replaceStatement` right after that
+  write, so cutting it at the call (preconditions, f7c595bd) is a decision for the user.

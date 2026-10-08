@@ -1898,7 +1898,12 @@ public class TestNullabilityPass extends CommonTest {
                     for (St successor : successors) {
                         mapNext.put(sample.id + "#" + successor.id, new St[]{sample, successor, last ? successor : null});
                     }
-                    return mapNext.size();
+                    return unique(new HashSet<>(mapNext.values()));
+                }
+                static int unique(Set<St[]> setNext) {
+                    int n = 0;
+                    for (St[] arr : setNext) if (arr[2] != null) n++;
+                    return n;
                 }
             }
             """;
@@ -1916,5 +1921,7 @@ public class TestNullabilityPass extends CommonTest {
                 "fernflower DecHelper.isChoiceStatement");
         assertTrue(locals(report).contains("next.mapNext: Map<String, St?[]>"),
                 "fernflower FinallyProcessor.compareSubGraphsEx: " + locals(report));
+        assertEquals("Set<St?[]>", byName.get("a.b.RN.unique(java.util.Set):0:setNext"),
+                "fernflower FinallyProcessor.getUniqueNext(graph, new HashSet<>(mapNext.values()))");
     }
 }
