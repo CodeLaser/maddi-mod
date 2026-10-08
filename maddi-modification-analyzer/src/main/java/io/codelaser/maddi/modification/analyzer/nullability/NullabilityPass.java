@@ -371,9 +371,19 @@ public final class NullabilityPass {
         }
         for (FieldInfo fi : fields) seedDefaultValue(fi);
         linkEdges.forEach((edge, count) -> {
-            // [0] assigned directly where the source is known non-null, [1] assigned directly otherwise
-            if (count[1] > 0 || count[0] == 0) addEdge(edge.get(0), edge.get(1));
-            else flows.add(List.of(edge.get(0), edge.get(1))); // the array is not null there; its elements may be
+            // [0] assigned (or passed) where the source is known non-null, [1] where it is not, [2] assigned by a
+            // value not seen through. Never observed at all: only the links' transitive closure. In
+            // 'imp.getNestedName(root ? node.classStruct.qualifiedName : node.simpleName)' both alternatives are '≡'
+            // the argument, and so each other: fernflower's ClassNode.simpleName (compared with null) reached
+            // StructClass.qualifiedName and from there most of the program. A slot is written by calls, without
+            // an assignment the statement shows: kept.
+            // [3] a link of a method's summary (no statement): kept as before, unless guarded somewhere
+            boolean slot = edge.get(1) instanceof Arg || edge.get(1) instanceof Content;
+            if (count[1] > 0 || count[2] > 0 || count[0] == 0 && slot) {
+                addEdge(edge.get(0), edge.get(1));
+            } else {
+                flows.add(List.of(edge.get(0), edge.get(1))); // the value is not null there; its elements may be
+            }
         });
         holderFields(methods, fields);
         coupleContent();
@@ -1208,13 +1218,20 @@ public final class NullabilityPass {
     // is known non-null, the statement carries no null from it (M4)
     private void linkEdge(Object from, Object to, Variable sourceVar, Variable recipientVar, Statement statement) {
         if (from == null || to == null || from.equals(to)) return;
-        int[] count = linkEdges.computeIfAbsent(List.of(from, to), _ -> new int[2]);
-        if (statement == null) return;
+        int[] count = linkEdges.computeIfAbsent(List.of(from, to), _ -> new int[4]);
+        if (statement == null) {
+            count[3]++; // a link of the method's summary, not of one statement
+            return;
+        }
         Expression value = assignedValue(statement, recipientVar);
         Guard guard = value == null ? argumentGuard(statement, sourceVar)
                 : guard(value, sourceVar, facts.before(statement));
         if (guard == Guard.GUARDED) count[0]++;
         else if (guard == Guard.UNGUARDED) count[1]++;
+        else if (guard == Guard.OPAQUE) count[2]++; // a value (or part) not seen through
+        // a call that is not given the source can still return it through an alias ('table = this.table; return
+        // table.get(i)', guava LocalCache.Segment.getFirst): assigned here by a value not seen through
+        else if (value != null && NonNullFacts.unwrap(value) instanceof MethodCall) count[2]++;
     }
 
     /*
@@ -1501,12 +1518,8 @@ public final class NullabilityPass {
             && !rt.typeParameter().isMethodTypeParameter()) {
             Object receiver = argumentNode(mi, scope, mc.object());
             ParameterizedType type = receiver == null ? null : typeOf(receiver);
-            int arity = callee.typeInfo().typeParameters().size();
-            int index = rt.typeParameter().getIndex();
-            if (type != null && type.arrays() == 0 && type.parameters().size() == arity && index < arity) {
-                return new Arg(receiver, index);
-            }
-            return null;
+            int index = type == null ? -1 : slotIndex(type, callee.typeInfo(), rt.typeParameter().getIndex());
+            return index < 0 ? null : new Arg(receiver, index);
         }
         if (analysed.contains(callee) && !rt.isVoid()) return callee;
         return null;
@@ -1640,11 +1653,23 @@ public final class NullabilityPass {
             // the same object: its content slots are one (coupleContent); not where the callee's type arguments are
             // type variables, which each call instantiates anew
             if (concreteArguments(callee.returnType())) flows.add(List.of(callee, target));
-            if (policy.callResults() && !isTypeVariable(callee.returnType())) addEdge(callee, target);
+            // a class type variable's own null ('E getWithKey(K k) { ... return null; }', E?) holds for every
+            // instantiation; so does a method type variable's, unless a parameter of that very type can carry the
+            // caller's null back out ('<X> X id(X x)'): '<T> T getAttribute(Key<T> key)' returns a map's lookup
+            ParameterizedType rt = callee.returnType();
+            boolean ownNull = rt.arrays() == 0 && rt.typeParameter() != null
+                              && (!rt.typeParameter().isMethodTypeParameter()
+                                  || callee.parameters().stream().noneMatch(pi ->
+                                         rt.typeParameter().equals(pi.parameterizedType().typeParameter())));
+            if (policy.callResults() && (!isTypeVariable(rt) || ownNull)) addEdge(callee, target);
         }
-        if (readScope != null && !analysed.contains(callee)
-            && argumentNode(readScope.mi(), readScope.scope(), unwrapped) instanceof Arg slot) {
-            flows.add(List.of(slot, target)); // 'x = map.get(k)': x is the map's value, its slots are the value's
+        if (readScope != null && argumentNode(readScope.mi(), readScope.scope(), unwrapped) instanceof Arg slot) {
+            if (!analysed.contains(callee)) {
+                flows.add(List.of(slot, target)); // 'x = map.get(k)': x is the map's value, its slots are the value's
+            }
+            // Kotlin: the value read is the receiver's slot ('block = blocks.getWithKey(j)', 'st = stats.get(0)' on a
+            // VBStyleCollection<Statement?, ...>): a nullable slot gives a nullable value
+            if (policy.callResults()) addEdge(slot, target);
         }
         String lib = libraryNullableReturn(callee);
         if (lib != null) {
@@ -1771,13 +1796,13 @@ public final class NullabilityPass {
                                LinkComputer.ListOfLinks list, List<Expression> arguments) {
         Object receiver = slotReceiver(mi, scope, call, callee);
         if (receiver == null) return;
-        int arity = callee.typeInfo().typeParameters().size();
+        ParameterizedType type = typeOf(receiver);
         List<ParameterInfo> parameters = callee.parameters();
         for (int i = 0; i < arguments.size() && i < parameters.size(); i++) {
             ParameterizedType pt = parameters.get(i).parameterizedType();
             if (pt.arrays() > 0 || pt.typeParameter() == null || pt.typeParameter().isMethodTypeParameter()) continue;
-            int index = pt.typeParameter().getIndex();
-            if (index < arity) argument(mi, scope, statement, call, list, arguments, i, new Arg(receiver, index));
+            int index = slotIndex(type, callee.typeInfo(), pt.typeParameter().getIndex());
+            if (index >= 0) argument(mi, scope, statement, call, list, arguments, i, new Arg(receiver, index));
         }
         contentCopies(mi, scope, receiver, callee, arguments);
     }
@@ -1793,9 +1818,35 @@ public final class NullabilityPass {
         }
         Object receiver = node(mi, scope, ve.variable());
         ParameterizedType type = receiver == null ? null : typeOf(receiver);
-        int arity = callee.typeInfo().typeParameters().size();
-        if (type == null || type.arrays() > 0 || arity == 0 || type.parameters().size() != arity) return null;
-        return receiver;
+        if (type == null || type.arrays() > 0 || callee.typeInfo().typeParameters().isEmpty()) return null;
+        boolean anySlot = false;
+        for (int i = 0; i < callee.typeInfo().typeParameters().size(); i++) {
+            anySlot |= slotIndex(type, callee.typeInfo(), i) >= 0;
+        }
+        return anySlot ? receiver : null;
+    }
+
+    /*
+     The receiver's type argument that the callee's class type variable 'index' stands for. The same class (or one
+     with as many type parameters, ArrayList<E> -> List<E>): the same position. Otherwise through the receiver's
+     supertype: on a 'VBStyleCollection<Statement, Integer>', which extends ArrayList<E>, 'get' returns ArrayList's E,
+     the receiver's argument 0 (fernflower 'stat.getStats().get(0)'). -1 when it maps to no argument of the receiver.
+     */
+    private static int slotIndex(ParameterizedType receiverType, TypeInfo calleeClass, int index) {
+        int arity = calleeClass.typeParameters().size();
+        if (receiverType.arrays() > 0 || index >= arity) return -1;
+        TypeInfo receiverClass = receiverType.typeInfo();
+        if (receiverClass == calleeClass || receiverClass == null || receiverType.parameters().size() == arity) {
+            return index < receiverType.parameters().size() ? index : -1;
+        }
+        ParameterizedType formal = receiverClass.asParameterizedType();
+        ParameterizedType asSuper = formal.concreteSuperType(calleeClass.asParameterizedType());
+        if (asSuper == null || index >= asSuper.parameters().size()) return -1;
+        ParameterizedType argument = asSuper.parameters().get(index);
+        if (argument.arrays() > 0 || argument.typeParameter() == null || argument.typeParameter().isMethodTypeParameter()
+            || argument.typeParameter().getOwner().getLeft() != receiverClass) return -1;
+        int j = argument.typeParameter().getIndex();
+        return j < receiverType.parameters().size() ? j : -1;
     }
 
     // 'm(array)' for 'm(String... xs)': the one argument in the varargs position is itself the array

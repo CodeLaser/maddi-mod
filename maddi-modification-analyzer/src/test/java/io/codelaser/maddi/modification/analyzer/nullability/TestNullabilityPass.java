@@ -1320,4 +1320,121 @@ public class TestNullabilityPass extends CommonTest {
                 .filter(c -> "trim".equals(c.methodInfo().name())).findFirst().orElseThrow();
         assertEquals(true, report.useSites().nonNullAt(trim, other.parameters().getFirst()), "isEmpty is true for null");
     }
+
+    @DisplayName("Kotlin: an analysed generic method's own null (E?) reaches the variable its result is assigned to")
+    @Test
+    public void classTypeVariableResults() {
+        NullabilityPass.Report report = run("a.b.V", """
+                package a.b;
+                import java.util.*;
+                class V {
+                    static class VB<E, K> extends ArrayList<E> {
+                        private final Map<K, Integer> map = new HashMap<>();
+                        void addWithKey(E element, K key) { map.put(key, size()); super.add(element); }
+                        E getWithKey(K key) {
+                            Integer index = map.get(key);
+                            if (index == null) return null;
+                            return super.get(index);
+                        }
+                    }
+                    static class Block { int id; }
+                    private final VB<Block, Integer> blocks = new VB<>();
+                    private final VB<Block, Integer> holes = new VB<>();
+                    private final Map<String, Object> attributes = new HashMap<>();
+                    void fill(Block b) { blocks.addWithKey(b, b.id); holes.add(null); }
+                    Block first() { Block b = holes.get(0); return b; }
+                    @SuppressWarnings("unchecked")
+                    <T> T attribute(String name, Class<T> type) { return (T) attributes.get(name); }
+                    String name() { String n = attribute("name", String.class); return n; }
+                    <X> X id(X x) { return x; }
+                    String same(String s) { String t = id(s); return t; }
+                    List<Block> range(int from, int to) {
+                        List<Block> out = new ArrayList<>();
+                        for (int j = from; j < to; j++) {
+                            Block block = blocks.getWithKey(j);
+                            out.add(block);
+                        }
+                        return out;
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        System.out.println(explain(report));
+        Map<String, String> byName = report.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+        assertEquals("E?", byName.get("a.b.V.VB.getWithKey(Object)"));
+        // 'block = blocks.getWithKey(j)' is nullable, and so is what it is added to (fernflower ControlFlowGraph:351)
+        assertEquals("List<Block?>", byName.get("a.b.V.range(int,int)"));
+        assertEquals("VB<Block, Integer>", byName.get("a.b.V.blocks"), "the slot itself holds no null");
+        // a list method on a two-argument subclass: ArrayList's E is the receiver's argument 0
+        assertEquals("VB<Block?, Integer>", byName.get("a.b.V.holes"));
+        assertEquals("Block?", byName.get("a.b.V.first()"));
+        // a method type variable's own null (a map lookup), but not one a parameter of that type carries
+        assertEquals("String?", byName.get("a.b.V.name()"));
+        assertEquals("String", byName.get("a.b.V.same(String)"));
+    }
+
+    @DisplayName("two alternatives of one argument are not each other's value")
+    @Test
+    public void alternativesInAnArgument() {
+        NullabilityPass.Report report = run("a.b.T", """
+                package a.b;
+                class T {
+                    static class Struct { final String qualifiedName; Struct(String q) { qualifiedName = q; } }
+                    static class Node {
+                        final Struct struct;
+                        String simpleName;
+                        boolean root;
+                        Node(Struct struct) {
+                            this.struct = struct;
+                            simpleName = struct.qualifiedName.substring(struct.qualifiedName.lastIndexOf('/') + 1);
+                        }
+                    }
+                    static void use(String s) { }
+                    static void add(Node node) {
+                        if (node.simpleName != null) use(node.root ? node.struct.qualifiedName : node.simpleName);
+                    }
+                    static String name(Node node) { return node.struct.qualifiedName; }
+                }
+                """);
+        System.out.println(explain(report));
+        Map<String, String> byName = report.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+        assertEquals("String?", byName.get("a.b.T.Node.simpleName"));
+        assertEquals("String", byName.get("a.b.T.Struct.qualifiedName"), "fernflower ClassesProcessor:508");
+        assertEquals("String", byName.get("a.b.T.name(a.b.T.Node)"));
+    }
+
+    @DisplayName("a java.util lookup's Object argument is not known non-null after the call, for Kotlin")
+    @Test
+    public void lookupArguments() {
+        NullabilityPass.Report report = run("a.b.L2", """
+                package a.b;
+                import java.util.*;
+                class L2 {
+                    static class Block { List<Block> preds = new ArrayList<>(); }
+                    static int count(Set<Block> blocks, List<Block> lst) {
+                        int n = 0;
+                        for (int i = 0; i < lst.size(); i++) {
+                            Block child = lst.get(i);
+                            if (!blocks.contains(child)) {
+                                n += child.preds.size();
+                            }
+                        }
+                        return n;
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        MethodInfo count = parsed.findUniqueMethod("count", 2);
+        List<io.codelaser.maddi.cst.api.expression.VariableExpression> derefs = new java.util.ArrayList<>();
+        List<Statement> inner = new java.util.ArrayList<>();
+        count.methodBody().visit(e -> {
+            if (e instanceof IfElseStatement ifElse) inner.add(ifElse.block().statements().getFirst());
+            return true;
+        });
+        Statement use = inner.getFirst();
+        io.codelaser.maddi.cst.api.variable.Variable child = report.smartCasts().before(use).stream()
+                .filter(v -> v.simpleName().equals("child")).findFirst().orElse(null);
+        System.out.println("SMART " + report.smartCasts().before(use) + " JAVA " + report.useSites().before(use));
+        assertEquals(null, child, "contains(Object) accepts null: Kotlin knows nothing about child");
+    }
 }
