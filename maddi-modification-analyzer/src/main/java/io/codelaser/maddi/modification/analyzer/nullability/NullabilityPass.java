@@ -19,6 +19,7 @@ import io.codelaser.maddi.cst.api.element.Element;
 import io.codelaser.maddi.cst.api.expression.ArrayInitializer;
 import io.codelaser.maddi.cst.api.expression.Assignment;
 import io.codelaser.maddi.cst.api.expression.BinaryOperator;
+import io.codelaser.maddi.cst.api.expression.SwitchExpression;
 import io.codelaser.maddi.cst.api.expression.Cast;
 import io.codelaser.maddi.cst.api.expression.ConstructorCall;
 import io.codelaser.maddi.cst.api.expression.ConstantExpression;
@@ -43,6 +44,7 @@ import io.codelaser.maddi.cst.api.statement.ForStatement;
 import io.codelaser.maddi.cst.api.statement.LocalVariableCreation;
 import io.codelaser.maddi.cst.api.statement.ReturnStatement;
 import io.codelaser.maddi.cst.api.statement.Statement;
+import io.codelaser.maddi.cst.api.statement.YieldStatement;
 import io.codelaser.maddi.cst.api.statement.TryStatement;
 import io.codelaser.maddi.cst.api.type.NullableState;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
@@ -1398,6 +1400,13 @@ public final class NullabilityPass {
                     if (lambda.methodBody() != null) handleBlock(lambda.methodInfo(), lambda.methodBody(), own);
                     return false;
                 }
+                // a switch expression's block arms are statements inside an expression: no sub-block of the
+                // statement (fernflower StructTypeAnnotationAttribute.parse declared and filled an array there)
+                if (e instanceof SwitchExpression se) {
+                    se.entries().forEach(entry -> {
+                        if (entry.statement() instanceof Block arm) handleBlock(mi, arm, own);
+                    });
+                }
                 if (e instanceof Block) return false; // nested statements are handled with their own vd
                 if (policy.nullTests() && e instanceof BinaryOperator bo) nullTest(mi, own, bo);
                 if (e instanceof MethodCall mc && mc.methodInfo() != null) {
@@ -1588,6 +1597,14 @@ public final class NullabilityPass {
                 }
             }
             statement.subBlockStream().forEach(this::indexFills);
+            statement.visit(e -> {
+                if (e instanceof SwitchExpression se) {
+                    se.entries().forEach(entry -> {
+                        if (entry.statement() instanceof Block arm) indexFills(arm);
+                    });
+                }
+                return !(e instanceof Block) && !(e instanceof Lambda);
+            });
         }
     }
 
@@ -1666,6 +1683,44 @@ public final class NullabilityPass {
     // analysed callee's return: on guava that carried the flow-insensitivity of 'v = get(k); if (v == null) ...'
     // into the callers, +947 noise for -27 unsafe (2026-10-06); to be revisited with the use-site pass (M4).
     private void callResult(Object target, Expression value) {
+        for (Expression alternative : alternatives(value)) callResultOf(target, alternative);
+    }
+
+    /*
+     The values an expression may evaluate to: a conditional's branches, a switch expression's arms ('-> v', and each
+     'yield v' of a block arm), recursively; else the expression itself. Fernflower's 'MatchEngine': 'value = switch
+     (property) { case STATEMENT_TYPE -> stat_type.get(strValue); ... }'.
+     */
+    private static List<Expression> alternatives(Expression value) {
+        List<Expression> out = new ArrayList<>();
+        alternatives(value, out);
+        return out;
+    }
+
+    private static void alternatives(Expression value, List<Expression> out) {
+        if (value == null) return;
+        switch (NonNullFacts.unwrap(value)) {
+            case InlineConditional ic -> {
+                alternatives(ic.ifTrue(), out);
+                alternatives(ic.ifFalse(), out);
+            }
+            case SwitchExpression se -> se.entries().forEach(entry -> {
+                Statement arm = entry.statement();
+                if (arm instanceof Block block) {
+                    block.visit(e -> {
+                        if (e instanceof YieldStatement ys) alternatives(ys.expression(), out);
+                        // a nested switch expression's yields are its own
+                        return !(e instanceof Lambda) && !(e instanceof SwitchExpression);
+                    });
+                } else if (arm instanceof ExpressionAsStatement || arm instanceof YieldStatement) {
+                    alternatives(arm.expression(), out);
+                }
+            });
+            default -> out.add(value);
+        }
+    }
+
+    private void callResultOf(Object target, Expression value) {
         Expression unwrapped = value instanceof Cast c ? c.expression() : value;
         if (target == null || !(unwrapped instanceof MethodCall mc) || mc.methodInfo() == null) return;
         MethodInfo callee = mc.methodInfo();
@@ -1828,16 +1883,27 @@ public final class NullabilityPass {
         contentCopies(mi, scope, receiver, callee, arguments);
     }
 
-    // the receiver whose slots a call writes: a variable of the callee's generic class, with as many type arguments
+    // the receiver whose slots a call writes: a variable of the callee's generic class, with as many type arguments;
+    // or an analysed method's result, whose slots are those of what it returns ('wrapper.getInits().addWithKey(v, k)'
+    // writes the field 'inits' returns: fernflower InitializerProcessor)
     private Object slotReceiver(MethodInfo mi, Scope scope, Expression call, MethodInfo callee) {
         if (!(call instanceof MethodCall mc) || mc.object() == null || callee.isStatic()) return null;
-        if (!(NonNullFacts.unwrap(mc.object()) instanceof VariableExpression ve)) return null;
+        Expression object = NonNullFacts.unwrap(mc.object());
+        Object receiver;
+        if (object instanceof VariableExpression ve) {
+            receiver = node(mi, scope, ve.variable());
+        } else if (object instanceof MethodCall getter && getter.methodInfo() != null
+                   && analysed.contains(getter.methodInfo()) && !getter.methodInfo().isConstructor()
+                   && concreteArguments(getter.methodInfo().returnType())) {
+            receiver = getter.methodInfo();
+        } else {
+            return null;
+        }
         // only a method that modifies its receiver stores what it is given: 'add', 'put', 'set'; not a consumer
         // such as 'Comparator.compare(T, T)', 'Equivalence.equivalent', 'Predicate.test'
         if (callee.analysis().getOrDefault(PropertyImpl.NON_MODIFYING_METHOD, ValueImpl.BoolImpl.FALSE).isTrue()) {
             return null;
         }
-        Object receiver = node(mi, scope, ve.variable());
         ParameterizedType type = receiver == null ? null : typeOf(receiver);
         if (type == null || type.arrays() > 0 || callee.typeInfo().typeParameters().isEmpty()) return null;
         boolean anySlot = false;

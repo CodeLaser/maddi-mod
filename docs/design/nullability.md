@@ -867,3 +867,24 @@ ASSERT_INTO_NON_NULL 510 → 348 (with cba2d20a).
   - `FunctionExprent.lstOperands` reads (32): `IfExprent(int, ListStack, BitSet)` delegates `this(null, ...)` and
     then assigns `condition`. In Java the null is never seen from outside, but in Kotlin the private constructor
     stores it, so the field stays nullable unless the printer restructures the constructors.
+
+### 2026-10-08 — switch-expression block arms
+
+- **Block arms.** `handleBlock` stops its expression walk at every `Block`, because nested blocks reach it as sub-blocks
+  of the statement. A switch expression's block arm (`case K -> { ...; yield v; }`) is inside an expression, so it
+  never did: its statements contributed no links or seeds, and its locals had no verdict. `indexFills` had the same
+  gap. Fernflower's `StructTypeAnnotationAttribute.parse` declares and fills `Offsets[] offsets` in such an arm. With
+  no local verdict, the printer declared it `Array<Offsets?>` and passed it to `LocalvarTarget(Array<Offsets>)`. Both
+  walks now descend into block arms. Expected: that type error goes away; other arms' locals get verdicts.
+- **Call results among alternatives.** A library call's nullable result seeds its target only when it is the value
+  itself. Fernflower's `MatchEngine` assigns `value = switch (property) { case ... -> stat_type.get(strValue); ... }`,
+  and the `Map.get` results inside the arms were not seen. `callResult` now looks through a conditional's branches
+  and a switch expression's arms (`-> v`, and each `yield v` of a block arm). Expected: MatchEngine.kt:42 goes away.
+- **Slots written through a getter.** A null passed to a class-type-variable parameter goes to the receiver's slot
+  only when the receiver is a variable. Fernflower's `wrapper.getDynamicFieldInitializers().addWithKey(value, key)`
+  (InitializerProcessor) therefore made `VBStyleCollection.addWithKey(E?)`, and its `super.add(element)` failed
+  in Kotlin. An analysed method's result, with concrete type arguments, is now a slot receiver too. Its slots are
+  those of what it returns. Expected: both VBStyleCollection.kt errors go away, and
+  `ClassWrapper.dynamicFieldInitializers` becomes `VBStyleCollection<Exprent?, String>`.
+
+Guava (all four policies) unchanged.
