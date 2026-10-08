@@ -49,8 +49,11 @@
 # 2026-10-08, merged: verdicts cba2d20a, 4c264541, 1747091b (constant-index array elements as Java facts) with maddi
 # 46504b106 and 3f74e6490: 191 files, 16 type errors; ASSERT_INTO_NON_NULL 350. Measured by worktree-maddi-all, the
 # only session that runs this ratchet.
+# 2026-10-08, merged verdicts c27b8a6e, 47454a4f (switch-expression arms; call results among alternatives; slots
+# written through a getter) and maddi 36db89642 (filled arrays as Array<X>, Optional<X?> cast to Optional<X>, method
+# references asserting nullable stream elements): 195 files, 7 type errors; ASSERT_INTO_NON_NULL 317.
 types	199
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	199
-compilingFiles	191
+compilingFiles	195
