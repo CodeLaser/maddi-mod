@@ -935,3 +935,29 @@ Guava (all four policies) unchanged.
   (FastFixedSetFactory.kt:19/33). That came from 5c817266/32f0a688 moving where fernflower's nulls land. A slot
   typed by a type variable is no longer tied to one with a concrete argument. Guava: NULL_MARKED +2 agree / -2
   noise; OPEN and OPEN_VISIBILITY +185 agree / -183 undecided; unsafe unchanged.
+- **Revert of 929948ce** (the instantiation tie): it spread `Int?` through every FastFixedSet/FastSparseSet user
+  (193 files / 11 errors).
+- **`Policy.assertPreconditions`** (KOTLIN only). An analysed parameter that is non-null on every normal exit of its
+  method (`NonNullFacts.nonNullAtExit`) is declared non-null. The printer then asserts a nullable argument at the
+  call, as it does for any non-null parameter, so no null flows into the method. It applies only where no call
+  passes the literal `null`: `f(null)` always throws, and `f(null!!)` says nothing more.
+  - In a closed world an overridden method qualifies when every analysed implementation does too, by its own
+    body or by passing the parameter on to the overridden method (`super.replaceStatement(oldstat, newstat)`).
+    Kotlin needs the override family to agree anyway.
+  - Fernflower: `replaceStatement(first, firstif.getIfstat())` carried `IfStatement.ifstat`'s null into
+    getNeighbours' lists and from there DomHelper's FastFixedSets.
+  - It moves the NPE forward, from inside the method to the call.
+- **A lookup's miss (KOTLIN).** Under `assertContentWrites`, a `return null` in a method whose return type is its
+  class's type variable (`E getWithKey(K)`) is indirect evidence, like `Map.get`. The result and the variables it
+  is assigned to stay nullable, but a write of it into content is asserted. Fernflower's
+  `firstst = stats.getWithKey(firstblock.id)` reached the statements' edge maps through `new StatEdge(…, firstst,
+  …)`. `TestNullabilityPass.classTypeVariableResults`' `range()` is now `List<Block>`: the `!!` is at
+  `out.add(block)`.
+- **What remains in the statement graph is genuine.** `SwitchStatement.collectExitEdgesIndices` does
+  `nodes.add(null)` into `caseStatements` (declared `List<@Nullable Statement>`), and `remapWithPatterns` passes
+  each case statement to `new StatEdge(BREAK, statement, last)`. So the edge maps' sets can hold null. Where a
+  non-null `FastFixedSetFactory<Statement>` meets them (DomHelper), Kotlin needs a read-only
+  `Collection<out E>` parameter, which is the printer's read-only-collections item.
+
+Guava unchanged under all four policies (both rules are KOTLIN-only, and the family preconditions changed no
+Java verdict).

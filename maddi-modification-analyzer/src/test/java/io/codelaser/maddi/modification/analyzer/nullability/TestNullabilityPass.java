@@ -1363,8 +1363,9 @@ public class TestNullabilityPass extends CommonTest {
         Map<String, String> byName = report.verdicts().entrySet().stream()
                 .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
         assertEquals("E?", byName.get("a.b.V.VB.getWithKey(Object)"));
-        // 'block = blocks.getWithKey(j)' is nullable, and so is what it is added to (fernflower ControlFlowGraph:351)
-        assertEquals("List<Block?>", byName.get("a.b.V.range(int,int)"));
+        // 'block = blocks.getWithKey(j)' is nullable, but a lookup's miss is asserted where it is added to content,
+        // as Map.get's (Policy.assertContentWrites; fernflower ControlFlowGraph:351)
+        assertEquals("List<Block>", byName.get("a.b.V.range(int,int)"));
         assertEquals("VB<Block, Integer>", byName.get("a.b.V.blocks"), "the slot itself holds no null");
         // a list method on a two-argument subclass: ArrayList's E is the receiver's argument 0
         assertEquals("VB<Block?, Integer>", byName.get("a.b.V.holes"));
@@ -1467,8 +1468,10 @@ public class TestNullabilityPass extends CommonTest {
             Map<String, String> byName = report.verdicts().entrySet().stream()
                     .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
             assertEquals("InputStream?", byName.get("a.b." + name + ".open(String)"), policy.toString());
-            assertEquals("InputStream?", byName.get("a.b." + name + ".create(java.io.InputStream):0:in"),
-                    "fernflower ContextUnit.reload, " + policy);
+            // Kotlin: 'create' dereferences 'in' on every exit, so it is non-null and the caller asserts
+            // (Policy.assertPreconditions)
+            assertEquals(policy.assertPreconditions() ? "InputStream" : "InputStream?",
+                    byName.get("a.b." + name + ".create(java.io.InputStream):0:in"), "fernflower ContextUnit.reload, " + policy);
         }
     }
 
@@ -1872,5 +1875,105 @@ public class TestNullabilityPass extends CommonTest {
                 "fernflower FastFixedSetFactory.spawnEmptySet: " + byName.get("a.b.FF.Factory.spawnEmptySet()"));
         assertEquals("""
                 flags.flagged: Set<String?>""", locals(report));
+    }
+
+    @Language("java")
+    private static final String PRECONDITIONS = """
+            package a.b;
+            import java.util.*;
+            class RS {
+                static class St {
+                    St ifstat;
+                    St parent;
+                    final Map<St, List<St>> preds = new HashMap<>();
+                    St(boolean b) { ifstat = b ? new St(false) : null; }
+                    void replaceStatement(St oldstat, St newstat) {
+                        preds.computeIfAbsent(oldstat, k -> new ArrayList<>()).add(newstat);
+                        newstat.parent = this;
+                    }
+                    void replaceMaybe(St oldstat, St newstat) {
+                        preds.computeIfAbsent(oldstat, k -> new ArrayList<>()).add(newstat);
+                        if (newstat != null) newstat.parent = this;
+                    }
+                }
+                static class IfSt extends St {
+                    St ifs;
+                    IfSt() { super(false); }
+                    @Override
+                    void replaceStatement(St oldstat, St newstat) {
+                        super.replaceStatement(oldstat, newstat);
+                        if (ifs == oldstat) ifs = newstat;
+                    }
+                }
+                static void merge(St parent, St first, St firstif) {
+                    parent.replaceStatement(first, firstif.ifstat);
+                    parent.replaceMaybe(first, firstif.ifstat);
+                }
+            }
+            """;
+
+    @DisplayName("Kotlin: a parameter dereferenced on every normal exit is non-null; the caller asserts the argument")
+    @Test
+    public void assertedPreconditions() {
+        NullabilityPass.Report report = run("a.b.RS", PRECONDITIONS, NullabilityPass.Policy.KOTLIN);
+        System.out.println(explain(report));
+        Map<String, String> byName = report.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+        assertEquals("St", byName.get("a.b.RS.St.replaceStatement(a.b.RS.St,a.b.RS.St):1:newstat"),
+                "fernflower Statement.replaceStatement");
+        assertEquals("St", byName.get("a.b.RS.IfSt.replaceStatement(a.b.RS.St,a.b.RS.St):1:newstat"),
+                "an override handing it to super: fernflower IfStatement.replaceStatement");
+        assertEquals("St?", byName.get("a.b.RS.St.replaceMaybe(a.b.RS.St,a.b.RS.St):1:newstat"), "it may complete with null");
+        assertEquals("Map<St, List<St?>>", byName.get("a.b.RS.St.preds"), "only replaceMaybe stores a null");
+        assertEquals("St?", byName.get("a.b.RS.St.ifstat"));
+
+        NullabilityPass.Report java = run("a.b.RS2", PRECONDITIONS.replace("class RS ", "class RS2 "));
+        Map<String, String> javaByName = java.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+        assertEquals("St?", javaByName.get("a.b.RS2.St.replaceStatement(a.b.RS2.St,a.b.RS2.St):1:newstat"),
+                "Java annotations say what can happen");
+    }
+
+    @Language("java")
+    private static final String LOOKUPS = """
+            package a.b;
+            import java.util.*;
+            class LM {
+                static class Keyed<E> {
+                    private final List<E> items = new ArrayList<>();
+                    private final List<Integer> keys = new ArrayList<>();
+                    E getWithKey(int key) {
+                        int index = keys.indexOf(key);
+                        if (index < 0) return null;
+                        return items.get(index);
+                    }
+                }
+                static class Edge {
+                    final String source;
+                    Edge(String source) { this.source = source; }
+                }
+                static void edges(Keyed<String> stats, int k, List<String> out, List<Edge> edges) {
+                    String first = stats.getWithKey(k);
+                    if (k > 0) first.length();
+                    out.add(first);
+                    edges.add(new Edge(first));
+                }
+            }
+            """;
+
+    @DisplayName("Kotlin: an analysed lookup's own null (E getWithKey) is a miss like Map.get: asserted at a content write")
+    @Test
+    public void lookupMiss() {
+        NullabilityPass.Report report = run("a.b.LM", LOOKUPS, NullabilityPass.Policy.KOTLIN);
+        System.out.println(explain(report));
+        Map<String, String> byName = report.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+        assertEquals("E?", byName.get("a.b.LM.Keyed.getWithKey(int)"));
+        assertEquals("String?", byName.get("a.b.LM.Edge.source"), "a value, not content: still nullable");
+        assertEquals("List<String>", byName.get("a.b.LM.edges(a.b.LM.Keyed,int,java.util.List,java.util.List):2:out"),
+                "fernflower DomHelper.graphToStatement: 'firstst' into the statements' edge maps");
+        assertEquals("""
+                edges.first: String?
+                getWithKey.index: int""", locals(report));
     }
 }
