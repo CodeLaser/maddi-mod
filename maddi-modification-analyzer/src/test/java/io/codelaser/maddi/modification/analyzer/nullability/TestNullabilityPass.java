@@ -1662,4 +1662,85 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("Keyed<String?, String>", byName.get("a.b.SG.Wrapper.inits"));
         assertEquals("Keyed<String?, String>", byName.get("a.b.SG.Wrapper.getInits()"));
     }
+
+    @Language("java")
+    private static final String ASSERTED = """
+            package a.b;
+            import java.util.*;
+            class AD {
+                static class Block {
+                    void touch() { }
+                }
+                private final Map<Integer, Block> blocks = new HashMap<>();
+                Block getWithKey(int j) { return blocks.containsKey(j) ? blocks.get(j) : null; }
+                void edges(int from, int to, List<Block> range) {
+                    for (int j = from; j < to; j++) {
+                        Block block = getWithKey(j);
+                        range.add(block);
+                        block.touch();
+                    }
+                }
+                void guarded(int j, List<Block> out) {
+                    Block block = getWithKey(j);
+                    out.add(block);
+                    if (j > 0) block.touch();
+                }
+                void leaves(int j, List<Block> out2) {
+                    Block block = getWithKey(j);
+                    out2.add(block);
+                    if (j < 0) return;
+                    block.touch();
+                }
+                void reassigned(int j, List<Block> out3) {
+                    Block block = getWithKey(j);
+                    out3.add(block);
+                    block.touch();
+                    block = getWithKey(j + 1);
+                }
+                void nonNull(List<Block> out4) {
+                    Block block = new Block();
+                    out4.add(block);
+                    block.touch();
+                }
+            }
+            """;
+
+    @DisplayName("Kotlin: a local its block dereferences unconditionally is asserted at its declaration")
+    @Test
+    public void assertedAtDeclaration() {
+        NullabilityPass.Report report = run("a.b.AD", ASSERTED, NullabilityPass.Policy.KOTLIN);
+        System.out.println(explain(report));
+        Map<String, String> byName = report.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+        assertEquals("List<Block>", byName.get("a.b.AD.edges(int,int,java.util.List):2:range"),
+                "fernflower ControlFlowGraph.setExceptionEdges");
+        assertEquals("List<Block?>", byName.get("a.b.AD.guarded(int,java.util.List):1:out"), "a conditional dereference");
+        assertEquals("List<Block?>", byName.get("a.b.AD.leaves(int,java.util.List):1:out2"), "a return before it");
+        assertEquals("List<Block?>", byName.get("a.b.AD.reassigned(int,java.util.List):1:out3"), "assigned again");
+        assertEquals("""
+                edges.block: Block
+                edges.j: int
+                guarded.block: Block?
+                leaves.block: Block?
+                nonNull.block: Block
+                reassigned.block: Block?""", locals(report));
+        // the printer's lookup, by declaring element
+        List<String> asserted = new java.util.ArrayList<>();
+        for (MethodInfo mi : parsed.methods()) {
+            mi.methodBody().visit(e -> {
+                if (e instanceof io.codelaser.maddi.cst.api.statement.LocalVariableCreation lvc) {
+                    lvc.localVariableStream().filter(lv -> report.assertedAtDeclaration(mi, lvc, lv))
+                            .forEach(lv -> asserted.add(mi.name() + "." + lv.simpleName()));
+                }
+                return true;
+            });
+        }
+        assertEquals("[edges.block]", asserted.toString(), "not where nothing null arrives (nonNull)");
+
+        NullabilityPass.Report java = run("a.b.AD2", ASSERTED.replace("class AD ", "class AD2 "));
+        Map<String, String> javaByName = java.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+        assertEquals("List<Block?>", javaByName.get("a.b.AD2.edges(int,int,java.util.List):2:range"),
+                "Java annotations say what can happen");
+    }
 }

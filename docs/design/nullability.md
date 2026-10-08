@@ -888,3 +888,27 @@ ASSERT_INTO_NON_NULL 510 → 348 (with cba2d20a).
   `ClassWrapper.dynamicFieldInitializers` becomes `VBStyleCollection<Exprent?, String>`.
 
 Guava (all four policies) unchanged.
+
+### 2026-10-08 — asserted at the declaration (Kotlin)
+
+- **`Policy.assertAtDeclaration`** (on for `KOTLIN` only). Fernflower's `ControlFlowGraph.setExceptionEdges` runs
+  `BasicBlock block = blocks.getWithKey(j); protectedRange.add(block); block.addSuccessorException(handle);`. The
+  `!!` at the dereference comes after the null has reached `protectedRange`'s slot, and from there
+  `ExceptionRangeCFG.protectedRange`. The result was ExceptionDeobfuscator.kt:211 (`MutableList<BasicBlock?>` into a
+  `Collection<BasicBlock>`).
+  - **The printer's half** (maddi 9942ae3d0): it asserts at the declaration instead
+    (`val block = blocks.getWithKey(j)!!`, reported as ASSERT_AT_DECLARATION) when
+    `NullabilityVerdicts.assertedAtDeclaration` says so.
+  - **The pass's half: which locals.** A local qualifies when it has an initializer other than `null`, is never
+    assigned again in the rest of its block, and some later statement of that block dereferences it unconditionally.
+    "Unconditionally" means a call on it, a field, an element or `.length`, outside `?:` branches, the right side of
+    `&&`/`||`, lambdas and switch arms. No statement in between may contain a return, throw, yield, break or
+    continue.
+  - **Among those, the asserted locals** are the ones null reaches in a first closure. Each becomes a barrier like a
+    non-null contract, and the closure runs again. The local's own verdict is then non-null, and nothing downstream
+    gets null from it. Its slots are unaffected.
+  - In Java, a null there would throw at the dereference anyway. The assertion moves the NPE forward, past whatever
+    the statements in between do.
+- **Switch-arm fill, printer side.** On fernflower the pass now gives `StructTypeAnnotationAttribute.parse`'s
+  `offsets` an `Offsets[]` with non-null elements, yet StructTypeAnnotationAttribute.kt:45 remains. The remaining
+  `Array<Offsets?>` comes from how the printer prints the filled array inside a `when` arm.
