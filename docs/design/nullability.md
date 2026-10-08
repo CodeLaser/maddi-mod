@@ -935,9 +935,3 @@ Guava (all four policies) unchanged.
   (FastFixedSetFactory.kt:19/33). That came from 5c817266/32f0a688 moving where fernflower's nulls land. A slot
   typed by a type variable is no longer tied to one with a concrete argument. Guava: NULL_MARKED +2 agree / -2
   noise; OPEN and OPEN_VISIBILITY +185 agree / -183 undecided; unsafe unchanged.
-- **The instantiation of a call's result (Kotlin).** After a0a80ec0, `tmpSet = factory.spawnEmptySet()` gave a
-  `FastFixedSet<Statement>`. But tmpSet holds genuinely nullable statements (from `IfStatement.ifstat` through
-  `replaceStatement` and `getNeighbours`), so DomHelper had five errors. Under `callResults` (KOTLIN), the result's
-  slot typed by the callee class's type variable is now tied both ways to the receiver's slot for that variable, so
-  the factory is a `FastFixedSetFactory<Statement?>`. For Java annotations the same tie cost guava +114 noise: it
-  made receivers nullable where only the result met null. So it is Kotlin-only, and guava is unchanged.
