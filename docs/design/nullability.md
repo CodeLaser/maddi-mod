@@ -921,11 +921,3 @@ Guava (all four policies) unchanged.
   found, which had named `Statement.first`'s default value. Guava: +1 agree, -1 noise under every policy.
   Expected on fernflower: `Statement.stats` loses its nullable elements. That should clear DomHelper:174,
   SwitchPatternHelper:537/538, and probably SwitchPatternHelper:1563 and FinallyProcessor:249.
-- **Writes through a slot read.** `ExceptionDeobfuscator.hasObfuscatedExceptions` runs
-  `ranges.computeIfAbsent(h, k -> new HashSet<>()).addAll(range.getProtectedRange())`. That copies into the map's
-  value, but `slotReceiver` did not take a lookup as a receiver. So `ranges` stayed `Map<B, Set<B>>` while
-  `protectedRange`'s elements are nullable, and that was ExceptionDeobfuscator.kt:211. A call that `argumentNode`
-  reads as a slot (a method returning its class's type variable, at any depth) is now a receiver too.
-  `protectedRange`'s nullable elements are genuine flow-insensitivity: `FinallyProcessor.getUniqueNext` starts
-  `next = null` and only its correlation with `multiple` makes `arr[0].addSuccessor(next)` non-null. Guava
-  unchanged.

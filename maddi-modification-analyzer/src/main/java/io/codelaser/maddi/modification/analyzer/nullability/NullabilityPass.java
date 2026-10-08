@@ -2036,7 +2036,7 @@ public final class NullabilityPass {
 
     // the receiver whose slots a call writes: a variable of the callee's generic class, with as many type arguments;
     // or an analysed method's result, whose slots are those of what it returns ('wrapper.getInits().addWithKey(v, k)'
-    // writes the field 'inits' returns: fernflower InitializerProcessor); or a slot read by a lookup
+    // writes the field 'inits' returns: fernflower InitializerProcessor)
     private Object slotReceiver(MethodInfo mi, Scope scope, Expression call, MethodInfo callee) {
         if (!(call instanceof MethodCall mc) || mc.object() == null || callee.isStatic()) return null;
         Expression object = NonNullFacts.unwrap(mc.object());
@@ -2047,10 +2047,6 @@ public final class NullabilityPass {
                    && analysed.contains(getter.methodInfo()) && !getter.methodInfo().isConstructor()
                    && concreteArguments(getter.methodInfo().returnType())) {
             receiver = getter.methodInfo();
-        } else if (object instanceof MethodCall lookup && argumentNode(mi, scope, lookup) instanceof Arg slot) {
-            // a generic receiver's content read: 'ranges.computeIfAbsent(h, k -> new HashSet<>()).addAll(c)' writes
-            // the map's value (fernflower ExceptionDeobfuscator.hasObfuscatedExceptions)
-            receiver = slot;
         } else {
             return null;
         }
