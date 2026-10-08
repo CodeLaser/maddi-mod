@@ -912,3 +912,12 @@ Guava (all four policies) unchanged.
 - **Switch-arm fill, printer side.** On fernflower the pass now gives `StructTypeAnnotationAttribute.parse`'s
   `offsets` an `Offsets[]` with non-null elements, yet StructTypeAnnotationAttribute.kt:45 remains. The remaining
   `Array<Offsets?>` comes from how the printer prints the filled array inside a `when` arm.
+- **A field of this, dereferenced.** `NonNullFacts.effects` only counted a field access as a dereference of its
+  scope when the scope chain did not end at `this`. So `this.first.id` never established `this.first`. In
+  fernflower's `RootStatement`, `DoStatement` and `CatchStatement` constructors,
+  `first = head; stats.addWithKey(first, first.id);` therefore wrote a nullable `first` into `Statement.stats`'s
+  slot, although the second argument dereferences it before the call. Only `this.f` itself, whose scope is `this`,
+  is now exempt. The explanation of a node reached by a written null now shows that chain rather than the first one
+  found, which had named `Statement.first`'s default value. Guava: +1 agree, -1 noise under every policy.
+  Expected on fernflower: `Statement.stats` loses its nullable elements. That should clear DomHelper:174,
+  SwitchPatternHelper:537/538, and probably SwitchPatternHelper:1563 and FinallyProcessor:249.

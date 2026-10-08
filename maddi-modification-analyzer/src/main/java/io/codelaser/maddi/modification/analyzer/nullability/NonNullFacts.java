@@ -512,7 +512,8 @@ public final class NonNullFacts {
                 case Assignment a -> {
                     effects(a.value(), facts);
                     Variable target = a.variableTarget();
-                    if (target instanceof FieldReference fr && !fr.scopeIsRecursivelyThis()) {
+                    // 'this.first.id = v' dereferences this.first: only 'this.f' itself has no scope to dereference
+                    if (target instanceof FieldReference fr && !fr.scopeIsThis()) {
                         record(a.target(), facts);
                         dereference(fr.scope(), facts);
                     }
@@ -547,7 +548,7 @@ public final class NonNullFacts {
                 }
                 case VariableExpression ve -> {
                     if (ve.variable() instanceof FieldReference fr && !fr.fieldInfo().isStatic()
-                        && !fr.scopeIsRecursivelyThis()) {
+                        && !fr.scopeIsThis()) {
                         effects(fr.scope(), facts);
                         record(ve, facts);
                         dereference(fr.scope(), facts);

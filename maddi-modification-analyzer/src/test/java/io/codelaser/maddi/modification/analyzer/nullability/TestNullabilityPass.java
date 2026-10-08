@@ -1743,4 +1743,69 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("List<Block?>", javaByName.get("a.b.AD2.edges(int,int,java.util.List):2:range"),
                 "Java annotations say what can happen");
     }
+
+    @Language("java")
+    private static final String LOOKUP = """
+            package a.b;
+            import java.util.*;
+            class LK {
+                static class Keyed<E> {
+                    private final List<E> items = new ArrayList<>();
+                    private final List<Integer> keys = new ArrayList<>();
+                    E getWithKey(int key) {
+                        int index = keys.indexOf(key);
+                        if (index < 0) return null;
+                        return items.get(index);
+                    }
+                    void addWithKey(E e, int key) { items.add(e); keys.add(key); }
+                    E get(int i) { return items.get(i); }
+                    int size() { return items.size(); }
+                }
+                static class Stmt {
+                    int id;
+                    Stmt first;
+                    final Keyed<Stmt> stats = new Keyed<>();
+                    Stmt() { }
+                    Stmt(Stmt head) {
+                        first = head;
+                        stats.addWithKey(head, head.id);
+                    }
+                    Stmt(Stmt head, int kind) {
+                        first = head;
+                        stats.addWithKey(first, first.id);
+                    }
+                    void initSimpleCopy() {
+                        if (stats.size() > 0) first = stats.get(0);
+                    }
+                    void replaceStatement(Stmt oldstat, Stmt newstat) {
+                        stats.addWithKey(newstat, newstat.id);
+                        if (first == oldstat) first = newstat;
+                    }
+                }
+                static Stmt general(Stmt root, int headId) {
+                    Stmt head = root.stats.getWithKey(headId);
+                    return new Stmt(head);
+                }
+                static Stmt root(Stmt root, int headId) {
+                    return new Stmt(root.stats.getWithKey(headId), 1);
+                }
+            }
+            """;
+
+    @DisplayName("'stats.addWithKey(first, first.id)': a later argument dereferences a field of this before the write")
+    @Test
+    public void dereferencedFieldOfThis() {
+        NullabilityPass.Report report = run("a.b.LK", LOOKUP, NullabilityPass.Policy.KOTLIN);
+        System.out.println(explain(report));
+        Map<String, String> byName = report.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+        assertEquals("E?", byName.get("a.b.LK.Keyed.getWithKey(int)"));
+        assertEquals("Stmt?", byName.get("a.b.LK.Stmt.first"), "the value itself is still nullable");
+        assertEquals("Keyed<Stmt>", byName.get("a.b.LK.Stmt.stats"), "fernflower RootStatement(head, dummyExit)");
+
+        NullabilityPass.Report java = run("a.b.LK2", LOOKUP.replace("class LK ", "class LK2 "));
+        Map<String, String> javaByName = java.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+        assertEquals("E?", javaByName.get("a.b.LK2.Keyed.getWithKey(int)"));
+    }
 }

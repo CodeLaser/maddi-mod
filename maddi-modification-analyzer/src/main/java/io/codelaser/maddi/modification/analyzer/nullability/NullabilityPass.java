@@ -745,10 +745,18 @@ public final class NullabilityPass {
         // Policy.assertContentWrites: first what null reaches without the library contracts; a value outside it
         // enters a slot only as an asserted write, so that edge is not followed, and a library seed on a slot itself
         // is an asserted write too
-        Set<Object> strict = closure(new HashMap<>(), strictSeeds, null);
+        Map<Object, Object> strictCause = new HashMap<>();
+        Set<Object> strict = closure(strictCause, strictSeeds, null);
         Set<Object> seeds = new LinkedHashSet<>(seedOrigin.keySet());
         seeds.removeIf(n -> isSlot(n) && !strictSeeds.contains(n));
-        return closure(cause, seeds, strict);
+        Set<Object> reached = closure(cause, seeds, strict);
+        // explain a node null reaches by a written null with that chain: it is the one that lets the node's value
+        // into a slot, where the first chain found may begin at a library contract or a default value
+        strict.forEach(n -> {
+            if (strictSeeds.contains(n)) cause.remove(n);
+            else if (strictCause.containsKey(n)) cause.put(n, strictCause.get(n));
+        });
+        return reached;
     }
 
     private static boolean isSlot(Object node) {
