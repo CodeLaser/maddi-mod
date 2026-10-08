@@ -41,8 +41,10 @@
 # 188 files, 23 errors.
 # 2026-10-08, maddi 3fb8a5e32, e1bb3c373 (no `!!` on nullable lookup arguments; blocks as when { else -> { } }) and
 # 1be7014c3 (filter(Objects::nonNull) narrowed by map { it!! }): 189 files, 21 errors.
+# 2026-10-08, with cba2d20a's verdicts and maddi 46504b106 (assignment arguments of statement calls go first),
+# 3f74e6490 (comparing keys asserted; null-returning setValue throws): 190 files, 18 errors.
 types	199
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	199
-compilingFiles	189
+compilingFiles	190
