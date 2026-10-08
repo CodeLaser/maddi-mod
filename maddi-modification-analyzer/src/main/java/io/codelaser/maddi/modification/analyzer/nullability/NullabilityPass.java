@@ -68,6 +68,7 @@ import io.codelaser.maddi.modification.prepwork.variable.LinkNature;
 import io.codelaser.maddi.modification.prepwork.variable.Links;
 import io.codelaser.maddi.modification.prepwork.variable.ReturnVariable;
 import io.codelaser.maddi.modification.prepwork.variable.VariableData;
+import io.codelaser.maddi.modification.prepwork.variable.VariableInfoContainer;
 import io.codelaser.maddi.modification.prepwork.variable.VariableInfo;
 import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
 
@@ -211,7 +212,7 @@ public final class NullabilityPass {
      */
     public record Report(Map<Info, ParameterizedType> verdicts, Map<Local, ParameterizedType> locals,
                          Map<Object, Object> cause, Map<Object, String> seedOrigin, NonNullFacts useSites,
-                         NonNullFacts smartCasts, Set<Local> asserted) {
+                         NonNullFacts smartCasts, Set<Local> asserted, Set<Local> unobserved) {
 
         /**
          * Whether the printer asserts this local at its declaration ({@link Policy#assertAtDeclaration}): null reaches
@@ -220,6 +221,16 @@ public final class NullabilityPass {
          */
         public boolean assertedAtDeclaration(MethodInfo methodInfo, Element declaration, LocalVariable variable) {
             return asserted.contains(new Local(methodInfo, declaration, variable.simpleName()));
+        }
+
+        /**
+         * For a local {@link #assertedAtDeclaration}: the linking engine proves that no statement between the
+         * declaration and the first unconditional dereference refers to it, directly or through a linked variable,
+         * so asserting it earlier changes no behaviour. False without that proof. Same arguments as {@link #local}.
+         */
+        public boolean unobservedBeforeDereference(MethodInfo methodInfo, Element declaration, LocalVariable variable) {
+            Local local = new Local(methodInfo, declaration, variable.simpleName());
+            return asserted.contains(local) && unobserved.contains(local);
         }
 
         /**
@@ -275,6 +286,8 @@ public final class NullabilityPass {
     // locals their block dereferences unconditionally further on (Policy.assertAtDeclaration), and those null reaches
     private final Set<Local> assertCandidates = new HashSet<>();
     private final Set<Local> asserted = new HashSet<>();
+    // of the candidates, those the links prove unobserved between declaration and dereference
+    private final Set<Local> unobservedCandidates = new HashSet<>();
     // not reached by null, but by a value of an outside caller (World.OPEN*): UNSPECIFIED
     private Set<Object> external = Set.of();
     // every flow between two nodes, also one dropped as known non-null: the array Contents they tie (coupleContent)
@@ -447,7 +460,8 @@ public final class NullabilityPass {
         }
         NonNullFacts smartCasts = facts.kotlinSmartCasts();
         methods.forEach(smartCasts::walk);
-        return new Report(verdicts, locals, cause, seedOrigin, facts, smartCasts, Set.copyOf(asserted));
+        return new Report(verdicts, locals, cause, seedOrigin, facts, smartCasts, Set.copyOf(asserted),
+                Set.copyOf(unobservedCandidates));
     }
 
     /**
@@ -1484,14 +1498,59 @@ public final class NullabilityPass {
                 || lv.parameterizedType().isPrimitiveExcludingVoid()) return;
             List<Statement> rest = statements.subList(index + 1, statements.size());
             if (rest.stream().anyMatch(st -> assigns(st, lv))) return;
-            for (Statement st : rest) {
+            for (int j = 0; j < rest.size(); j++) {
+                Statement st = rest.get(j);
                 if (dereferencesFirst(st, lv)) {
-                    assertCandidates.add(new Local(mi, lvc, lv.simpleName()));
+                    Local local = new Local(mi, lvc, lv.simpleName());
+                    assertCandidates.add(local);
+                    if (unobserved(lvc, rest.subList(0, j), lv)) unobservedCandidates.add(local);
                     return;
                 }
                 if (mayLeave(st)) return;
             }
         });
+    }
+
+    /*
+     The linking engine's proof that nothing between the declaration and the dereference observes the local (then the
+     printer reports it as INFO, not as a behaviour change): no statement in between refers to it, and no variable
+     such a statement uses is an alias of it ('≡'/'←' links; also of a variable built on it: 'block.f'). Without the
+     links of each statement (a degraded method) there is no proof.
+     */
+    private static boolean unobserved(LocalVariableCreation declaration, List<Statement> between, LocalVariable lv) {
+        if (VariableDataImpl.of(declaration) == null) return false;
+        for (Statement st : between) {
+            VariableData vd = VariableDataImpl.of(st);
+            if (vd == null) return false;
+            Set<Variable> used = new HashSet<>();
+            boolean[] direct = {false};
+            st.visit(e -> {
+                if (e instanceof VariableExpression ve) {
+                    if (refersTo(ve.variable(), lv)) direct[0] = true;
+                    used.add(ve.variable());
+                }
+                return !direct[0];
+            });
+            if (direct[0]) return false;
+            for (Variable v : used) {
+                VariableInfoContainer vic = vd.variableInfoContainerOrNull(v.fullyQualifiedName());
+                if (vic == null) continue; // not a variable of this statement's data (a constant, a type)
+                Links links = vic.best().linkedVariables();
+                if (links == null) return false;
+                for (Link link : links) {
+                    // only the identity family of the link algebra ('≡', '←', '→') makes a variable the local's
+                    // value; the others leave them possibly unrelated: 'from ∈ instrBlocks' and 'to ∈ instrBlocks'
+                    // say nothing of 'from' against 'to'
+                    if (link.linkNature().isIdenticalToOrAssignedFromTo()
+                        && (refersTo(link.from(), lv) || refersTo(link.to(), lv))) return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    private static boolean refersTo(Variable v, LocalVariable lv) {
+        return v != null && v.variableStreamDescendIntoScope().anyMatch(lv::equals);
     }
 
     private static boolean assigns(Statement statement, LocalVariable lv) {

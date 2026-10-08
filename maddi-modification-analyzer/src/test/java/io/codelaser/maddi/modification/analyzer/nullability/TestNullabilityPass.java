@@ -1808,4 +1808,65 @@ public class TestNullabilityPass extends CommonTest {
                 .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
         assertEquals("E?", javaByName.get("a.b.LK2.Keyed.getWithKey(int)"));
     }
+
+    @DisplayName("Kotlin: an asserted local is unobserved before its dereference only with the links' proof")
+    @Test
+    public void unobservedBeforeDereference() {
+        NullabilityPass.Report report = run("a.b.UO", """
+                package a.b;
+                import java.util.*;
+                class UO {
+                    static class Block {
+                        int id;
+                        Block next;
+                        void touch() { }
+                    }
+                    static String key(Map<Integer, Block> instrBlocks, int a, int b) {
+                        Block from = instrBlocks.get(a);
+                        Block to = instrBlocks.get(b);
+                        return from.id + ":" + to.id;
+                    }
+                    static Block find(int j) { return j < 0 ? null : new Block(); }
+                    static void range(int n, List<Block> protectedRange) {
+                        for (int j = 0; j < n; j++) {
+                            Block block = find(j);
+                            protectedRange.add(block);
+                            block.touch();
+                        }
+                    }
+                    static void alias(Block holder, int j) {
+                        Block block = holder.next;
+                        System.out.println(holder.next);
+                        block.touch();
+                    }
+                    static void next(int j) {
+                        Block block = find(j);
+                        block.touch();
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        System.out.println(explain(report));
+        List<String> asserted = new java.util.ArrayList<>();
+        List<String> unobserved = new java.util.ArrayList<>();
+        for (MethodInfo mi : parsed.methods()) {
+            mi.methodBody().visit(e -> {
+                if (e instanceof io.codelaser.maddi.cst.api.statement.LocalVariableCreation lvc) {
+                    lvc.localVariableStream().forEach(lv -> {
+                        if (report.assertedAtDeclaration(mi, lvc, lv)) asserted.add(mi.name() + "." + lv.simpleName());
+                        if (report.unobservedBeforeDereference(mi, lvc, lv)) {
+                            unobserved.add(mi.name() + "." + lv.simpleName());
+                        }
+                    });
+                }
+                return true;
+            });
+        }
+        java.util.Collections.sort(asserted);
+        java.util.Collections.sort(unobserved);
+        assertEquals("[alias.block, key.from, key.to, next.block, range.block]", asserted.toString());
+        // key.from: fernflower ControlFlowGraph:337, 'to = instrBlocks.get(...)' reads the container, not 'from';
+        // range.block: ControlFlowGraph:351, 'protectedRange.add(block)' refers to it;
+        // alias.block: 'holder.next' is the same value
+        assertEquals("[key.from, key.to, next.block]", unobserved.toString());
+    }
 }

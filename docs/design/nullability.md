@@ -942,3 +942,20 @@ The underlying problem: fernflower's statement graph really can hold null.
 maps through `new StatEdge(BREAK, statement, last)`. Kotlin's invariance then needs every slot connected to them to
 agree, while the pass ties slots only along the flows it sees, so partial fixes move the disagreement around.
 Printing never-modified collection parameters as read-only (covariant) is the printer-side lever.
+
+### 2026-10-08 — unobserved before the dereference (Kotlin reporting)
+
+The user decided that an assertion at the declaration is reported as INFO (ASSERT_AT_DECLARATION_UNOBSERVED)
+rather than BEHAVIOUR_CHANGE, but only when the linking engine proves that the statements between the declaration
+and the dereference do not refer to the local. `Report.unobservedBeforeDereference` answers that for an asserted
+local:
+- no statement strictly in between refers to the local directly;
+- no variable such a statement uses is linked to it, or to a variable built on it (`block.f`), by a link of the
+  identity family (`≡`, `←`, `→`). The other natures of the link algebra (`∈`, `∋`, `~`, `⊆`, `≺`, `≈`, …) leave
+  the two variables possibly unrelated;
+- every statement in between has its links, so a degraded method gets no proof.
+
+So in fernflower's ControlFlowGraph:337, `from = instrBlocks.get(a); to =
+instrBlocks.get(b); … from.id`, `from ∈ instrBlocks` and `to ∈ instrBlocks` relate neither to the other. ControlFlowGraph:351
+(`protectedRange.add(block)` before `block.addSuccessorException`) refers to it, so it stays a behaviour change.
+No verdict changes.
