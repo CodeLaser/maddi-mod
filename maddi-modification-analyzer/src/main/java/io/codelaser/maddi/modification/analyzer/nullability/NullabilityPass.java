@@ -19,6 +19,7 @@ import io.codelaser.maddi.cst.api.element.Element;
 import io.codelaser.maddi.cst.api.expression.ArrayInitializer;
 import io.codelaser.maddi.cst.api.expression.Assignment;
 import io.codelaser.maddi.cst.api.expression.BinaryOperator;
+import io.codelaser.maddi.cst.api.expression.SwitchExpression;
 import io.codelaser.maddi.cst.api.expression.Cast;
 import io.codelaser.maddi.cst.api.expression.ConstructorCall;
 import io.codelaser.maddi.cst.api.expression.ConstantExpression;
@@ -1398,6 +1399,13 @@ public final class NullabilityPass {
                     if (lambda.methodBody() != null) handleBlock(lambda.methodInfo(), lambda.methodBody(), own);
                     return false;
                 }
+                // a switch expression's block arms are statements inside an expression: no sub-block of the
+                // statement (fernflower StructTypeAnnotationAttribute.parse declared and filled an array there)
+                if (e instanceof SwitchExpression se) {
+                    se.entries().forEach(entry -> {
+                        if (entry.statement() instanceof Block arm) handleBlock(mi, arm, own);
+                    });
+                }
                 if (e instanceof Block) return false; // nested statements are handled with their own vd
                 if (policy.nullTests() && e instanceof BinaryOperator bo) nullTest(mi, own, bo);
                 if (e instanceof MethodCall mc && mc.methodInfo() != null) {
@@ -1588,6 +1596,14 @@ public final class NullabilityPass {
                 }
             }
             statement.subBlockStream().forEach(this::indexFills);
+            statement.visit(e -> {
+                if (e instanceof SwitchExpression se) {
+                    se.entries().forEach(entry -> {
+                        if (entry.statement() instanceof Block arm) indexFills(arm);
+                    });
+                }
+                return !(e instanceof Block) && !(e instanceof Lambda);
+            });
         }
     }
 

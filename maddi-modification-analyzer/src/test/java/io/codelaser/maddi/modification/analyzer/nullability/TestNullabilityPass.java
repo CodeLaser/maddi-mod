@@ -1501,4 +1501,86 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("List<String>", byName.get("a.b.E2.Op.operands"));
         assertEquals("String?", byName.get("a.b.E2.Op2.<init>(String):0:s"), "a call in between may write the array");
     }
+
+    @DisplayName("statements in a switch expression's block arms are statements: their seeds, links and fills")
+    @Test
+    public void switchExpressionArms() {
+        NullabilityPass.Report report = run("a.b.SA", """
+                package a.b;
+                class SA {
+                    static String[] arm(int k, int n) {
+                        return switch (k) {
+                            case 0 -> {
+                                String[] out = new String[n];
+                                for (int i = 0; i < n; i++) out[i] = "x";
+                                yield out;
+                            }
+                            default -> new String[0];
+                        };
+                    }
+                    static void hole(int k) {
+                        String r = switch (k) {
+                            case 0 -> {
+                                String s = null;
+                                yield s;
+                            }
+                            default -> "x";
+                        };
+                        take(r);
+                    }
+                    static void take(String s) { }
+                }
+                """);
+        System.out.println(explain(report));
+        Map<String, String> byName = report.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+        assertEquals("String[]", byName.get("a.b.SA.arm(int,int)"), "fernflower StructTypeAnnotationAttribute:52");
+        assertEquals("String?", byName.get("a.b.SA.take(String):0:s"), "a null in a block arm");
+
+        NullabilityPass.Report report2 = run("a.b.SB", """
+                package a.b;
+                class SB {
+                    interface Info {
+                        class Local implements Info {
+                            private final Offsets[] table;
+                            public Local(Offsets[] table) { this.table = table; }
+                            public Offsets[] getTable() { return table; }
+                            public static class Offsets {
+                                private final int at;
+                                public Offsets(int at) { this.at = at; }
+                            }
+                        }
+                        class Empty implements Info { }
+                    }
+                    static Info parse(int k, int n) {
+                        Info info = switch (k) {
+                            case 0 -> new Info.Empty();
+                            case 1 -> {
+                                Info.Local.Offsets[] offsets = new Info.Local.Offsets[n];
+                                for (int i = 0; i < n; i++) {
+                                    offsets[i] = new Info.Local.Offsets(i);
+                                }
+                                yield new Info.Local(offsets);
+                            }
+                            default -> throw new RuntimeException("k " + k);
+                        };
+                        return info;
+                    }
+                }
+                """);
+        System.out.println(explain(report2));
+        Map<String, String> byName2 = report2.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+        assertEquals("Offsets[]", byName2.get("a.b.SB.Info.Local.table"), "fernflower TargetInfo.LocalvarTarget.table");
+        // locals of a block arm have their own verdict: the printer declared 'offsets' as Array<Offsets?> without one
+        assertEquals("""
+                parse.i: int
+                parse.info: Info
+                parse.offsets: Offsets[]""", locals(report2));
+        assertEquals("""
+                arm.i: int
+                arm.out: String[]
+                hole.r: String?
+                hole.s: String?""", locals(report));
+    }
 }

@@ -867,3 +867,12 @@ ASSERT_INTO_NON_NULL 510 → 348 (with cba2d20a).
   - `FunctionExprent.lstOperands` reads (32): `IfExprent(int, ListStack, BitSet)` delegates `this(null, ...)` and
     then assigns `condition`. In Java the null is never seen from outside, but in Kotlin the private constructor
     stores it, so the field stays nullable unless the printer restructures the constructors.
+
+### 2026-10-08 — switch-expression block arms
+
+- **Block arms.** `handleBlock` stops its expression walk at every `Block`, because nested blocks reach it as sub-blocks
+  of the statement. A switch expression's block arm (`case K -> { ...; yield v; }`) is inside an expression, so it
+  never did: its statements contributed no links or seeds, and its locals had no verdict. `indexFills` had the same
+  gap. Fernflower's `StructTypeAnnotationAttribute.parse` declares and fills `Offsets[] offsets` in such an arm. With
+  no local verdict, the printer declared it `Array<Offsets?>` and passed it to `LocalvarTarget(Array<Offsets>)`. Both
+  walks now descend into block arms. Expected: that type error goes away; other arms' locals get verdicts.
