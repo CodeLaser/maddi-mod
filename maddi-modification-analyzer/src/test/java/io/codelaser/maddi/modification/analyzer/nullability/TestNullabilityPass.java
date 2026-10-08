@@ -1808,4 +1808,41 @@ public class TestNullabilityPass extends CommonTest {
                 .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
         assertEquals("E?", javaByName.get("a.b.LK2.Keyed.getWithKey(int)"));
     }
+
+    @DisplayName("a content copy into a map's value ('computeIfAbsent(k, ...).addAll(c)') ties the value's slot")
+    @Test
+    public void copyIntoMapValue() {
+        NullabilityPass.Report report = run("a.b.MV", """
+                package a.b;
+                import java.util.*;
+                class MV {
+                    static class B {
+                        private final List<B> succ = new ArrayList<>();
+                        void addSuccessor(B b) { succ.add(b); }
+                        List<B> getSuccessors() { return succ; }
+                    }
+                    static B pick(boolean m) {
+                        B next = null;
+                        if (m) next = new B();
+                        return next;
+                    }
+                    static void link(B a, boolean m) { a.addSuccessor(pick(m)); }
+                    static int count(List<B> handlers, B a) {
+                        Map<B, Set<B>> ranges = new HashMap<>();
+                        for (B h : handlers) {
+                            ranges.computeIfAbsent(h, k -> new HashSet<>()).addAll(a.getSuccessors());
+                        }
+                        return ranges.size();
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        System.out.println(explain(report));
+        Map<String, String> byName = report.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+        assertEquals("List<B?>", byName.get("a.b.MV.B.succ"));
+        assertEquals("""
+                count.h: B
+                count.ranges: Map<B, Set<B?>>
+                pick.next: B?""", locals(report), "fernflower ExceptionDeobfuscator.hasObfuscatedExceptions");
+    }
 }
