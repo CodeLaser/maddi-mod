@@ -46,8 +46,11 @@
 # 2026-10-08, verdicts from the printer's ASSERT_INTO_NON_NULL list (maddi-mod cba2d20a and the next commit): generic
 # results, slots through supertypes, closure-only and unreachable-call edges dropped, try-with-resources resources as
 # declarations: 190 files, 20 type errors; ASSERT_INTO_NON_NULL 510 -> 348.
+# 2026-10-08, merged: verdicts cba2d20a, 4c264541, 1747091b (constant-index array elements as Java facts) with maddi
+# 46504b106 and 3f74e6490: 191 files, 16 type errors; ASSERT_INTO_NON_NULL 350. Measured by worktree-maddi-all, the
+# only session that runs this ratchet.
 types	199
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	199
-compilingFiles	190
+compilingFiles	191
