@@ -150,43 +150,32 @@ public final class NullabilityPass {
      *                  the local is non-null and no null flows on from it (fernflower's
      *                  {@code protectedRange.add(block); block.addSuccessorException(handle)}). It moves the NPE
      *                  forward, from the dereference to the declaration. Off for Java annotations.
-     * @param assertPreconditions the Kotlin translation's choice for an analysed parameter that is non-null on every
-     *                  normal exit of its method (dereferenced, checked and thrown on, required; {@link
-     *                  NonNullFacts#nonNullAtExit}): its declaration is non-null, so a nullable argument is asserted at
-     *                  the call ({@code replaceStatement(first, firstif.getIfstat()!!)}) and no null flows on into
-     *                  the method's slots (fernflower's {@code newstat} reached getNeighbours' lists, and from there
-     *                  DomHelper's FastFixedSets). It moves the NPE forward, from inside the method to the call.
-     *                  Off for Java annotations.
      */
     public record Policy(NullableState unreached, boolean nullTests, boolean contracts, World world,
-                         boolean assertContentWrites, boolean callResults, boolean assertAtDeclaration,
-                         boolean assertPreconditions) {
+                         boolean assertContentWrites, boolean callResults, boolean assertAtDeclaration) {
         public static final Policy NULL_MARKED = new Policy(NullableState.NONNULL, true, true, World.CLOSED, false,
-                false, false, false);
+                false, false);
         public static final Policy NULL_MARKED_FLOW_ONLY = new Policy(NullableState.NONNULL, false, true,
-                World.CLOSED, false, false, false, false);
+                World.CLOSED, false, false, false);
         public static final Policy CAUTIOUS = new Policy(NullableState.UNSPECIFIED, true, true, World.CLOSED, false,
-                false, false, false);
+                false, false);
         /**
          * {@link #NULL_MARKED} for the Java→Kotlin translation: content writes are asserted, and a variable assigned an
          * analysed method's nullable result is nullable (Kotlin will not compile it otherwise).
          */
         public static final Policy KOTLIN = new Policy(NullableState.NONNULL, true, true, World.CLOSED, true, true,
-                true, true);
+                true);
 
         public Policy withoutContracts() {
-            return new Policy(unreached, nullTests, false, world, assertContentWrites, callResults, assertAtDeclaration,
-                    assertPreconditions);
+            return new Policy(unreached, nullTests, false, world, assertContentWrites, callResults, assertAtDeclaration);
         }
 
         public Policy withWorld(World world) {
-            return new Policy(unreached, nullTests, contracts, world, assertContentWrites, callResults, assertAtDeclaration,
-                    assertPreconditions);
+            return new Policy(unreached, nullTests, contracts, world, assertContentWrites, callResults, assertAtDeclaration);
         }
 
         public Policy withAssertContentWrites(boolean assertContentWrites) {
-            return new Policy(unreached, nullTests, contracts, world, assertContentWrites, callResults, assertAtDeclaration,
-                    assertPreconditions);
+            return new Policy(unreached, nullTests, contracts, world, assertContentWrites, callResults, assertAtDeclaration);
         }
     }
 
@@ -352,51 +341,12 @@ public final class NullabilityPass {
             // a call runs this body only when no override replaces it: an analysed one; in an open world any
             boolean overridable = !mi.isConstructor() && !mi.isStatic() && !mi.access().isPrivate()
                                   && !mi.isFinal() && !mi.typeInfo().isFinal();
-            if (overridable && policy.world() != World.CLOSED) continue;
-            List<MethodInfo> family = implementations.getOrDefault(mi, List.of());
-            for (int i = 0; i < mi.parameters().size(); i++) {
-                ParameterInfo pi = mi.parameters().get(i);
-                if (!facts.nonNullAtExit(mi, pi)) continue;
-                // closed world: a call runs one of the implementations; each must throw on null too, by its own
-                // body or by handing the parameter to the overridden one ('super.replaceStatement(oldstat, newstat)':
-                // fernflower's IfStatement, CatchAllStatement, ...). Kotlin needs the family to agree anyway.
-                int index = i;
-                boolean all = family.stream().allMatch(impl -> index < impl.parameters().size()
-                        && (facts.nonNullAtExit(impl, impl.parameters().get(index))
-                            || passesToOverridden(impl, mi, impl.parameters().get(index), index)));
-                if (!all) continue;
-                set.add(pi);
-                family.forEach(impl -> set.add(impl.parameters().get(index)));
+            if (overridable && (policy.world() != World.CLOSED || implementations.containsKey(mi))) continue;
+            for (ParameterInfo pi : mi.parameters()) {
+                if (facts.nonNullAtExit(mi, pi)) set.add(pi);
             }
         }
         return Set.copyOf(set);
-    }
-
-    /*
-     The implementation calls the overridden method with its parameter at the same position, as a statement of its
-     body that every normal exit passes (nothing before it may leave), and never assigns the parameter.
-     */
-    private static boolean passesToOverridden(MethodInfo impl, MethodInfo overridden, ParameterInfo pi, int index) {
-        if (impl.methodBody() == null || assignsParameter(impl, pi)) return false;
-        for (Statement statement : impl.methodBody().statements()) {
-            if (statement instanceof ExpressionAsStatement eas && eas.expression() instanceof MethodCall mc
-                && overridden.equals(mc.methodInfo()) && index < mc.parameterExpressions().size()
-                && NonNullFacts.unwrap(mc.parameterExpressions().get(index)) instanceof VariableExpression ve
-                && pi.equals(ve.variable())) {
-                return true;
-            }
-            if (mayLeave(statement)) return false;
-        }
-        return false;
-    }
-
-    private static boolean assignsParameter(MethodInfo mi, ParameterInfo pi) {
-        boolean[] found = {false};
-        mi.methodBody().visit(e -> {
-            if (e instanceof Assignment a && pi.equals(a.variableTarget())) found[0] = true;
-            return !found[0];
-        });
-        return found[0];
     }
 
     // analysed methods with a reference return no null reached, not degraded. A type-variable return counts too:
@@ -463,16 +413,6 @@ public final class NullabilityPass {
         holderFields(methods, fields);
         coupleContent();
 
-        // Policy.assertPreconditions: the caller asserts the argument, so no null enters the method through it. Not
-        // where a call passes the literal null ('f(null)' always throws; 'f(null!!)' says nothing more)
-        if (policy.assertPreconditions()) {
-            for (ParameterInfo pi : preconditions) {
-                String origin = seedOrigin.get(pi);
-                if (!(strictSeeds.contains(pi) && origin != null && origin.startsWith("null argument"))) {
-                    nonNullContracts.add(pi);
-                }
-            }
-        }
         Map<Object, Object> cause = new LinkedHashMap<>();
         reached = closure(cause);
         if (policy.assertAtDeclaration()) {
@@ -1153,13 +1093,6 @@ public final class NullabilityPass {
         MethodInfo owner = nullOwner(((LocalVariable) marker).assignmentExpression());
         if (owner != null && !owner.equals(mi) && analysed.contains(owner) && !owner.returnType().isVoid()) {
             addEdge(owner, target);
-        } else if (policy.assertContentWrites() && target instanceof MethodInfo m && m.equals(mi)
-                   && isTypeVariable(m.returnType()) && !m.returnType().typeParameter().isMethodTypeParameter()) {
-            // a lookup's miss ('E getWithKey(K key) { ... return null; }'), as Map.get's: the method's result is
-            // nullable, but a write of it into content is asserted (Policy.assertContentWrites). Fernflower's
-            // VBStyleCollection.getWithKey: each miss reached the statements' edge maps and from there their
-            // FastFixedSets, invariant in Kotlin
-            seedIndirect(target, origin);
         } else {
             seed(target, origin);
         }
