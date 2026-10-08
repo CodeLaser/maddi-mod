@@ -1875,11 +1875,14 @@ public final class NullabilityPass {
      initializer ('int[][][] t = {{null, null}, null}'), which no method's variable data holds.
      */
     private void seedInitializer(Content elements, ArrayInitializer initializer, MethodInfo mi) {
-        for (Expression e : initializer.expressions()) {
-            if (NonNullFacts.unwrap(e) instanceof NullConstant) {
-                seed(elements, "null in an array initializer in " + where(mi));
-            } else {
-                seedCreated(elements, e, mi);
+        for (Expression element : initializer.expressions()) {
+            // also an alternative of the element: '{…, monitor ? "1" : null}' (fernflower FlattenStatementsHelper)
+            for (Expression e : alternatives(element)) {
+                if (NonNullFacts.unwrap(e) instanceof NullConstant) {
+                    seed(elements, "null in an array initializer in " + where(mi));
+                } else {
+                    seedCreated(elements, e, mi);
+                }
             }
         }
     }
@@ -2106,6 +2109,13 @@ public final class NullabilityPass {
                    && analysed.contains(getter.methodInfo()) && !getter.methodInfo().isConstructor()
                    && concreteArguments(getter.methodInfo().returnType())) {
             receiver = getter.methodInfo();
+        } else if (object instanceof MethodCall lookup && !analysed.contains(callee)
+                   && argumentNode(mi, scope, lookup) instanceof Arg slot) {
+            // a library write into a generic receiver's content read ('ranges.computeIfAbsent(id, k -> new
+            // ArrayList<>()).add(new String[]{…, c ? "1" : null})' writes the map's value: fernflower
+            // FlattenStatementsHelper.saveEdge, a Kotlin NPE without it). Library callees only: through an analysed
+            // generic class (FastFixedSet) the same receiver made fernflower's type variables disagree (32f0a688)
+            receiver = slot;
         } else {
             return null;
         }

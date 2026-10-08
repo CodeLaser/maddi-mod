@@ -959,3 +959,20 @@ So in fernflower's ControlFlowGraph:337, `from = instrBlocks.get(a); to =
 instrBlocks.get(b); … from.id`, `from ∈ instrBlocks` and `to ∈ instrBlocks` relate neither to the other. ControlFlowGraph:351
 (`protectedRange.add(block)` before `block.addSuccessorException`) refers to it, so it stays a behaviour change.
 No verdict changes.
+
+### 2026-10-08 — nulls the Kotlin translation must carry (runtime check)
+
+The printer session now runs fernflower's own test suite against the compiled Kotlin translation. Three verdicts
+asserted (`!!`) where Java carries a null on, so the translation threw an NPE:
+- **A null alternative in an array initializer.** `new String[]{…, monitor ? "1" : null}`
+  (FlattenStatementsHelper.saveEdge) and `new BasicBlock[]{…, last ? successor : null}`
+  (FinallyProcessor.compareSubGraphsEx). `seedInitializer` only saw a bare `null` element; it now walks each
+  element's alternatives.
+- **A library write through a lookup.** `ranges.computeIfAbsent(id, k -> new ArrayList<>()).add(array)` writes
+  the map's value. A lookup is now a write receiver, but only for a library callee. Through an analysed generic
+  class, the same receiver made fernflower's FastFixedSet type variables disagree (32f0a688, reverted).
+- `DecHelper.isChoiceStatement`'s `List<? super Statement>` was already nullable in the pass: `post = null`
+  reaches `lst.add(0, post)`.
+- `JarFile.getManifest()` (nullable) has no JDK hint yet, so `ContextUnit.setManifest` stays non-null.
+
+Guava unchanged under all four policies.
