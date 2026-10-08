@@ -1872,5 +1872,8 @@ public class TestNullabilityPass extends CommonTest {
                 "fernflower FastFixedSetFactory.spawnEmptySet: " + byName.get("a.b.FF.Factory.spawnEmptySet()"));
         assertEquals("""
                 flags.flagged: Set<String?>""", locals(report));
+        // the call instantiates E with the receiver's argument: the result's slot is the factory's
+        assertEquals("Factory<String?>", byName.get("a.b.FF.flags(a.b.FF.Factory,String):0:factory"),
+                "fernflower DomHelper.calcPostDominators: tmpSet = factory.spawnEmptySet()");
     }
 }

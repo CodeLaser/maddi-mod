@@ -1880,6 +1880,9 @@ public final class NullabilityPass {
         if (target == null || !(unwrapped instanceof MethodCall mc) || mc.methodInfo() == null) return;
         MethodInfo callee = mc.methodInfo();
         if (readScope != null) factorySlots(target, value, readScope.mi());
+        // Kotlin only: for Java annotations it made guava's receivers nullable where the result only met null
+        // (+114 noise, 2026-10-08)
+        if (policy.callResults() && analysed.contains(callee)) instantiatedSlots(target, mc, callee);
         if (analysed.contains(callee) && !callee.isConstructor() && !callee.returnType().isVoid()) {
             // the same object: its content slots are one (coupleContent); not where the callee's type arguments are
             // type variables, which each call instantiates anew
@@ -2042,22 +2045,9 @@ public final class NullabilityPass {
     // or an analysed method's result, whose slots are those of what it returns ('wrapper.getInits().addWithKey(v, k)'
     // writes the field 'inits' returns: fernflower InitializerProcessor); or a slot read by a lookup
     private Object slotReceiver(MethodInfo mi, Scope scope, Expression call, MethodInfo callee) {
-        if (!(call instanceof MethodCall mc) || mc.object() == null || callee.isStatic()) return null;
-        Expression object = NonNullFacts.unwrap(mc.object());
-        Object receiver;
-        if (object instanceof VariableExpression ve) {
-            receiver = node(mi, scope, ve.variable());
-        } else if (object instanceof MethodCall getter && getter.methodInfo() != null
-                   && analysed.contains(getter.methodInfo()) && !getter.methodInfo().isConstructor()
-                   && concreteArguments(getter.methodInfo().returnType())) {
-            receiver = getter.methodInfo();
-        } else if (object instanceof MethodCall lookup && argumentNode(mi, scope, lookup) instanceof Arg slot) {
-            // a generic receiver's content read: 'ranges.computeIfAbsent(h, k -> new HashSet<>()).addAll(c)' writes
-            // the map's value (fernflower ExceptionDeobfuscator.hasObfuscatedExceptions)
-            receiver = slot;
-        } else {
-            return null;
-        }
+        if (!(call instanceof MethodCall mc) || callee.isStatic()) return null;
+        Object receiver = receiverNode(mi, scope, mc);
+        if (receiver == null) return null;
         // only a method that modifies its receiver stores what it is given: 'add', 'put', 'set'; not a consumer
         // such as 'Comparator.compare(T, T)', 'Equivalence.equivalent', 'Predicate.test'
         if (callee.analysis().getOrDefault(PropertyImpl.NON_MODIFYING_METHOD, ValueImpl.BoolImpl.FALSE).isTrue()) {
@@ -2070,6 +2060,47 @@ public final class NullabilityPass {
             anySlot |= slotIndex(type, callee.typeInfo(), i) >= 0;
         }
         return anySlot ? receiver : null;
+    }
+
+    // the node of a call's receiver: a variable; an analysed method's result with concrete type arguments; or a slot
+    // read by a lookup ('ranges.computeIfAbsent(h, k -> new HashSet<>())' is the map's value: fernflower
+    // ExceptionDeobfuscator.hasObfuscatedExceptions). Null otherwise.
+    private Object receiverNode(MethodInfo mi, Scope scope, MethodCall mc) {
+        if (mc.object() == null) return null;
+        Expression object = NonNullFacts.unwrap(mc.object());
+        if (object instanceof VariableExpression ve) return node(mi, scope, ve.variable());
+        if (object instanceof MethodCall getter && getter.methodInfo() != null
+            && analysed.contains(getter.methodInfo()) && !getter.methodInfo().isConstructor()
+            && concreteArguments(getter.methodInfo().returnType())) {
+            return getter.methodInfo();
+        }
+        if (object instanceof MethodCall lookup && argumentNode(mi, scope, lookup) instanceof Arg slot) return slot;
+        return null;
+    }
+
+    /*
+     'tmpSet = factory.spawnEmptySet()' with 'FastFixedSet<E> spawnEmptySet()' in FastFixedSetFactory<E>: the call
+     instantiates E with the receiver's argument, so the result's slot of E is the receiver's slot, both ways (fernflower
+     DomHelper.calcPostDominators, after coupleContent stopped tying a type variable's slot to a concrete one).
+     */
+    private void instantiatedSlots(Object target, MethodCall mc, MethodInfo callee) {
+        if (readScope == null || callee.isStatic() || callee.isConstructor()) return;
+        ParameterizedType rt = callee.returnType();
+        if (rt.arrays() > 0 || rt.parameters().isEmpty()) return;
+        Object receiver = receiverNode(readScope.mi(), readScope.scope(), mc);
+        ParameterizedType receiverType = receiver == null ? null : typeOf(receiver);
+        ParameterizedType targetType = typeOf(target);
+        if (receiverType == null || targetType == null || targetType.arrays() > 0
+            || targetType.parameters().size() != rt.parameters().size()) return;
+        for (int i = 0; i < rt.parameters().size(); i++) {
+            ParameterizedType a = rt.parameters().get(i);
+            if (!isTypeVariable(a) || a.typeParameter().isMethodTypeParameter()
+                || a.typeParameter().getOwner().getLeft() != callee.typeInfo()) continue;
+            int j = slotIndex(receiverType, callee.typeInfo(), a.typeParameter().getIndex());
+            if (j < 0) continue;
+            addEdge(new Arg(receiver, j), new Arg(target, i));
+            addEdge(new Arg(target, i), new Arg(receiver, j));
+        }
     }
 
     /*
