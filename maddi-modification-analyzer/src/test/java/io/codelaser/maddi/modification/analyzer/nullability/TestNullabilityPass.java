@@ -1437,4 +1437,68 @@ public class TestNullabilityPass extends CommonTest {
         System.out.println("SMART " + report.smartCasts().before(use) + " JAVA " + report.useSites().before(use));
         assertEquals(null, child, "contains(Object) accepts null: Kotlin knows nothing about child");
     }
+
+    @DisplayName("a try-with-resources resource is a declaration: its initializer's null reaches what it is passed to")
+    @Test
+    public void tryResources() {
+        List<NullabilityPass.Policy> policies = List.of(NullabilityPass.Policy.NULL_MARKED, NullabilityPass.Policy.KOTLIN);
+        for (int p = 0; p < policies.size(); p++) {
+            NullabilityPass.Policy policy = policies.get(p);
+            String name = "W" + p; // one parse per type and test
+            NullabilityPass.Report report = run("a.b." + name, """
+                    package a.b;
+                    import java.io.*;
+                    import java.util.*;
+                    class %s {
+                        private final Map<String, byte[]> links = new HashMap<>();
+                        InputStream open(String name) {
+                            byte[] data = links.get(name);
+                            return data == null ? null : new ByteArrayInputStream(data);
+                        }
+                        static int create(InputStream in) throws IOException { return in.read(); }
+                        int reload(String name) throws IOException {
+                            try (InputStream in = open(name)) {
+                                return create(in);
+                            }
+                        }
+                    }
+                    """.formatted(name), policy);
+            Map<String, String> byName = report.verdicts().entrySet().stream()
+                    .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+            assertEquals("InputStream?", byName.get("a.b." + name + ".open(String)"), policy.toString());
+            assertEquals("InputStream?", byName.get("a.b." + name + ".create(java.io.InputStream):0:in"),
+                    "fernflower ContextUnit.reload, " + policy);
+        }
+    }
+
+    @DisplayName("a null-checked array element (constant index) guards the argument it is passed as")
+    @Test
+    public void checkedElements() {
+        NullabilityPass.Report report = run("a.b.E2", """
+                package a.b;
+                import java.util.*;
+                class E2 {
+                    static class Op { final List<String> operands = new ArrayList<>(); Op(String o) { operands.add(o); } }
+                    static Object[] find(boolean b) { Object[] r = new Object[2]; if (b) r[0] = "x"; return r; }
+                    static Op guarded(boolean b) {
+                        Object[] res = find(b);
+                        if (res[0] != null) return new Op((String) res[0]);
+                        return null;
+                    }
+                    static Op afterCall(boolean b) {
+                        Object[] res = find(b);
+                        if (res[0] != null) { find(!b); return new Op2((String) res[0]).op; }
+                        return null;
+                    }
+                    static class Op2 { final Op op; Op2(String s) { op = new Op("y"); take(s); } }
+                    static void take(String s) { }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        System.out.println(explain(report));
+        Map<String, String> byName = report.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+        assertEquals("String", byName.get("a.b.E2.Op.<init>(String):0:o"), "fernflower AssertProcessor:186");
+        assertEquals("List<String>", byName.get("a.b.E2.Op.operands"));
+        assertEquals("String?", byName.get("a.b.E2.Op2.<init>(String):0:s"), "a call in between may write the array");
+    }
 }

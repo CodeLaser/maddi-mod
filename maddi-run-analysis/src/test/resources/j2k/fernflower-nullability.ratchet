@@ -43,6 +43,9 @@
 # 1be7014c3 (filter(Objects::nonNull) narrowed by map { it!! }): 189 files, 21 errors.
 # 2026-10-08, with cba2d20a's verdicts and maddi 46504b106 (assignment arguments of statement calls go first),
 # 3f74e6490 (comparing keys asserted; null-returning setValue throws): 190 files, 18 errors.
+# 2026-10-08, verdicts from the printer's ASSERT_INTO_NON_NULL list (maddi-mod cba2d20a and the next commit): generic
+# results, slots through supertypes, closure-only and unreachable-call edges dropped, try-with-resources resources as
+# declarations: 190 files, 20 type errors; ASSERT_INTO_NON_NULL 510 -> 348.
 types	199
 printerCrashes	0
 syntaxErrors	0

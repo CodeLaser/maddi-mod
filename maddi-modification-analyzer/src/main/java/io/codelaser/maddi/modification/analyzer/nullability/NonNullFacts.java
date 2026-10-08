@@ -304,7 +304,19 @@ public final class NonNullFacts {
         return v instanceof ParameterInfo
                || v instanceof LocalVariable lv && !lv.simpleName().startsWith("$")
                || v instanceof FieldReference fr && fr.scopeIsRecursivelyThis() && !fr.fieldInfo().isStatic()
-                  && (!kotlinSmartCasts || fr.fieldInfo().isFinal());
+                  && (!kotlinSmartCasts || fr.fieldInfo().isFinal())
+               || !kotlinSmartCasts && isConstantElement(v);
+    }
+
+    /*
+     'a[0]' of a local or parameter array, Java only (Kotlin does not smart-cast an element): fernflower's
+     'Object[] res = f(); if (res[0] != null) g((X) res[0]);'. Forgotten at a call, which may write the array, and
+     when the array variable is assigned.
+     */
+    private static boolean isConstantElement(Variable v) {
+        return v instanceof DependentVariable dv && dv.indexExpression() instanceof IntConstant
+               && (dv.arrayVariable() instanceof ParameterInfo
+                   || dv.arrayVariable() instanceof LocalVariable lv && !lv.simpleName().startsWith("$"));
     }
 
     private static boolean isNonFinalField(Variable v) {
@@ -313,7 +325,7 @@ public final class NonNullFacts {
 
     // a call may change any non-final field
     private static void callMade(Set<Variable> facts) {
-        facts.removeIf(NonNullFacts::isNonFinalField);
+        facts.removeIf(v -> isNonFinalField(v) || v instanceof DependentVariable);
     }
 
     // ------------------------------------------------------------------ conditions
@@ -504,6 +516,9 @@ public final class NonNullFacts {
                         record(a.target(), facts);
                         dereference(fr.scope(), facts);
                     }
+                    // a new array: what was known of its elements no longer holds
+                    facts.removeIf(v -> v instanceof DependentVariable dv && target != null
+                                        && target.equals(dv.arrayVariable()));
                     if (trackable(target)) {
                         boolean nonNull = a.assignmentOperator() == null && nonNull(a.value(), facts);
                         facts.remove(target);
