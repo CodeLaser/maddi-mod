@@ -21,6 +21,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -1844,5 +1845,32 @@ public class TestNullabilityPass extends CommonTest {
                 count.h: B
                 count.ranges: Map<B, Set<B?>>
                 pick.next: B?""", locals(report), "fernflower ExceptionDeobfuscator.hasObfuscatedExceptions");
+    }
+
+    @DisplayName("a generic class's own type variable is instantiated per call: a caller's E? stays out of 'FS<E>'")
+    @Test
+    public void classTypeVariableInstantiation() {
+        NullabilityPass.Report report = run("a.b.FF", """
+                package a.b;
+                import java.util.*;
+                class FF {
+                    static class Factory<E> {
+                        final List<E> values = new ArrayList<>();
+                        Set<E> spawnEmptySet() { return new HashSet<>(); }
+                    }
+                    static int flags(Factory<String> factory, String s) {
+                        Set<String> flagged = factory.spawnEmptySet();
+                        flagged.add(s.isEmpty() ? null : s);
+                        return flagged.size();
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        System.out.println(explain(report));
+        Map<String, String> byName = report.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+        assertFalse(byName.get("a.b.FF.Factory.spawnEmptySet()").contains("E?"),
+                "fernflower FastFixedSetFactory.spawnEmptySet: " + byName.get("a.b.FF.Factory.spawnEmptySet()"));
+        assertEquals("""
+                flags.flagged: Set<String?>""", locals(report));
     }
 }

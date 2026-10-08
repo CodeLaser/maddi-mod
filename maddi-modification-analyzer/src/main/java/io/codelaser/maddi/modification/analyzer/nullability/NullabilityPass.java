@@ -891,6 +891,10 @@ public final class NullabilityPass {
                     if (isMethodTypeVariable(t0.parameters().get(i)) || isMethodTypeVariable(t1.parameters().get(i))) {
                         continue;
                     }
+                    // nor between a class's type variable and a concrete argument: 'Set<String> s =
+                    // factory.spawnEmptySet()' instantiates Factory<E>'s 'Set<E>' for this call only; its slot is
+                    // the receiver's (fernflower FastFixedSetFactory.spawnEmptySet became 'FastFixedSet<E?>')
+                    if (isTypeVariable(t0.parameters().get(i)) != isTypeVariable(t1.parameters().get(i))) continue;
                     Arg a0 = new Arg(flow.get(0), i);
                     Arg a1 = new Arg(flow.get(1), i);
                     successors.computeIfAbsent(a0, _ -> new LinkedHashSet<>()).add(a1);
