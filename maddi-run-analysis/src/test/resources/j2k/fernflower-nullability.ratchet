@@ -52,8 +52,11 @@
 # 2026-10-08, merged verdicts c27b8a6e, 47454a4f (switch-expression arms; call results among alternatives; slots
 # written through a getter) and maddi 36db89642 (filled arrays as Array<X>, Optional<X?> cast to Optional<X>, method
 # references asserting nullable stream elements): 195 files, 7 type errors; ASSERT_INTO_NON_NULL 317.
+# 2026-10-08, verdict 3564fef8 (locals asserted at their declaration, with maddi 9942ae3d0) and maddi af0fd470c (lambda
+# parameters Kotlin infers nullable: comparator keys over nullable elements, Optional.map after a null): 196 files,
+# 4 type errors; ASSERT_AT_DECLARATION 252, ASSERT_INTO_NON_NULL 339.
 types	199
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	199
-compilingFiles	195
+compilingFiles	196
