@@ -921,3 +921,24 @@ Guava (all four policies) unchanged.
   found, which had named `Statement.first`'s default value. Guava: +1 agree, -1 noise under every policy.
   Expected on fernflower: `Statement.stats` loses its nullable elements. That should clear DomHelper:174,
   SwitchPatternHelper:537/538, and probably SwitchPatternHelper:1563 and FinallyProcessor:249.
+
+### 2026-10-08 — tried and reverted: slot ties around fernflower's statement graph
+
+Measured by the printer session on fernflower (maddi af0fd470c). Devel with 3564fef8 was at 196 files / 4 errors;
+**5c817266 (`this.first.id` dereferences `this.first`) gives 197 / 3**, and the branch is truncated there.
+Reverted, each a net loss:
+- **32f0a688, a slot read as a receiver** (`ranges.computeIfAbsent(h, …).addAll(c)` ties the map's value slot):
+  196 / 5. It fixes ExceptionDeobfuscator:211 but makes the FastFixedSet type variables disagree.
+- **a0a80ec0, no tie between a class type variable and a concrete argument:** 197 / 7.
+- **929948ce, a call result's slots tied both ways to the receiver's:** 193 / 11. It spreads `Int?` through
+  every FastFixedSet/FastSparseSet user.
+- **f7c595bd, preconditions asserted at the call plus a lookup's miss as indirect evidence:** 187 / 25.
+  Implementations went non-null while their interface (`ExprentIterator.processExprent`,
+  `NewClassNameBuilder.buildNewClassname`) stayed nullable. An override family has to move together, interface
+  included. Moving the NPE to the call was also not approved.
+
+The underlying problem: fernflower's statement graph really can hold null.
+`SwitchStatement.collectExitEdgesIndices` does `nodes.add(null)` into `caseStatements`, and those reach the edge
+maps through `new StatEdge(BREAK, statement, last)`. Kotlin's invariance then needs every slot connected to them to
+agree, while the pass ties slots only along the flows it sees, so partial fixes move the disagreement around.
+Printing never-modified collection parameters as read-only (covariant) is the printer-side lever.
