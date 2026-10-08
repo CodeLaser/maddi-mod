@@ -78,6 +78,11 @@ public class TestJavaToKotlinFernflowerNullability {
             return report.assertedAtDeclaration(method, declaration, variable);
         }
 
+        // NullabilityVerdicts.unobservedBeforeDereference (maddi, the printer's next commit); no @Override until then
+        public boolean unobservedBeforeDereference(MethodInfo method, Element declaration, LocalVariable variable) {
+            return report.unobservedBeforeDereference(method, declaration, variable);
+        }
+
         /** Kotlin's smart casts only: useSites() also counts requireNonNull and contracts, which Kotlin does not. */
         @Override
         public boolean nonNullAt(io.codelaser.maddi.cst.api.statement.Statement statement,
