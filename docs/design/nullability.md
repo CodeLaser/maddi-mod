@@ -912,3 +912,26 @@ Guava (all four policies) unchanged.
 - **Switch-arm fill, printer side.** On fernflower the pass now gives `StructTypeAnnotationAttribute.parse`'s
   `offsets` an `Offsets[]` with non-null elements, yet StructTypeAnnotationAttribute.kt:45 remains. The remaining
   `Array<Offsets?>` comes from how the printer prints the filled array inside a `when` arm.
+- **A field of this, dereferenced.** `NonNullFacts.effects` only counted a field access as a dereference of its
+  scope when the scope chain did not end at `this`. So `this.first.id` never established `this.first`. In
+  fernflower's `RootStatement`, `DoStatement` and `CatchStatement` constructors,
+  `first = head; stats.addWithKey(first, first.id);` therefore wrote a nullable `first` into `Statement.stats`'s
+  slot, although the second argument dereferences it before the call. Only `this.f` itself, whose scope is `this`,
+  is now exempt. The explanation of a node reached by a written null now shows that chain rather than the first one
+  found, which had named `Statement.first`'s default value. Guava: +1 agree, -1 noise under every policy.
+  Expected on fernflower: `Statement.stats` loses its nullable elements. That should clear DomHelper:174,
+  SwitchPatternHelper:537/538, and probably SwitchPatternHelper:1563 and FinallyProcessor:249.
+- **Writes through a slot read.** `ExceptionDeobfuscator.hasObfuscatedExceptions` runs
+  `ranges.computeIfAbsent(h, k -> new HashSet<>()).addAll(range.getProtectedRange())`. That copies into the map's
+  value, but `slotReceiver` did not take a lookup as a receiver. So `ranges` stayed `Map<B, Set<B>>` while
+  `protectedRange`'s elements are nullable, and that was ExceptionDeobfuscator.kt:211. A call that `argumentNode`
+  reads as a slot (a method returning its class's type variable, at any depth) is now a receiver too.
+  `protectedRange`'s nullable elements are genuine flow-insensitivity: `FinallyProcessor.getUniqueNext` starts
+  `next = null` and only its correlation with `multiple` makes `arr[0].addSuccessor(next)` non-null. Guava
+  unchanged.
+- **A class's type variable is instantiated per call.** `coupleContent` skipped a method's type variables but
+  not a class's. `Set<Statement> flagged = factory.spawnEmptySet()` therefore tied the caller's
+  `Set<Statement?>` to `FastFixedSetFactory<E>.spawnEmptySet()`'s `Set<E>`, which printed as `FastFixedSet<E?>`
+  (FastFixedSetFactory.kt:19/33). That came from 5c817266/32f0a688 moving where fernflower's nulls land. A slot
+  typed by a type variable is no longer tied to one with a concrete argument. Guava: NULL_MARKED +2 agree / -2
+  noise; OPEN and OPEN_VISIBILITY +185 agree / -183 undecided; unsafe unchanged.

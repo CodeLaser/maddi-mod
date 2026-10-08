@@ -745,10 +745,18 @@ public final class NullabilityPass {
         // Policy.assertContentWrites: first what null reaches without the library contracts; a value outside it
         // enters a slot only as an asserted write, so that edge is not followed, and a library seed on a slot itself
         // is an asserted write too
-        Set<Object> strict = closure(new HashMap<>(), strictSeeds, null);
+        Map<Object, Object> strictCause = new HashMap<>();
+        Set<Object> strict = closure(strictCause, strictSeeds, null);
         Set<Object> seeds = new LinkedHashSet<>(seedOrigin.keySet());
         seeds.removeIf(n -> isSlot(n) && !strictSeeds.contains(n));
-        return closure(cause, seeds, strict);
+        Set<Object> reached = closure(cause, seeds, strict);
+        // explain a node null reaches by a written null with that chain: it is the one that lets the node's value
+        // into a slot, where the first chain found may begin at a library contract or a default value
+        strict.forEach(n -> {
+            if (strictSeeds.contains(n)) cause.remove(n);
+            else if (strictCause.containsKey(n)) cause.put(n, strictCause.get(n));
+        });
+        return reached;
     }
 
     private static boolean isSlot(Object node) {
@@ -883,6 +891,10 @@ public final class NullabilityPass {
                     if (isMethodTypeVariable(t0.parameters().get(i)) || isMethodTypeVariable(t1.parameters().get(i))) {
                         continue;
                     }
+                    // nor between a class's type variable and a concrete argument: 'Set<String> s =
+                    // factory.spawnEmptySet()' instantiates Factory<E>'s 'Set<E>' for this call only; its slot is
+                    // the receiver's (fernflower FastFixedSetFactory.spawnEmptySet became 'FastFixedSet<E?>')
+                    if (isTypeVariable(t0.parameters().get(i)) != isTypeVariable(t1.parameters().get(i))) continue;
                     Arg a0 = new Arg(flow.get(0), i);
                     Arg a1 = new Arg(flow.get(1), i);
                     successors.computeIfAbsent(a0, _ -> new LinkedHashSet<>()).add(a1);
@@ -2028,7 +2040,7 @@ public final class NullabilityPass {
 
     // the receiver whose slots a call writes: a variable of the callee's generic class, with as many type arguments;
     // or an analysed method's result, whose slots are those of what it returns ('wrapper.getInits().addWithKey(v, k)'
-    // writes the field 'inits' returns: fernflower InitializerProcessor)
+    // writes the field 'inits' returns: fernflower InitializerProcessor); or a slot read by a lookup
     private Object slotReceiver(MethodInfo mi, Scope scope, Expression call, MethodInfo callee) {
         if (!(call instanceof MethodCall mc) || mc.object() == null || callee.isStatic()) return null;
         Expression object = NonNullFacts.unwrap(mc.object());
@@ -2039,6 +2051,10 @@ public final class NullabilityPass {
                    && analysed.contains(getter.methodInfo()) && !getter.methodInfo().isConstructor()
                    && concreteArguments(getter.methodInfo().returnType())) {
             receiver = getter.methodInfo();
+        } else if (object instanceof MethodCall lookup && argumentNode(mi, scope, lookup) instanceof Arg slot) {
+            // a generic receiver's content read: 'ranges.computeIfAbsent(h, k -> new HashSet<>()).addAll(c)' writes
+            // the map's value (fernflower ExceptionDeobfuscator.hasObfuscatedExceptions)
+            receiver = slot;
         } else {
             return null;
         }
