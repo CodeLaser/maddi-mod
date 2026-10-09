@@ -29,6 +29,7 @@ import io.codelaser.maddi.cst.api.expression.Lambda;
 import io.codelaser.maddi.cst.api.expression.MethodCall;
 import io.codelaser.maddi.cst.api.expression.MethodReference;
 import io.codelaser.maddi.cst.api.expression.NullConstant;
+import io.codelaser.maddi.cst.api.expression.StringConcat;
 import io.codelaser.maddi.cst.api.expression.Or;
 import io.codelaser.maddi.cst.api.expression.SwitchExpression;
 import io.codelaser.maddi.cst.api.expression.VariableExpression;
@@ -278,6 +279,8 @@ public final class NullabilityPass {
             return switch (node) {
                 case Content c -> "elements of " + label(c.of());
                 case Arg a -> "type argument " + a.index() + " of " + label(a.of());
+                case Keyed k -> (k.key() == null ? "values under a key not known" : "values under key " + k.key())
+                                + " in " + label(k.slot());
                 case MethodInfo mi -> "return " + mi.fullyQualifiedName();
                 case Info info -> info.fullyQualifiedName();
                 default -> String.valueOf(node);
@@ -299,6 +302,15 @@ public final class NullabilityPass {
     private final Set<MethodInfo> trustedReturns;
     // analysed parameters an earlier round found non-null on every normal exit of their method: passing null throws
     private final Set<ParameterInfo> preconditions;
+    // what an earlier round found about final fields per runtime class: a read narrowed by 'instanceof' (gap 3)
+    private final NarrowedReads narrowed;
+    private List<FieldInfo> analysedFields = List.of();
+    // keyed map fields (CodeLaser/maddi-mod#22 gap 2): the value slot per field, the accessors that take the key as a
+    // parameter, and the keys written per slot
+    private final Map<FieldInfo, Arg> keyedSlots = new HashMap<>();
+    private final Map<MethodInfo, KeyedAccessor> keyedPutters = new HashMap<>();
+    private final Map<MethodInfo, KeyedAccessor> keyedGetters = new HashMap<>();
+    private final Map<Arg, Set<Object>> keysUsed = new LinkedHashMap<>();
     private Set<Object> reached = Set.of();
     // locals their block dereferences unconditionally further on (Policy.assertAtDeclaration), and those null reaches
     private final Set<Local> assertCandidates = new HashSet<>();
@@ -342,13 +354,15 @@ public final class NullabilityPass {
     private final Map<MethodInfo, Map<String, List<Local>>> declaredByName = new HashMap<>();
 
     public NullabilityPass(Policy policy) {
-        this(policy, Set.of(), Set.of());
+        this(policy, Set.of(), Set.of(), NarrowedReads.NONE);
     }
 
-    private NullabilityPass(Policy policy, Set<MethodInfo> trustedReturns, Set<ParameterInfo> preconditions) {
+    private NullabilityPass(Policy policy, Set<MethodInfo> trustedReturns, Set<ParameterInfo> preconditions,
+                            NarrowedReads narrowed) {
         this.policy = policy;
         this.trustedReturns = trustedReturns;
         this.preconditions = preconditions;
+        this.narrowed = narrowed;
     }
 
     private static final int MAX_ROUNDS = 5;
@@ -364,15 +378,215 @@ public final class NullabilityPass {
     public Report go(List<Info> analysisOrder) {
         Set<MethodInfo> trusted = Set.of();
         Set<ParameterInfo> nonNullAtExit = Set.of();
+        NarrowedReads narrowedReads = NarrowedReads.NONE;
         for (int round = 1; ; round++) {
-            NullabilityPass pass = new NullabilityPass(policy, trusted, nonNullAtExit);
+            NullabilityPass pass = new NullabilityPass(policy, trusted, nonNullAtExit, narrowedReads);
             Report report = pass.once(analysisOrder);
             Set<MethodInfo> next = pass.unreachedReturns();
             Set<ParameterInfo> nextPreconditions = pass.preconditions();
-            if (next.equals(trusted) && nextPreconditions.equals(nonNullAtExit) || round == MAX_ROUNDS) return report;
+            NarrowedReads nextNarrowed = pass.narrowedReads();
+            if (next.equals(trusted) && nextPreconditions.equals(nonNullAtExit) && nextNarrowed.equals(narrowedReads)
+                || round == MAX_ROUNDS) {
+                return report;
+            }
             trusted = next;
             nonNullAtExit = nextPreconditions;
+            narrowedReads = nextNarrowed;
         }
+    }
+
+    // ------------------------------------------------------------------ narrowed reads (CodeLaser/maddi-mod#22 gap 3)
+
+    // gate NONARROWING: no read is narrowed by the receiver's runtime type (A/B)
+    private static final boolean NARROWING_OFF = System.getenv("NONARROWING") != null;
+
+    /**
+     * Per final instance field, the concrete classes whose instances may hold null in it; per getter, its field.
+     * {@link NonNullFacts} asks it whether a read {@code x.getF()} / {@code x.f} is non-null where {@code x} is known
+     * to be an instance of a type: when none of those classes is a subtype of it. A field absent from the map is not
+     * known (not final, no analysed subclass, an open world): never narrowed.
+     */
+    record NarrowedReads(Map<FieldInfo, Set<TypeInfo>> nullClasses, Map<MethodInfo, FieldInfo> getters) {
+        static final NarrowedReads NONE = new NarrowedReads(Map.of(), Map.of());
+
+        boolean isEmpty() {
+            return nullClasses.isEmpty();
+        }
+
+        boolean nonNull(Object member, TypeInfo type) {
+            FieldInfo field = member instanceof FieldInfo f ? f : member instanceof MethodInfo m ? getters.get(m) : null;
+            Set<TypeInfo> classes = field == null ? null : nullClasses.get(field);
+            if (classes == null) return false;
+            for (TypeInfo x : classes) {
+                if (isSubtype(x, type)) return false;
+            }
+            return true;
+        }
+    }
+
+    private static boolean isSubtype(TypeInfo sub, TypeInfo sup) {
+        return sub == sup || sub.superTypesExcludingJavaLangObject().contains(sup);
+    }
+
+    /*
+     Computed at the end of a round, from what null reached in it, for the next round's use-site facts: sound because a
+     round's reachability over-approximates the next one's (edges only drop). Closed world only: an open world has
+     classes the pass does not see. A field is a candidate when it is final, of an instance, and its class has an
+     analysed proper subclass (without one the narrowing tells nothing the field's own verdict does not).
+     */
+    private NarrowedReads narrowedReads() {
+        if (NARROWING_OFF || policy.world() != World.CLOSED) return NarrowedReads.NONE;
+        Set<TypeInfo> classes = new LinkedHashSet<>();
+        for (MethodInfo mi : analysed) classes.add(mi.typeInfo());
+        for (FieldInfo fi : analysedFields) classes.add(fi.owner());
+        Map<FieldInfo, Set<TypeInfo>> nullClasses = new HashMap<>();
+        for (FieldInfo fi : analysedFields) {
+            if (!fi.isFinal() || fi.isStatic() || fi.type().isPrimitiveExcludingVoid() && fi.type().arrays() == 0) continue;
+            TypeInfo owner = fi.owner();
+            if (owner.typeNature().isRecord() || owner.isInterface()) continue;
+            List<TypeInfo> concrete = classes.stream()
+                    .filter(x -> x == owner || isSubtype(x, owner))
+                    .filter(x -> !x.isInterface() && (!x.isAbstract() || x.isAnonymous())).toList();
+            if (classes.stream().noneMatch(x -> x != owner && isSubtype(x, owner))) continue;
+            // a final field is assigned exactly once: by its initializer or along every constructor chain; one of the
+            // two must be visible here (an instance initializer block is not looked at)
+            boolean initialized = fi.initializer() != null && !fi.initializer().isEmpty();
+            if (!initialized && owner.constructors().stream().noneMatch(k -> assignmentsOf(k, fi).findAny().isPresent())) {
+                continue;
+            }
+            Set<TypeInfo> nullable = new LinkedHashSet<>();
+            boolean initializerNull = initialized && mayBeNull(fi.initializer(), Map.of());
+            for (TypeInfo x : concrete) {
+                if (initializerNull || classMayHoldNull(x, fi)) nullable.add(x);
+            }
+            nullClasses.put(fi, Set.copyOf(nullable));
+        }
+        if (nullClasses.isEmpty()) return NarrowedReads.NONE;
+        Map<MethodInfo, FieldInfo> getters = new HashMap<>();
+        for (MethodInfo mi : analysed) {
+            io.codelaser.maddi.cst.api.analysis.Value.FieldValue fv = mi.getSetField();
+            if (fv == null || fv.field() == null || fv.setter() || fv.hasIndex() || mi.isStatic()
+                || !mi.parameters().isEmpty() || implementations.containsKey(mi)
+                || !nullClasses.containsKey(fv.field())) continue;
+            getters.put(mi, fv.field());
+        }
+        return new NarrowedReads(Map.copyOf(nullClasses), Map.copyOf(getters));
+    }
+
+    // may an instance whose runtime class is x hold null in the final field fi, through any of x's constructors?
+    private boolean classMayHoldNull(TypeInfo x, FieldInfo fi) {
+        List<MethodInfo> constructors = x.constructors();
+        if (constructors.isEmpty()) {
+            TypeInfo parent = parentOf(x);
+            if (x.isAnonymous() && parent != null) {
+                // 'new C(args) { ... }': the arguments go to one of the parent's constructors, which one is not
+                // looked up here; each, with what reaches its parameters
+                return parent.constructors().isEmpty() ? implicitSuperMayHoldNull(parent, fi, 0)
+                        : parent.constructors().stream().anyMatch(k -> constructsNull(k, reachedEnv(k), fi, 0));
+            }
+            return implicitSuperMayHoldNull(x, fi, 0);
+        }
+        return constructors.stream().anyMatch(k -> constructsNull(k, reachedEnv(k), fi, 0));
+    }
+
+    private Map<ParameterInfo, Boolean> reachedEnv(MethodInfo constructor) {
+        Map<ParameterInfo, Boolean> env = new HashMap<>();
+        for (ParameterInfo pi : constructor.parameters()) {
+            env.put(pi, reached.contains(pi) || external.contains(pi));
+        }
+        return env;
+    }
+
+    private static TypeInfo parentOf(TypeInfo type) {
+        ParameterizedType parent = type.parentClass();
+        return parent == null ? null : parent.typeInfo();
+    }
+
+    /*
+     The constructor chain from k: what k's body assigns to the field when k is of the field's class, and what the
+     constructor it delegates to ('this(...)', 'super(...)', or the implicit 'super()') makes of the arguments, given
+     what k's own parameters may be (env).
+     */
+    private boolean constructsNull(MethodInfo k, Map<ParameterInfo, Boolean> env, FieldInfo fi, int depth) {
+        if (depth > 32) return true;
+        TypeInfo owner = fi.owner();
+        Block body = k.methodBody();
+        if (body == null) return k.typeInfo() == owner || isSubtype(k.typeInfo(), owner);
+        boolean mayBeNull = k.typeInfo() == owner
+                            && assignmentsOf(k, fi).anyMatch(value -> mayBeNull(value, env));
+        Statement first = body.isEmpty() ? null : body.statements().getFirst();
+        if (first instanceof ExplicitConstructorInvocation eci) {
+            MethodInfo target = eci.methodInfo();
+            if (target == null) return true;
+            if (target.typeInfo() == owner || isSubtype(target.typeInfo(), owner)) {
+                List<ParameterInfo> parameters = target.parameters();
+                List<Expression> arguments = eci.parameterExpressions();
+                Map<ParameterInfo, Boolean> next = new HashMap<>();
+                boolean plain = parameters.size() == arguments.size()
+                                && (parameters.isEmpty() || !parameters.getLast().isVarArgs());
+                for (int i = 0; i < parameters.size(); i++) {
+                    next.put(parameters.get(i), !plain || mayBeNull(arguments.get(i), env));
+                }
+                mayBeNull |= constructsNull(target, next, fi, depth + 1);
+            }
+        } else if (k.typeInfo() != owner) {
+            mayBeNull |= implicitSuperMayHoldNull(k.typeInfo(), fi, depth + 1);
+        }
+        return mayBeNull;
+    }
+
+    // 'super()', implicit: the parent's constructor without parameters (or the parent's own implicit one)
+    private boolean implicitSuperMayHoldNull(TypeInfo type, FieldInfo fi, int depth) {
+        if (type == fi.owner()) return false; // no constructor of its own: only the initializer assigns
+        TypeInfo parent = parentOf(type);
+        if (parent == null || !(parent == fi.owner() || isSubtype(parent, fi.owner()))) return false;
+        if (parent.constructors().isEmpty()) return implicitSuperMayHoldNull(parent, fi, depth + 1);
+        return parent.constructors().stream().filter(k -> k.parameters().isEmpty()).findFirst()
+                .map(k -> constructsNull(k, Map.of(), fi, depth + 1)).orElse(true);
+    }
+
+    // the values a constructor's body assigns to 'this.fi'
+    private static java.util.stream.Stream<Expression> assignmentsOf(MethodInfo constructor, FieldInfo fi) {
+        Block body = constructor.methodBody();
+        if (body == null) return java.util.stream.Stream.of();
+        List<Expression> values = new ArrayList<>();
+        body.visit(e -> {
+            if (e instanceof Assignment a && a.variableTarget() instanceof FieldReference fr && fr.fieldInfo() == fi
+                && fr.scopeIsThis()) {
+                values.add(a.value());
+            }
+            return true;
+        });
+        return values.stream();
+    }
+
+    // may this expression, in a constructor whose parameters may be null as env says, evaluate to null?
+    private boolean mayBeNull(Expression e, Map<ParameterInfo, Boolean> env) {
+        Expression x = NonNullFacts.unwrap(e);
+        if (x == null || x instanceof NullConstant) return true;
+        if (x.parameterizedType() != null && x.parameterizedType().isPrimitiveExcludingVoid()
+            && x.parameterizedType().arrays() == 0) return false;
+        return switch (x) {
+            case VariableExpression ve -> switch (ve.variable()) {
+                case ParameterInfo pi -> env.containsKey(pi) ? env.get(pi) : reached.contains(pi) || external.contains(pi);
+                case io.codelaser.maddi.cst.api.variable.This _ -> false;
+                case FieldReference fr when !Util.virtual(fr) -> reached.contains(fr.fieldInfo())
+                                                                 || external.contains(fr.fieldInfo());
+                default -> true;
+            };
+            case ConstructorCall _, Lambda _, MethodReference _, ArrayInitializer _, StringConcat _ -> false;
+            case ConstantExpression<?> _ -> false;
+            case InlineConditional ic -> mayBeNull(ic.ifTrue(), env) || mayBeNull(ic.ifFalse(), env);
+            case MethodCall mc -> {
+                MethodInfo callee = mc.methodInfo();
+                if (callee == null) yield true;
+                if (analysed.contains(callee)) {
+                    yield reached.contains(callee) || external.contains(callee) || degraded.contains(callee);
+                }
+                yield libraryNullableReturn(callee) != null;
+            }
+            default -> true;
+        };
     }
 
     private Set<ParameterInfo> preconditions() {
@@ -409,6 +623,7 @@ public final class NullabilityPass {
         List<FieldInfo> fields = analysisOrder.stream()
                 .filter(i -> i instanceof FieldInfo).map(i -> (FieldInfo) i).toList();
         analysed.addAll(methods);
+        analysedFields = fields;
         methods.forEach(this::indexNullLiterals);
         for (MethodInfo mi : methods) if (mi.methodBody() != null) indexFills(mi.methodBody());
         for (MethodInfo mi : methods) {
@@ -416,8 +631,10 @@ public final class NullabilityPass {
                 implementations.computeIfAbsent(overridden, _ -> new java.util.ArrayList<>()).add(mi);
             }
         }
+        indexKeyedMaps(methods, fields);
         facts = new NonNullFacts(this::parameterContract, this::returnContract)
-                .withPredicates(NullPredicates.infer(methods));
+                .withPredicates(NullPredicates.infer(methods))
+                .withNarrowedReads(narrowed.isEmpty() ? null : narrowed::nonNull);
         if (policy.contracts()) {
             for (FieldInfo fi : fields) contract(fi, fi);
             for (MethodInfo mi : methods) {
@@ -434,6 +651,7 @@ public final class NullabilityPass {
             owner = mi;
             buildForMethod(mi);
         }
+        keyedEdges(methods);
         for (FieldInfo fi : fields) seedDefaultValue(fi);
         linkEdges.forEach((edge, count) -> {
             // [0] assigned (or passed) where the source is known non-null, [1] where it is not, [2] assigned by a
@@ -835,7 +1053,7 @@ public final class NullabilityPass {
     }
 
     private static boolean isSlot(Object node) {
-        return node instanceof Arg || node instanceof Content;
+        return node instanceof Arg || node instanceof Content || node instanceof Keyed;
     }
 
     // strict: when not null, an edge from a value into a slot is followed only from a node in it
@@ -891,6 +1109,7 @@ public final class NullabilityPass {
                 yield outer == null || outer.arrays() > 0 || a.index() >= outer.parameters().size() ? null
                         : outer.parameters().get(a.index());
             }
+            case Keyed k -> typeOf(k.slot());
             case ParameterInfo pi -> pi.parameterizedType();
             case FieldInfo fi -> fi.type();
             case MethodInfo mi -> mi.returnType();
@@ -1046,6 +1265,7 @@ public final class NullabilityPass {
         return switch (node) {
             case Content c -> library(c.of());
             case Arg a -> library(a.of());
+            case Keyed k -> library(k.slot());
             case ParameterInfo pi -> !analysed.contains(pi.methodInfo());
             case MethodInfo mi -> !analysed.contains(mi);
             default -> false;
@@ -1313,6 +1533,8 @@ public final class NullabilityPass {
                             && assignsHere(statement, pi) ? shadow(pi) : recipient;
         Links links = vi.linkedVariables();
         if (recipient == null || links == null) return;
+        // 'x = ctx.get(KEY)' on a keyed map: the value read is the key's, not every key's (gap 2)
+        Keyed keyed = statement == null ? null : keyedRead(statement, v);
         for (Link link : links) {
             // links about a face of v ('this.f.g') are not about v; an element of v ('r[1] <- null', an initializer)
             // is v's Content, its hidden content ('l.§$s', 'm.§$$s[-2]', 'b.t') a type argument's slot
@@ -1355,11 +1577,12 @@ public final class NullabilityPass {
                         nullMarker(mi, link.to(), from, "null in " + mi.fullyQualifiedName());
                     }
                 } else {
-                    linkEdge(node(mi, scope, link.to()), from, link.to(), fromVar, statement);
+                    linkEdge(keyedSource(keyed, node(mi, scope, link.to())), from, link.to(), fromVar, statement);
                 }
             } else if (link.linkNature().isIdenticalToOrAssignedFromTo()) {
                 // '→': v is assigned to link.to()
-                linkEdge(from, node(mi, scope, link.to()), fromVar, link.to(), statement);
+                Keyed keyedTo = statement == null ? null : keyedRead(statement, link.to());
+                linkEdge(keyedSource(keyedTo, from), node(mi, scope, link.to()), fromVar, link.to(), statement);
             }
         }
     }
@@ -1375,11 +1598,13 @@ public final class NullabilityPass {
     private void membership(MethodInfo mi, Scope scope, Object side, Variable sideVar, boolean sideIsContainer,
                             Variable otherVar, Statement statement) {
         Object other = node(mi, scope, otherVar);
-        Object container = sideIsContainer ? side : other;
         Variable memberVar = sideIsContainer ? otherVar : sideVar;
+        // the member read from a keyed map by this statement ('ids = ctx.get(IDS)'): the key's values (gap 2)
+        Keyed keyed = statement == null ? null : keyedRead(statement, memberVar);
+        Object container = keyedSource(keyed, sideIsContainer ? side : other);
         Object member = sideIsContainer ? other : side;
-        if (!(container instanceof Arg || container instanceof Content)) return;
-        if (member == null || member instanceof Arg || member instanceof Content) return;
+        if (!(container instanceof Arg || container instanceof Content || container instanceof Keyed)) return;
+        if (member == null || member instanceof Arg || member instanceof Content || member instanceof Keyed) return;
         switch (memberVar) {
             case ParameterInfo _ -> {
             }
@@ -2478,6 +2703,272 @@ public final class NullabilityPass {
         }
     }
 
+    // ------------------------------------------------------------------ keyed maps (CodeLaser/maddi-mod#22 gap 2)
+
+    // gate NOKEYEDMAPS: a map field's values stay one slot for all keys (A/B)
+    private static final boolean KEYED_MAPS_OFF = System.getenv("NOKEYEDMAPS") != null;
+
+    /**
+     * The values a keyed map field holds under one constant key: nacos's {@code MapperContext.whereParamMap}, a
+     * {@code Map<String, Object>} written and read through {@code putWhereParameter(KEY, value)} and
+     * {@code getWhereParameter(KEY)}, where a null {@code dataId} put under one key made every key's value nullable.
+     * The key is the constant's value ({@link #keyOf}); a null key stands for the values put under a key not known,
+     * which every keyed node receives. A keyed node flows into the field's value slot, which keeps every value.
+     */
+    public record Keyed(Arg slot, Object key) {
+        @Override
+        public String toString() {
+            return Report.label(this);
+        }
+    }
+
+    /** An accessor of a keyed map: {@code get(key)} returning the value, or {@code put(key, value)}. */
+    record KeyedAccessor(FieldInfo field, int keyIndex, int valueIndex) {
+    }
+
+    private static final Set<String> KEYED_MAP_READS = Set.of("get", "containsKey", "containsValue", "size", "isEmpty",
+            "toString", "hashCode", "equals", "keySet", "values", "forEach", "remove", "clear");
+
+    /*
+     A final map field qualifies when every use the analysed code makes of it is seen: the receiver of a read, of a
+     removal, of 'get(k)' or 'put(k, v)', the target of its initialisation with an empty new map, an operand of a
+     string concatenation. Anything else (passed on, returned, assigned elsewhere, 'putAll', 'compute', 'entrySet'
+     whose entries can be set) may put a value under any key: the field's values stay one slot. An accessor is a
+     method whose single statement is 'return field.get(k)' or 'field.put(k, v)' with its own parameters; its callers
+     write or read the key they pass.
+     */
+    private void indexKeyedMaps(List<MethodInfo> methods, List<FieldInfo> fields) {
+        if (KEYED_MAPS_OFF) return;
+        Map<FieldInfo, Boolean> candidates = new HashMap<>();
+        for (FieldInfo fi : fields) {
+            ParameterizedType type = fi.type();
+            if (!fi.isFinal() || type.arrays() > 0 || type.parameters().size() != 2 || !isMap(type)
+                || isTypeVariable(type.parameters().get(1))) continue;
+            Expression initializer = fi.initializer();
+            if (initializer != null && !initializer.isEmpty() && !emptyNewMap(initializer)) continue;
+            candidates.put(fi, true);
+        }
+        if (candidates.isEmpty()) return;
+        java.util.Set<Element> accounted = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+        Map<MethodInfo, KeyedAccessor> putters = new HashMap<>();
+        Map<MethodInfo, KeyedAccessor> getters = new HashMap<>();
+        for (MethodInfo mi : methods) {
+            if (mi.methodBody() == null) continue;
+            mi.methodBody().visit(e -> {
+                switch (e) {
+                    case MethodCall mc when mc.object() != null && candidateField(mc.object(), candidates) != null -> {
+                        FieldInfo fi = candidateField(mc.object(), candidates);
+                        accounted.add(NonNullFacts.unwrap(mc.object()));
+                        String name = mc.methodInfo() == null ? "" : mc.methodInfo().name();
+                        int n = mc.parameterExpressions().size();
+                        if ("put".equals(name) && n == 2) {
+                            KeyedAccessor a = accessor(mi, mc, fi, true);
+                            if (a != null) putters.put(mi, a);
+                        } else if ("get".equals(name) && n == 1) {
+                            KeyedAccessor a = accessor(mi, mc, fi, false);
+                            if (a != null) getters.put(mi, a);
+                        } else if (!KEYED_MAP_READS.contains(name)) {
+                            candidates.put(fi, false);
+                        }
+                    }
+                    case Assignment a when a.variableTarget() instanceof FieldReference fr
+                                           && candidates.containsKey(fr.fieldInfo()) -> {
+                        accounted.add(a.target());
+                        if (!emptyNewMap(a.value())) candidates.put(fr.fieldInfo(), false);
+                    }
+                    // a string concatenation reads the map's toString(); also when the parser gives a plain '+'
+                    case io.codelaser.maddi.cst.api.expression.BinaryOperator bo when bo instanceof StringConcat
+                            || bo.parameterizedType() != null && bo.parameterizedType().arrays() == 0
+                               && bo.parameterizedType().typeInfo() != null
+                               && "java.lang.String".equals(bo.parameterizedType().typeInfo().fullyQualifiedName()) -> {
+                        if (candidateField(bo.lhs(), candidates) != null) accounted.add(NonNullFacts.unwrap(bo.lhs()));
+                        if (candidateField(bo.rhs(), candidates) != null) accounted.add(NonNullFacts.unwrap(bo.rhs()));
+                    }
+                    default -> {
+                    }
+                }
+                return true;
+            });
+        }
+        for (MethodInfo mi : methods) {
+            if (mi.methodBody() == null) continue;
+            mi.methodBody().visit(e -> {
+                if (e instanceof VariableExpression ve && ve.variable() instanceof FieldReference fr
+                    && candidates.containsKey(fr.fieldInfo()) && !accounted.contains(ve)) {
+                    candidates.put(fr.fieldInfo(), false); // a use not seen through: the map escapes
+                }
+                return true;
+            });
+        }
+        candidates.forEach((fi, ok) -> {
+            if (ok) keyedSlots.put(fi, new Arg(fi, 1));
+        });
+        putters.forEach((mi, a) -> {
+            if (keyedSlots.containsKey(a.field())) keyedPutters.put(mi, a);
+        });
+        // a getter some override replaces does not return the key's value
+        getters.forEach((mi, a) -> {
+            if (keyedSlots.containsKey(a.field()) && !implementations.containsKey(mi)
+                && (policy.world() == World.CLOSED || !overridable(mi))) {
+                keyedGetters.put(mi, a);
+            }
+        });
+    }
+
+    private static boolean overridable(MethodInfo mi) {
+        return !mi.isStatic() && !mi.access().isPrivate() && !mi.isFinal() && !mi.typeInfo().isFinal();
+    }
+
+    private static FieldInfo candidateField(Expression e, Map<FieldInfo, Boolean> candidates) {
+        return NonNullFacts.unwrap(e) instanceof VariableExpression ve && ve.variable() instanceof FieldReference fr
+               && candidates.containsKey(fr.fieldInfo()) ? fr.fieldInfo() : null;
+    }
+
+    private static boolean emptyNewMap(Expression e) {
+        return NonNullFacts.unwrap(e) instanceof ConstructorCall cc && cc.parameterExpressions().isEmpty()
+               && cc.anonymousClass() == null;
+    }
+
+    private static boolean isMap(ParameterizedType pt) {
+        TypeInfo ti = pt.typeInfo();
+        if (ti == null) return false;
+        return "java.util.Map".equals(ti.fullyQualifiedName())
+               || ti.superTypesExcludingJavaLangObject().stream()
+                       .anyMatch(t -> "java.util.Map".equals(t.fullyQualifiedName()));
+    }
+
+    // 'return field.get(k)' / 'field.put(k, v)' as the method's only statement, k (and v) its own parameters
+    private static KeyedAccessor accessor(MethodInfo mi, MethodCall mc, FieldInfo fi, boolean put) {
+        Block body = mi.methodBody();
+        if (body == null || body.statements().size() != 1) return null;
+        Statement only = body.statements().getFirst();
+        Expression whole = only instanceof ReturnStatement rs ? rs.expression()
+                : only instanceof ExpressionAsStatement eas ? eas.expression() : null;
+        if (whole == null || NonNullFacts.unwrap(whole) != mc) return null;
+        if (!put && !(only instanceof ReturnStatement)) return null;
+        int key = ownParameter(mi, mc.parameterExpressions().getFirst());
+        int value = put ? ownParameter(mi, mc.parameterExpressions().get(1)) : -1;
+        if (key < 0 || put && value < 0) return null;
+        return new KeyedAccessor(fi, key, value);
+    }
+
+    private static int ownParameter(MethodInfo mi, Expression e) {
+        return NonNullFacts.unwrap(e) instanceof VariableExpression ve && ve.variable() instanceof ParameterInfo pi
+               && pi.methodInfo() == mi ? pi.index() : -1;
+    }
+
+    /*
+     The key a constant expression stands for, by value: a literal, or a static final field whose initializer is one
+     (FieldConstant.DATA_ID and "dataId" are the same key), or an enum constant (equal only to itself). Null when not
+     a constant: a key computed at run time can be any key.
+     */
+    static Object keyOf(Expression e) {
+        return keyOf(e, 0);
+    }
+
+    private static Object keyOf(Expression e, int depth) {
+        Expression x = NonNullFacts.unwrap(e);
+        if (x == null || x instanceof NullConstant || depth > 8) return null;
+        if (x instanceof ConstantExpression<?> ce && ce.constant() != null) {
+            return ce.constant().getClass().getSimpleName() + ":" + ce.constant();
+        }
+        if (x instanceof VariableExpression ve && ve.variable() instanceof FieldReference fr) {
+            FieldInfo fi = fr.fieldInfo();
+            if (!fi.isStatic() || !fi.isFinal()) return null;
+            if (fi.owner().typeNature().isEnum() && fi.type().typeInfo() == fi.owner()) {
+                return "enum:" + fi.fullyQualifiedName();
+            }
+            Expression initializer = fi.initializer();
+            return initializer == null || initializer.isEmpty() ? null : keyOf(initializer, depth + 1);
+        }
+        return null;
+    }
+
+    private Keyed keyed(Arg slot, Object key) {
+        keysUsed.computeIfAbsent(slot, _ -> new LinkedHashSet<>()).add(key == null ? NO_KEY : key);
+        return new Keyed(slot, key);
+    }
+
+    private static final Object NO_KEY = new Object();
+
+    /*
+     A write into a keyed map: through a keyed putter, the key its caller passes; directly ('field.put(k, v)'), the
+     key k, except in a keyed putter itself, whose callers write. A key not known writes the values every key reads.
+     The write into the field's whole value slot is made as before, by the parameter or the receiver's slot.
+     */
+    private void keyedWrite(MethodInfo mi, Scope scope, Statement statement, Expression call, MethodInfo callee,
+                            LinkComputer.ListOfLinks list, List<Expression> arguments) {
+        if (keyedSlots.isEmpty()) return;
+        KeyedAccessor putter = keyedPutters.get(callee);
+        if (putter != null && arguments.size() > Math.max(putter.keyIndex(), putter.valueIndex())) {
+            Arg slot = keyedSlots.get(putter.field());
+            argument(mi, scope, statement, call, list, arguments, putter.valueIndex(),
+                    keyed(slot, keyOf(arguments.get(putter.keyIndex()))));
+            return;
+        }
+        if (!(call instanceof MethodCall mc) || !"put".equals(callee.name()) || arguments.size() != 2
+            || mc.object() == null || !(NonNullFacts.unwrap(mc.object()) instanceof VariableExpression ve)
+            || !(ve.variable() instanceof FieldReference fr)) return;
+        Arg slot = keyedSlots.get(fr.fieldInfo());
+        if (slot == null) return;
+        KeyedAccessor own = keyedPutters.get(mi);
+        if (own != null && own.field() == fr.fieldInfo() && ownParameter(mi, arguments.getFirst()) == own.keyIndex()) {
+            return;
+        }
+        argument(mi, scope, statement, call, list, arguments, 1, keyed(slot, keyOf(arguments.getFirst())));
+    }
+
+    // the keyed node a statement reads: 'x = ctx.get(KEY)' through a keyed getter, or 'x = field.get(KEY)'
+    private Keyed keyedRead(Statement statement, Variable recipient) {
+        if (keyedSlots.isEmpty()) return null;
+        Expression value = assignedValue(statement, recipient);
+        if (!(NonNullFacts.unwrap(value) instanceof MethodCall mc) || mc.methodInfo() == null) return null;
+        KeyedAccessor getter = keyedGetters.get(mc.methodInfo());
+        if (getter != null && getter.keyIndex() < mc.parameterExpressions().size()) {
+            Object key = keyOf(mc.parameterExpressions().get(getter.keyIndex()));
+            return key == null ? null : keyed(keyedSlots.get(getter.field()), key);
+        }
+        if ("get".equals(mc.methodInfo().name()) && mc.parameterExpressions().size() == 1 && mc.object() != null
+            && NonNullFacts.unwrap(mc.object()) instanceof VariableExpression ve
+            && ve.variable() instanceof FieldReference fr && keyedSlots.containsKey(fr.fieldInfo())) {
+            Object key = keyOf(mc.parameterExpressions().getFirst());
+            return key == null ? null : keyed(keyedSlots.get(fr.fieldInfo()), key);
+        }
+        return null;
+    }
+
+    // the node a read takes its value from: the key's node where it would be the field's value slot
+    private static Object keyedSource(Keyed keyed, Object node) {
+        return keyed != null && keyed.slot().equals(node) ? keyed : node;
+    }
+
+    /*
+     After all writes are seen: the values under a key not known reach every key; every key's values are the field's
+     values too (and their own slots are tied to the field's, coupleContent). In an open world an outside caller of a
+     keyed putter writes under any key.
+     */
+    private void keyedEdges(List<MethodInfo> methods) {
+        keysUsed.forEach((slot, keys) -> {
+            Keyed unknown = new Keyed(slot, null);
+            for (Object key : keys) {
+                if (key == NO_KEY) continue;
+                Keyed k = new Keyed(slot, key);
+                addEdge(unknown, k);
+                addEdge(k, slot);
+            }
+        });
+        if (policy.world() == World.CLOSED) return;
+        keyedPutters.forEach((mi, putter) -> {
+            if (externallyCallable(mi)) {
+                addEdge(mi.parameters().get(putter.valueIndex()), new Keyed(keyedSlots.get(putter.field()), null));
+                for (Object key : keysUsed.getOrDefault(keyedSlots.get(putter.field()), Set.of())) {
+                    if (key != NO_KEY) addEdge(new Keyed(keyedSlots.get(putter.field()), null),
+                            new Keyed(keyedSlots.get(putter.field()), key));
+                }
+            }
+        });
+    }
+
     private void callSite(MethodInfo mi, Scope scope, Statement statement, Expression call, MethodInfo callee,
                           io.codelaser.maddi.cst.api.analysis.PropertyValueMap analysis, List<Expression> arguments) {
         List<ParameterInfo> parameters = callee.parameters();
@@ -2514,6 +3005,7 @@ public final class NullabilityPass {
                 argument(mi, scope, statement, call, list, arguments, i, pi);
             }
         }
+        keyedWrite(mi, scope, statement, call, callee, list, arguments);
     }
 
     /*

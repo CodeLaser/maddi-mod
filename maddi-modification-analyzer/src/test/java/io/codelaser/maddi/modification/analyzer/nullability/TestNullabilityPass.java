@@ -2238,4 +2238,214 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("IOException?", j.get("a.b.LJ.$0.postVisitDirectory(java.nio.file.Path,java.io.IOException):1:exc"));
         assertEquals("Throwable", j.get("a.b.LJ.Handler.uncaughtException(Thread,Throwable):1:e"));
     }
+
+    // the verdict of every declaration, by fully qualified name
+    private static Map<String, String> byName(NullabilityPass.Report report) {
+        return report.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+    }
+
+    private static Map<String, String> localsByName(NullabilityPass.Report report) {
+        return report.locals().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().methodInfo().name() + "." + e.getKey().name(),
+                        e -> k(e.getValue()), (a, b) -> a + "|" + b));
+    }
+
+    /*
+     CodeLaser/maddi-mod#22 gap 2, nacos MapperContext: a Map<String, Object> written and read through accessors with
+     constant keys. One value slot made every key's value nullable when one key's was (a null 'dataId' made 'ids'
+     nullable). A key's values are now a node of their own; the field's slot still holds all of them.
+     */
+    @DisplayName("keyed maps: a constant key's values are its own, through accessors or directly (gap 2)")
+    @Test
+    public void keyedMaps() {
+        NullabilityPass.Report report = run("a.b.KM", """
+                package a.b;
+                import java.util.*;
+                class KM {
+                    static final String A = "a";
+                    static final String B = "b";
+                    static final String B2 = "b";
+                    static class Ctx {
+                        private final Map<String, Object> where;
+                        private final Map<String, String> direct = new HashMap<>();
+                        Ctx() { this.where = new HashMap<>(); }
+                        Object get(String key) { return where.get(key); }
+                        void put(String key, Object value) { where.put(key, value); }
+                        void fill(String x) { direct.put(A, x); direct.put("c", "c"); }
+                        String c() { String c = direct.get("c"); return c; }
+                        String a() { String a = direct.get(A); return a; }
+                        @Override public String toString() { return "Ctx{" + where + "}"; }
+                    }
+                    static Ctx build(String a, List<Long> ids) { Ctx c = new Ctx(); c.put(A, a); c.put(B, ids); c.fill(a); return c; }
+                    static Ctx caller() { return build(null, new ArrayList<>()); }
+                    static int useB(Ctx c) { List<Long> ids = (List<Long>) c.get(B); return ids.size(); }
+                    static int useB2(Ctx c) { List<Long> ids2 = (List<Long>) c.get(B2); return ids2.size(); }
+                    static int useA(Ctx c) { String a = (String) c.get(A); return a.length(); }
+                    static Object any(Ctx c, String k) { Object any = c.get(k); return any; }
+                }
+                """);
+        Map<String, String> locals = localsByName(report);
+        assertEquals("List<Long>", locals.get("useB.ids"), "only B's values");
+        assertEquals("List<Long>", locals.get("useB2.ids2"), "B2 is the same key as B");
+        assertEquals("String?", locals.get("useA.a"), "a null is put under A");
+        assertEquals("Object?", locals.get("any.any"), "a key not known reads every key");
+        // directly on the field: Map.get's own contract (the key may be absent) still holds, but no other key's null
+        String chains = report.locals().keySet().stream().filter(l -> report.cause().containsKey(l)
+                                                                     || report.seedOrigin().containsKey(l))
+                .map(report::explain).sorted().collect(Collectors.joining("\n"));
+        assertTrue(chains.contains("c in a.b.KM.Ctx.c() <- assigned java.util.Map.get(Object)"), chains);
+        Map<String, String> byName = byName(report);
+        // the declarations keep every value
+        assertEquals("Map<String, Object?>", byName.get("a.b.KM.Ctx.where"));
+        assertEquals("Object?", byName.get("a.b.KM.Ctx.put(String,Object):1:value"));
+        assertEquals("Map<String, String?>", byName.get("a.b.KM.Ctx.direct"));
+
+        // a write under a key not known reaches every key; a map that escapes keeps one slot
+        NullabilityPass.Report unknown = run("a.b.KU", """
+                package a.b;
+                import java.util.*;
+                class KU {
+                    static final String A = "a";
+                    static final String B = "b";
+                    static class Ctx {
+                        private final Map<String, Object> where = new HashMap<>();
+                        Object get(String key) { return where.get(key); }
+                        void put(String key, Object value) { where.put(key, value); }
+                    }
+                    static class Escaping {
+                        private final Map<String, Object> where = new HashMap<>();
+                        Object get(String key) { return where.get(key); }
+                        void put(String key, Object value) { where.put(key, value); }
+                        Map<String, Object> raw() { return where; }
+                    }
+                    static void fill(Ctx c, String k, Escaping e) { c.put(k, null); c.put(B, "b"); e.put(A, null); e.put(B, "b"); }
+                    static int useB(Ctx c) { String b = (String) c.get(B); return b.length(); }
+                    static int escapedB(Escaping e) { String eb = (String) e.get(B); return eb.length(); }
+                }
+                """);
+        Map<String, String> u = localsByName(unknown);
+        assertEquals("String?", u.get("useB.b"), "the null put under k may be B's");
+        assertEquals("String?", u.get("escapedB.eb"), "raw() lets anyone put under B");
+    }
+
+    /*
+     CodeLaser/maddi-mod#22 gap 3, nacos ClientOperationEvent: 'super(clientId, null)' in one subclass made the event's
+     service nullable, and with it every use, also where the event is known to be another subclass. A local read
+     from 'x.getF()' is non-null where 'x instanceof T' holds and no class an instance of T can be leaves null in F.
+     */
+    @DisplayName("narrowed reads: a getter's value on an instance of a subclass that never stores null (gap 3)")
+    @Test
+    public void narrowedReads() {
+        NullabilityPass.Report report = run("a.b.EV", """
+                package a.b;
+                import java.util.*;
+                class EV {
+                    static class Service { void touch() { } }
+                    static class Op {
+                        private final String clientId;
+                        final Service service;
+                        Op(String clientId, Service service) { this.clientId = clientId; this.service = service; }
+                        Service getService() { return service; }
+                        String getClientId() { return clientId; }
+                    }
+                    static class Register extends Op { Register(Service s, String id) { super(id, s); } }
+                    static class Fuzzy extends Op { Fuzzy(String id) { super(id, null); } }
+                    static class Changed { private final Service service; Changed(Service service) { this.service = service; service.touch(); } }
+                    static List<Object> published = new ArrayList<>();
+                    static void publish(Op other) {
+                        Op[] all = { new Register(new Service(), "x"), new Fuzzy("y"), new Op("z", new Service()) };
+                        for (Op op : all) { after(op); early(op); pattern(op); inside(op); broad(op); field(op); moved(op, other); }
+                    }
+                    static void after(Op event) {
+                        Service service = event.getService();
+                        if (event instanceof Register) {
+                            add(service);
+                        }
+                    }
+                    static void early(Op event) {
+                        Service service = event.getService();
+                        if (!(event instanceof Register)) return;
+                        addEarly(service);
+                    }
+                    static void pattern(Op event) {
+                        Service service = event.getService();
+                        if (event instanceof Register r && r.getClientId() != null) addPattern(service);
+                    }
+                    static void inside(Op event) {
+                        if (event instanceof Register) { Service s = event.getService(); addInside(s); }
+                    }
+                    static void broad(Op event) {
+                        Service service = event.getService();
+                        if (event instanceof Op) addBroad(service);
+                    }
+                    static void field(Op event) {
+                        Service service = event.service;
+                        if (event instanceof Register) addField(service);
+                    }
+                    static void moved(Op event, Op other) {
+                        Service service = event.getService();
+                        event = other;
+                        if (event instanceof Register) addMoved(service);
+                    }
+                    static void add(Service service) { published.add(new Changed(service)); }
+                    static void addEarly(Service service) { published.add(service); }
+                    static void addPattern(Service service) { published.add(service); }
+                    static void addInside(Service service) { published.add(service); }
+                    static void addBroad(Service service) { published.add(service); }
+                    static void addField(Service service) { published.add(service); }
+                    static void addMoved(Service service) { published.add(service); }
+                }
+                """);
+        System.out.println(explain(report));
+        Map<String, String> byName = byName(report);
+        String p = "(a.b.EV.Service):0:service";
+        assertEquals("Service", byName.get("a.b.EV.add" + p), "after the read, in the branch");
+        assertEquals("Service", byName.get("a.b.EV.Changed.service"));
+        assertEquals("Service", byName.get("a.b.EV.addEarly" + p), "after 'if (!(x instanceof T)) return'");
+        assertEquals("Service", byName.get("a.b.EV.addPattern" + p));
+        assertEquals("Service", byName.get("a.b.EV.addInside" + p), "the read inside the branch");
+        assertEquals("Service", byName.get("a.b.EV.addField" + p), "a field read");
+        assertEquals("Service?", byName.get("a.b.EV.addBroad" + p), "a Fuzzy is an Op");
+        assertEquals("Service?", byName.get("a.b.EV.addMoved" + p), "the event tested is not the one read");
+        // the declarations keep the null of the Fuzzy events
+        assertEquals("Service?", byName.get("a.b.EV.Op.service"));
+        assertEquals("Service?", byName.get("a.b.EV.Op.getService()"));
+
+        // a subclass of the narrowed type that stores null, an overriding getter, a non-final field: no narrowing
+        NullabilityPass.Report sub = run("a.b.EW", """
+                package a.b;
+                import java.util.*;
+                class EW {
+                    static class Service { }
+                    static class Op {
+                        private final Service service;
+                        private Service mutable;
+                        Op(Service service) { this.service = service; this.mutable = service; }
+                        Service getService() { return service; }
+                        Service getMutable() { return mutable; }
+                        void setMutable(Service s) { this.mutable = s; }
+                    }
+                    static class Register extends Op { Register(Service s) { super(s); } }
+                    static class Late extends Register { Late() { super(null); } }
+                    static class Other extends Op { Other() { super(new Service()); } }
+                    static class Weird extends Other { Weird() { setMutable(null); } @Override Service getService() { return null; } }
+                    static List<Object> published = new ArrayList<>();
+                    static void publish() { Op[] all = { new Register(new Service()), new Late(), new Other(), new Weird() }; for (Op op : all) handle(op); }
+                    static void handle(Op event) {
+                        Service service = event.getService();
+                        Service mutable = event.getMutable();
+                        if (event instanceof Register) addRegister(service);
+                        if (event instanceof Other) { addOther(service); addMutable(mutable); }
+                    }
+                    static void addRegister(Service service) { published.add(service); }
+                    static void addOther(Service service) { published.add(service); }
+                    static void addMutable(Service service) { published.add(service); }
+                }
+                """);
+        Map<String, String> s = byName(sub);
+        assertEquals("Service?", s.get("a.b.EW.addRegister(a.b.EW.Service):0:service"), "a Late is a Register");
+        assertEquals("Service?", s.get("a.b.EW.addOther(a.b.EW.Service):0:service"), "Weird overrides the getter");
+        assertEquals("Service?", s.get("a.b.EW.addMutable(a.b.EW.Service):0:service"), "not a final field");
+    }
 }
