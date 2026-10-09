@@ -68,6 +68,12 @@ public class TestJavaToKotlinFernflowerNullability {
             return report.verdicts().get(methodInfo);
         }
 
+        /** The values the body assigns a parameter, for the printer's `var p = p` (maddi-mod#22 gap 5). */
+        @Override
+        public ParameterizedType reassignedParameter(ParameterInfo parameterInfo) {
+            return report.reassigned(parameterInfo);
+        }
+
         @Override
         public ParameterizedType local(MethodInfo method, Element declaration, LocalVariable variable) {
             return report.local(method, declaration, variable);

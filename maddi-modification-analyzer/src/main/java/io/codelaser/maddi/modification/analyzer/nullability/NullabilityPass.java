@@ -247,6 +247,15 @@ public final class NullabilityPass {
          *                    a try resource), the {@link ForEachStatement}, or the {@link TryStatement.CatchClause}
          *                    that declares {@code variable}; compared by identity
          */
+        /**
+         * A parameter the body assigns: the verdict of what the body assigns it, the type of the Kotlin printer's
+         * {@code var p = p} (CodeLaser/maddi-mod#22 gap 5). The parameter's own verdict is the caller's value only. Null when
+         * the body never assigns it.
+         */
+        public ParameterizedType reassigned(ParameterInfo parameterInfo) {
+            return locals.get(new Local(parameterInfo.methodInfo(), null, parameterInfo.name()));
+        }
+
         public ParameterizedType local(MethodInfo methodInfo, Element declaration, LocalVariable variable) {
             Element d = declaration instanceof ForEachStatement fe ? fe.initializer() : declaration;
             return locals.get(new Local(methodInfo, d, variable.simpleName()));
@@ -322,6 +331,13 @@ public final class NullabilityPass {
     // statement that assigns it directly to the recipient (M4)
     private final Map<List<Object>, int[]> linkEdges = new LinkedHashMap<>();
     private final Map<Local, LocalVariable> declaredLocals = new LinkedHashMap<>();
+    // a parameter the body assigns (CodeLaser/maddi-mod#22 gap 5, #9): the parameter node is the caller's value only; what
+    // the body assigns goes to a shadow local of the same name (the Kotlin printer's `var p = p`), which the parameter
+    // flows into, and which reads after the first assignment resolve to (from the loop's start, for an assignment
+    // inside a loop)
+    private final Set<ParameterInfo> reassigned = new HashSet<>();
+    private final Map<Local, ParameterInfo> shadows = new LinkedHashMap<>();
+    private final Set<ParameterInfo> shadowed = new HashSet<>(); // walk state: reads resolve to the shadow from here on
     // per method (a lambda is its own), the declarations of each name: the fallback when scopes do not resolve one
     private final Map<MethodInfo, Map<String, List<Local>>> declaredByName = new HashMap<>();
 
@@ -470,6 +486,8 @@ public final class NullabilityPass {
         // an unreached local of a degraded method: its links are missing, so "no null reaches it" is not known
         declaredLocals.forEach((local, lv) -> locals.put(local, verdict(lv.parameterizedType(), local,
                 degraded.contains(localOwner.get(local)))));
+        shadows.forEach((local, pi) -> locals.put(local, verdict(pi.parameterizedType(), local,
+                degraded.contains(pi.methodInfo()))));
         for (FieldInfo fi : fields) {
             verdicts.put(fi, contracted(fi, verdict(fi.type(), fi, false)));
         }
@@ -876,7 +894,8 @@ public final class NullabilityPass {
             case ParameterInfo pi -> pi.parameterizedType();
             case FieldInfo fi -> fi.type();
             case MethodInfo mi -> mi.returnType();
-            case Local local -> declaredLocals.containsKey(local) ? declaredLocals.get(local).parameterizedType() : null;
+            case Local local -> declaredLocals.containsKey(local) ? declaredLocals.get(local).parameterizedType()
+                    : shadows.containsKey(local) ? shadows.get(local).parameterizedType() : null;
             case Content c -> {
                 ParameterizedType outer = typeOf(c.of());
                 yield outer == null || outer.arrays() == 0 ? null : outer.componentType();
@@ -1067,6 +1086,37 @@ public final class NullabilityPass {
         }
     }
 
+    // the shadow local of a reassigned parameter; created once, the caller's value flows into it
+    private Local shadow(ParameterInfo pi) {
+        Local local = new Local(pi.methodInfo(), null, pi.name());
+        if (shadows.putIfAbsent(local, pi) == null) {
+            localOwner.put(local, pi.methodInfo());
+            addEdge(pi, local);
+        }
+        return local;
+    }
+
+    // the parameters of mi assigned (plainly, not '+=') anywhere in element, lambdas excluded
+    // gate NOPARAMSHADOW: a reassigned parameter keeps one node for the caller's and the body's values (A/B)
+    private static final boolean PARAMETER_SHADOWS_OFF = System.getenv("NOPARAMSHADOW") != null;
+
+    private static Set<ParameterInfo> parametersAssignedIn(Element element, MethodInfo mi) {
+        Set<ParameterInfo> set = new HashSet<>();
+        if (element == null || PARAMETER_SHADOWS_OFF) return set;
+        element.visit(e -> {
+            if (e instanceof Lambda) return false;
+            if (e instanceof Assignment a && a.assignmentOperator() == null
+                && a.variableTarget() instanceof ParameterInfo pi && pi.methodInfo() == mi) set.add(pi);
+            return true;
+        });
+        return set;
+    }
+
+    // the node an assignment writes: a reassigned parameter's shadow, else the variable's node
+    private Object assignmentTarget(MethodInfo mi, Scope scope, Variable target) {
+        return target instanceof ParameterInfo pi && reassigned.contains(pi) ? shadow(pi) : node(mi, scope, target);
+    }
+
     private void declare(Scope scope, MethodInfo mi, Element declaration, LocalVariable lv) {
         Local local = new Local(mi, declaration, lv.simpleName());
         scope.names.put(lv.simpleName(), local);
@@ -1080,7 +1130,7 @@ public final class NullabilityPass {
     // local in scope. Markers ($_ce, $_v) and the link engine's intermediates ($__) are not nodes.
     private Object node(MethodInfo mi, Scope scope, Variable v) {
         return switch (v) {
-            case ParameterInfo pi -> pi;
+            case ParameterInfo pi -> shadowed.contains(pi) ? shadow(pi) : pi;
             case DependentVariable dv when dv.arrayVariable() instanceof FieldReference fr && Util.virtual(fr) -> {
                 // a slice of a multi-parameter container, 'map.§$$s[-2]': type argument 1 (the value)
                 Object base = node(mi, scope, fr.scopeVariable());
@@ -1235,6 +1285,9 @@ public final class NullabilityPass {
         // the body first: it declares the locals; the method's own variable data is the state at the end of the
         // body, in the body's scope
         facts.walk(mi);
+        shadowed.clear();
+        reassigned.addAll(parametersAssignedIn(mi.methodBody(), mi));
+        for (ParameterInfo pi : mi.parameters()) if (reassigned.contains(pi)) shadow(pi);
         Scope body = mi.methodBody() == null ? new Scope(null) : handleBlock(mi, mi.methodBody(), null);
         VariableData vd = VariableDataImpl.of(mi);
         if (vd != null) {
@@ -1254,6 +1307,10 @@ public final class NullabilityPass {
     private void linksOf(MethodInfo mi, Scope scope, VariableInfo vi, Statement statement) {
         Variable v = vi.variable();
         Object recipient = node(mi, scope, v);
+        // the statement assigns a reassigned parameter: the assignment's links are the shadow's, the reads' the
+        // parameter's ('value = decode(value.trim())')
+        Object assignedTo = v instanceof ParameterInfo pi && reassigned.contains(pi) && statement != null
+                            && assignsHere(statement, pi) ? shadow(pi) : recipient;
         Links links = vi.linkedVariables();
         if (recipient == null || links == null) return;
         for (Link link : links) {
@@ -1261,7 +1318,7 @@ public final class NullabilityPass {
             // is v's Content, its hidden content ('l.§$s', 'm.§$$s[-2]', 'b.t') a type argument's slot
             Object from;
             if (link.from().equals(v)) {
-                from = recipient;
+                from = link.linkNature().isIdenticalTo() || link.linkNature().isAssignedFrom() ? assignedTo : recipient;
             } else {
                 Object face = node(mi, scope, link.from());
                 from = face instanceof Content || face instanceof Arg ? face : null;
@@ -1482,6 +1539,13 @@ public final class NullabilityPass {
             if (policy.assertAtDeclaration() && statement instanceof LocalVariableCreation lvc) {
                 assertCandidates(mi, lvc, statements, index);
             }
+            // a loop that assigns a parameter: every read inside it may see the assigned value (a later iteration)
+            if (statement instanceof io.codelaser.maddi.cst.api.statement.LoopStatement) {
+                shadowed.addAll(parametersAssignedIn(statement, mi));
+            }
+            // the statement's own expression is evaluated before its sub-blocks: what they assign does not shadow it
+            // ('if (args == null) { args = …; }' tests the caller's value)
+            Set<ParameterInfo> shadowedBefore = Set.copyOf(shadowed);
             // a statement's own declarations are visible in the statement only; a local variable creation's in the
             // rest of the block
             Scope own = new Scope(scope);
@@ -1515,6 +1579,8 @@ public final class NullabilityPass {
                 }
                 handleBlock(mi, sb, blockParent);
             });
+            Set<ParameterInfo> shadowedBySubBlocks = new HashSet<>(shadowed);
+            shadowed.retainAll(shadowedBefore);
             VariableData vd = VariableDataImpl.of(statement);
             if (vd != null) vd.variableInfoStream().forEach(vi -> linksOf(mi, own, vi, statement));
             if (statement instanceof TryStatement ts) {
@@ -1551,6 +1617,9 @@ public final class NullabilityPass {
             if (statement instanceof ExplicitConstructorInvocation eci && eci.methodInfo() != null) {
                 callSite(mi, own, statement, null, eci.methodInfo(), eci.analysis(), eci.parameterExpressions());
             }
+            // from here on a read of a parameter the statement assigned is a read of the shadow
+            shadowed.addAll(shadowedBySubBlocks);
+            shadowed.addAll(parametersAssignedIn(statement, mi));
         }
         return scope;
     }
@@ -1739,7 +1808,7 @@ public final class NullabilityPass {
                 constructorCopies(mi, scope, local, lv.assignmentExpression());
             });
         } else if (statement.expression() instanceof Assignment a && a.variableTarget() != null) {
-            Object target = node(mi, scope, a.variableTarget());
+            Object target = assignmentTarget(mi, scope, a.variableTarget());
             if (a.value() instanceof NullConstant) seed(target, "assigned null in " + mi.fullyQualifiedName());
             callResult(target, a.value());
             seedCreated(target, a.value(), mi);
@@ -1768,7 +1837,7 @@ public final class NullabilityPass {
         top.visit(e -> {
             if (e instanceof Lambda) return false;
             if (e instanceof Assignment a && a != top && a.variableTarget() != null && a.assignmentOperator() == null) {
-                Object target = node(mi, scope, a.variableTarget());
+                Object target = assignmentTarget(mi, scope, a.variableTarget());
                 if (a.value() instanceof NullConstant) seed(target, "assigned null in " + mi.fullyQualifiedName());
                 callResult(target, a.value());
                 seedCreated(target, a.value(), mi);
