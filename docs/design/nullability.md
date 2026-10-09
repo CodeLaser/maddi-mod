@@ -986,3 +986,20 @@ Guava unchanged under all four policies.
   statement graph's lists. From there it reaches DomHelper's FastFixedSets and `FastFixedSetFactory.spawnEmptySet()`
   as `E?` (FastFixedSetFactory.kt:19/33). In Java a null `newstat` throws in `replaceStatement` right after that
   write, so cutting it at the call (preconditions, f7c595bd) is a decision for the user.
+
+### 2026-10-09 — a library override's parameters (Kotlin)
+
+The JDK calls an override back with what it likes. In fernflower's test fixture `DecompilerTestFixture.deleteRecursively`,
+`SimpleFileVisitor.postVisitDirectory(Path dir, IOException exc)` receives a null `exc` whenever the directory's
+iteration completes without an error. Translated as `exc: IOException`, Kotlin's entry check throws (170 failures in
+the translated tests).
+
+- **Hints (maddi).** `java.nio.file.FileVisitor` and `SimpleFileVisitor` say `postVisitDirectory`'s `exc` is
+  `@Nullable` and the other parameters are `@NotNull`: `visitFile`/`preVisitDirectory` `attrs`, `visitFileFailed`
+  `exc`. The existing `libraryNullableParameter` seed does the rest under every policy.
+- **`Policy.libraryCallbacks` (KOTLIN only).** A parameter of a real override (not a lambda) of a library method is
+  nullable unless some overridden library method declares it non-null. It is not nullable when the library
+  parameter is a type variable, where the instantiation decides (`visitFile(Path file, …)` for `T = Path`), or a
+  primitive. Seed cause: "overrides X, which does not declare it non-null". It is off for the Java policies: in
+  guava's annotations an unannotated JDK override parameter is non-null, so the oracle would count it as noise.
+  Guava is unchanged under all four policies.
