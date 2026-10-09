@@ -21,7 +21,8 @@ import java.util.Set;
 
 /**
  * The nullability pass on fernflower, without printing: every nullable verdict (top level and type arguments) with
- * its cause chain, written to {@code build/fernflower-nullability-causes.txt}. The verdict side's instrument for
+ * its cause chain, written to {@code build/fernflower-nullability-causes.txt} ({@code NULLABILITY_CORPUS} names
+ * another J2K corpus, e.g. {@code langchain4j}). The verdict side's instrument for
  * the printer's findings; the J2K ratchet itself is {@link TestJavaToKotlinFernflowerNullability}'s, run by the
  * printer's side.
  */
@@ -38,7 +39,9 @@ public class TestFernflowerNullabilityCauses {
 
     @Test
     public void test() throws Exception {
-        JavaToKotlinRatchet.Corpus corpus = JavaToKotlinRatchet.parse("fernflower");
+        // NULLABILITY_CORPUS (passed on by a --no-daemon build): another J2K corpus, e.g. langchain4j
+        String corpusName = java.util.Objects.requireNonNullElse(System.getenv("NULLABILITY_CORPUS"), "fernflower");
+        JavaToKotlinRatchet.Corpus corpus = JavaToKotlinRatchet.parse(corpusName);
         JavaInspector javaInspector = corpus.javaInspector();
         AnalysisEngineImpl engine = new AnalysisEngineImpl();
         engine.resultsLoader(javaInspector.runtime(), javaInspector.mainSources()).load(List.of(JDK_HINTS));
@@ -89,7 +92,26 @@ public class TestFernflowerNullabilityCauses {
             }
         });
         java.util.Collections.sort(lines);
-        java.nio.file.Files.write(Path.of("build/fernflower-nullability-causes.txt"), lines);
+        // CAUSES_CALLS=<method>:<callee>: in that method, each call to that callee with its argument links
+        String calls = java.util.Objects.requireNonNullElse(System.getenv("CAUSES_CALLS"), "");
+        if (calls.contains(":")) {
+            String method = calls.substring(0, calls.indexOf(':'));
+            String callee = calls.substring(calls.indexOf(':') + 1);
+            corpus.types().stream().flatMap(io.codelaser.maddi.cst.api.info.TypeInfo::recursiveSubTypeStream)
+                    .flatMap(io.codelaser.maddi.cst.api.info.TypeInfo::constructorAndMethodStream)
+                    .filter(mi -> mi.name().equals(method) && mi.methodBody() != null)
+                    .forEach(mi -> mi.methodBody().visit(e -> {
+                        if (e instanceof io.codelaser.maddi.cst.api.expression.MethodCall mc
+                            && mc.methodInfo() != null && callee.equals(mc.methodInfo().name())) {
+                            lines.add("CALL " + mc.source().compact2() + " " + mc.methodInfo().fullyQualifiedName()
+                                      + " args=" + mc.analysis().getOrNull(
+                                    io.codelaser.maddi.modification.link.impl.LinkComputerImpl.LINKED_VARIABLES_ARGUMENTS,
+                                    io.codelaser.maddi.modification.link.impl.LinkComputerImpl.ListOfLinksImpl.class));
+                        }
+                        return true;
+                    }));
+        }
+        java.nio.file.Files.write(Path.of("build/" + corpusName + "-nullability-causes.txt"), lines);
         org.junit.jupiter.api.Assertions.assertFalse(lines.isEmpty());
     }
 }
