@@ -1,6 +1,7 @@
 # TestJavaToKotlinFernflowerNullability: fernflower printed as Kotlin with NullabilityPass (NULL_MARKED) verdicts,
 # judged by kotlinc 2.4.0 (see maddi-run-openjdk's JavaToKotlinRatchet). Lower is better for printerCrashes and
-# syntaxErrors, higher for syntaxCleanFiles and compilingFiles; `types` must not move. Write a better value here in
+# syntaxErrors, higher for syntaxCleanFiles, compilingFiles, bytecodeFiles, testsPassing, testBytecodeFiles and
+# translatedTestsPassing; `types` must not move. Write a better value here in
 # the commit that earns it.
 #
 # 2026-10-06, first record, measured with field, parameter and return verdicts only (local verdicts stubbed: ws/maddi-null
@@ -58,8 +59,23 @@
 # 2026-10-08, verdict 5c817266 (a field of this dereferenced through its own field: Statement.stats non-null) on
 # devel, after the slot-tie attempts were measured and reverted (design log 35d43e01, CodeLaser/maddi-mod#21):
 # 197 files, 3 type errors; ASSERT_AT_DECLARATION 228, ASSERT_INTO_NON_NULL 302.
+# 2026-10-09, verdicts b709320e (null alternatives in array initializers, library writes through a lookup and a
+# copy passed as an argument) with maddi 428db4be8 (Java interop for the JVM back end, casts that let null through,
+# yields inside when arms, JVM records, …): 197 files, 3 type errors (ExceptionDeobfuscator compiles,
+# FastFixedSetFactory does not: maddi-mod#21). First record of the two new stages: 196 files compile to class files
+# (DomHelper, against the original FastFixedSetFactory, does not), and fernflower's own tests pass 263 of 265 with
+# them in front of the original classes (the original: 264). Failing: the Groovy test (on the original too) and
+# BulkDecompilationTest.testObfuscated (JarFile.getManifest() is null for a jar without one: a JDK hint to come).
+# 2026-10-09, and the test sources translated too (with their verdicts, and annotations): 25 of the 28 test files
+# compile to class files; with those in front, 93 of 265 tests pass. 170 fail in the translated
+# DecompilerTestFixture.deleteRecursively: postVisitDirectory(dir, exc) overrides the JDK's FileVisitor, which passes
+# a null exc, and the override's verdict is non-null.
 types	199
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	199
 compilingFiles	197
+bytecodeFiles	196
+testsPassing	263
+testBytecodeFiles	25
+translatedTestsPassing	93
