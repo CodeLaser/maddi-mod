@@ -1924,4 +1924,30 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("Set<St?[]>", byName.get("a.b.RN.unique(java.util.Set):0:setNext"),
                 "fernflower FinallyProcessor.getUniqueNext(graph, new HashSet<>(mapNext.values()))");
     }
+
+    @DisplayName("JDK hint: JarFile.getManifest() returns null for a jar without a manifest")
+    @Test
+    public void jarManifest() {
+        NullabilityPass.Report report = run("a.b.JM", """
+                package a.b;
+                import java.io.IOException;
+                import java.util.jar.JarFile;
+                import java.util.jar.Manifest;
+                class JM {
+                    static class Unit {
+                        private Manifest manifest;
+                        void setManifest(Manifest manifest) { this.manifest = manifest; }
+                    }
+                    static void addSpace(JarFile archive, Unit unit) throws IOException {
+                        unit.setManifest(archive.getManifest());
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        System.out.println(explain(report));
+        Map<String, String> byName = report.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+        assertEquals("Manifest?", byName.get("a.b.JM.Unit.setManifest(java.util.jar.Manifest):0:manifest"),
+                "fernflower StructContext.addSpace -> ContextUnit.setManifest");
+        assertEquals("Manifest?", byName.get("a.b.JM.Unit.manifest"));
+    }
 }
