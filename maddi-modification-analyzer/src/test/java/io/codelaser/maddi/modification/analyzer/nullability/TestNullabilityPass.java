@@ -1869,4 +1869,59 @@ public class TestNullabilityPass extends CommonTest {
         // alias.block: 'holder.next' is the same value
         assertEquals("[key.from, key.to, next.block]", unobserved.toString());
     }
+
+    @Language("java")
+    private static final String RUNTIME_NULLS = """
+            package a.b;
+            import java.util.*;
+            class RN {
+                static class St { int id; }
+                private final Map<Integer, List<String[]>> ranges = new HashMap<>();
+                void saveEdge(int id, boolean monitor, boolean cont) {
+                    ranges.computeIfAbsent(id, k -> new ArrayList<>())
+                            .add(new String[]{"x", monitor ? "1" : null, cont ? "1" : null});
+                }
+                static boolean choice(St head, List<? super St> lst, int n) {
+                    St post = null;
+                    if (n > 2) post = new St();
+                    lst.add(head);
+                    lst.remove(post);
+                    lst.add(0, post);
+                    return true;
+                }
+                static void use(St head) {
+                    List<St> lst = new ArrayList<>();
+                    choice(head, lst, 3);
+                }
+                static int next(St sample, List<St> successors, boolean last) {
+                    Map<String, St[]> mapNext = new HashMap<>();
+                    for (St successor : successors) {
+                        mapNext.put(sample.id + "#" + successor.id, new St[]{sample, successor, last ? successor : null});
+                    }
+                    return unique(new HashSet<>(mapNext.values()));
+                }
+                static int unique(Set<St[]> setNext) {
+                    int n = 0;
+                    for (St[] arr : setNext) if (arr[2] != null) n++;
+                    return n;
+                }
+            }
+            """;
+
+    @DisplayName("nulls Kotlin must carry: a null alternative in an array initializer; a null added to a '? super' list")
+    @Test
+    public void runtimeNulls() {
+        NullabilityPass.Report report = run("a.b.RN", RUNTIME_NULLS, NullabilityPass.Policy.KOTLIN);
+        System.out.println(explain(report));
+        Map<String, String> byName = report.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+        assertEquals("Map<Integer, List<String?[]>>", byName.get("a.b.RN.ranges"),
+                "fernflower FlattenStatementsHelper.saveEdge");
+        assertEquals("List<St?>", byName.get("a.b.RN.choice(a.b.RN.St,java.util.List,int):1:lst"),
+                "fernflower DecHelper.isChoiceStatement");
+        assertTrue(locals(report).contains("next.mapNext: Map<String, St?[]>"),
+                "fernflower FinallyProcessor.compareSubGraphsEx: " + locals(report));
+        assertEquals("Set<St?[]>", byName.get("a.b.RN.unique(java.util.Set):0:setNext"),
+                "fernflower FinallyProcessor.getUniqueNext(graph, new HashSet<>(mapNext.values()))");
+    }
 }

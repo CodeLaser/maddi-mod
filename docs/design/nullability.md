@@ -959,3 +959,30 @@ So in fernflower's ControlFlowGraph:337, `from = instrBlocks.get(a); to =
 instrBlocks.get(b); … from.id`, `from ∈ instrBlocks` and `to ∈ instrBlocks` relate neither to the other. ControlFlowGraph:351
 (`protectedRange.add(block)` before `block.addSuccessorException`) refers to it, so it stays a behaviour change.
 No verdict changes.
+
+### 2026-10-08 — nulls the Kotlin translation must carry (runtime check)
+
+The printer session now runs fernflower's own test suite against the compiled Kotlin translation. Three verdicts
+asserted (`!!`) where Java carries a null on, so the translation threw an NPE:
+- **A null alternative in an array initializer.** `new String[]{…, monitor ? "1" : null}`
+  (FlattenStatementsHelper.saveEdge) and `new BasicBlock[]{…, last ? successor : null}`
+  (FinallyProcessor.compareSubGraphsEx). `seedInitializer` only saw a bare `null` element; it now walks each
+  element's alternatives.
+- **A library write through a lookup.** `ranges.computeIfAbsent(id, k -> new ArrayList<>()).add(array)` writes
+  the map's value. A lookup is now a write receiver, but only for a library callee. Through an analysed generic
+  class, the same receiver made fernflower's FastFixedSet type variables disagree (32f0a688, reverted).
+- `DecHelper.isChoiceStatement`'s `List<? super Statement>` was already nullable in the pass: `post = null`
+  reaches `lst.add(0, post)`.
+- `JarFile.getManifest()` (nullable) has no JDK hint yet, so `ContextUnit.setManifest` stays non-null.
+
+Guava unchanged under all four policies.
+- **A library copy as an argument.** `getUniqueNext(graph, new HashSet<>(mapNext.values()))` now copies the
+  map's values into the parameter's slots. `slotOf` reads a library view of a generic receiver
+  (`values()`: `Collection<V>`, slot 0 is the map's V), and a library copy constructor passed as the argument
+  ties its argument's slots to the parameter's. Without that, mapNext's nullable components (above) stopped at the
+  call and FinallyProcessor.kt:358 failed. Guava: NULL_MARKED unchanged; OPEN* -1 agree / +1 undecided.
+- **Still open:** with 06fc1e65 the write `mapStates.get(type).set(index, value)` in `Statement.changeEdgeNode` is
+  seen. It carries `IfStatement.ifstat`'s null (through `replaceStatement(first, firstif.getIfstat())`) into the
+  statement graph's lists. From there it reaches DomHelper's FastFixedSets and `FastFixedSetFactory.spawnEmptySet()`
+  as `E?` (FastFixedSetFactory.kt:19/33). In Java a null `newstat` throws in `replaceStatement` right after that
+  write, so cutting it at the call (preconditions, f7c595bd) is a decision for the user.
