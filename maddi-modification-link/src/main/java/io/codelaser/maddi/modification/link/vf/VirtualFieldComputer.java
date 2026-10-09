@@ -1,5 +1,7 @@
 package io.codelaser.maddi.modification.link.vf;
 
+import io.codelaser.maddi.modification.common.FunctionTypes;
+
 import io.codelaser.maddi.modification.common.AnalysisHelper;
 import io.codelaser.maddi.modification.link.impl.translate.VariableTranslationMap;
 import io.codelaser.maddi.modification.prepwork.Util;
@@ -107,7 +109,7 @@ public class VirtualFieldComputer {
                             || typeInfo.isPrimitiveExcludingVoid()
                             || typeInfo.isVoid()
                             || Util.isContainerType(typeInfo)
-                            || typeInfo.packageName().equals("java.util.function"))) {
+                            || FunctionTypes.isStandardFunctionalInterface(typeInfo))) {
             return NONE_NONE;
         }
         if (pt.parameters().isEmpty() && arrays == 0) {

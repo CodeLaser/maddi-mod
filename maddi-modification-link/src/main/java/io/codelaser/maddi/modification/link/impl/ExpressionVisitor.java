@@ -1,5 +1,7 @@
 package io.codelaser.maddi.modification.link.impl;
 
+import io.codelaser.maddi.modification.common.FunctionTypes;
+
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 
 import io.codelaser.maddi.modification.common.util.TolerantWrite;
@@ -788,7 +790,7 @@ public record ExpressionVisitor(Runtime runtime,
         MethodLinkedVariables mlv = mlv0.removeSomeValue();
         // translate conditionally wrt concrete type, evaluated object
         MethodLinkedVariables mlvTranslated2;
-        if (mc.methodInfo().isSAMOfStandardFunctionalInterface()) {
+        if (FunctionTypes.isSAMOfStandardFunctionalInterface(mc.methodInfo())) {
             mlvTranslated2 = mlv; // no point doing anything
         } else if (objectPrimary != null) {
             This thisVar = runtime.newThis(mc.methodInfo().typeInfo().asParameterizedType());
@@ -855,7 +857,7 @@ public record ExpressionVisitor(Runtime runtime,
         // rehomed this->objectPrimary above, so a face that still sits on a recursively-this scope chain
         // is an own field of THIS method's receiver ('inc()' -> this.i, 'd.incJ()' -> this.d.j). Faces
         // rehomed onto a parameter or local are not own fields and are dropped.
-        if (objectPrimary != null && !mc.methodInfo().isSAMOfStandardFunctionalInterface()) {
+        if (objectPrimary != null && !FunctionTypes.isSAMOfStandardFunctionalInterface(mc.methodInfo())) {
             for (Variable av : mlvTranslated2.assigned()) {
                 if (av instanceof FieldReference fr && fr.scopeIsRecursivelyThis()) {
                     sourceMethodComputer.assignedInCallees.add(av);

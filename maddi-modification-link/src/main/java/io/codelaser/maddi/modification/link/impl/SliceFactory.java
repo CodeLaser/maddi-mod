@@ -1,5 +1,7 @@
 package io.codelaser.maddi.modification.link.impl;
 
+import io.codelaser.maddi.modification.common.FunctionTypes;
+
 import io.codelaser.maddi.cst.api.expression.VariableExpression;
 import io.codelaser.maddi.cst.api.info.FieldInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
@@ -24,7 +26,7 @@ public class SliceFactory {
     public static DependentVariable create(Runtime runtime, Variable base, int negativeIndex, FieldInfo field) {
         assert negativeIndex <= -1;
         VariableExpression arrayExpression = runtime.newVariableExpression(base);
-        assert !base.parameterizedType().isStandardFunctionalInterface();
+        assert !FunctionTypes.isStandardFunctionalInterface(base.parameterizedType());
         ParameterizedType sliceType = field.type().copyWithOneMoreArray();
         return runtime.newDependentVariable(arrayExpression, runtime.newInt(negativeIndex), sliceType);
     }

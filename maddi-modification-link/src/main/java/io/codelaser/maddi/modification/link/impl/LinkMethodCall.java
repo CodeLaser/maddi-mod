@@ -1,5 +1,7 @@
 package io.codelaser.maddi.modification.link.impl;
 
+import io.codelaser.maddi.modification.common.FunctionTypes;
+
 import io.codelaser.maddi.modification.link.LinkComputer;
 import io.codelaser.maddi.modification.link.impl.localvar.AppliedFunctionalInterfaceVariable;
 import io.codelaser.maddi.modification.link.impl.localvar.FunctionalInterfaceVariable;
@@ -140,7 +142,7 @@ public record LinkMethodCall(JavaInspector javaInspector,
         Links concreteReturnValue;
         Set<Variable> extraModified;
         // What does the RETURN VALUE of this call link to? Three leaves:
-        if (methodInfo.isSAMOfStandardFunctionalInterface()) {
+        if (FunctionTypes.isSAMOfStandardFunctionalInterface(methodInfo)) {
             assert methodInfo == methodInfo.typeInfo().singleAbstractMethod();
             // LEAF 1 — the call IS the SAM of a lambda held by a parameter: 'apply'/'accept'/'get' invoked on a
             // Function/Consumer/Supplier argument. The result links to a marker (AppliedFunctionalInterfaceVariable)

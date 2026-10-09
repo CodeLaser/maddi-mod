@@ -1,5 +1,7 @@
 package io.codelaser.maddi.modification.link.impl;
 
+import io.codelaser.maddi.modification.common.FunctionTypes;
+
 import io.codelaser.maddi.modification.link.LinkComputer;
 import io.codelaser.maddi.modification.link.impl.linkgraph.FollowGraph;
 import io.codelaser.maddi.modification.link.impl.linkgraph.Graph;
@@ -60,7 +62,7 @@ public record LinkAppliedFunctionalInterface(JavaInspector javaInspector,
         // concrete lambda bound to that parameter is visible here. Three leaves, on the parameter's declared type:
         List<Links> list = paramProvider.apply(applied.sourceOfFunctionalInterface());
         ParameterizedType functionalType;
-        if (!applied.sourceOfFunctionalInterface().parameterizedType().isStandardFunctionalInterface()) {
+        if (!FunctionTypes.isStandardFunctionalInterface(applied.sourceOfFunctionalInterface().parameterizedType())) {
             // LEAF — a custom (non-standard) functional interface: search the parameter's links for the concrete
             // FunctionalInterfaceVariable and expand it (also collecting its modifications). See TestModificationFunctional,7,8.
             SearchResult sr = searchAndExpand(list);
