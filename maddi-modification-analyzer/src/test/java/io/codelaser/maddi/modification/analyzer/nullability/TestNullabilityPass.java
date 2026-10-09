@@ -2087,4 +2087,55 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("Set<Case>", byName.get("a.b.SP.same(java.util.List)"));
         assertEquals("Map<Integer, Exprent?>", byName.get("a.b.SP.byEdge(java.util.List)"));
     }
+
+    @DisplayName("a parameter of a library override is nullable for Kotlin unless the library declares it non-null")
+    @Test
+    public void libraryOverrideParameter() {
+        String source = """
+                package a.b;
+                import java.io.IOException;
+                import java.nio.file.*;
+                import java.nio.file.attribute.BasicFileAttributes;
+                class LO {
+                    static void deleteRecursively(Path dir) throws IOException {
+                        Files.walkFileTree(dir, new SimpleFileVisitor<>() {
+                            @Override
+                            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                                Files.delete(file);
+                                return FileVisitResult.CONTINUE;
+                            }
+                            @Override
+                            public FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException {
+                                Files.delete(dir);
+                                return FileVisitResult.CONTINUE;
+                            }
+                        });
+                    }
+                    static class Handler implements Thread.UncaughtExceptionHandler {
+                        @Override
+                        public void uncaughtException(Thread t, Throwable e) { }
+                    }
+                }
+                """;
+        NullabilityPass.Report kotlin = run("a.b.LO", source, NullabilityPass.Policy.KOTLIN);
+        System.out.println(explain(kotlin));
+        Map<String, String> k = kotlin.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+        // the JDK hint: exc is null when the directory's iteration completed without an error
+        assertEquals("IOException?", k.get("a.b.LO.$0.postVisitDirectory(java.nio.file.Path,java.io.IOException):1:exc"),
+                "fernflower DecompilerTestFixture.deleteRecursively");
+        // T is Path here: a type-variable parameter follows the instantiation
+        assertEquals("Path", k.get("a.b.LO.$0.visitFile(java.nio.file.Path,java.nio.file.attribute.BasicFileAttributes):0:file"));
+        // hinted non-null: the JDK passes the file's attributes
+        assertEquals("BasicFileAttributes", k.get("a.b.LO.$0.visitFile(java.nio.file.Path,java.nio.file.attribute.BasicFileAttributes):1:attrs"));
+        // no hint: the JVM calls it back with what it likes
+        assertEquals("Throwable?", k.get("a.b.LO.Handler.uncaughtException(Thread,Throwable):1:e"));
+
+        NullabilityPass.Report java = run("a.b.LJ", source.replace("class LO", "class LJ"),
+                NullabilityPass.Policy.NULL_MARKED);
+        Map<String, String> j = java.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+        assertEquals("IOException?", j.get("a.b.LJ.$0.postVisitDirectory(java.nio.file.Path,java.io.IOException):1:exc"));
+        assertEquals("Throwable", j.get("a.b.LJ.Handler.uncaughtException(Thread,Throwable):1:e"));
+    }
 }

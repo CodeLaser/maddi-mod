@@ -153,30 +153,36 @@ public final class NullabilityPass {
      *                  forward, from the dereference to the declaration. Off for Java annotations.
      */
     public record Policy(NullableState unreached, boolean nullTests, boolean contracts, World world,
-                         boolean assertContentWrites, boolean callResults, boolean assertAtDeclaration) {
+                         boolean assertContentWrites, boolean callResults, boolean assertAtDeclaration,
+                         boolean libraryCallbacks) {
         public static final Policy NULL_MARKED = new Policy(NullableState.NONNULL, true, true, World.CLOSED, false,
-                false, false);
+                false, false, false);
         public static final Policy NULL_MARKED_FLOW_ONLY = new Policy(NullableState.NONNULL, false, true,
-                World.CLOSED, false, false, false);
+                World.CLOSED, false, false, false, false);
         public static final Policy CAUTIOUS = new Policy(NullableState.UNSPECIFIED, true, true, World.CLOSED, false,
-                false, false);
+                false, false, false);
         /**
          * {@link #NULL_MARKED} for the Java→Kotlin translation: content writes are asserted, and a variable assigned an
-         * analysed method's nullable result is nullable (Kotlin will not compile it otherwise).
+         * analysed method's nullable result is nullable (Kotlin will not compile it otherwise), and a parameter of an
+         * override of a library method is nullable unless the library declares it non-null (the library calls it back
+         * with what it likes; Kotlin checks a non-null parameter on entry).
          */
         public static final Policy KOTLIN = new Policy(NullableState.NONNULL, true, true, World.CLOSED, true, true,
-                true);
+                true, true);
 
         public Policy withoutContracts() {
-            return new Policy(unreached, nullTests, false, world, assertContentWrites, callResults, assertAtDeclaration);
+            return new Policy(unreached, nullTests, false, world, assertContentWrites, callResults, assertAtDeclaration,
+                    libraryCallbacks);
         }
 
         public Policy withWorld(World world) {
-            return new Policy(unreached, nullTests, contracts, world, assertContentWrites, callResults, assertAtDeclaration);
+            return new Policy(unreached, nullTests, contracts, world, assertContentWrites, callResults, assertAtDeclaration,
+                    libraryCallbacks);
         }
 
         public Policy withAssertContentWrites(boolean assertContentWrites) {
-            return new Policy(unreached, nullTests, contracts, world, assertContentWrites, callResults, assertAtDeclaration);
+            return new Policy(unreached, nullTests, contracts, world, assertContentWrites, callResults, assertAtDeclaration,
+                    libraryCallbacks);
         }
     }
 
@@ -631,6 +637,25 @@ public final class NullabilityPass {
                 .filter(m -> !analysed.contains(m) && index < m.parameters().size())
                 .filter(m -> stateOf(m.parameters().get(index), PropertyImpl.NULLABILITY_PARAMETER)
                              == NullableState.NULLABLE)
+                .map(MethodInfo::fullyQualifiedName).findFirst().orElse(null);
+    }
+
+    /*
+     A library method mi overrides (a real override, not a lambda's functional method) whose parameter 'index' the
+     hints leave unspecified: the library may call the override back with null (fernflower's
+     SimpleFileVisitor.postVisitDirectory before its hint). Not a type-variable parameter (the instantiation decides),
+     a primitive, or one any overridden library method declares non-null.
+     */
+    private String libraryUnhintedParameter(MethodInfo mi, int index) {
+        if (libraryNonNullParameter(mi, index)) return null;
+        return mi.overrides().stream()
+                .filter(m -> !analysed.contains(m) && index < m.parameters().size())
+                .filter(m -> {
+                    ParameterizedType type = m.parameters().get(index).parameterizedType();
+                    return !isTypeVariable(type) && !(type.isPrimitiveExcludingVoid() && type.arrays() == 0)
+                           && stateOf(m.parameters().get(index), PropertyImpl.NULLABILITY_PARAMETER)
+                              == NullableState.UNSPECIFIED;
+                })
                 .map(MethodInfo::fullyQualifiedName).findFirst().orElse(null);
     }
 
@@ -1193,7 +1218,12 @@ public final class NullabilityPass {
             if (lib != null && !mi.returnType().isVoid()) seed(mi, "overrides " + lib);
             for (ParameterInfo pi : mi.parameters()) {
                 String libParam = libraryNullableParameter(mi, pi.index());
-                if (libParam != null) seed(pi, "overrides " + libParam);
+                if (libParam != null) {
+                    seed(pi, "overrides " + libParam);
+                } else if (policy.libraryCallbacks()) {
+                    String unhinted = libraryUnhintedParameter(mi, pi.index());
+                    if (unhinted != null) seed(pi, "overrides " + unhinted + ", which does not declare it non-null");
+                }
             }
         }
         if (mi.analysis().getOrDefault(PropertyImpl.DEGRADED_ANALYSIS_METHOD,
