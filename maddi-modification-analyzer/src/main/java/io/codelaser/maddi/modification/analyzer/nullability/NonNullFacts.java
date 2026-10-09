@@ -23,6 +23,8 @@ import io.codelaser.maddi.cst.api.variable.DependentVariable;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.cst.api.variable.LocalVariable;
 import io.codelaser.maddi.cst.api.variable.Variable;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.type.ParameterizedType;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -180,7 +182,9 @@ public final class NonNullFacts {
             // the condition is evaluated again after the body: what the loop assigns is not known at its start
             // ('while (node.parent != null) { node = node.parent; }')
             Set<Variable> stableIn = new HashSet<>(in);
-            stableIn.removeAll(assignedIn(statement));
+            Set<Variable> assignedInLoop = assignedIn(statement);
+            stableIn.removeAll(assignedInLoop);
+            stableIn.removeIf(v -> dependsOnAssigned(v, assignedInLoop));
             if (containsCall(statement)) stableIn.removeIf(NonNullFacts::isNonFinalField);
             before.put(statement, Set.copyOf(stableIn));
             return loop(statement, stableIn);
@@ -192,6 +196,7 @@ public final class NonNullFacts {
                 lvc.localVariableStream().forEach(lv -> {
                     effects(lv.assignmentExpression(), facts);
                     facts.remove(lv);
+                    facts.removeIf(v -> dependsOnAssigned(v, Set.of(lv)));
                     if (nonNull(lv.assignmentExpression(), facts)) facts.add(lv);
                 });
                 return new Out(facts, true);
@@ -252,6 +257,7 @@ public final class NonNullFacts {
                 Set<Variable> assigned = assignedIn(statement);
                 Set<Variable> stable = new HashSet<>(facts);
                 stable.removeAll(assigned);
+                stable.removeIf(v -> dependsOnAssigned(v, assigned));
                 if (containsCall(statement)) stable.removeIf(NonNullFacts::isNonFinalField);
                 statement.subBlockStream().forEach(sb -> {
                     if (statement instanceof SwitchStatementOldStyle) {
@@ -273,6 +279,10 @@ public final class NonNullFacts {
         statement.subBlockStream().forEach(sb -> {
             Set<Variable> blockIn = new HashSet<>(facts);
             if (statement.expression() != null) blockIn.addAll(whenTrue(statement.expression()));
+            if (statement instanceof ForEachStatement fe) {
+                Variable present = keySetLoop(fe);
+                if (present != null) blockIn.add(present);
+            }
             block(sb, blockIn);
         });
         // the condition is evaluated on every way out (but the last evaluation's 'false' is not known here)
@@ -323,9 +333,89 @@ public final class NonNullFacts {
         return v instanceof FieldReference fr && !fr.fieldInfo().isFinal();
     }
 
-    // a call may change any non-final field
-    private static void callMade(Set<Variable> facts) {
-        facts.removeIf(v -> isNonFinalField(v) || v instanceof DependentVariable);
+    // ------------------------------------------------------------------ key presence (CodeLaser/maddi-mod#22 gap 1)
+
+    /*
+     'map[k]', a synthetic element variable: the key k is PRESENT in map, so 'map.get(k)' / 'map.remove(k)' is not
+     the absent key's null (what the map holds for k still flows through the map's value slot). Established by
+     'map.containsKey(k)' true, by 'map.put(k, v)' with v non-null, and inside 'for (K k : map.keySet())'. Forgotten
+     when map or k is assigned, and at a call that may change the map: one on the map itself other than a read, or
+     one handed the map. Java only: Kotlin does not smart-cast a lookup.
+     */
+    private static final Set<String> MAP_READS = Set.of("get", "getOrDefault", "containsKey", "containsValue",
+            "size", "isEmpty", "keySet", "values", "entrySet", "forEach", "equals", "hashCode", "toString");
+
+    /** Is the key of {@code lookup} ({@code map.get(k)}, {@code map.remove(k)}) known present when it is called? */
+    public boolean keyPresentWhenCalled(MethodCall lookup) {
+        if (lookup.methodInfo() == null
+            || !("get".equals(lookup.methodInfo().name()) || "remove".equals(lookup.methodInfo().name()))) {
+            return false;
+        }
+        Variable present = keyPresence(lookup, null);
+        return present != null && whenCalled.getOrDefault(lookup, Set.of()).contains(present);
+    }
+
+    // the key-presence fact of a call on a map variable whose first argument is the key, or null
+    private Variable keyPresence(MethodCall mc, String name) {
+        if (kotlinSmartCasts || mc.methodInfo() == null || mc.object() == null || mc.parameterExpressions().isEmpty()
+            || name != null && !name.equals(mc.methodInfo().name())) return null;
+        Variable map = trackableVariable(mc.object());
+        Variable key = trackableVariable(mc.parameterExpressions().getFirst());
+        if (map == null || key == null || !isMap(mc.object().parameterizedType())) return null;
+        return keyPresence(map, key, mc.object().parameterizedType());
+    }
+
+    // 'for (K k : map.keySet())': k is present in map throughout the body
+    private Variable keySetLoop(ForEachStatement fe) {
+        if (kotlinSmartCasts || !(unwrap(fe.expression()) instanceof MethodCall mc) || mc.methodInfo() == null
+            || !"keySet".equals(mc.methodInfo().name()) || mc.object() == null) return null;
+        Variable map = trackableVariable(mc.object());
+        LocalVariable k = fe.initializer().localVariable();
+        if (map == null || k == null || !isMap(mc.object().parameterizedType())) return null;
+        return keyPresence(map, k, mc.object().parameterizedType());
+    }
+
+    private Variable trackableVariable(Expression e) {
+        return unwrap(e) instanceof VariableExpression ve && trackable(ve.variable()) ? ve.variable() : null;
+    }
+
+    private static boolean isMap(ParameterizedType pt) {
+        TypeInfo ti = pt == null || pt.arrays() > 0 ? null : pt.typeInfo();
+        if (ti == null) return false;
+        return "java.util.Map".equals(ti.fullyQualifiedName())
+               || ti.superTypesExcludingJavaLangObject().stream()
+                       .anyMatch(t -> "java.util.Map".equals(t.fullyQualifiedName()));
+    }
+
+    private static Variable keyPresence(Variable map, Variable key, ParameterizedType mapType) {
+        ParameterizedType valueType = mapType.parameters().size() == 2 ? mapType.parameters().get(1) : mapType;
+        return new KeyPresence(map, key, valueType);
+    }
+
+    // an element or key-presence fact of a variable that is assigned
+    private static boolean dependsOnAssigned(Variable v, Set<Variable> assigned) {
+        return v instanceof DependentVariable dv
+               && (dv.arrayVariable() != null && assigned.contains(dv.arrayVariable())
+                   || dv.indexVariable() != null && assigned.contains(dv.indexVariable()))
+               || v instanceof KeyPresence kp && (assigned.contains(kp.map()) || assigned.contains(kp.key()));
+    }
+
+    // a call may change any non-final field and the elements of any array; a map's keys stay present unless the
+    // call is on the map itself (other than a read) or is handed the map
+    private static void callMade(Set<Variable> facts, Expression call) {
+        Variable receiver = call instanceof MethodCall mc && mc.object() != null
+                            && unwrap(mc.object()) instanceof VariableExpression ve ? ve.variable() : null;
+        boolean read = call instanceof MethodCall mc && mc.methodInfo() != null
+                       && MAP_READS.contains(mc.methodInfo().name());
+        List<Expression> arguments = call instanceof MethodCall mc ? mc.parameterExpressions()
+                : call instanceof ConstructorCall cc ? cc.parameterExpressions() : List.of();
+        facts.removeIf(v -> isNonFinalField(v) || v instanceof DependentVariable
+                            || v instanceof KeyPresence kp && touches(kp.map(), receiver, read, arguments));
+    }
+
+    private static boolean touches(Variable map, Variable receiver, boolean read, List<Expression> arguments) {
+        if (map.equals(receiver) && !read) return true;
+        return arguments.stream().anyMatch(a -> unwrap(a) instanceof VariableExpression ve && map.equals(ve.variable()));
     }
 
     // ------------------------------------------------------------------ conditions
@@ -369,7 +459,11 @@ public final class NonNullFacts {
             case Negation n -> set.addAll(whenFalse(n.expression()));
             case InstanceOf io when unwrap(io.expression()) instanceof VariableExpression ve
                                     && trackable(ve.variable()) -> set.add(ve.variable());
-            case MethodCall mc -> set.addAll(predicated(mc, NullPredicates.When.FALSE_IF_NULL));
+            case MethodCall mc -> {
+                set.addAll(predicated(mc, NullPredicates.When.FALSE_IF_NULL));
+                Variable present = keyPresence(mc, "containsKey");
+                if (present != null) set.add(present);
+            }
             default -> {
             }
         }
@@ -517,9 +611,8 @@ public final class NonNullFacts {
                         record(a.target(), facts);
                         dereference(fr.scope(), facts);
                     }
-                    // a new array: what was known of its elements no longer holds
-                    facts.removeIf(v -> v instanceof DependentVariable dv && target != null
-                                        && target.equals(dv.arrayVariable()));
+                    // a new array: what was known of its elements no longer holds; a new map or key: its presence
+                    if (target != null) facts.removeIf(v -> dependsOnAssigned(v, Set.of(target)));
                     if (trackable(target)) {
                         boolean nonNull = a.assignmentOperator() == null && nonNull(a.value(), facts);
                         facts.remove(target);
@@ -535,7 +628,12 @@ public final class NonNullFacts {
                     if (mc.methodInfo() != null && !mc.methodInfo().isStatic()) dereference(mc.object(), facts);
                     whenCalled.put(mc, Set.copyOf(facts));
                     if (mc.methodInfo() != null) demanded(mc.methodInfo(), arguments, facts);
-                    callMade(facts);
+                    callMade(facts, mc);
+                    // 'map.put(k, v)' with v non-null: k is present from here on
+                    if (arguments.size() == 2 && nonNull(arguments.get(1), facts)) {
+                        Variable present = keyPresence(mc, "put");
+                        if (present != null) facts.add(present);
+                    }
                     return false;
                 }
                 case ConstructorCall cc -> {
@@ -543,7 +641,7 @@ public final class NonNullFacts {
                     for (Expression argument : cc.parameterExpressions()) effects(argument, facts);
                     whenCalled.put(cc, Set.copyOf(facts));
                     if (cc.constructor() != null) demanded(cc.constructor(), cc.parameterExpressions(), facts);
-                    callMade(facts);
+                    callMade(facts, cc);
                     return false;
                 }
                 case VariableExpression ve -> {
