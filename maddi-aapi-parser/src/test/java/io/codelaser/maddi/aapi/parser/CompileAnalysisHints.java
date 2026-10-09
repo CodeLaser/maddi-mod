@@ -133,6 +133,15 @@ public class CompileAnalysisHints {
         // the archive covers java.desktop (swing/awt) and java.net.http, which the lean default omits
         AnalysisHintsCompiler compiler = new AnalysisHintsCompiler(
                 javaInspectorFactory("java.desktop", "java.net.http"));
+        // Every library but the jdk itself is compiled with the committed jdk results preloaded (CodeLaser/maddi-mod#7): the
+        // defaults the compiler writes for an UNCONTRACTED member of a shadowed type -- stamped defaultsAnalyzer,
+        // never recomputed at run time -- otherwise see String, CharSequence and the collections as mutable, and a
+        // sibling of the first contract in a type ships its parameters as modified. Found on libs/kotlin
+        // (removeSurrounding's CharSequence); libs/test, libs/log and the side-loaded libraries took the same
+        // path until 2026-10-09.
+        List<String> jdkPreload = List.of(RESULTS_BASE_DIR.resolve(JDK_LIBRARY).toString());
+        AnalysisHintsCompiler compilerWithJdk = new AnalysisHintsCompiler(
+                javaInspectorFactory("java.desktop", "java.net.http"), null, jdkPreload);
         for (String library : LIBRARIES) {
             if (!includeJdk && JDK_LIBRARY.equals(library)) continue;
             if (KOTLIN_LIBRARY.equals(library)) {
@@ -149,10 +158,10 @@ public class CompileAnalysisHints {
                 // UNCONTRACTED member of a shadowed part class see String and CharSequence as mutable (see the
                 // AnalysisHintsCompiler constructor). The committed ones, not resultsBase's: a test compiling into
                 // a temporary directory without the jdk must see the same defaults as the committed build.
-                compile(new AnalysisHintsCompiler(kotlinJavaInspectorFactory(), null,
-                        List.of(RESULTS_BASE_DIR.resolve(JDK_LIBRARY).toString())), library, resultsBase);
+                compile(new AnalysisHintsCompiler(kotlinJavaInspectorFactory(), null, jdkPreload), library,
+                        resultsBase);
             } else {
-                compile(compiler, library, resultsBase);
+                compile(JDK_LIBRARY.equals(library) ? compiler : compilerWithJdk, library, resultsBase);
             }
         }
         for (String library : SIDE_LOADED_LIBRARIES) {
@@ -162,18 +171,20 @@ public class CompileAnalysisHints {
                 // vavr-match too: io.vavr.Patterns is annotated with io.vavr.match.annotation.Patterns, and without
                 // that class file a stub is created and Patterns' $Cons/$Tuple2/... lose their verdicts
                 compile(new AnalysisHintsCompiler(libraryJavaInspectorFactory("io.vavr.",
-                        io.vavr.Value.class, io.vavr.match.annotation.Patterns.class)), library, resultsBase);
+                        io.vavr.Value.class, io.vavr.match.annotation.Patterns.class), null, jdkPreload), library,
+                        resultsBase);
             } else if (ECLIPSE_COLLECTIONS_LIBRARY.equals(library)) {
                 // the API jar AND the implementation jar: the hints cover both
                 compile(new AnalysisHintsCompiler(libraryJavaInspectorFactory("org.eclipse.collections.",
                         org.eclipse.collections.api.RichIterable.class,
-                        org.eclipse.collections.impl.factory.Lists.class)), library, resultsBase);
+                        org.eclipse.collections.impl.factory.Lists.class), null, jdkPreload), library, resultsBase);
             } else if (GUAVA_LIBRARY.equals(library)) {
                 // failureaccess too: guava's class files reference InternalFutureFailureAccess, a stub would eat
                 // the util.concurrent verdicts the collect hints' signatures reach
                 compile(new AnalysisHintsCompiler(libraryJavaInspectorFactory("com.google.common.",
                         com.google.common.collect.ImmutableList.class,
-                        com.google.common.util.concurrent.internal.InternalFutureFailureAccess.class)), library, resultsBase);
+                        com.google.common.util.concurrent.internal.InternalFutureFailureAccess.class), null, jdkPreload),
+                        library, resultsBase);
             } else {
                 throw new UnsupportedOperationException("No inspector factory for side-loaded " + library);
             }

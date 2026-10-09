@@ -265,7 +265,18 @@ public class TestShadowCloneBench extends CommonTest {
         // parameter now reaches it through a local re-assigned inside a loop's branch (`curOutDir = outputDir;
         // while (…) { if (dir) { curOutDir = new File(curOutDir, n); curOutDir.mkdirs(); continue; } … }`,
         // Function13420786/14877116/16000974/17499276), a link the fork/join now produces.
-        org.junit.jupiter.api.Assertions.assertEquals(282, totalRev,
+        // ⭐ Re-baselined 2026-10-09 for CodeLaser/maddi-mod#7: libs/test and libs/log (and the side-loaded libraries) are
+        // compiled with the committed jdk results preloaded, as libs/kotlin was since 1272c2146, so the defaults of
+        // their UNCONTRACTED members see String, CharSequence and the collections as immutable/containers. A/B on
+        // this corpus, same 9,319 types, hints reverted and re-applied around one run each:
+        //     divergences 712 -> 706   {unmodifiedField 26 -> 23, unmodifiedParameter 679 -> 676}   {propagated 688 -> 685, seed 24 -> 21}
+        //     reverse      282 -> 279   (3 closed, 0 opened)
+        // Every mover is a JUnit shape (libs/test): the three seeds are `expected`/`expectedList` fields handed to
+        // an assertion by a test case's `$N.execute()` (ArrayList_AddAt, ArrayList_RetainAll, ArrayList_RetainAll_Copy),
+        // with their constructor parameters propagated; the three closed reverse are `testNativeVersion()`-style
+        // nonModifyingMethod verdicts (Map_Compute_RV, Map_ComputeIfPresent_RV, Map_Merge_RV). The assertion's
+        // parameters now default to unmodified, as the runtime default would have given them.
+        org.junit.jupiter.api.Assertions.assertEquals(279, totalRev,
                 "reverse divergences are expected since design A (110695ece) retired the "
                 + "walkable-summary seed channel; re-baseline deliberately, and reclassify");
         // Re-baselined 2026-09-22 for the RECEIVER-DISCLAIMER rule (@IgnoreModifications on a parameter now
@@ -280,9 +291,9 @@ public class TestShadowCloneBench extends CommonTest {
         // mirror was found in the first place.
         // Both fixes above apply together, measured on this corpus with both present.
         org.junit.jupiter.api.Assertions.assertEquals(
-                Map.of("nonModifyingMethod", 7, "unmodifiedField", 26, "unmodifiedParameter", 679),
+                Map.of("nonModifyingMethod", 7, "unmodifiedField", 23, "unmodifiedParameter", 676),
                 byProperty);
-        org.junit.jupiter.api.Assertions.assertEquals(Map.of("propagated", 688, "seed", 24), byClass);
+        org.junit.jupiter.api.Assertions.assertEquals(Map.of("propagated", 685, "seed", 21), byClass);
     }
 
     private volatile int totalMethods, totalSeeds, totalEdges, totalMissingArgLinks, totalUnprojectedReceivers;
