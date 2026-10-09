@@ -70,11 +70,14 @@
 # compile to class files; with those in front, 93 of 265 tests pass. 170 fail in the translated
 # DecompilerTestFixture.deleteRecursively: postVisitDirectory(dir, exc) overrides the JDK's FileVisitor, which passes
 # a null exc, and the override's verdict is non-null.
+# 2026-10-09, issue #21: substitution for class type variables nested in generic types (the instantiation's slot, not the
+# class's E), stream pipelines (map/filter/toList/collect), record accessors tied to their components; guava's
+# @NullMarked policies unchanged: 199 files, 0 type errors; ASSERT_AT_DECLARATION 33, ASSERT_INTO_NON_NULL 263.
 types	199
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	199
-compilingFiles	197
+compilingFiles	199
 bytecodeFiles	196
 testsPassing	263
 testBytecodeFiles	25

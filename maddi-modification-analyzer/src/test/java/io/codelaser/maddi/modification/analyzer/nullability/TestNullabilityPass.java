@@ -1950,4 +1950,141 @@ public class TestNullabilityPass extends CommonTest {
                 "fernflower StructContext.addSpace -> ContextUnit.setManifest");
         assertEquals("Manifest?", byName.get("a.b.JM.Unit.manifest"));
     }
+
+    // fernflower's FastFixedSetFactory<E> / FastFixedSet<E> as DomHelper.calcPostDominators uses them
+    @Language("java")
+    private static final String INSTANTIATION = """
+            package a.b;
+            import java.util.*;
+            class CI {
+                static class Node { Node next = null; }
+                static class Factory<E> {
+                    private final List<E> keys;
+                    Factory(Collection<E> set) { keys = new ArrayList<>(set); }
+                    FSet<E> spawn() { return new FSet<>(this); }
+                    List<E> all() { List<E> l = new ArrayList<>(keys); l.add(null); return l; }
+                }
+                static class FSet<E> {
+                    final Factory<E> factory;
+                    final Set<E> elements = new HashSet<>();
+                    FSet(Factory<E> factory) { this.factory = factory; }
+                    void add(E e) { elements.add(e); }
+                    void union(FSet<E> other) { elements.addAll(other.elements); }
+                    FSet<E> copy() { FSet<E> c = new FSet<>(factory); c.elements.addAll(elements); return c; }
+                }
+                static List<Node> succ(Node n) { List<Node> l = new ArrayList<>(); l.add(n.next); return l; }
+                static void dom(List<Node> nodes) {
+                    Factory<Node> factory = new Factory<>(nodes);
+                    FSet<Node> flags = factory.spawn();
+                    FSet<Node> init = factory.spawn();
+                    for (Node n : nodes) { for (Node s : succ(n)) flags.add(s); }
+                    FSet<Node> tmp = init.copy();
+                    tmp.union(flags);
+                    List<Node> withHole = factory.all();
+                }
+                static void ints() {
+                    List<Integer> ones = new ArrayList<>();
+                    ones.add(1);
+                    Factory<Integer> f = new Factory<>(ones);
+                    FSet<Integer> s = f.spawn();
+                    s.add(2);
+                }
+            }
+            """;
+
+    @DisplayName("a class type variable inside a generic type is instantiated by the receiver's slot, not tied to it")
+    @Test
+    public void classTypeVariableInstantiation() {
+        NullabilityPass.Report report = run("a.b.CI", INSTANTIATION, NullabilityPass.Policy.KOTLIN);
+        System.out.println(explain(report));
+        Map<String, String> byName = report.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+        String locals = locals(report);
+        // the class stays generic in E: no 'E?' from one instantiation's null (fernflower FastFixedSetFactory.kt:19/33)
+        assertEquals("FSet<E!>", byName.get("a.b.CI.Factory.spawn()"));
+        assertEquals("Collection<E!>", byName.get("a.b.CI.Factory.<init>(java.util.Collection):0:set"));
+        assertEquals("FSet<E!>", byName.get("a.b.CI.FSet.union(a.b.CI.FSet):0:other"));
+        assertEquals("FSet<E!>", byName.get("a.b.CI.FSet.copy()"));
+        // the class's own null does reach every instantiation
+        assertEquals("List<E?>", byName.get("a.b.CI.Factory.all()"));
+        assertTrue(locals.contains("dom.withHole: List<Node?>"), locals);
+        // the null added to 'flags' belongs to the factory's instantiation, and so to every set it spawns (Kotlin)
+        assertTrue(locals.contains("dom.flags: FSet<Node?>"), locals);
+        assertTrue(locals.contains("dom.factory: Factory<Node?>"), locals);
+        assertTrue(locals.contains("dom.init: FSet<Node?>"), locals);
+        assertTrue(locals.contains("dom.tmp: FSet<Node?>"), locals);
+        assertEquals("List<Node?>", byName.get("a.b.CI.dom(java.util.List):0:nodes"), "new Factory<>(nodes) is invariant");
+        // another instantiation is untouched
+        assertTrue(locals.contains("ints.f: Factory<Integer>"), locals);
+        assertTrue(locals.contains("ints.s: FSet<Integer>"), locals);
+
+        // Java annotations: the argument flows into the receiver; a result is tied to its receiver by the links only
+        NullabilityPass.Report java = run("a.b.CJ", INSTANTIATION.replace("class CI", "class CJ"),
+                NullabilityPass.Policy.NULL_MARKED);
+        Map<String, String> javaByName = java.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+        String javaLocals = locals(java);
+        assertEquals("FSet<E!>", javaByName.get("a.b.CJ.Factory.spawn()"));
+        assertTrue(javaLocals.contains("dom.flags: FSet<Node?>"), javaLocals);
+        assertTrue(javaLocals.contains("dom.tmp: FSet<Node?>"), javaLocals);
+        assertTrue(javaLocals.contains("dom.factory: Factory<Node>"), javaLocals);
+        // (init: the links make tmp = init.copy() share content, so init follows tmp; not asserted)
+        // (withHole: the class's own null reaches it through the links where they exist; the explicit edge is Kotlin's)
+        assertEquals("List<Node>", javaByName.get("a.b.CJ.dom(java.util.List):0:nodes"));
+    }
+
+    // fernflower's SwitchPatternHelper: case values through two stream pipelines and two records
+    @Language("java")
+    private static final String STREAMS = """
+            package a.b;
+            import java.util.*;
+            import java.util.stream.*;
+            class SP {
+                static class Exprent { }
+                record Case(List<Exprent> exprents) { }
+                record Pair(Exprent exprent, int edge) { }
+                private final List<List<Exprent>> caseValues = new ArrayList<>();
+                SP() { List<Exprent> vals = new ArrayList<>(); vals.add(null); caseValues.add(vals); }
+                List<List<Exprent>> getCaseValues() { return caseValues; }
+                void resort(List<Case> cases) {
+                    getCaseValues().clear();
+                    getCaseValues().addAll(cases.stream().map(t -> t.exprents()).toList());
+                }
+                List<Case> build() {
+                    List<List<Exprent>> sorted = new ArrayList<>();
+                    for (List<Exprent> cv : caseValues) {
+                        List<Pair> pairs = IntStream.range(0, cv.size()).mapToObj(i -> new Pair(cv.get(i), i)).toList();
+                        sorted.add(pairs.stream().map(p -> p.exprent()).collect(Collectors.toList()));
+                    }
+                    return IntStream.range(0, sorted.size()).mapToObj(i -> new Case(sorted.get(i))).collect(Collectors.toList());
+                }
+                static List<Exprent> firsts(List<Case> cases) {
+                    return cases.stream().filter(c -> !c.exprents().isEmpty()).map(c -> c.exprents().get(0)).toList();
+                }
+                static Set<Case> same(List<Case> cases) { return cases.stream().map(c -> c).collect(Collectors.toSet()); }
+                static Map<Integer, Exprent> byEdge(List<Pair> pairs) {
+                    return pairs.stream().collect(Collectors.toMap(p -> p.edge(), p -> p.exprent()));
+                }
+            }
+            """;
+
+    @DisplayName("stream pipelines: map, filter, toList, collect(toList/toSet/toMap) carry the elements' nodes (Kotlin)")
+    @Test
+    public void streamPipelines() {
+        NullabilityPass.Report report = run("a.b.SP", STREAMS, NullabilityPass.Policy.KOTLIN);
+        System.out.println(explain(report));
+        Map<String, String> byName = report.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+        String locals = locals(report);
+        assertEquals("List<List<Exprent?>>", byName.get("a.b.SP.caseValues"));
+        assertEquals("Exprent?", byName.get("a.b.SP.Pair.exprent"), "new Pair(cv.get(i), i) inside mapToObj");
+        assertTrue(locals.contains("build.sorted: List<List<Exprent?>>"), locals);
+        assertEquals("List<Exprent?>", byName.get("a.b.SP.Case.exprents"), "new Case(sorted.get(i)) and resort's addAll");
+        // the synthesised accessors follow their components (they have no variable data of their own)
+        assertEquals("List<Exprent?>", byName.get("a.b.SP.Case.exprents()"));
+        assertEquals("Exprent?", byName.get("a.b.SP.Pair.exprent()"));
+        assertEquals("List<Exprent?>", byName.get("a.b.SP.firsts(java.util.List)"));
+        assertEquals("Set<Case>", byName.get("a.b.SP.same(java.util.List)"));
+        assertEquals("Map<Integer, Exprent?>", byName.get("a.b.SP.byEdge(java.util.List)"));
+    }
 }

@@ -986,3 +986,86 @@ Guava unchanged under all four policies.
   statement graph's lists. From there it reaches DomHelper's FastFixedSets and `FastFixedSetFactory.spawnEmptySet()`
   as `E?` (FastFixedSetFactory.kt:19/33). In Java a null `newstat` throws in `replaceStatement` right after that
   write, so cutting it at the call (preconditions, f7c595bd) is a decision for the user.
+
+### 2026-10-09 — issue #21 measured; substitution for class type variables; stream pipelines
+
+**What the pass's graph says** (a reflection probe over `successors`/`reached` on fernflower, policy `KOTLIN`, at
+4dc2fec6): 4,956 symmetric slot ties forming 424 components of two or more slots, **none mixed** (every component is
+nullable as a whole or not at all), and **no slot-to-slot edge from a nullable slot into a non-null one**. The
+per-group consistency the issue asks for already holds; a union-find over the ties the pass has would change nothing.
+The three kotlinc errors at 4dc2fec6 (197 files; ExceptionDeobfuscator.kt:211 is gone since 06fc1e65) come from
+relations the pass does not model, or models in the wrong place:
+
+- **FastFixedSetFactory.kt:19/33.** Chain: `null in IfStatement.<init>` → `IfStatement.ifstat` → `replaceStatement`'s
+  `newstat` → `changeEdgeNode`'s `value` → `mapStates.get(type).set(index, value)` → `Statement.mapPredStates` →
+  `getNeighbours()` → DomHelper's `lstSuccs`, `pred`, `setFlagNodes: FastFixedSet<Statement?>` → **coupleContent's
+  symmetric tie** between that concrete slot and the type-variable slot of `spawnEmptySet(): FastFixedSet<E>`, so `E`
+  itself came out nullable and the class printed `FastFixedSet<E?>`. A consistent group, but one Kotlin cannot write:
+  a class's `E` cannot be `E?` on account of one instantiation. (Not `caseStatements`: its null is transient,
+  `replaceNullStatementsWithBasicBlocks` replaces every null before the field is assigned and before
+  `remapWithPatterns` reads it; the `!!` in `addEdgeDirectInternal` is safe at run time. The field's `?` is forced only
+  by invariance at `this.caseStatements = caseStatements`.)
+- **SwitchPatternHelper.kt:1559.** `FullCase.exprents` (a record component, `@NotNull List<Exprent>`) against
+  `caseValues: List<List<@Nullable Exprent>>`. The nullable elements travel `getCaseValues().get(i)` → `caseValue` →
+  `new CaseValueWithEdge(caseValue.get(ind), …)` → `stream().map(t -> t.exprent).collect(toList())` →
+  `sortedCaseValue` → `new FullCase(sortedCaseValue.get(ind), …)` → `cases.stream().map(t -> t.exprents).toList()` →
+  `getCaseValues().addAll(…)`. The pass had no model for a stream pipeline (`map`'s and `collect`'s results are method
+  type variables, `argumentNode` gives nothing): every predecessor of the field's element slot was unreached.
+
+Neither position is read-only, so the printer's covariant `List`/`Collection` (direction 1 of the issue) does not
+touch them; it stays a noise reducer. The four reverted attempts of 2026-10-08 were measured before 06fc1e65 made the
+`set(index, value)` write visible, on a graph whose live chain was a different one.
+
+**Substitution** (`instantiatedSlots`, `instantiatedArguments`, `constructorCopies`, `receiverNode`). A call on a
+receiver of generic class C instantiates C's type variables with the receiver's type arguments, so a position typed by
+one of them *inside another generic type* denotes the receiver's slot: `tmpSet = factory.spawnEmptySet()` ties
+`tmpSet`'s argument 0 to `factory`'s; `tmpSet.union(set)` with `union(FastFixedSet<E> set)` ties the argument's to the
+receiver's; `new Factory<>(lstStats)` with `Factory(Collection<E> set)` ties `lstStats`' to the new object's, i.e. the
+target's. The pass already did this for a bare `E` (`receiverSlots`, `argumentNode`, `slotIndex`); the nested case fell
+through to coupleContent, which identified the instantiation with the declaration's own type-variable slot.
+- `coupleContent` no longer adds an edge from a concrete slot into a class type variable's slot (that slot is
+  parametric: it is reached only by what the class itself puts there). The other direction stays: the class's own null
+  reaches every instantiation. The old symmetric tie was what a0a80ec0 cut in both directions, without the substitution.
+- Directions: an argument's slot flows into the receiver's (content copied in) under every policy, as `contentCopies`
+  already did for `Collection<? extends E>`. The receiver's slot into a result's, the class's own null into an
+  instantiation, and the receiver's into a `? super E` consumer are **Kotlin-only** (`Policy.callResults`): real
+  flows, but a first measurement with them on for Java gave guava **+246 noise under every policy**, 241 through one
+  chain: `AbstractMap.get(Object)`'s `@Nullable` key → `Multimaps.AsMap.get` → the multimap's K slot (flow-insensitive,
+  `containsKey(key) ? multimap.get(key) : null`) → `multimap.keySet()` → the `ImmutableSet<E>` override hub →
+  `RegularImmutableMultiset.<init>(…, ImmutableSet<E> elementSet)` → `RegularImmutableSet.EMPTY` → everything
+  `ImmutableSet.of()` returns. The Java policies keep the ties the links give them, as before.
+- The opposite directions are Kotlin's invariance (`Policy.assertContentWrites`, as for arrays): `tmpSet.add(x)` with a
+  nullable `x` needs `FastFixedSetFactory<Statement?>`, and `new Factory<>(nodes)` needs `nodes: MutableList<Node?>`.
+  Not into a `? extends` position. Not where the class's own null makes the formal position `E?`
+  (`List<E> all() { …; l.add(null); return l; }`: a `List<Node?>` matches a `Factory<Node>` already); since a class
+  type variable's slot is reached only by the class's own nulls, that is known from a first closure before the
+  invariance edges go in (`invariantTies`, in `once`).
+- Kotlin also takes a slot read passed as an argument (`new Pair(cv.get(i), i)`) as the parameter's value, as
+  `callResult` does for an assignment; the Java policies leave it to the links.
+- **Record accessors.** The first measurement left one new error, SwitchPatternHelper.kt:109: `initializer.instance`
+  read as non-null while the component `Initializer.instance` and the constructor parameter were nullable. A
+  synthesised accessor (`RecordSynthetics.createAccessor`) has a body, `return field;`, but no source, and its
+  statement carries no variable data, so no link tied the component to the return. A parameterless getter without
+  variable data now takes its field from the getter/setter association (`MethodInfo.getSetField`).
+
+**Streams** (`streamElements`, `mapped`, `streamTerminal`, `slotSources`). The pass follows a pipeline to the nodes
+whose values are its elements: `c.stream()` (the collection's slot, also a library view such as `map.values()`),
+`Arrays.stream(a)`, `Stream.of(x, y)`, `Stream.concat`; through `filter`, `sorted`, `distinct`, `limit`, `skip`,
+`peek`, `boxed`, …; through `map` / `mapToObj` to the lambda body's node (a field, an analysed call, a slot read; the
+lambda parameter itself means the source's elements) or an analysed method reference. A terminal `toList()`,
+`collect(Collectors.toList() / toSet() / toUnmodifiable… / toCollection(…))`, `findFirst/findAny/min/max`
+(Optional) makes those nodes values of the result's slot 0; `toMap(k, v)` of slots 0 and 1. Applied where a result is
+assigned or returned, where it is an argument, and in `contentCopies` (`addAll(stream…toList())`). No node for a
+lambda that constructs (`mapToObj(i -> new Pair(…))`): the record's constructor call inside the lambda is a call site
+of its own and carries the value into the record's field.
+
+Guava: `NULL_MARKED` and `NULL_MARKED_FLOW_ONLY` unchanged, declaration for declaration; `OPEN_VISIBILITY` and `OPEN`
++7 agree / −7 undecided (6 return arguments, 1 parameter) and −1 agree / +1 undecided on a field argument.
+Fernflower: **199 files, 0 type errors** (4dc2fec6: 197 / 3). Printer messages against the same code before the
+change: ASSERT_INTO_NON_NULL 288 → 263, ASSERT_AT_DECLARATION 32 → 33, ASSERT_AT_DEREFERENCE 2,187 → 2,387 (the nullable
+`Statement` slots DomHelper and the FastFixedSets now carry are read with `!!`).
+Tests: `TestNullabilityPass.classTypeVariableInstantiation` (both policies), `streamPipelines` (Kotlin).
+
+Measuring: a second Gradle build in the same worktree while a slow test's JVM runs recompiles classes that JVM loads
+from `build/classes` and kills it (`ClassFormatError`; Gradle reports an `EOFException`), leaving the previous
+`report.txt` in place. Unit tests first, then the slow tests, one at a time.
