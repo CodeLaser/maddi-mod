@@ -1258,6 +1258,45 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("String?[]", byName.get("a.b.A.Engine.idle"), "not a statement of the body");
     }
 
+    @DisplayName("a reassigned parameter: the parameter is the caller's value, what the body assigns is a shadow (issue #22 gap 5)")
+    @Test
+    public void reassignedParameter() {
+        NullabilityPass.Report report = run("a.b.R", """
+                package a.b;
+                class R {
+                    static String decode(String s) { return s.isEmpty() ? null : s; }
+                    String incoming(String value) { value = decode(value.trim()); return value; }
+                    String loop(String p) { while (p.length() > 3) { p = decode(p); } return p; }
+                    String constant(String q) { q = "x"; return q; }
+                    String conditional(String r) { if (r.isEmpty()) r = decode(r); return r; }
+                    int length(String t) { int n = t.length(); t = decode(t); return n; }
+                }
+                """);
+        System.out.println(explain(report));
+        Map<String, String> byName = report.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+        // the parameters: no caller passes null, and the body's assignments do not count
+        for (String m : new String[]{"incoming(String):0:value", "loop(String):0:p", "constant(String):0:q",
+                "conditional(String):0:r", "length(String):0:t"}) {
+            assertEquals("String", byName.get("a.b.R." + m), m);
+        }
+        // the returns read the shadow, which holds the caller's value and decode's null
+        assertEquals("String?", byName.get("a.b.R.incoming(String)"));
+        assertEquals("String?", byName.get("a.b.R.loop(String)"));
+        assertEquals("String", byName.get("a.b.R.constant(String)"));
+        assertEquals("String?", byName.get("a.b.R.conditional(String)"));
+        Map<String, String> shadows = new java.util.TreeMap<>();
+        for (MethodInfo mi : report.verdicts().keySet().stream().filter(i -> i instanceof MethodInfo)
+                .map(i -> (MethodInfo) i).toList()) {
+            for (io.codelaser.maddi.cst.api.info.ParameterInfo pi : mi.parameters()) {
+                ParameterizedType shadow = report.reassigned(pi);
+                if (shadow != null) shadows.put(mi.name(), k(shadow));
+            }
+        }
+        assertEquals("{conditional=String?, constant=String, incoming=String?, length=String?, loop=String?}",
+                shadows.toString());
+    }
+
     @DisplayName("a map lookup whose key is known present is not the absent key's null (issue #22 gap 1)")
     @Test
     public void keyPresence() {

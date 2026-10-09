@@ -43,6 +43,21 @@ import java.util.stream.Stream;
 public class WriteAnalysisResults {
     private static final Logger LOGGER = LoggerFactory.getLogger(WriteAnalysisResults.class);
 
+    /**
+     * The format marker (CodeLaser/maddi-mod#3): the first element of every results file names the format and its
+     * version, so that a file written by another release is refused with a message that says so, instead of a
+     * ClassCastException from the positional reader. Bump the version when the shape of the elements changes
+     * (their keys, their order, the encoding of a value); {@link LoadAnalysisResults} reads exactly this version,
+     * and still accepts a file without a marker (written before the marker existed) as version 0.
+     */
+    public static final String FORMAT_NAME = "maddi-analysis-results";
+    public static final int FORMAT_VERSION = 1;
+
+    /** The marker as written: the first element of the file's array. */
+    public static String formatMarker() {
+        return "{\"format\": \"" + FORMAT_NAME + "\", \"version\": " + FORMAT_VERSION + "}";
+    }
+
     private final Runtime runtime;
     private final Predicate<TypeInfo> typePredicate;
     // which analysis properties to serialise; the analysisFingerprint (docs/design/analysis-rewiring.md) passes a predicate
@@ -167,8 +182,9 @@ public class WriteAnalysisResults {
         try {
             try (OutputStreamWriter osw = new OutputStreamWriter(Files.newOutputStream(tmp),
                     StandardCharsets.UTF_8)) {
-                osw.write("[");
-                AtomicBoolean first = new AtomicBoolean(true);
+                osw.write("[\n");
+                osw.write(formatMarker());
+                AtomicBoolean first = new AtomicBoolean(false); // the marker is the first element
                 for (TypeInfo typeInfo : list) {
                     if (typePredicate.test(typeInfo)) {
                         writePrimary(osw, codec, first, typeInfo);

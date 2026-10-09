@@ -186,8 +186,12 @@ Severity: **H** high, **M** medium, **L** low.
   changes after translation (`:59,67,137`).
 
 ## 7. Serialization IO  (M→H robustness)
-- [ ] **H** (CodeLaser/maddi#16) No version/schema marker; `LoadAnalysisResults` reads by fixed positional index with unchecked
-  casts (`io/LoadAnalysisResults.java:159-184`) → format drift = `ClassCastException`.
+- [x] **H** (CodeLaser/maddi#16, CodeLaser/maddi-mod#3) ~~No version/schema marker; `LoadAnalysisResults` reads by fixed positional index with unchecked
+  casts (`io/LoadAnalysisResults.java:159-184`) → format drift = `ClassCastException`.~~ **Fixed 2026-10-09**
+  (c3d37857): every file starts with `{"format": "maddi-analysis-results", "version": 1}`; another version or
+  format is refused with an `AnalysisResultsFormatException` naming the file and both versions, a file without the
+  marker reads as version 0, and the positional reads verify key and kind, so drift is reported with the element
+  it occurs in. `goDirTolerant` skips such a file. `TestAnalysisResultsFormat` is the round-trip and negative test.
 - [x] **H** (CodeLaser/maddi#17) A stale/renamed `Info` on load aborts the whole file (`:167-170`); no skip-and-continue.
 - [x] **H** (CodeLaser/maddi#18) Properties the codec can't encode are silently dropped, no log (`io/WriteAnalysisResults.java:115`).
   `PrepWorkCodec` registers exactly one maddi property (`io/PrepWorkCodec.java:56-57`) — easy to forget new ones.
@@ -203,8 +207,14 @@ Severity: **H** high, **M** medium, **L** low.
   depends on it + the CST `analysis()` stores being thread-safe. Unverified, no `parallel=true` test.
 
 ## 9. `VariableData` ordering is non-deterministic across runs  (M→H, added 2026-07-25)
-- [ ] **H** (CodeLaser/maddi#19) `VariableDataImpl.variableInfoStream()` order is **identity-hashCode sensitive**, hence
-  non-deterministic across JVM runs. The order is the insertion order of the `vicByFqn` `LinkedHashMap`
+- [x] **H** (CodeLaser/maddi#19, CodeLaser/maddi-mod#4) **Fixed 2026-10-09** (705082f4). The mechanism was not
+  allocation order: `MethodAnalyzer.doBlocks` collected the sub-blocks with `Collectors.toUnmodifiableMap`, and
+  `addMerge` walked that map, whose iteration order is `java.util`'s per-JVM salt (`ImmutableCollections.SALT`,
+  fixed at JVM start: stable within one JVM, different in the next). The per-block maps are now `LinkedHashMap`s
+  in source order; `TestVariableDataOrder` pins the order for a five-branch switch, an old-style switch and a
+  try/catch/finally. The original analysis follows.
+  ~~`VariableDataImpl.variableInfoStream()` order is **identity-hashCode sensitive**, hence
+  non-deterministic across JVM runs.~~ The order is the insertion order of the `vicByFqn` `LinkedHashMap`
   (`variable/impl/VariableDataImpl.java:42,82-84,125-126`; `Builder.put` `:58-60`), which is populated during
   `MethodAnalyzer` as variables are encountered. That encounter order depends on object-allocation order (it is
   stable *within* one JVM but shifts when allocation shifts), so consumers that read `variableInfoStream()` /

@@ -557,12 +557,20 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                 feed(f -> f.passCompleted(it, fullPass, analyzed));
             }
             // convergence diagnosis: which properties are still moving? (value-changing writes per property)
-            String topChanges = TolerantWrite.changeCounts().entrySet().stream()
+            java.util.Map<String, Long> changeCounts = TolerantWrite.changeCounts();
+            String topChanges = changeCounts.entrySet().stream()
+                    .filter(e -> !e.getKey().startsWith(TolerantWrite.RECOMPUTED))
                     .sorted((a, b) -> Long.compare(b.getValue(), a.getValue()))
                     .limit(10)
                     .map(e -> e.getKey() + "=" + e.getValue())
                     .reduce((a, b) -> a + ", " + b).orElse("-");
-            LOGGER.info("Iteration {} property changes (top 10): {}", iterations, topChanges);
+            // per-iteration outputs that are recomputed, not converging (a write-once on a re-materialized body):
+            // reported apart, so that they do not read as a property that keeps moving (CodeLaser/maddi-mod#12)
+            String recomputed = changeCounts.entrySet().stream()
+                    .filter(e -> e.getKey().startsWith(TolerantWrite.RECOMPUTED))
+                    .map(e -> e.getKey().substring(TolerantWrite.RECOMPUTED.length()) + "=" + e.getValue())
+                    .reduce((a, b) -> a + ", " + b).map(r -> "; recomputed: " + r).orElse("");
+            LOGGER.info("Iteration {} property changes (top 10): {}{}", iterations, topChanges, recomputed);
             // under an active worklist, a zero-change SUBSET iteration is not a fixpoint certificate — only a
             // zero-change FULL pass is; route through the verification branch below instead of stopping here
             boolean done = propertiesChanged == 0 && (dependersOf == null || verifying);

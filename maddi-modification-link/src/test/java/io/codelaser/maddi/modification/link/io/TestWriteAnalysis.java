@@ -42,6 +42,8 @@ public class TestWriteAnalysis {
     @Language("json")
     private static final String EXPECT = """
             [
+            {"format": "maddi-analysis-results", "version": 1},
+
             {"name": "Tio.codelaser.maddi.C", "data":{"commutableMethods":["p1","p2,p3","p4"],"defaultsAnalyzer":1,"immutableType":3}, "sub":
              {"name": "Mm1(0)", "data":{"defaultsAnalyzer":1}}}
             ]

@@ -1137,3 +1137,25 @@ smart-cast a lookup. `MapUtil.computeIfAbsent(map, k, …)` (a static helper) is
 Guava: unchanged under all four policies (one cause chain spelled differently). Fernflower: 199 files, 0 type
 errors, unchanged. `TestNullabilityPass.keyPresence` pins eleven shapes, including the ones that must forget the
 fact (a call on the map, the map handed to a call, the key reassigned, a null put).
+
+### 2026-10-09 — issue #22 gap 5, issue #9: a parameter the body assigns (`var p = p`)
+
+`String value = …; value = decode(value.trim())`, `while (node != null) node = node.next`, `if (args == null) args
+= new Object[0]`: a parameter is one node, so the caller's value and whatever the body assigns shared a verdict. A
+null assigned in the body made the parameter nullable for every caller, and a nullable argument made the body's
+later reads nullable where Kotlin would have smart-cast. The pass now gives a reassigned parameter two nodes: the
+parameter, for the caller's value, and a shadow `Local(method, null, name)` the parameter flows into and the body's
+assignments go to. Reads resolve to the shadow from the first assignment on (from the loop's start for an
+assignment inside a loop; a statement's own expression before what its sub-blocks assign, so `if (args == null)`
+tests the caller's value). Only plain assignments outside lambdas count; `+=` and a lambda's assignment leave the
+parameter one node. `Report.reassigned(pi)` is the shadow's verdict; `Report.verdicts()` keeps the parameter's.
+
+The Kotlin printer already printed `var p = p` for such a parameter; it now types the var nullable when the shadow's
+verdict is and the parameter's is not (`var exp: Exprent? = exp`), since Kotlin would infer the parameter's non-null
+type and reject the body's null. Every read in the body then takes the var's type (`KotlinNullability.parameterType`
+consults the method's own shadow; a first version matched by name alone and typed callees' same-named parameters by
+the caller's locals: 29 type errors in fernflower).
+
+Gate `NOPARAMSHADOW` restores one node. Guava: unchanged under all four policies. Fernflower: 199 files, 0 type
+errors, unchanged. `TestNullabilityPass.reassignedParameter` pins the incoming, loop, conditional and constant
+shapes. The link-engine side of #9 (the reassigned parameter in `MethodLinkedVariables` summaries) stays open.
