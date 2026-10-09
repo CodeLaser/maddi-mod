@@ -79,6 +79,8 @@
 # class files, and fernflower's tests pass 264 of 265 on them, as on the original (the Groovy test fails on both).
 # 27 of 28 test files compile to class files; with the translated tests in front, 264 of 265 pass as well.
 # JavaCompilerArgumentsProvider does not: JUnit 6 is @NullMarked, and its override's parameters print nullable.
+# 2026-10-09, a @NullMarked library declares its unannotated parameters non-null (maddi 29745e935, maddi-mod
+# 2931ea1a): JavaCompilerArgumentsProvider compiles, all 28 test files do.
 types	199
 printerCrashes	0
 syntaxErrors	0
@@ -86,5 +88,5 @@ syntaxCleanFiles	199
 compilingFiles	199
 bytecodeFiles	199
 testsPassing	264
-testBytecodeFiles	27
+testBytecodeFiles	28
 translatedTestsPassing	264

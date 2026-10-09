@@ -1,0 +1,20 @@
+# TestJavaToKotlinLangchain4jNullability: langchain4j-core printed as Kotlin with NullabilityPass (KOTLIN) verdicts,
+# judged by kotlinc 2.4.0 and by langchain4j-core's own tests (see maddi-run-openjdk's JavaToKotlinRatchet). Lower is
+# better for printerCrashes and syntaxErrors, higher for syntaxCleanFiles, compilingFiles, bytecodeFiles,
+# testsPassing, testBytecodeFiles and translatedTestsPassing; `types` must not move. Write a better value here in the
+# commit that earns it.
+#
+# 2026-10-09, first record, corpus at dab06ac18, maddi-mod devel 8f813d5f with maddi's import-computer fix: 346 types,
+# all syntax-clean; 189 compiling against the original classes (460 type errors: 173 of them Java annotation
+# declarations, which the printer does not translate yet; 14 element nullability through invariant Mutable*
+# collections, the modification side's work list), 166 to class files. The tests: 1,111 pass on the original classes
+# (5 skipped), 1,057 with the Kotlin classes in front; of 172 test files 116 compile, and with those 1,023 pass.
+types	346
+printerCrashes	0
+syntaxErrors	0
+syntaxCleanFiles	346
+compilingFiles	189
+bytecodeFiles	166
+testsPassing	1057
+testBytecodeFiles	116
+translatedTestsPassing	1023
