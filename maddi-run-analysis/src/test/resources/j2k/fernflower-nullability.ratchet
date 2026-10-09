@@ -73,12 +73,18 @@
 # 2026-10-09, issue #21: substitution for class type variables nested in generic types (the instantiation's slot, not the
 # class's E), stream pipelines (map/filter/toList/collect), record accessors tied to their components; guava's
 # @NullMarked policies unchanged: 199 files, 0 type errors; ASSERT_AT_DECLARATION 33, ASSERT_INTO_NON_NULL 263.
+# 2026-10-09, devel f090a46d with #21 (3831b69e), the java.util.jar hints (maddi 4a62fc6b0) and library-override
+# parameters (579f1d26: deleteRecursively's exc is IOException?), and maddi's printer: Java's String.strip* through
+# java.lang.String, statics named by their declaring class, enum constants with bodies. All 199 files compile to
+# class files, and fernflower's tests pass 264 of 265 on them, as on the original (the Groovy test fails on both).
+# 27 of 28 test files compile to class files; with the translated tests in front, 264 of 265 pass as well.
+# JavaCompilerArgumentsProvider does not: JUnit 6 is @NullMarked, and its override's parameters print nullable.
 types	199
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	199
 compilingFiles	199
-bytecodeFiles	196
-testsPassing	263
-testBytecodeFiles	25
-translatedTestsPassing	93
+bytecodeFiles	199
+testsPassing	264
+testBytecodeFiles	27
+translatedTestsPassing	264
