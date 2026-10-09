@@ -2138,4 +2138,26 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("IOException?", j.get("a.b.LJ.$0.postVisitDirectory(java.nio.file.Path,java.io.IOException):1:exc"));
         assertEquals("Throwable", j.get("a.b.LJ.Handler.uncaughtException(Thread,Throwable):1:e"));
     }
+
+    @DisplayName("a parameter of an override of a @NullMarked library's method is non-null for Kotlin")
+    @Test
+    public void nullMarkedLibraryOverride() {
+        // JUnit 6 marks its packages (package-info.class): Kotlin reads publishEntry(Map) as non-null, and an
+        // override with a nullable parameter overrides nothing (fernflower's JavaCompilerArgumentsProvider)
+        NullabilityPass.Report report = run("a.b.NM", """
+                package a.b;
+                import java.util.Map;
+                import org.junit.jupiter.api.TestReporter;
+                class NM {
+                    static class Reporter implements TestReporter {
+                        @Override
+                        public void publishEntry(Map<String, String> map) { }
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        System.out.println(explain(report));
+        Map<String, String> byName = report.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+        assertEquals("Map<String, String>", byName.get("a.b.NM.Reporter.publishEntry(java.util.Map):0:map"));
+    }
 }

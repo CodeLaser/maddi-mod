@@ -635,14 +635,30 @@ public final class NullabilityPass {
     private String libraryNullableParameter(MethodInfo mi, int index) {
         return java.util.stream.Stream.concat(java.util.stream.Stream.of(mi), overrides(mi).stream())
                 .filter(m -> !analysed.contains(m) && index < m.parameters().size())
-                .filter(m -> stateOf(m.parameters().get(index), PropertyImpl.NULLABILITY_PARAMETER)
-                             == NullableState.NULLABLE)
+                .filter(m -> libraryParameterState(m.parameters().get(index)) == NullableState.NULLABLE)
                 .map(MethodInfo::fullyQualifiedName).findFirst().orElse(null);
     }
 
     /*
-     A library method mi overrides (a real override, not a lambda's functional method) whose parameter 'index' the
-     hints leave unspecified: the library may call the override back with null (fernflower's
+     What a library parameter declares: the hints first, then the class file's own annotations (JSpecify's
+     @Nullable on a type use), then its @NullMarked scope -- method, types, package-info, module -- where an
+     unannotated parameter that is not a type variable is non-null (JUnit 6's ArgumentsProvider.provideArguments:
+     a nullable override parameter does not override it in Kotlin). UNSPECIFIED when nothing says.
+     */
+    private static NullableState libraryParameterState(ParameterInfo pi) {
+        NullableState hint = stateOf(pi, PropertyImpl.NULLABILITY_PARAMETER);
+        if (hint != NullableState.UNSPECIFIED) return hint;
+        NullableState explicit = NullAnnotations.explicitState(pi);
+        if (explicit != null) return explicit;
+        if (!isTypeVariable(pi.parameterizedType()) && NullAnnotations.inNullMarkedScope(pi.methodInfo())) {
+            return NullableState.NONNULL;
+        }
+        return NullableState.UNSPECIFIED;
+    }
+
+    /*
+     A library method mi overrides (a real override, not a lambda's functional method) whose parameter 'index'
+     nothing declares (libraryParameterState): the library may call the override back with null (fernflower's
      SimpleFileVisitor.postVisitDirectory before its hint). Not a type-variable parameter (the instantiation decides),
      a primitive, or one any overridden library method declares non-null.
      */
@@ -653,8 +669,7 @@ public final class NullabilityPass {
                 .filter(m -> {
                     ParameterizedType type = m.parameters().get(index).parameterizedType();
                     return !isTypeVariable(type) && !(type.isPrimitiveExcludingVoid() && type.arrays() == 0)
-                           && stateOf(m.parameters().get(index), PropertyImpl.NULLABILITY_PARAMETER)
-                              == NullableState.UNSPECIFIED;
+                           && libraryParameterState(m.parameters().get(index)) == NullableState.UNSPECIFIED;
                 })
                 .map(MethodInfo::fullyQualifiedName).findFirst().orElse(null);
     }
@@ -733,8 +748,7 @@ public final class NullabilityPass {
     private boolean libraryNonNullParameter(MethodInfo mi, int index) {
         return overrides(mi).stream()
                 .filter(m -> !analysed.contains(m) && index < m.parameters().size())
-                .anyMatch(m -> stateOf(m.parameters().get(index), PropertyImpl.NULLABILITY_PARAMETER)
-                               == NullableState.NONNULL);
+                .anyMatch(m -> libraryParameterState(m.parameters().get(index)) == NullableState.NONNULL);
     }
 
     /*

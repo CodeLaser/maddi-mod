@@ -1086,3 +1086,15 @@ the translated tests).
   primitive. Seed cause: "overrides X, which does not declare it non-null". It is off for the Java policies: in
   guava's annotations an unannotated JDK override parameter is non-null, so the oracle would count it as noise.
   Guava is unchanged under all four policies.
+- **`@NullMarked` libraries (2026-10-09, after the printer's measurement).** JUnit 6 marks each package
+  (`package-info.class`), and Kotlin 2 reads an unannotated parameter there as non-null. So `libraryCallbacks`'
+  `provideArguments(parameters: ParameterDeclarations?, …)` overrode nothing, and fernflower's
+  JavaCompilerArgumentsProvider stopped compiling.
+  - maddi: a unit loaded from a class file now carries its package's and module's annotations
+    (`CompilationUnit.packageAnnotations()`/`moduleAnnotations()`, read once per package by `ClassSymbolScanner`).
+    `NullAnnotations.inNullMarkedScope` and `DeclaredNullability` read them.
+  - The pass: `libraryParameterState` reads, in order, the hint, the class file's explicit annotation, and the
+    `@NullMarked` scope (non-null unless a type variable). It feeds `libraryNullableParameter`,
+    `libraryNonNullParameter` and `libraryUnhintedParameter`.
+  - Test: `nullMarkedLibraryOverride` (`TestReporter.publishEntry(Map)`); it fails with the scope check disabled.
+  - Guava: NULL_MARKED and FLOW_ONLY unchanged; OPEN and OPEN_VISIBILITY each +7 agree / -7 undecided.
