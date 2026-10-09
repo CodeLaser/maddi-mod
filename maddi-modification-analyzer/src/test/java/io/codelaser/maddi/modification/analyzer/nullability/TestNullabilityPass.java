@@ -1258,6 +1258,44 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("String?[]", byName.get("a.b.A.Engine.idle"), "not a statement of the body");
     }
 
+    @DisplayName("a map lookup whose key is known present is not the absent key's null (issue #22 gap 1)")
+    @Test
+    public void keyPresence() {
+        NullabilityPass.Report report = run("a.b.K", """
+                package a.b;
+                import java.util.*;
+                class K {
+                    String guarded(Map<String, String> m, String k) { if (m.containsKey(k)) { return m.get(k); } return ""; }
+                    String early(Map<String, String> m, String k) { if (!m.containsKey(k)) return ""; return m.get(k); }
+                    String unguarded(Map<String, String> m, String k) { return m.get(k); }
+                    String afterPut(Map<String, String> m, String k) { m.put(k, "v"); return m.get(k); }
+                    String afterPutNull(Map<String, String> m, String k) { m.put(k, null); return m.get(k); }
+                    String loop(Map<String, String> m) { for (String k : m.keySet()) { return m.get(k); } return ""; }
+                    String cleared(Map<String, String> m, String k) { if (m.containsKey(k)) { m.clear(); return m.get(k); } return ""; }
+                    String otherCall(Map<String, String> m, String k, List<String> l) { if (m.containsKey(k)) { l.add(k); return m.get(k); } return ""; }
+                    String reassigned(Map<String, String> m, String k) { if (m.containsKey(k)) { k = k + "x"; return m.get(k); } return ""; }
+                    String passed(Map<String, String> m, String k) { if (m.containsKey(k)) { use(m); return m.get(k); } return ""; }
+                    static void use(Map<String, String> m) { m.clear(); }
+                    String removed(Map<String, String> m, String k) { if (m.containsKey(k)) { return m.remove(k); } return ""; }
+                    int length(Map<String, String> m, String k) { if (m.containsKey(k)) { return m.get(k).length(); } return 0; }
+                }
+                """);
+        System.out.println(explain(report));
+        Map<String, String> byName = report.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+        assertEquals("String", byName.get("a.b.K.guarded(java.util.Map,String)"));
+        assertEquals("String", byName.get("a.b.K.early(java.util.Map,String)"));
+        assertEquals("String?", byName.get("a.b.K.unguarded(java.util.Map,String)"));
+        assertEquals("String", byName.get("a.b.K.afterPut(java.util.Map,String)"));
+        assertEquals("String?", byName.get("a.b.K.afterPutNull(java.util.Map,String)"), "the value put is null");
+        assertEquals("String", byName.get("a.b.K.loop(java.util.Map)"));
+        assertEquals("String?", byName.get("a.b.K.cleared(java.util.Map,String)"), "a call on the map");
+        assertEquals("String", byName.get("a.b.K.otherCall(java.util.Map,String,java.util.List)"));
+        assertEquals("String?", byName.get("a.b.K.reassigned(java.util.Map,String)"), "the key is assigned");
+        assertEquals("String?", byName.get("a.b.K.passed(java.util.Map,String)"), "the map is handed to a call");
+        assertEquals("String", byName.get("a.b.K.removed(java.util.Map,String)"));
+    }
+
     @DisplayName("a null returned by a method that may return its argument does not flow back into the argument")
     @Test
     public void identityReturn() {

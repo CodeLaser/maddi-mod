@@ -2329,7 +2329,9 @@ public final class NullabilityPass {
             // VBStyleCollection<Statement?, ...>): a nullable slot gives a nullable value
             if (policy.callResults()) addEdge(slot, target);
         }
-        String lib = libraryNullableReturn(callee);
+        // 'x = map.get(k)' with k known present (NonNullFacts, CodeLaser/maddi-mod#22 gap 1): not the absent key's null; what
+        // the map holds for k still flows through its value slot above
+        String lib = facts.keyPresentWhenCalled(mc) ? null : libraryNullableReturn(callee);
         if (lib != null) {
             seedIndirect(target, "assigned " + lib);
         } else if (policy.contracts() && analysed.contains(callee)
@@ -2387,7 +2389,7 @@ public final class NullabilityPass {
 
     private String nullableLibraryCall(Expression e) {
         Expression unwrapped = e instanceof Cast c ? c.expression() : e;
-        if (unwrapped instanceof MethodCall mc && mc.methodInfo() != null) {
+        if (unwrapped instanceof MethodCall mc && mc.methodInfo() != null && !facts.keyPresentWhenCalled(mc)) {
             return libraryNullableReturn(mc.methodInfo());
         }
         return null;

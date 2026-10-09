@@ -1098,3 +1098,19 @@ same, narrow one. Gate `NOFIELDFILL` for A/B.
 Guava: −1 noise under every policy (`Striped.CompactStriped.array`, exactly this shape), unsafe unchanged.
 Fernflower: 199 files, 0 type errors, unchanged. `TestNullabilityPass.filledArrays` pins the field, the assigned
 local and a conditional fill of a field that stays nullable.
+
+### 2026-10-09 — issue #22 gap 1: a map key known present (`NonNullFacts.KeyPresence`)
+
+`if (map.containsKey(k)) map.get(k)`, `map.put(k, v); map.get(k)` and `for (K k : map.keySet()) map.get(k)` read
+the lookup as the library's `@Nullable V get(Object)`: the absent key's null, which these shapes exclude. The facts
+walk now carries a synthetic variable `map[k]` ("k is present in map"), established by a true `containsKey(k)`, by
+`put(k, v)` with `v` known non-null, and inside a `keySet()` loop; it goes when `map` or `k` is assigned and at a
+call that may change the map (one on the map other than a read, or one handed the map). Both require `map` and `k`
+to be trackable variables and the receiver a `java.util.Map`. Where a lookup's (`get`, `remove`) result would take
+the library's nullable return, the pass skips that seed when the key is present at the call; what the map holds
+for `k` still flows through its value slot, so a null stored in the map still arrives. Java only: Kotlin does not
+smart-cast a lookup. `MapUtil.computeIfAbsent(map, k, …)` (a static helper) is not covered.
+
+Guava: unchanged under all four policies (one cause chain spelled differently). Fernflower: 199 files, 0 type
+errors, unchanged. `TestNullabilityPass.keyPresence` pins eleven shapes, including the ones that must forget the
+fact (a call on the map, the map handed to a call, the key reassigned, a null put).
