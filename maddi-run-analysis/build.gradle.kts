@@ -116,3 +116,18 @@ tasks.withType<Test>().configureEach {
         listOf("-Dmaddi.test.kotlinCompilerClasspath=" + kotlinCompiler.asPath)
     })
 }
+// ... and the corpus's own tests, with JUnit's console launcher (see maddi-run-openjdk).
+val junitConsole = configurations.create("junitConsole") {
+    isCanBeResolved = true
+    isCanBeConsumed = false
+}
+dependencies {
+    junitConsole("org.junit.platform:junit-platform-console:6.0.3")
+    junitConsole("org.junit.jupiter:junit-jupiter-engine:6.0.3")
+}
+tasks.withType<Test>().configureEach {
+    inputs.files(junitConsole).withPropertyName("junitConsole")
+    jvmArgumentProviders.add(CommandLineArgumentProvider {
+        listOf("-Dmaddi.test.junitConsoleClasspath=" + junitConsole.asPath)
+    })
+}
