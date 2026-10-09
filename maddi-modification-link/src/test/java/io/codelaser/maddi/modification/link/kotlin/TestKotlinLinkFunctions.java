@@ -23,6 +23,8 @@ public class TestKotlinLinkFunctions extends CommonKotlinLinkTest {
                 fun applyConsumer(f: (StringBuilder) -> Unit, s: StringBuilder) { f(s) }
                 fun applyFunction(f: (StringBuilder) -> StringBuilder, s: StringBuilder): StringBuilder = f(s)
                 fun find(xs: List<StringBuilder>): StringBuilder? { xs.forEach { if (it.isEmpty()) return it }; return null }
+                fun findMap(xs: List<StringBuilder>): StringBuilder? { xs.map { if (it.isEmpty()) return it; it.length }; return null }
+                fun findNested(xss: List<List<StringBuilder>>): StringBuilder? { xss.forEach { xs -> xs.forEach { if (it.isEmpty()) return it } }; return null }
                 fun captured(xs: List<StringBuilder>): StringBuilder? { var r: StringBuilder? = null; xs.forEach { r = it }; return r }
             }
             """;
@@ -81,14 +83,32 @@ public class TestKotlinLinkFunctions extends CommonKotlinLinkTest {
     }
 
     /*
-     ⛔ CodeLaser/maddi#65: `return it` inside forEach returns from `find`; its value never reaches find's return variable, so
-     the result reads as linked to nothing. The Java loop links it to an element of xs. Unsound: an independence
-     claim on `find` would be wrong.
+     `return it` inside forEach returns from `find` (CodeLaser/maddi-mod#11, formerly CodeLaser/maddi#65). The lambda links its
+     parameter to find's return variable ('0:it → find'), and applying it to the elements of xs lifts that to
+     'find ∈ xs.§$s', as the Java loop's `return x` does. Before, the value went to the lambda's own (Unit) return
+     variable and `find` read as linked to nothing: an independence claim on it would have been wrong. The two
+     sides differ only in the number of the `null` constant's marker.
      */
     @Test
     public void nonLocalReturn() {
         assertEquals("[0:xs.§$s∋$_ce2] --> find←$_ce2,find∈0:xs.§$s", p.javaLinks("find"));
-        assertEquals("[-] --> -", p.kotlinLinks("find"));
+        assertEquals("[0:xs.§$s∋$_ce1] --> find←$_ce1,find∈0:xs.§$s", p.kotlinLinks("find"));
+    }
+
+    /*
+     Through two lambdas (exitLevels() == 2: the inner `return it` leaves both forEach lambdas): the inner
+     application lifts '0:it → findNested' onto the outer lambda's parameter ('0:xs.§$s ∋ findNested'), and the outer
+     application translates that face onto the elements of xss.
+
+     ⛔ Through a FUNCTION-shaped application (`map`: the lambda has a result): Kotlin's `map` is a static extension,
+     so the lifting engine has no object whose elements the lambda is applied to (CodeLaser/maddi#78 territory: the same
+     reason `xs.map { it }` links its result to nothing), and the returned value is lost. Still unsound; pinned.
+     */
+    @Test
+    public void nonLocalReturnShapes() {
+        assertEquals("[0:xss.§$s.§$s∋$_ce1] --> findNested←$_ce1,findNested∈0:xss.§$s.§$s",
+                p.kotlinLinks("findNested"));
+        assertEquals("[-] --> -", p.kotlinLinks("findMap"));
     }
 
     /*

@@ -224,6 +224,58 @@ public class Util {
         return null;
     }
 
+    /**
+     * The method {@code levels} lambdas up from {@code methodInfo}: the target of a Kotlin non-local return with
+     * {@code ReturnStatement.exitLevels() == levels}. {@code methodInfo} itself for 0, {@code null} when the chain
+     * ends before.
+     */
+    public static MethodInfo enclosingMethod(MethodInfo methodInfo, int levels) {
+        MethodInfo m = methodInfo;
+        for (int i = 0; i < levels && m != null; i++) {
+            m = lambdaContainer(m);
+        }
+        return m;
+    }
+
+    /** Whether {@code outer} is {@code inner} or a method whose body (through lambdas) contains {@code inner}. */
+    public static boolean isOrEncloses(MethodInfo outer, MethodInfo inner) {
+        for (MethodInfo m = inner; m != null; m = lambdaContainer(m)) {
+            if (m == outer) return true;
+        }
+        return false;
+    }
+
+    /**
+     * The method whose body holds the lambda whose SAM is {@code lambdaMethod}. {@code TypeInfo.enclosingMethod()}
+     * names the SOURCE method for a lambda nested in a lambda (the Kotlin front end converts the whole body against
+     * that method); the lambda in between is found in that method's body.
+     */
+    private static MethodInfo lambdaContainer(MethodInfo lambdaMethod) {
+        MethodInfo source = lambdaMethod.typeInfo().enclosingMethod();
+        if (source == null || source.methodBody() == null) return source;
+        MethodInfo found = lambdaContainer(source.methodBody(), lambdaMethod, source);
+        return found == null ? source : found;
+    }
+
+    private static MethodInfo lambdaContainer(io.codelaser.maddi.cst.api.element.Element root,
+                                              MethodInfo lambdaMethod,
+                                              MethodInfo current) {
+        MethodInfo[] found = {null};
+        root.visit(e -> {
+            if (found[0] != null) return false;
+            if (e instanceof io.codelaser.maddi.cst.api.expression.Lambda lambda) {
+                if (lambda.methodInfo() == lambdaMethod) {
+                    found[0] = current;
+                } else if (lambda.methodInfo().methodBody() != null) {
+                    found[0] = lambdaContainer(lambda.methodInfo().methodBody(), lambdaMethod, lambda.methodInfo());
+                }
+                return false;
+            }
+            return true;
+        });
+        return found[0];
+    }
+
     public static Variable oneBelowThis(Variable v) {
         if (v instanceof FieldReference fr && fr.scopeVariable() != null && !fr.scopeIsThis()) {
             return oneBelowThis(fr.scopeVariable());
