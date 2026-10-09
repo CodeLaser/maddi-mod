@@ -309,6 +309,17 @@ parameter, replaces SAM formal parameters by the actual arguments, and re-invoke
 Specs (spec-by-example, `@TestInstance(PER_CLASS)`): `typelink/TestStreamMapSpec`, `typelink/TestStreamForEachSpec`,
 `typelink/TestSupplierSpec`.
 
+**Kotlin function types are standard** (CodeLaser/maddi-mod#13, `FunctionTypes` in `maddi-modification-common`, gate `KFNCUSTOM`
+restores the custom path): every Kotlin function type is `kotlin.jvm.functions.FunctionN`, and the engine's "standard
+functional interface" tests (`LinkMethodCall` LEAF 1, `LinkAppliedFunctionalInterface`, `ExpressionVisitor`,
+`VirtualFieldComputer`, `ShallowMethodAnalyzer`'s ignore-modifications default) go through `FunctionTypes`, which adds
+`Function0..22`/`FunctionN` to `java.util.function`, `Runnable` and the synthetic SAM types. So `fun apply(f: (SB) ->
+Unit, s: SB) { f(s) }` links `[0:f*↗$_afi0, -] --> -` like the Java `Consumer` twin: `s` is not modified and does not
+flow into `f`'s hidden content, and `applyR`'s result comes FROM the applied function (`←$_afi0`), resolved where the
+lambda is known. The CST's own `isStandardFunctionalInterface()` is unchanged: it also serves assignability. Open:
+`suspend` function types (a trailing `Continuation` parameter) and receiver lambdas (`T.() -> R`, a `Function1`
+whose first parameter is the receiver) take the same path and are not measured separately.
+
 **Kotlin non-local returns** (CodeLaser/maddi-mod#11, `kotlin/TestKotlinLinkFunctions.nonLocalReturn*`): `xs.forEach { if (p(it))
 return it }` returns from the method `exitLevels()` lambdas up. `LinkComputerImpl.doStatement` assigns the value to
 THAT method's return variable (`Util.enclosingMethod`, which finds the lambda in between for a lambda nested in a

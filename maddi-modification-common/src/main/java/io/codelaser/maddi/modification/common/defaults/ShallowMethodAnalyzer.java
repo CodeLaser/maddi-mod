@@ -14,6 +14,8 @@
 
 package io.codelaser.maddi.modification.common.defaults;
 
+import io.codelaser.maddi.modification.common.FunctionTypes;
+
 import io.codelaser.maddi.modification.common.util.TolerantWrite;
 import io.codelaser.maddi.modification.common.AnalysisHelper;
 import io.codelaser.maddi.cst.api.analysis.Message;
@@ -423,7 +425,7 @@ public class ShallowMethodAnalyzer extends AnnotationToProperty {
 
     private ValueOrigin computeParameterIgnoreModifications(ParameterInfo parameterInfo) {
         ParameterizedType pt = parameterInfo.parameterizedType();
-        return pt.isStandardFunctionalInterface() ? FROM_TYPE_TRUE : DEFAULT_FALSE;
+        return FunctionTypes.isStandardFunctionalInterface(pt) ? FROM_TYPE_TRUE : DEFAULT_FALSE;
     }
 
     // a parameter has one nullability along its override chain (Kotlin's rule): nullable when an overridden method

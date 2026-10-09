@@ -8,7 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /*
  Function types and lambdas. A Kotlin function type is kotlin.jvm.functions.FunctionN: the Java twins that take a
- Function1 link exactly as Kotlin does, those that take a java.util.function type do not (CodeLaser/maddi#80). What Kotlin's
+ Function1 or a java.util.function type link exactly as Kotlin does (CodeLaser/maddi-mod#13). What Kotlin's
  lambdas can do and Java's cannot: return from the enclosing function (CodeLaser/maddi#65) and assign an enclosing `var` (CodeLaser/maddi#72, now a
  Ref holder, whose write reaches the creator since CodeLaser/maddi#94).
  */
@@ -64,22 +64,22 @@ public class TestKotlinLinkFunctions extends CommonKotlinLinkTest {
     public void functionTypeAsJavaFunction1() {
         p.assertSameAsJava("apply");
         p.assertSameAsJava("applyR");
-        assertEquals("[0:f*.§$$.§$←1:s*, 1:s*→0:f*.§$$.§$] --> -", p.kotlinLinks("apply"));
+        assertEquals("[0:f*↗$_afi0, -] --> -", p.kotlinLinks("apply"));
     }
 
     /*
-     ⛔ CodeLaser/maddi#80: FunctionN is a custom functional interface to the link engine, java.util.function a standard
-     one. With a Consumer the argument is not modified and the call is an applied-functional-interface link; with
-     a Kotlin function type `s` is modified and flows into `f`. A decision, not a defect: if FunctionN becomes
-     standard, the Kotlin side must equal these Java lines.
+     Kotlin's function types are STANDARD functional interfaces to the engine, like java.util.function
+     (CodeLaser/maddi-mod#13, formerly CodeLaser/maddi#80; `FunctionTypes`, gate KFNCUSTOM restores the custom path). The argument is
+     not modified and the call is an applied-functional-interface link, resolved where the lambda is known; the
+     result comes FROM the applied function. Before, `s` read as modified and flowing into `f`'s hidden content, and
+     `applyFunction`'s result pointed into `f`.
      */
     @Test
     public void functionTypeVersusJavaUtilFunction() {
         assertEquals("[0:f*↗$_afi0, -] --> -", p.javaLinks("applyConsumer"));
-        assertEquals("[0:f*.§$$.§$←1:s*, 1:s*→0:f*.§$$.§$] --> -", p.kotlinLinks("applyConsumer"));
+        p.assertSameAsJava("applyConsumer");
         assertEquals("[0:f*↗$_afi0, -] --> applyFunction←$_afi0,applyFunction↖Λ0:f*", p.javaLinks("applyFunction"));
-        assertEquals("[0:f*.§$$.§$←1:s*, 1:s*→0:f*.§$$.§$] --> applyFunction→0:f*.§$$.§$",
-                p.kotlinLinks("applyFunction"));
+        p.assertSameAsJava("applyFunction");
     }
 
     /*
