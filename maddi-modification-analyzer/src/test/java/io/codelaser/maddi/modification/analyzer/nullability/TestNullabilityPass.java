@@ -1222,6 +1222,24 @@ public class TestNullabilityPass extends CommonTest {
                         for (int i = 0; i < n; i++) { out[i] = "x"; }
                         return out;
                     }
+                    static String[] assigned(int n) {
+                        String[] out;
+                        out = new String[n];
+                        for (int i = 0; i < n; i++) { out[i] = "x"; }
+                        return out;
+                    }
+                    static class Engine {
+                        private final String[] workers;
+                        private final String[] idle;
+                        Engine(int size) {
+                            this.workers = new String[size];
+                            for (int mod = 0; mod < size; ++mod) { workers[mod] = "w" + mod; }
+                            idle = new String[size];
+                            for (int i = 0; i < size; i++) { if (i > 0) idle[i] = "x"; }
+                        }
+                        String worker(int i) { return workers[i]; }
+                        String idle(int i) { return idle[i]; }
+                    }
                 }
                 """);
         System.out.println(explain(report));
@@ -1233,6 +1251,11 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("String?[]", byName.get("a.b.A.conditional(int)"), "not a statement of the body");
         assertEquals("String?[]", byName.get("a.b.A.early(int)"), "a break");
         assertEquals("String?[]", byName.get("a.b.A.later(int)"), "not the next statement");
+        // CodeLaser/maddi-mod#22 gap 4: the creation is an assignment, to a local declared before or to a field in the constructor
+        assertEquals("String[]", byName.get("a.b.A.assigned(int)"), "assigned after its declaration");
+        assertEquals("String[]", byName.get("a.b.A.Engine.workers"), "a field the constructor's loop fills");
+        assertEquals("String", byName.get("a.b.A.Engine.worker(int)"));
+        assertEquals("String?[]", byName.get("a.b.A.Engine.idle"), "not a statement of the body");
     }
 
     @DisplayName("a null returned by a method that may return its argument does not flow back into the argument")

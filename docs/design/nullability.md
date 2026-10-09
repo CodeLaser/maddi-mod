@@ -1086,3 +1086,15 @@ the translated tests).
   primitive. Seed cause: "overrides X, which does not declare it non-null". It is off for the Java policies: in
   guava's annotations an unannotated JDK override parameter is non-null, so the oracle would count it as noise.
   Guava is unchanged under all four policies.
+
+### 2026-10-09 — issue #22 gap 4: an array field filled by the constructor's loop
+
+`indexFills` recognised only `T[] a = new T[n];` followed by its loop. nacos's `NacosExecuteTaskExecuteEngine`
+writes `this.executeWorkers = new TaskExecuteWorker[size];` in the constructor and fills it in the next statement's
+loop, and every `executeWorkers[i].x` kept "array created with null elements". The creation may now also be an
+assignment statement, to a field (the constructor's shape) or to a local declared earlier; the loop rule is the
+same, narrow one. Gate `NOFIELDFILL` for A/B.
+
+Guava: −1 noise under every policy (`Striped.CompactStriped.array`, exactly this shape), unsafe unchanged.
+Fernflower: 199 files, 0 type errors, unchanged. `TestNullabilityPass.filledArrays` pins the field, the assigned
+local and a conditional fill of a field that stays nullable.

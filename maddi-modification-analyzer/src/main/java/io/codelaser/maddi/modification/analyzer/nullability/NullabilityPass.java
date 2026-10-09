@@ -284,6 +284,8 @@ public final class NullabilityPass {
     private final Map<Expression, MethodInfo> nullOwners = new java.util.IdentityHashMap<>();
     // array creations ('new T[n]') the next statement fills completely before anything reads them (indexFills)
     private final Set<Expression> filledCreations = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+    // gate NOFIELDFILL: only a local's declaration counts as the creation the next loop fills (A/B for CodeLaser/maddi-mod#22 gap 4)
+    private static final boolean FIELD_FILLS_OFF = System.getenv("NOFIELDFILL") != null;
     // analysed methods whose return an earlier round found unreached by null (see go)
     private final Set<MethodInfo> trustedReturns;
     // analysed parameters an earlier round found non-null on every normal exit of their method: passing null throws
@@ -2134,13 +2136,26 @@ public final class NullabilityPass {
         List<Statement> statements = block.statements();
         for (int i = 0; i < statements.size(); i++) {
             Statement statement = statements.get(i);
-            if (i + 1 < statements.size() && statement instanceof LocalVariableCreation lvc
-                && statements.get(i + 1) instanceof ForStatement loop) {
-                List<LocalVariable> locals = lvc.localVariableStream().toList();
-                Expression init = locals.size() == 1 ? locals.getFirst().assignmentExpression() : null;
+            if (i + 1 < statements.size() && statements.get(i + 1) instanceof ForStatement loop) {
+                Variable array = null;
+                Expression init = null;
+                if (statement instanceof LocalVariableCreation lvc) {
+                    List<LocalVariable> locals = lvc.localVariableStream().toList();
+                    if (locals.size() == 1) {
+                        array = locals.getFirst();
+                        init = locals.getFirst().assignmentExpression();
+                    }
+                } else if (!FIELD_FILLS_OFF && statement instanceof ExpressionAsStatement eas
+                           && eas.expression() instanceof Assignment a && a.assignmentOperator() == null
+                           && (a.variableTarget() instanceof FieldReference || a.variableTarget() instanceof LocalVariable)) {
+                    // `this.workers = new Worker[n]; for (...) workers[i] = new Worker();` in a constructor (nacos's
+                    // NacosExecuteTaskExecuteEngine, CodeLaser/maddi-mod#22 gap 4), or a local assigned after its declaration
+                    array = a.variableTarget();
+                    init = a.value();
+                }
                 if (init != null && arrayCreatedWithNulls(init) == 1
                     && NonNullFacts.unwrap(init) instanceof ConstructorCall cc
-                    && fills(loop, locals.getFirst(), cc.parameterExpressions().getFirst())) {
+                    && fills(loop, array, cc.parameterExpressions().getFirst())) {
                     filledCreations.add(init);
                 }
             }
@@ -2156,7 +2171,7 @@ public final class NullabilityPass {
         }
     }
 
-    private static boolean fills(ForStatement loop, LocalVariable array,
+    private static boolean fills(ForStatement loop, Variable array,
                                  Expression size) {
         if (loop.initializers().size() != 1 || !(loop.initializers().getFirst() instanceof LocalVariableCreation init)
             || init.localVariableStream().count() != 1) return false;
