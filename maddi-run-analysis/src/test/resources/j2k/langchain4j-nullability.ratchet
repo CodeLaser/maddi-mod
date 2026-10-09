@@ -14,12 +14,15 @@
 # tests go DOWN, knowingly, with 87 more Kotlin classes in front: 1,033 pass with the Kotlin classes (24 builder
 # setters judged non-null are handed null by the tests; 18 boxed parameters judged non-null turn primitive in the JVM
 # signature, so the Java tests miss the method); 115 test files compile, and with those 992 pass.
+# 2026-10-09, maddi-mod 7c73f6ae (an analysed call's result flows into an argument where its links are empty: the
+# Json*Schema builders' description parameters nullable) with maddi 3f3faedd7 (a nullable parameter beside a varargs
+# overload keeps Java's choice): 200 type errors; 1,063 tests pass with the Kotlin classes, 1,022 translated.
 types	346
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	346
 compilingFiles	276
 bytecodeFiles	240
-testsPassing	1033
+testsPassing	1063
 testBytecodeFiles	115
-translatedTestsPassing	992
+translatedTestsPassing	1022
