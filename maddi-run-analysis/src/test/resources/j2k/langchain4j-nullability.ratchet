@@ -9,12 +9,17 @@
 # declarations, which the printer does not translate yet; 14 element nullability through invariant Mutable*
 # collections, the modification side's work list), 166 to class files. The tests: 1,111 pass on the original classes
 # (5 skipped), 1,057 with the Kotlin classes in front; of 172 test files 116 compile, and with those 1,023 pass.
+# 2026-10-09, maddi prints Java annotation types as annotation classes (the scanner keeps the elements' defaults)
+# and spreads a renamed String.formatted's varargs: 276 files compiling (202 type errors), 240 to class files. The
+# tests go DOWN, knowingly, with 87 more Kotlin classes in front: 1,033 pass with the Kotlin classes (24 builder
+# setters judged non-null are handed null by the tests; 18 boxed parameters judged non-null turn primitive in the JVM
+# signature, so the Java tests miss the method); 115 test files compile, and with those 992 pass.
 types	346
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	346
-compilingFiles	189
-bytecodeFiles	166
-testsPassing	1057
-testBytecodeFiles	116
-translatedTestsPassing	1023
+compilingFiles	276
+bytecodeFiles	240
+testsPassing	1033
+testBytecodeFiles	115
+translatedTestsPassing	992
