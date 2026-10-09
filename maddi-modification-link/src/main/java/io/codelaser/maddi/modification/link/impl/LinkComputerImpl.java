@@ -1086,11 +1086,14 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                     ValueImpl.VariableBooleanMapImpl value =
                             new ValueImpl.VariableBooleanMapImpl(Map.copyOf(variablesLinkedToObject));
                     if (wmc.methodCall().analysis().getOrCreate(VARIABLES_LINKED_TO_OBJECT, () -> value) == value) {
-                        TolerantWrite.count("set:variablesLinkedToObject@LCI");
+                        TolerantWrite.count(TolerantWrite.RECOMPUTED + "variablesLinkedToObject@LCI");
                         // deliberately NOT counted in propertiesChanged: the method body is re-materialized every
                         // iteration, so this "write-once" lands on a fresh expression each time (measured: exactly
                         // 635/iteration on timefold) — it recomputes an output for this iteration's consumers, it
                         // is not a converging property. Counting it kept the iteration loop running to the max.
+                        // The count is the number of method calls in the methods linked this iteration; the
+                        // iterating analyzer reports it apart from the property changes (CodeLaser/maddi-mod#12 read it
+                        // as an oscillating property).
                     }
                 }
             }

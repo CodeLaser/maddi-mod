@@ -54,6 +54,12 @@ public final class TolerantWrite {
     }
 
     /** convergence diagnosis for write sites that do not go through this class (plain set() + counter) */
+    /**
+     * Prefix of a {@link #count counted} key that is a per-iteration output recomputed on a re-materialized body,
+     * not a converging property: the iterating analyzer reports such counts apart from the property changes.
+     */
+    public static final String RECOMPUTED = "recomputed:";
+
     public static void count(String key) {
         CHANGES.computeIfAbsent(key, _ -> new java.util.concurrent.atomic.LongAdder()).increment();
     }
