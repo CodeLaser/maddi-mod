@@ -309,6 +309,16 @@ parameter, replaces SAM formal parameters by the actual arguments, and re-invoke
 Specs (spec-by-example, `@TestInstance(PER_CLASS)`): `typelink/TestStreamMapSpec`, `typelink/TestStreamForEachSpec`,
 `typelink/TestSupplierSpec`.
 
+**Kotlin non-local returns** (CodeLaser/maddi-mod#11, `kotlin/TestKotlinLinkFunctions.nonLocalReturn*`): `xs.forEach { if (p(it))
+return it }` returns from the method `exitLevels()` lambdas up. `LinkComputerImpl.doStatement` assigns the value to
+THAT method's return variable (`Util.enclosingMethod`, which finds the lambda in between for a lambda nested in a
+lambda, since the front end names the source method as every lambda's `enclosingMethod()`), never to the lambda's own.
+The link to a lambda parameter, `0:it → find`, travels in the lambda's parameter summary; `LinkFunctionalInterface.go`
+takes such links out first and lifts them onto the applied elements: `elements ∋ find`, as a `for` loop's `return x`
+links, or a face of the parameter translated onto the elements for the nested case. Not covered: a value that is
+neither a lambda parameter nor a constant (a captured variable: no slot in the summary), and a FUNCTION-shaped
+application without an object (Kotlin's static `map` extension: no elements to name, CodeLaser/maddi#78's territory).
+
 ### 7.5 Collectors (next)
 
 `Collector<T,A,R>` bundles four of the above: `Supplier<A>` (container), `BiConsumer<A,T>` (accumulator),

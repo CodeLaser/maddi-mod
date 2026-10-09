@@ -795,7 +795,14 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                                                       || isParameterOfSiblingMethod(v)
                                                       || !KEEP_OC_FACES && isFaceOfObjectCreation(v));
             if (ignoreReturnValue.contains(pi)) {
-                return links.removeIfTo(v -> v instanceof ReturnVariable || isParameterOfStrictlyEnclosed(v));
+                // the parameter's link to this method's own return variable is the return's link, read there, and
+                // one to the return variable of an ENCLOSED method (an anonymous class returning the captured
+                // parameter) is internal; a link to an ENCLOSING method's return variable is a non-local return
+                // (CodeLaser/maddi-mod#11), kept
+                return links.removeIfTo(v -> v instanceof ReturnVariable rv
+                                             && !(rv.methodInfo() != methodInfo
+                                                  && Util.isOrEncloses(rv.methodInfo(), methodInfo))
+                                             || isParameterOfStrictlyEnclosed(v));
             }
             return links.removeIfTo(this::isParameterOfStrictlyEnclosed);
         }
@@ -942,13 +949,23 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
             if (r != null) {
                 r = r.copyLinksToExtra();
             }
-            if (statement instanceof ReturnStatement && methodInfo.hasReturnValue()) {
+            // A Kotlin non-local return (CodeLaser/maddi-mod#11), `xs.forEach { if (p(it)) return it }`, returns from the
+            // method exitLevels() lambdas up. Its value is assigned to THAT method's return variable, not to the
+            // lambda's own: the lambda's result (Unit, for forEach) never holds it, and the enclosing method's summary
+            // must. The link to a lambda parameter ('0:it → find') travels in the lambda's parameter summary and is
+            // lifted onto the applied elements where the lambda is applied (LinkFunctionalInterface). A value that
+            // is neither a parameter nor a constant (a captured variable) has no slot in the summary and is lost.
+            MethodInfo returnTarget = statement instanceof ReturnStatement rs
+                    ? Util.enclosingMethod(methodInfo, rs.exitLevels()) : null;
+            Variable returnTargetVariable = returnTarget == null || !returnTarget.hasReturnValue() ? null
+                    : returnTarget == methodInfo ? returnVariable : new ReturnVariableImpl(returnTarget);
+            if (returnTargetVariable != null) {
                 if (r != null && r.links().primary() != null) {
                     destination = r.links().primary();
                 } else {
-                    destination = MarkerVariable.someValue(javaInspector.runtime(), methodInfo.returnType());
+                    destination = MarkerVariable.someValue(javaInspector.runtime(), returnTarget.returnType());
                 }
-                Links rvLinks = new LinksImpl.Builder(returnVariable)
+                Links rvLinks = new LinksImpl.Builder(returnTargetVariable)
                         .add(LinkNatureImpl.IS_ASSIGNED_FROM, destination)
                         .build();
                 if (Gate.isSet("RVTRACE")) {

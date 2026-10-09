@@ -7,6 +7,7 @@ import io.codelaser.maddi.modification.prepwork.Util;
 import io.codelaser.maddi.modification.prepwork.variable.Link;
 import io.codelaser.maddi.modification.prepwork.variable.LinkNature;
 import io.codelaser.maddi.modification.prepwork.variable.Links;
+import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
 import io.codelaser.maddi.modification.prepwork.variable.ReturnVariable;
 import io.codelaser.maddi.cst.api.info.FieldInfo;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
@@ -72,8 +73,50 @@ public record LinkFunctionalInterface(Runtime runtime, VirtualFieldComputer virt
         // Kotlin's `(T) -> Unit` is Function1<T, Unit>: its SAM returns R, concretely Unit, which is nothing (CodeLaser/maddi#94)
         boolean isConsumer = sam.noReturnValue() || returnsUnit(functionalInterfaceType);
 
+        // A Kotlin non-local return (CodeLaser/maddi-mod#11): a lambda parameter linked '0:it → find' to the return
+        // variable of the method the lambda is applied in (or of one enclosing it). Applying the lambda to the
+        // elements may end that method with one of them: 'elements ∋ find', as a `for` loop's `return x` links. A
+        // face of the parameter ('0:xs.§$s ∋ find', the lifted result of a lambda nested in this one) is translated
+        // onto the elements. Taken out before the shapes below, which would read the return variable as a captured
+        // variable of the lambda. A FUNCTION-shaped application without an object (Kotlin's static `map` extension)
+        // has no elements to name here, and the value is lost (CodeLaser/maddi#78 territory).
+        List<Triplet> nonLocalReturns = new ArrayList<>();
+        Variable appliedElements = isSupplier || isConsumer ? fromTranslated
+                : objectPrimary == null ? null : hiddenContentOf(objectPrimary);
+        List<Links> withoutNonLocalReturns = new ArrayList<>(linksList.size());
+        for (Links links : linksList) {
+            Links.Builder kept = links.primary() == null ? null : new LinksImpl.Builder(links.primary());
+            boolean changed = false;
+            for (Link link : links) {
+                if (Util.primary(link.to()) instanceof ReturnVariable rv
+                    && Util.isOrEncloses(rv.methodInfo(), currentMethod)) {
+                    changed = true;
+                    if (appliedElements != null) {
+                        Variable from;
+                        LinkNature nature;
+                        if (link.from().equals(links.primary())) {
+                            from = appliedElements;
+                            nature = link.linkNature() == LinkNatureImpl.IS_ASSIGNED_TO ? CONTAINS_AS_MEMBER
+                                    : link.linkNature();
+                        } else {
+                            from = new VariableTranslationMap(runtime).put(links.primary(), appliedElements)
+                                    .translateVariableRecursively(link.from());
+                            nature = link.linkNature();
+                        }
+                        if (from != null && Util.acceptModificationLink(from, link.to())) {
+                            nonLocalReturns.add(new Triplet(from, nature, link.to()));
+                        }
+                    }
+                } else if (kept != null) {
+                    kept.add(link.from(), link.linkNature(), link.to(), link.mediated());
+                }
+            }
+            withoutNonLocalReturns.add(changed && kept != null ? kept.build() : links);
+        }
+        linksList = withoutNonLocalReturns;
+
         if (isSupplier || isConsumer) {
-            List<Triplet> result = new ArrayList<>();
+            List<Triplet> result = new ArrayList<>(nonLocalReturns);
             int i = 0;
             for (Links links : linksList) {
                 // the slice of a BiConsumer's source is the lambda PARAMETER's: linksList comes from a map of the
@@ -168,7 +211,7 @@ public record LinkFunctionalInterface(Runtime runtime, VirtualFieldComputer virt
 
         translate + upscale = find the right virtual field that matches the dimensions
          */
-        List<Triplet> result = new ArrayList<>();
+        List<Triplet> result = new ArrayList<>(nonLocalReturns);
         if (objectPrimary != null && returnPrimary != null) {
             for (Links links : linksList) {
                 Set<Variable> toPrimaries = links.stream().map(l -> Util.primary(l.to()))
@@ -209,6 +252,15 @@ public record LinkFunctionalInterface(Runtime runtime, VirtualFieldComputer virt
             }
         }
         return result;
+    }
+
+    /** The source's hidden content (`xs.§$s`): the elements a FUNCTION-shaped application (`map`) feeds the lambda. */
+    private Variable hiddenContentOf(Variable objectPrimary) {
+        VirtualFields vf = virtualFieldComputer.compute(objectPrimary.parameterizedType(), false).virtualFields();
+        FieldInfo hiddenContent = vf == null ? null : vf.hiddenContent();
+        if (hiddenContent == null) return null;
+        return runtime.newFieldReference(hiddenContent, runtime.newVariableExpression(objectPrimary),
+                hiddenContent.type());
     }
 
     /** `kotlin.jvm.functions.FunctionN<…, Unit>`: the last type argument is the result. */
