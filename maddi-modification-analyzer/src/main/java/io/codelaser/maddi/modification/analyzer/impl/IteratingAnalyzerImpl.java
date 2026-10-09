@@ -32,6 +32,15 @@ import java.util.stream.Stream;
 
 public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements IteratingAnalyzer {
     private static final Logger LOGGER = LoggerFactory.getLogger(IteratingAnalyzerImpl.class);
+    /**
+     * How many MODREACH rounds a run may take (CodeLaser/maddi-mod#19). Each round that writes anything clears the
+     * derived family and re-derives it (~17 iterations on timefold); the reverse upgrades a round writes remove,
+     * after that re-derivation, the summary entries they caused in callers, which were the seeds keeping other
+     * frozen-FALSE nodes reached, so the next round finds those as reverse divergences: one hop up the caller
+     * chain per round, contracting about tenfold (timefold: 1099, 114, 3). The joint fixpoint takes as many rounds
+     * as the longest such chain plus one. Default 3; {@code MODREACH_ROUNDS=n} to measure further rounds.
+     */
+    static final int MODREACH_MAX_ROUNDS = Integer.parseInt(System.getenv().getOrDefault("MODREACH_ROUNDS", "3"));
 
     private final JavaInspector javaInspector;
     private SingleIterationAnalyzer lastRun;
@@ -650,7 +659,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                 certifiedWithoutFrozenValues = done && refusedSum == 0;
                 LOGGER.info("Stop iterating after {} iterations, done? {}{}", iterations, done,
                         plateau ? " (plateau: " + propertiesChanged + " vs " + previousPropertiesChanged + ")" : "");
-                if (configuration.modificationViaReachability() && modReachRounds < 3) {
+                if (configuration.modificationViaReachability() && modReachRounds < MODREACH_MAX_ROUNDS) {
                     // PLAN §14 P2.3: post-convergence single-writer cutover. One-shot reachability
                     // over the converged link artifacts becomes the authority for the three
                     // modification properties: frozen optimistic TRUEs downgrade, undecided nodes
