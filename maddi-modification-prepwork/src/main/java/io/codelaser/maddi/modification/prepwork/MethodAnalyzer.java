@@ -401,11 +401,19 @@ public class MethodAnalyzer {
         } else {
             blockStream = parentStatement.subBlockStream();
         }
+        // in SOURCE order (CodeLaser/maddi-mod#4): addMerge walks this map and enters the variables first met in a
+        // sub-block into the statement's VariableData in that order. A java.util immutable map iterates in a
+        // per-JVM salted order (ImmutableCollections.SALT), which made that order, and every consumer's, differ
+        // from run to run while staying stable within one
         return blockStream
                 .filter(b -> !b.isEmpty())
-                .collect(Collectors.toUnmodifiableMap(
+                .collect(Collectors.toMap(
                         block -> block.statements().getFirst().source().index(),
-                        block -> doBlock(methodInfo, block, vdOfParent, iv)));
+                        block -> doBlock(methodInfo, block, vdOfParent, iv),
+                        (a, b) -> {
+                            throw new IllegalStateException("two sub-blocks start at the same index");
+                        },
+                        LinkedHashMap::new));
     }
 
     private Stream<Block> newStyleSwitchStatementBlockStream(SwitchStatementNewStyle ns) {
@@ -616,10 +624,10 @@ public class MethodAnalyzer {
         VariableData previous = vdOfParent;
         boolean first = true;
         String indexOfFirstStatement = null;
-        Map<String, VariableData> lastOfEachSubBlock = new HashMap<>();
+        Map<String, VariableData> lastOfEachSubBlock = new LinkedHashMap<>(); // source order, see doBlocks
 
         List<VariableData> fallThrough = new ArrayList<>();
-        Map<String, List<VariableData>> fallThroughRecord = new HashMap<>();
+        Map<String, List<VariableData>> fallThroughRecord = new LinkedHashMap<>();
 
         for (Statement statement : oss.block().statements()) {
             String statementIndex = statement.source().index();
@@ -719,8 +727,9 @@ public class MethodAnalyzer {
             });
         } else {
             map.forEach((v, vis) -> {
-                Map<String, Assignments> assignmentsPerBlock = vis.entrySet().stream()
-                        .collect(Collectors.toUnmodifiableMap(Map.Entry::getKey, e -> e.getValue().assignments()));
+                Map<String, Assignments> assignmentsPerBlock = vis.entrySet().stream() // vis is sorted by index
+                        .collect(Collectors.toMap(Map.Entry::getKey, e -> e.getValue().assignments(),
+                                (a, b) -> a, LinkedHashMap::new));
                 // the return variable passed on for corrections is 'null' when we're computing for the return variable
                 ReturnVariable returnVariable = v.equals(iv.rv) ? null : iv.rv;
                 Assignments.CompleteMerge assignmentsRequiredForMerge = Assignments.assignmentsRequiredForMerge(statement,
@@ -766,7 +775,7 @@ public class MethodAnalyzer {
 
     private static Map<String, List<Assignments>> computeFallThrough(Map<String, List<VariableData>> fallThroughRecord, Variable v) {
         if (fallThroughRecord.isEmpty()) return Map.of();
-        Map<String, List<Assignments>> res = new HashMap<>();
+        Map<String, List<Assignments>> res = new LinkedHashMap<>();
         fallThroughRecord.forEach((index, vds) -> vds.forEach(vd -> {
             VariableInfoContainer vic = vd.variableInfoContainerOrNull(v.fullyQualifiedName());
             if (vic != null) {
