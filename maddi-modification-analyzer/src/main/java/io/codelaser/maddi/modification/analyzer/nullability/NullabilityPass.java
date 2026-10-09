@@ -2604,11 +2604,15 @@ public final class NullabilityPass {
         if (list == null || i >= list.list().size()) {
             // no argument links ('super(attributes)', 'this(...)' carry none): the argument's own node
             if (!(unwrappedArgument instanceof MethodCall)) addEdge(argumentNode(mi, scope, arguments.get(i)), pi);
+            else callResultArgument(unwrappedArgument, pi);
             return;
         }
         Links links = list.list().get(i);
         Variable primary = links.primary();
-        if (primary == null) return;
+        if (primary == null) {
+            callResultArgument(unwrappedArgument, pi);
+            return;
+        }
         if (isNullMarker(primary)) {
             nullMarker(mi, primary, pi, "null argument in " + mi.fullyQualifiedName());
             return;
@@ -2617,6 +2621,26 @@ public final class NullabilityPass {
         if (node != null) addEdge(node, pi);
         // an intermediate (or a local assigned in this very statement): its sources, in the argument's own links
         sourcesOf(mi, scope, primary, links, pi);
+    }
+
+    /*
+     An analysed method's result as the argument, where the links say nothing: the link engine links no value of an
+     immutable type ('String' per the JDK hints), so 'builder.description(optionalString(map, "description"))' had
+     no edge, and the setter's parameter stayed non-null although optionalString returns null (langchain4j's
+     JsonSchemaElementJsonUtils.fromMap; the translated tests pass null there). The same rule as callResultOf: not a
+     type-variable result, unless the callee's own null; and, like it, Kotlin only (Policy.callResults): guava
+     measured -13 agree / +14 noise under NULL_MARKED with it on for every policy (2026-10-09).
+     */
+    private void callResultArgument(Expression argument, Object pi) {
+        if (!policy.callResults() || !(argument instanceof MethodCall mc) || mc.methodInfo() == null) return;
+        MethodInfo callee = mc.methodInfo();
+        if (!analysed.contains(callee) || callee.isConstructor() || callee.returnType().isVoid()) return;
+        ParameterizedType rt = callee.returnType();
+        boolean ownNull = rt.arrays() == 0 && rt.typeParameter() != null
+                          && (!rt.typeParameter().isMethodTypeParameter()
+                              || callee.parameters().stream().noneMatch(p ->
+                                     rt.typeParameter().equals(p.parameterizedType().typeParameter())));
+        if (!isTypeVariable(rt) || ownNull) addEdge(callee, pi);
     }
 
     private void sourcesOf(MethodInfo mi, Scope scope, Variable primary, Links links, Object pi) {

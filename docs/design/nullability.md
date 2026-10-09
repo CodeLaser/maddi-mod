@@ -1098,3 +1098,14 @@ the translated tests).
     `libraryNonNullParameter` and `libraryUnhintedParameter`.
   - Test: `nullMarkedLibraryOverride` (`TestReporter.publishEntry(Map)`); it fails with the scope check disabled.
   - Guava: NULL_MARKED and FLOW_ONLY unchanged; OPEN and OPEN_VISIBILITY each +7 agree / -7 undecided.
+
+### 2026-10-09 — an analysed result as an argument, where the links are empty (Kotlin)
+
+langchain4j-core's translated tests hand null to `JsonStringSchema.Builder.description(String)` (26 tests) and
+`JsonEnumSchema.Builder.description` (4). `fromMap` passes `optionalString(map, "description")`, which returns null,
+but the argument's links were empty: the link engine links no value of an immutable type (`String`, per the JDK
+hints), and `argument()` took a call's edge only from the links. `callResultArgument` now adds the callee-to-
+parameter edge when the links give no source, under `callResultOf`'s rule (no type-variable result unless the
+callee's own null). It's Kotlin only (`Policy.callResults`): with it on for every policy, guava measured
+NULL_MARKED -13 agree / +14 noise. Kotlin-only, guava is unchanged under all four policies. Found with
+`TestFernflowerNullabilityCauses` (`NULLABILITY_CORPUS=langchain4j`, `CAUSES_CALLS=fromMap:description`).

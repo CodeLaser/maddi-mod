@@ -2160,4 +2160,80 @@ public class TestNullabilityPass extends CommonTest {
                 .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
         assertEquals("Map<String, String>", byName.get("a.b.NM.Reporter.publishEntry(java.util.Map):0:map"));
     }
+
+    // langchain4j's JsonSchemaElementJsonUtils.fromMap. Here the argument's links carry the flow; on the corpus they
+    // are empty (no links for an immutable String), and callResultArgument supplies the edge. This pins the flow, not
+    // the empty-links case, which needs the corpus (TestFernflowerNullabilityCauses, NULLABILITY_CORPUS=langchain4j).
+    @DisplayName("a nullable helper result handed to a builder setter, as langchain4j's JsonSchemaElementJsonUtils.fromMap")
+    @Test
+    public void builderSetterFromHelper() {
+        NullabilityPass.Report report = run("a.b.BS", """
+                package a.b;
+                import java.util.Map;
+                class BS {
+                    static class S {
+                        private final String description;
+                        S(Builder b) { this.description = b.description; }
+                        static Builder builder() { return new Builder(); }
+                        static class Builder {
+                            private String description;
+                            Builder description(String description) { this.description = description; return this; }
+                            S build() { return new S(this); }
+                        }
+                    }
+                    static class E {
+                        private final String description;
+                        E(Builder b) { this.description = b.description; }
+                        static Builder builder() { return new Builder(); }
+                        static class Builder {
+                            private String description;
+                            Builder description(String description) { this.description = description; return this; }
+                            E build() { return new E(this); }
+                        }
+                    }
+                    private static String optionalString(Map<String, Object> map, String field) {
+                        Object value = map.get(field);
+                        if (value == null) return null;
+                        if (!(value instanceof String)) {
+                            throw new IllegalArgumentException(field + " must be a string, but was: " + className(value));
+                        }
+                        return (String) value;
+                    }
+                    private static String className(Object obj) { return obj == null ? "null" : obj.getClass().getSimpleName(); }
+                    static <T> T ensureNotNull(T object, String name) {
+                        if (object == null) throw new IllegalArgumentException(name);
+                        return object;
+                    }
+                    private static boolean allStrings(java.util.List<?> list) {
+                        return list.stream().allMatch(String.class::isInstance);
+                    }
+                    static Object fromMap(Map<String, Object> map, String type) {
+                        ensureNotNull(map, "map");
+                        if (map.containsKey("enum")) {
+                            Object enumObj = map.get("enum");
+                            if (!(enumObj instanceof java.util.List<?> enumList)) {
+                                throw new IllegalArgumentException("enum must be a list, but was: " + className(enumObj));
+                            }
+                            Object enumTypeObj = map.get("type");
+                            if (!allStrings(enumList) || (enumTypeObj != null && !"string".equals(enumTypeObj))) {
+                                return null;
+                            }
+                            return E.builder()
+                                    .description(optionalString(map, "description"))
+                                    .build();
+                        }
+                        return switch (type) {
+                            case "string" -> map.isEmpty() ? S.builder().description(optionalString(map, "description")).build() : null;
+                            default -> null;
+                        };
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        System.out.println(explain(report));
+        Map<String, String> byName = report.verdicts().entrySet().stream()
+                .filter(e -> e.getKey().fullyQualifiedName().contains("Builder.description(String)"))
+                .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+        assertEquals("String?", byName.get("a.b.BS.E.Builder.description(String):0:description"));
+        assertEquals("String?", byName.get("a.b.BS.S.Builder.description(String):0:description"));
+    }
 }
