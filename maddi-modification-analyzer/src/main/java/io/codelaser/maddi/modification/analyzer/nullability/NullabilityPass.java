@@ -292,6 +292,9 @@ public final class NullabilityPass {
     private Set<Object> external = Set.of();
     // every flow between two nodes, also one dropped as known non-null: the array Contents they tie (coupleContent)
     private final List<List<Object>> flows = new ArrayList<>();
+    // Kotlin's invariance between an instantiation's slot and the receiver's: {from, to, the formal slot}; added as
+    // edges in once, unless the class itself makes the formal slot nullable (instantiatedSlots)
+    private final List<Object[]> invariantTies = new ArrayList<>();
     // nodes seeded by a null that is written (a literal, an argument, an initializer, an annotation), not by indirect
     // evidence only (seedLibrary): Policy.assertContentWrites
     private final Set<Object> strictSeeds = new HashSet<>();
@@ -425,6 +428,19 @@ public final class NullabilityPass {
         });
         holderFields(methods, fields);
         coupleContent();
+        if (!invariantTies.isEmpty()) {
+            // a class type variable's slot is reached only by the class's own nulls (coupleContent never ties it
+            // to an instantiation's slot), so that is known before the invariance edges are added
+            Set<Object> own = closure(new HashMap<>());
+            boolean added = false;
+            for (Object[] tie : invariantTies) {
+                if (!own.contains(tie[2])) {
+                    addEdge(tie[0], tie[1]);
+                    added = true;
+                }
+            }
+            if (added) coupleContent(); // the nested slots of the new flows
+        }
 
         Map<Object, Object> cause = new LinkedHashMap<>();
         reached = closure(cause);
@@ -900,15 +916,23 @@ public final class NullabilityPass {
                 // generic types are invariant too (List<String?> is not a List<String>), except into a
                 // '? extends' argument, which only receives; matched by position (ArrayList<E> -> List<E>)
                 for (int i = 0; i < t0.parameters().size(); i++) {
+                    ParameterizedType p0 = t0.parameters().get(i);
+                    ParameterizedType p1 = t1.parameters().get(i);
                     // not through a generic method's own type variable: each call instantiates it anew
                     // ('ImmutableMap.copyOf(Map<? extends K, ? extends V>)' would tie the maps of all its callers)
-                    if (isMethodTypeVariable(t0.parameters().get(i)) || isMethodTypeVariable(t1.parameters().get(i))) {
-                        continue;
-                    }
+                    if (isMethodTypeVariable(p0) || isMethodTypeVariable(p1)) continue;
+                    // A slot typed by a CLASS type variable ('FastFixedSet<E> spawnEmptySet()' in Factory<E>,
+                    // 'union(FastFixedSet<E> set)', 'Factory(Collection<E> set)') is parametric: it receives nothing
+                    // from one instantiation's slot ('FastFixedSet<Statement?> tmpSet'), or Kotlin would see 'E?'
+                    // inside the class (fernflower FastFixedSetFactory.kt:19/33). What the class itself puts into
+                    // such a slot reaches every instantiation, so that direction stays. The instantiation's null
+                    // belongs to the receiver's slot: instantiatedSlots ties it there.
+                    boolean class0 = isClassTypeVariable(p0);
+                    boolean class1 = isClassTypeVariable(p1);
                     Arg a0 = new Arg(flow.get(0), i);
                     Arg a1 = new Arg(flow.get(1), i);
-                    successors.computeIfAbsent(a0, _ -> new LinkedHashSet<>()).add(a1);
-                    if (!isExtendsWildcard(t1.parameters().get(i))) {
+                    if (!class1 || class0) successors.computeIfAbsent(a0, _ -> new LinkedHashSet<>()).add(a1);
+                    if (!isExtendsWildcard(p1) && (!class0 || class1)) {
                         successors.computeIfAbsent(a1, _ -> new LinkedHashSet<>()).add(a0);
                     }
                     queue.add(List.of(a0, a1));
@@ -961,6 +985,11 @@ public final class NullabilityPass {
 
     private static boolean isMethodTypeVariable(ParameterizedType pt) {
         return pt.typeParameter() != null && pt.typeParameter().isMethodTypeParameter();
+    }
+
+    // a type variable of a class ('E' in Factory<E>), also as the bound of a wildcard ('? extends E')
+    private static boolean isClassTypeVariable(ParameterizedType pt) {
+        return pt.typeParameter() != null && pt.arrays() == 0 && !pt.typeParameter().isMethodTypeParameter();
     }
 
     private static boolean isExtendsWildcard(ParameterizedType pt) {
@@ -1178,6 +1207,15 @@ public final class NullabilityPass {
         VariableData vd = VariableDataImpl.of(mi);
         if (vd != null) {
             vd.variableInfoStream().forEach(vi -> linksOf(mi, body, vi, null));
+        } else if (!mi.isConstructor() && !mi.returnType().isVoid() && mi.parameters().isEmpty()) {
+            // a getter the links do not cover: a record accessor is synthesised without source ('return field;'),
+            // and its statement carries no variable data, so nothing tied the component to the accessor's return.
+            // Fernflower SwitchPatternHelper: 'initializer.instance' read as non-null while 'Initializer.instance'
+            // was nullable (SwitchPatternHelper.kt:109). The getter/setter association says what it returns.
+            io.codelaser.maddi.cst.api.analysis.Value.FieldValue getter = mi.getSetField();
+            if (getter != null && getter.field() != null && !getter.setter() && !getter.hasIndex()) {
+                addEdge(getter.field(), mi);
+            }
         }
     }
 
@@ -1715,6 +1753,25 @@ public final class NullabilityPass {
         if (target == null || !(NonNullFacts.unwrap(value) instanceof ConstructorCall cc) || cc.constructor() == null
             || cc.parameterizedType() == null || cc.parameterizedType().arrays() > 0) return;
         contentCopies(mi, scope, target, cc.constructor(), cc.parameterExpressions());
+        // an analysed generic class: an argument to a parameter typed with the class's type variables inside a
+        // generic type ('Factory(Collection<E> set)') instantiates them with the new object's, i.e. the target's,
+        // slots (instantiatedSlots)
+        MethodInfo constructor = cc.constructor();
+        ParameterizedType targetType = typeOf(target);
+        if (!analysed.contains(constructor) || targetType == null || constructor.typeInfo().typeParameters().isEmpty()) {
+            return;
+        }
+        List<ParameterInfo> parameters = constructor.parameters();
+        List<Expression> arguments = cc.parameterExpressions();
+        for (int i = 0; i < arguments.size() && i < parameters.size(); i++) {
+            ParameterizedType formal = parameters.get(i).parameterizedType();
+            if (formal.arrays() > 0 || formal.parameters().isEmpty()) continue;
+            Object argument = argumentNode(mi, scope, arguments.get(i));
+            if (argument == null) continue;
+            ParameterizedType type = typeOf(argument);
+            instantiatedSlots(argument, type != null ? type : arguments.get(i).parameterizedType(), parameters.get(i),
+                    formal, target, targetType, constructor.typeInfo(), true);
+        }
     }
 
     /*
@@ -1736,8 +1793,10 @@ public final class NullabilityPass {
                 if (a.typeParameter() == null || a.typeParameter().isMethodTypeParameter()
                     || a.typeParameter().getOwner().getLeft() != callee.typeInfo()) continue;
                 int index = a.typeParameter().getIndex();
-                Object source = slotOf(mi, scope, arguments.get(i), j);
-                if (source != null && index < arity) addEdge(source, new Arg(receiver, index));
+                if (index >= arity) continue;
+                for (Object source : slotSources(mi, scope, arguments.get(i), j)) {
+                    addEdge(source, new Arg(receiver, index));
+                }
             }
         }
     }
@@ -1784,6 +1843,234 @@ public final class NullabilityPass {
         }
         if (analysed.contains(callee) && !rt.isVoid()) return callee;
         return null;
+    }
+
+    // the node of a call's receiver: a variable; an analysed method's result with concrete type arguments; or a slot
+    // read by a lookup ('ranges.computeIfAbsent(h, …)' is the map's value). Null otherwise: a static call, 'this', an
+    // expression the pass has no node for.
+    private Object receiverNode(MethodInfo mi, Scope scope, MethodCall mc) {
+        if (mc.object() == null || mc.methodInfo() == null || mc.methodInfo().isStatic()) return null;
+        Expression object = NonNullFacts.unwrap(mc.object());
+        if (object instanceof VariableExpression ve) return node(mi, scope, ve.variable());
+        if (object instanceof MethodCall getter && getter.methodInfo() != null
+            && analysed.contains(getter.methodInfo()) && !getter.methodInfo().isConstructor()
+            && concreteArguments(getter.methodInfo().returnType())) {
+            return getter.methodInfo();
+        }
+        if (object instanceof MethodCall lookup && argumentNode(mi, scope, lookup) instanceof Arg slot) return slot;
+        return null;
+    }
+
+    /*
+     Substitution. A call on a receiver of generic class C instantiates C's type variables with the receiver's type
+     arguments, so a position typed by one of them denotes the receiver's slot for it. 'tmpSet = factory.spawnEmptySet()'
+     with 'FastFixedSet<E> spawnEmptySet()' in Factory<E>: tmpSet's argument 0 is the factory's argument 0 (fernflower
+     DomHelper). 'tmpSet.union(set)' with 'union(FastFixedSet<E> set)': the argument's argument 0 is the receiver's.
+     'new Factory<>(lstStats)' with 'Factory(Collection<E> set)': lstStats' argument 0 is the new object's, which is the
+     target's. Before, coupleContent tied such a slot to the declaration's own type-variable slot, which made 'E'
+     nullable for the whole class (FastFixedSetFactory.kt:19/33, 'FastFixedSet<E?>').
+
+     Directions: the receiver's slot flows into a result's, and an argument's slot flows into the receiver's (content
+     copied in): real flows, always. The opposite directions are Kotlin's invariance (Policy.assertContentWrites, as
+     for arrays): 'tmpSet.add(x)' with a nullable x needs 'FastFixedSetFactory<Statement?>'. Not into a '? extends'
+     position, which only receives; and not where the class's own null makes the position 'E?' ('List<E> all() {
+     ...; l.add(null); return l; }'): a 'List<Node?>' then matches a Factory<Node> already. That is decided after the
+     graph is built (invariantTies, in once). A position typed by another type variable (a method's, another class's)
+     is skipped; a concrete generic position ('Map<K, List<V>>') recurses.
+     */
+    private void instantiatedSlots(Object concrete, ParameterizedType concreteType, Object formalNode,
+                                   ParameterizedType formal, Object receiver, ParameterizedType receiverType,
+                                   TypeInfo owner, boolean intoReceiver) {
+        if (concrete == null || concreteType == null || formal == null || concreteType.arrays() > 0
+            || formal.arrays() > 0 || concreteType.parameters().size() != formal.parameters().size()) return;
+        for (int i = 0; i < formal.parameters().size(); i++) {
+            ParameterizedType f = formal.parameters().get(i);
+            ParameterizedType c = concreteType.parameters().get(i);
+            Arg slot = new Arg(concrete, i);
+            Arg formalSlot = new Arg(formalNode, i);
+            if (f.typeParameter() != null) {
+                if (f.arrays() > 0 || f.typeParameter().isMethodTypeParameter()
+                    || !f.typeParameter().getOwner().isLeft() || f.typeParameter().getOwner().getLeft() != owner) {
+                    continue;
+                }
+                int j = slotIndex(receiverType, owner, f.typeParameter().getIndex());
+                if (j < 0) continue;
+                Arg receiverSlot = new Arg(receiver, j);
+                boolean receivesOnly = isExtendsWildcard(f);
+                boolean consumes = f.wildcard() != null && f.wildcard().isSuper(); // 'sort(Comparator<? super E>)'
+                // Kotlin (Policy.callResults): the class's own null in that position ('List<E> all() { ...;
+                // l.add(null); return l; }') reaches this instantiation, and the receiver's slot flows into a result
+                // ('multimap.keySet()' holds the multimap's keys) or into a consumer argument. Real flows, but for
+                // Java annotations they carried guava's flow-insensitive '@Nullable Object key' (AsMap.get) through
+                // the ImmutableSet<E> override hub into the EMPTY singletons: +246 noise (2026-10-09). The Java
+                // policies keep the ties the links give them, as before.
+                if (policy.callResults()) addEdge(formalSlot, slot);
+                if (intoReceiver) {
+                    if (consumes) {
+                        if (policy.callResults()) addEdge(receiverSlot, slot);
+                    } else {
+                        addEdge(slot, receiverSlot);
+                        if (policy.assertContentWrites() && !receivesOnly) {
+                            invariantTies.add(new Object[]{receiverSlot, slot, formalSlot});
+                        }
+                    }
+                } else {
+                    if (policy.callResults()) addEdge(receiverSlot, slot);
+                    if (policy.assertContentWrites() && !receivesOnly) {
+                        invariantTies.add(new Object[]{slot, receiverSlot, formalSlot});
+                    }
+                }
+            } else if (!f.parameters().isEmpty() && c.typeParameter() == null && c.arrays() == 0) {
+                instantiatedSlots(slot, c, formalSlot, f, receiver, receiverType, owner, intoReceiver);
+            }
+        }
+    }
+
+    // the arguments of a call whose parameters are typed with the callee's class type variables inside a generic type
+    private void instantiatedArguments(MethodInfo mi, Scope scope, Expression call, MethodInfo callee,
+                                       List<Expression> arguments) {
+        if (!(call instanceof MethodCall mc) || callee.typeInfo().typeParameters().isEmpty()) return;
+        Object receiver = receiverNode(mi, scope, mc);
+        ParameterizedType receiverType = receiver == null ? null : typeOf(receiver);
+        if (receiverType == null) return;
+        List<ParameterInfo> parameters = callee.parameters();
+        for (int i = 0; i < arguments.size() && i < parameters.size(); i++) {
+            ParameterizedType formal = parameters.get(i).parameterizedType();
+            if (formal.arrays() > 0 || formal.parameters().isEmpty()) continue;
+            Object argument = argumentNode(mi, scope, arguments.get(i));
+            if (argument == null) continue;
+            ParameterizedType type = typeOf(argument);
+            instantiatedSlots(argument, type != null ? type : arguments.get(i).parameterizedType(), parameters.get(i),
+                    formal, receiver, receiverType, callee.typeInfo(), true);
+        }
+    }
+
+    /*
+     Streams. The pass has no node for a stream; it follows the pipeline to the nodes whose values are its elements:
+     'c.stream()' (the collection's slot), 'Arrays.stream(a)', 'Stream.of(x, y)'; through filter, sorted, distinct, …;
+     through 'map(t -> t.f)' to the lambda body's node (a field, a call result, a slot read) or a method reference's
+     method. A terminal 'toList()', 'collect(Collectors.toList() / toSet() / toCollection(…) / toMap(k, v))' or
+     'findFirst()' then makes those nodes values of the result's slot. Fernflower's SwitchPatternHelper carries
+     'List<@Nullable Exprent>' elements through two such pipelines and two records into 'FullCase.exprents'.
+     */
+    private static final Set<String> STREAM_PASS_THROUGH = Set.of("filter", "sorted", "distinct", "limit", "skip",
+            "peek", "parallel", "sequential", "unordered", "onClose", "boxed", "takeWhile", "dropWhile");
+
+    private static boolean isStreamType(MethodInfo mi) {
+        return mi.typeInfo().fullyQualifiedName().startsWith("java.util.stream.");
+    }
+
+    // the nodes whose values are the elements of a stream expression; empty when the pass does not model it
+    private List<Object> streamElements(MethodInfo mi, Scope scope, Expression expression) {
+        if (expression == null) return List.of();
+        Expression e = NonNullFacts.unwrap(expression);
+        if (!(e instanceof MethodCall mc) || mc.methodInfo() == null) return List.of();
+        MethodInfo callee = mc.methodInfo();
+        String name = callee.name();
+        List<Expression> args = mc.parameterExpressions();
+        if (isStreamType(callee)) {
+            if (STREAM_PASS_THROUGH.contains(name)) return streamElements(mi, scope, mc.object());
+            if (("map".equals(name) || "mapToObj".equals(name)) && args.size() == 1) {
+                return mapped(mi, scope, mc.object(), args.getFirst());
+            }
+            if ("of".equals(name) && callee.isStatic()) {
+                List<Object> nodes = new ArrayList<>();
+                for (Expression a : args) {
+                    Object n = argumentNode(mi, scope, a);
+                    if (n != null) nodes.add(n);
+                }
+                return nodes;
+            }
+            if ("concat".equals(name) && callee.isStatic() && args.size() == 2) {
+                List<Object> nodes = new ArrayList<>(streamElements(mi, scope, args.get(0)));
+                nodes.addAll(streamElements(mi, scope, args.get(1)));
+                return nodes;
+            }
+            return List.of();
+        }
+        if (("stream".equals(name) || "parallelStream".equals(name)) && callee.parameters().isEmpty()
+            && mc.object() != null && !callee.isStatic()) {
+            Object slot = slotOf(mi, scope, mc.object(), 0);
+            return slot == null ? List.of() : List.of(slot);
+        }
+        if ("java.util.Arrays".equals(callee.typeInfo().fullyQualifiedName()) && "stream".equals(name)
+            && !args.isEmpty()) {
+            Object array = argumentNode(mi, scope, args.getFirst());
+            return array == null ? List.of() : List.of(new Content(array));
+        }
+        return List.of();
+    }
+
+    // the nodes a mapping function ('map(t -> t.f)', 'map(Foo::bar)') produces from the elements of 'source'
+    private List<Object> mapped(MethodInfo mi, Scope scope, Expression source, Expression function) {
+        Expression f = NonNullFacts.unwrap(function);
+        if (f instanceof MethodReference mr && mr.methodInfo() != null) {
+            MethodInfo m = mr.methodInfo();
+            return !m.isConstructor() && !m.returnType().isVoid() && analysed.contains(m) ? List.of(m) : List.of();
+        }
+        if (!(f instanceof Lambda lambda) || lambda.methodInfo() == null) return List.of();
+        Expression body = lambda.singleExpression();
+        if (body == null && lambda.methodBody() != null && lambda.methodBody().statements().size() == 1
+            && lambda.methodBody().statements().getFirst() instanceof ReturnStatement rs) {
+            body = rs.expression();
+        }
+        if (body == null) return List.of();
+        Expression value = NonNullFacts.unwrap(body);
+        // the element itself ('map(t -> t)'): the source's elements
+        if (value instanceof VariableExpression ve && ve.variable() instanceof ParameterInfo pi
+            && lambda.methodInfo().equals(pi.methodInfo())) {
+            return streamElements(mi, scope, source);
+        }
+        Object node = argumentNode(lambda.methodInfo(), scope, body);
+        return node == null ? List.of() : List.of(node);
+    }
+
+    // a terminal operation: slot index of its result -> the nodes whose values it collects there; empty otherwise
+    private Map<Integer, List<Object>> streamTerminal(MethodInfo mi, Scope scope, Expression expression) {
+        Expression e = NonNullFacts.unwrap(expression);
+        if (!(e instanceof MethodCall mc) || mc.methodInfo() == null || mc.object() == null
+            || !isStreamType(mc.methodInfo())) return Map.of();
+        String name = mc.methodInfo().name();
+        List<Expression> args = mc.parameterExpressions();
+        List<Object> elements;
+        switch (name) {
+            case "toList", "findFirst", "findAny", "min", "max" -> elements = streamElements(mi, scope, mc.object());
+            case "collect" -> {
+                if (args.size() != 1 || !(NonNullFacts.unwrap(args.getFirst()) instanceof MethodCall collector)
+                    || collector.methodInfo() == null
+                    || !"java.util.stream.Collectors".equals(collector.methodInfo().typeInfo().fullyQualifiedName())) {
+                    return Map.of();
+                }
+                List<Expression> cargs = collector.parameterExpressions();
+                switch (collector.methodInfo().name()) {
+                    case "toList", "toSet", "toUnmodifiableList", "toUnmodifiableSet", "toCollection" ->
+                            elements = streamElements(mi, scope, mc.object());
+                    case "toMap", "toUnmodifiableMap" -> {
+                        if (cargs.size() < 2) return Map.of();
+                        Map<Integer, List<Object>> slots = new LinkedHashMap<>();
+                        List<Object> keys = mapped(mi, scope, mc.object(), cargs.get(0));
+                        List<Object> values = mapped(mi, scope, mc.object(), cargs.get(1));
+                        if (!keys.isEmpty()) slots.put(0, keys);
+                        if (!values.isEmpty()) slots.put(1, values);
+                        return slots;
+                    }
+                    default -> {
+                        return Map.of();
+                    }
+                }
+            }
+            default -> {
+                return Map.of();
+            }
+        }
+        return elements.isEmpty() ? Map.of() : Map.of(0, elements);
+    }
+
+    // the nodes whose values are slot j of what an expression denotes: slotOf, or a stream terminal's elements
+    private List<Object> slotSources(MethodInfo mi, Scope scope, Expression expression, int j) {
+        Object slot = slotOf(mi, scope, expression, j);
+        if (slot != null) return List.of(slot);
+        return streamTerminal(mi, scope, expression).getOrDefault(j, List.of());
     }
 
     /*
@@ -1972,6 +2259,22 @@ public final class NullabilityPass {
                                   || callee.parameters().stream().noneMatch(pi ->
                                          rt.typeParameter().equals(pi.parameterizedType().typeParameter())));
             if (policy.callResults() && (!isTypeVariable(rt) || ownNull)) addEdge(callee, target);
+            // a result typed with the callee's class type variables inside a generic type ('FastFixedSet<E>
+            // spawnEmptySet()'): those positions are the receiver's slots (instantiatedSlots)
+            if (readScope != null && !callee.isStatic() && rt.arrays() == 0 && !rt.parameters().isEmpty()
+                && !concreteArguments(rt)) {
+                Object receiver = receiverNode(readScope.mi(), readScope.scope(), mc);
+                ParameterizedType receiverType = receiver == null ? null : typeOf(receiver);
+                if (receiverType != null) {
+                    instantiatedSlots(target, typeOf(target), callee, rt, receiver, receiverType, callee.typeInfo(),
+                            false);
+                }
+            }
+        }
+        if (readScope != null) {
+            // a stream's terminal operation: its elements are values of the result's slot
+            streamTerminal(readScope.mi(), readScope.scope(), unwrapped)
+                    .forEach((j, nodes) -> nodes.forEach(n -> addEdge(n, new Arg(target, j))));
         }
         if (readScope != null && argumentNode(readScope.mi(), readScope.scope(), unwrapped) instanceof Arg slot) {
             if (!analysed.contains(callee)) {
@@ -2066,6 +2369,7 @@ public final class NullabilityPass {
         LinkComputer.ListOfLinks list = analysis.getOrNull(LinkComputerImpl.LINKED_VARIABLES_ARGUMENTS,
                 LinkComputerImpl.ListOfLinksImpl.class);
         receiverSlots(mi, scope, statement, call, callee, list, arguments);
+        instantiatedArguments(mi, scope, call, callee, arguments);
         for (int i = 0; i < arguments.size(); i++) {
             ParameterInfo parameter = parameters.get(Math.min(i, parameters.size() - 1)); // varargs: the last one
             if (parameter.isVarArgs() && !passesTheArray(arguments, parameters, i)) {
@@ -2241,6 +2545,12 @@ public final class NullabilityPass {
             if (source instanceof Arg || source instanceof MethodInfo m && concreteArguments(m.returnType())) {
                 flows.add(List.of(source, pi)); // the same object: content slots tied (coupleContent)
             }
+            // Kotlin: a slot read passed on ('new Pair(cv.get(i), i)') gives the parameter the slot's value, as
+            // callResult does for an assignment; the Java policies leave this to the links
+            if (policy.callResults() && source instanceof Arg) addEdge(source, pi);
+            // a stream's terminal operation as the argument: its elements are values of the parameter's slot
+            streamTerminal(mi, scope, unwrappedArgument)
+                    .forEach((j, nodes) -> nodes.forEach(n -> addEdge(n, new Arg(pi, j))));
         }
         String lib = nullableLibraryCall(arguments.get(i));
         if (lib != null) {

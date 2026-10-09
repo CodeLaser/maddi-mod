@@ -58,8 +58,11 @@
 # 2026-10-08, verdict 5c817266 (a field of this dereferenced through its own field: Statement.stats non-null) on
 # devel, after the slot-tie attempts were measured and reverted (design log 35d43e01, CodeLaser/maddi-mod#21):
 # 197 files, 3 type errors; ASSERT_AT_DECLARATION 228, ASSERT_INTO_NON_NULL 302.
+# 2026-10-09, issue #21: substitution for class type variables nested in generic types (the instantiation's slot, not the
+# class's E), stream pipelines (map/filter/toList/collect), record accessors tied to their components; guava's
+# @NullMarked policies unchanged: 199 files, 0 type errors; ASSERT_AT_DECLARATION 33, ASSERT_INTO_NON_NULL 263.
 types	199
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	199
-compilingFiles	197
+compilingFiles	199
