@@ -141,7 +141,11 @@ public class LoadAnalysisResults {
                             os.write(bytes, 0, read);
                         }
                         String content = os.toString();
-                        countPrimaryTypes += go(codec, content);
+                        try {
+                            countPrimaryTypes += go(codec, content);
+                        } catch (AnalysisResultsFormatException e) {
+                            throw new AnalysisResultsFormatException(jarUrl + "!" + realName + ": " + e.getMessage(), e);
+                        }
                     }
                 }
             }
@@ -198,19 +202,82 @@ public class LoadAnalysisResults {
     public int go(Codec codec, Path jsonFile) throws IOException {
         LOGGER.info("Parsing {}", jsonFile);
         String s = Files.readString(jsonFile);
-        return go(codec, s);
+        try {
+            return go(codec, s);
+        } catch (AnalysisResultsFormatException e) {
+            throw new AnalysisResultsFormatException(jsonFile + ": " + e.getMessage(), e);
+        }
     }
 
+    /**
+     * @throws AnalysisResultsFormatException when the content carries a {@link WriteAnalysisResults#FORMAT_VERSION
+     *                                        format marker} of another version, or an element is not shaped as the
+     *                                        format says (CodeLaser/maddi-mod#3). A content without a marker was written
+     *                                        before the marker existed, and is read as version 0.
+     */
     public int go(Codec codec, String content) {
         JSONParser parser = new JSONParser(content);
         parser.Root();
         Node root = parser.rootNode();
+        if (!(root.getFirst() instanceof Array)) {
+            throw new AnalysisResultsFormatException("expected an array of analysis results, found "
+                                                     + root.getFirst().getClass().getSimpleName());
+        }
         int countPrimaryTypes = 0;
+        boolean first = true;
         for (JSONObject jo : root.getFirst().childrenOfType(JSONObject.class)) {
+            if (first) {
+                first = false;
+                if (isFormatMarker(jo)) {
+                    checkFormatMarker(jo);
+                    continue;
+                }
+                LOGGER.debug("No format marker: reading as version 0 (written before the marker existed)");
+            }
             if (processPrimaryType(codec, jo)) ++countPrimaryTypes;
             else ++skippedPrimaryTypes;
         }
         return countPrimaryTypes;
+    }
+
+    // the format marker, the first element of a file written since CodeLaser/maddi-mod#3: {"format": "...", "version": n}
+
+    private static boolean isFormatMarker(JSONObject jo) {
+        return jo.size() > 1 && jo.get(1) instanceof KeyValuePair kv && "\"format\"".equals(kv.get(0).getSource());
+    }
+
+    private static void checkFormatMarker(JSONObject jo) {
+        String format = CodecImpl.unquote(pair(jo, 1, "format", "the format marker").get(2).getSource());
+        String version = pair(jo, 3, "version", "the format marker").get(2).getSource();
+        if (!WriteAnalysisResults.FORMAT_NAME.equals(format)) {
+            throw new AnalysisResultsFormatException("not an analysis-results file: format '" + format
+                                                     + "', expected '" + WriteAnalysisResults.FORMAT_NAME + "'");
+        }
+        if (!String.valueOf(WriteAnalysisResults.FORMAT_VERSION).equals(version)) {
+            throw new AnalysisResultsFormatException("written in analysis-results format version " + version
+                                                     + ", this reader reads version " + WriteAnalysisResults.FORMAT_VERSION
+                                                     + ": regenerate the file with this release");
+        }
+    }
+
+    /**
+     * The key-value pair at {@code position} of {@code jo}, which the format says carries {@code key}. The parser's
+     * children interleave punctuation with pairs, so the pairs sit at the odd positions. A missing or differently
+     * keyed pair is format drift: reported as such, with the element it occurs in, rather than as a
+     * ClassCastException (CodeLaser/maddi-mod#3).
+     */
+    private static KeyValuePair pair(JSONObject jo, int position, String key, String where) {
+        if (jo.size() <= position || !(jo.get(position) instanceof KeyValuePair kv)) {
+            throw new AnalysisResultsFormatException("expected \"" + key + "\" as entry " + (position / 2 + 1) + " of "
+                                                     + where + ", found " + (jo.size() <= position ? "nothing"
+                    : jo.get(position).getClass().getSimpleName()));
+        }
+        String found = kv.get(0).getSource();
+        if (!("\"" + key + "\"").equals(found)) {
+            throw new AnalysisResultsFormatException("expected \"" + key + "\" as entry " + (position / 2 + 1) + " of "
+                                                     + where + ", found " + found);
+        }
+        return kv;
     }
 
     // number of primary types whose module is not on the classpath, so their hints were skipped
@@ -238,10 +305,18 @@ public class LoadAnalysisResults {
     // (topLevel) whose own type is not on the classpath, so the caller counts it as skipped; a nested element that
     // cannot be applied is dropped in place (see the class note on tolerance) without failing its siblings.
     private boolean processSub(Codec codec, Codec.Context context, JSONObject jo, boolean topLevel) {
-        KeyValuePair nameKv = (KeyValuePair) jo.get(1);
+        String where = topLevel ? "a primary type's element" : "the element of a member of " + context.currentType();
+        KeyValuePair nameKv = pair(jo, 1, "name", where);
         String fullyQualifiedWithType = CodecImpl.unquote(nameKv.get(2).getSource());
-        KeyValuePair dataKv = (KeyValuePair) jo.get(3);
-        JSONObject dataJo = (JSONObject) dataKv.get(2);
+        if (fullyQualifiedWithType.isEmpty()) {
+            throw new AnalysisResultsFormatException("empty \"name\" in " + where);
+        }
+        KeyValuePair dataKv = pair(jo, 3, "data", "element " + fullyQualifiedWithType);
+        if (!(dataKv.get(2) instanceof JSONObject dataJo)) {
+            throw new AnalysisResultsFormatException("expected an object as \"data\" of element "
+                                                     + fullyQualifiedWithType + ", found "
+                                                     + dataKv.get(2).getClass().getSimpleName());
+        }
 
         char type = fullyQualifiedWithType.charAt(0);
         String name = fullyQualifiedWithType.substring(1);
@@ -269,16 +344,27 @@ public class LoadAnalysisResults {
         try {
             processData(codec, context, info, dataJo, propertyKeyFilter);
             if (jo.size() > 5) {
-                KeyValuePair subs = (KeyValuePair) jo.get(5);
+                if (!(jo.get(5) instanceof KeyValuePair subs)) {
+                    throw new AnalysisResultsFormatException("expected \"sub\" or \"subs\" as entry 3 of element "
+                                                             + fullyQualifiedWithType + ", found "
+                                                             + jo.get(5).getClass().getSimpleName());
+                }
                 String subKey = subs.get(0).getSource();
-                if ("\"sub\"".equals(subKey)) {
-                    processSub(codec, context, (JSONObject) subs.get(2), false);
-                } else {
-                    assert "\"subs\"".equals(subKey);
-                    Array array = (Array) subs.get(2);
+                if ("\"sub\"".equals(subKey) && subs.get(2) instanceof JSONObject sub) {
+                    processSub(codec, context, sub, false);
+                } else if ("\"subs\"".equals(subKey) && subs.get(2) instanceof Array array) {
                     for (int i = 1; i < array.size(); i += 2) {
-                        processSub(codec, context, (JSONObject) array.get(i), false);
+                        if (!(array.get(i) instanceof JSONObject sub)) {
+                            throw new AnalysisResultsFormatException("expected an object in \"subs\" of element "
+                                                                     + fullyQualifiedWithType + ", found "
+                                                                     + array.get(i).getClass().getSimpleName());
+                        }
+                        processSub(codec, context, sub, false);
                     }
+                } else {
+                    throw new AnalysisResultsFormatException("expected \"sub\" (an object) or \"subs\" (an array) as "
+                                                             + "entry 3 of element " + fullyQualifiedWithType
+                                                             + ", found " + subKey);
                 }
             }
         } catch (Codec.DecoderException de) {
