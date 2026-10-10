@@ -2858,4 +2858,20 @@ public class TestNullabilityPass extends CommonTest {
                 threadLocal.sb: StringBuilder""", l.lines().filter(x -> x.contains(".sb:"))
                 .collect(Collectors.joining("\n")), l);
     }
+
+    @DisplayName("System.getProperty of a standard key is not null; of another key it may be")
+    @Test
+    public void standardSystemProperty() {
+        NullabilityPass.Report report = run("a.b.SP", """
+                package a.b;
+                class SP {
+                    static String os() { return System.getProperty("os.name"); }
+                    static String custom() { return System.getProperty("my.app.home"); }
+                }
+                """);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(label(info), k(pt)));
+        assertEquals("String", s.get("os()"), s.toString());
+        assertEquals("String?", s.get("custom()"), s.toString());
+    }
 }

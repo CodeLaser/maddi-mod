@@ -28,6 +28,7 @@ import io.codelaser.maddi.cst.api.expression.Expression;
 import io.codelaser.maddi.cst.api.expression.InlineConditional;
 import io.codelaser.maddi.cst.api.expression.Lambda;
 import io.codelaser.maddi.cst.api.expression.MethodCall;
+import io.codelaser.maddi.cst.api.expression.StringConstant;
 import io.codelaser.maddi.cst.api.expression.MethodReference;
 import io.codelaser.maddi.cst.api.expression.NullConstant;
 import io.codelaser.maddi.cst.api.expression.StringConcat;
@@ -2964,8 +2965,26 @@ public final class NullabilityPass {
     private String libraryNullableCall(MethodCall mc) {
         if (mc.methodInfo() == null || facts.keyPresentWhenCalled(mc) || facts.pureCallNonNullWhenCalled(mc)
             || NonNullFacts.computedNonNull(mc) || NonNullFacts.initialThreadLocal(mc)
-            || applicationClassLoader(mc)) return null;
+            || applicationClassLoader(mc) || standardSystemProperty(mc)) return null;
         return libraryNullableReturn(mc.methodInfo());
+    }
+
+    /*
+     The keys System.getProperties() guarantees (its javadoc's table): 'System.getProperty("os.name")' is never null
+     (nacos, CodeLaser/maddi-mod#22, after gap 9). A key known only at run time stays the library's null.
+     */
+    private static final Set<String> STANDARD_PROPERTIES = Set.of("java.version", "java.version.date", "java.vendor",
+            "java.vendor.url", "java.home", "java.vm.specification.version", "java.vm.specification.vendor",
+            "java.vm.specification.name", "java.vm.version", "java.vm.vendor", "java.vm.name",
+            "java.specification.version", "java.specification.vendor", "java.specification.name",
+            "java.class.version", "java.class.path", "java.library.path", "java.io.tmpdir", "os.name", "os.arch",
+            "os.version", "file.separator", "path.separator", "line.separator", "user.name", "user.home", "user.dir",
+            "native.encoding", "file.encoding");
+
+    private static boolean standardSystemProperty(MethodCall mc) {
+        return "java.lang.System.getProperty(String)".equals(mc.methodInfo().fullyQualifiedName())
+               && NonNullFacts.unwrap(mc.parameterExpressions().getFirst()) instanceof StringConstant sc
+               && STANDARD_PROPERTIES.contains(sc.constant());
     }
 
     private boolean applicationClassLoader(MethodCall mc) {
