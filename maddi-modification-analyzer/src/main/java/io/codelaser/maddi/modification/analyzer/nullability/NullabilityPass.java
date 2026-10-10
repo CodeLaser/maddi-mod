@@ -218,10 +218,23 @@ public final class NullabilityPass {
      * @param useSites per statement, the locals and parameters known non-null when it starts (M4)
      * @param smartCasts the same, restricted to what Kotlin's smart cast derives: for a printer that drops
      *                   {@code !!} where Kotlin will see the variable as non-null
+     * @param nonNullCallResults calls to an analysed method whose return null reaches, where it reaches only through
+     *                   parameters whose arguments at that call cannot be null (by identity; see {@link #callResultNonNull})
      */
     public record Report(Map<Info, ParameterizedType> verdicts, Map<Local, ParameterizedType> locals,
                          Map<Object, Object> cause, Map<Object, String> seedOrigin, NonNullFacts useSites,
-                         NonNullFacts smartCasts, Set<Local> asserted, Set<Local> unobserved) {
+                         NonNullFacts smartCasts, Set<Local> asserted, Set<Local> unobserved,
+                         Set<Expression> nonNullCallResults) {
+
+        /**
+         * CodeLaser/maddi-mod#22 gap 9: the callee's return is nullable (its verdict), but not the result of THIS call,
+         * because null reaches the return only from parameters this call's arguments do not make null.
+         * {@code getInteger(key, defaultValue)} returning {@code search(key).orElse(defaultValue)}, called as
+         * {@code getInteger(KEY, 5)} by one caller and {@code getInteger(key, null)} by another. Compared by identity.
+         */
+        public boolean callResultNonNull(Expression call) {
+            return nonNullCallResults.contains(call);
+        }
 
         /**
          * Whether the printer asserts this local at its declaration ({@link Policy#assertAtDeclaration}): null reaches
@@ -351,6 +364,15 @@ public final class NullabilityPass {
     // statement that assigns it directly to the recipient (M4)
     private final Map<List<Object>, int[]> linkEdges = new LinkedHashMap<>();
     private final Map<Local, LocalVariable> declaredLocals = new LinkedHashMap<>();
+    // CodeLaser/maddi-mod#22 gap 9: a call's own arguments. Each analysed call gets an id; SiteArg(id, i) receives what
+    // argument i of that call carries, and nothing more (no successors). A call's result is the callee's return only
+    // where that return is nullable by itself, or through a parameter whose argument at THIS call is nullable
+    private final Map<Expression, Integer> callIds = new IdentityHashMap<>();
+    private final Map<Integer, MethodInfo> callees = new HashMap<>();
+    private final List<GatedSite> gatedSites = new ArrayList<>();
+    private final Set<Integer> argumentsSeen = new HashSet<>();
+    // gate NOGAP9 for A/B: every call's result is the callee's return, as before
+    private static final boolean GAP9_OFF = System.getenv("NOGAP9") != null;
     // a parameter the body assigns (CodeLaser/maddi-mod#22 gap 5, #9): the parameter node is the caller's value only; what
     // the body assigns goes to a shadow local of the same name (the Kotlin printer's `var p = p`), which the parameter
     // flows into, and which reads after the first assignment resolve to (from the loop's start, for an assignment
@@ -728,8 +750,18 @@ public final class NullabilityPass {
         }
         NonNullFacts smartCasts = facts.kotlinSmartCasts();
         methods.forEach(smartCasts::walk);
+        Set<Expression> nonNullCallResults = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+        Map<MethodInfo, Boolean> intrinsic = new HashMap<>();
+        Set<Object> finalReached = reached;
+        callIds.forEach((call, id) -> {
+            MethodInfo callee = callees.get(id);
+            if (finalReached.contains(callee)
+                && !callResultNullable(callee, id, finalReached, finalReached::contains, intrinsic)) {
+                nonNullCallResults.add(call);
+            }
+        });
         return new Report(verdicts, locals, cause, seedOrigin, facts, smartCasts, Set.copyOf(asserted),
-                Set.copyOf(unobservedCandidates));
+                Set.copyOf(unobservedCandidates), nonNullCallResults);
     }
 
     /**
@@ -1124,17 +1156,100 @@ public final class NullabilityPass {
         Set<Object> reached = new LinkedHashSet<>(seeds);
         reached.removeAll(nonNullContracts);
         Deque<Object> queue = new ArrayDeque<>(reached);
-        while (!queue.isEmpty()) {
-            Object n = queue.removeFirst();
-            for (Object s : successors.getOrDefault(n, Set.of())) {
-                if (strict != null && isSlot(s) && !isSlot(n) && !strict.contains(n) && !isVarargElements(s)) continue;
-                if (!nonNullContracts.contains(s) && reached.add(s)) {
-                    cause.put(s, n);
-                    queue.addLast(s);
+        while (true) {
+            while (!queue.isEmpty()) {
+                Object n = queue.removeFirst();
+                for (Object s : successors.getOrDefault(n, Set.of())) {
+                    if (strict != null && isSlot(s) && !isSlot(n) && !strict.contains(n) && !isVarargElements(s)) continue;
+                    if (!nonNullContracts.contains(s) && reached.add(s)) {
+                        cause.put(s, n);
+                        queue.addLast(s);
+                    }
                 }
             }
+            // gap 9: the gated call results, once nothing else moves; monotone, so repeated until none opens
+            Map<MethodInfo, Boolean> intrinsic = new HashMap<>();
+            for (GatedSite site : gatedSites) {
+                if (!reached.contains(site.callee()) || reached.contains(site.target())
+                    || nonNullContracts.contains(site.target())
+                    || !callResultNullable(site.callee(), site.call(), reached, reached::contains, intrinsic)) continue;
+                reached.add(site.target());
+                cause.put(site.target(), site.callee());
+                queue.addLast(site.target());
+            }
+            if (queue.isEmpty()) return reached;
         }
-        return reached;
+    }
+
+    /*
+     Gap 9. Whether the result of call 'call' to 'callee' may be null, the callee's return being reached: by itself
+     (reached without passing through one of its own parameters), or through a parameter whose argument at this call is
+     (its SiteArg reached). SearchableProperties.getInteger(key, defaultValue) is 'search(key).orElse(defaultValue)', and
+     getInteger(key) calls getInteger(key, null): only that call's result is nullable, not 'getInteger(KEY, 5)'.
+     */
+    private boolean callResultNullable(MethodInfo callee, int call, Set<Object> reached,
+                                       java.util.function.Predicate<Object> isReached,
+                                       Map<MethodInfo, Boolean> intrinsicMemo) {
+        if (GAP9_OFF || !argumentsSeen.contains(call)) return true;
+        Set<ParameterInfo> through = passThrough(callee);
+        if (through.isEmpty()) return true;
+        if (intrinsicMemo.computeIfAbsent(callee, m -> reachedWithout(m, through, reached))) return true;
+        for (ParameterInfo pi : through) {
+            if (isReached.test(new SiteArg(call, pi.index()))) return true;
+        }
+        return false;
+    }
+
+    private Map<Object, Set<Object>> predecessors;
+    private int predecessorsOf = -1;
+    private final Map<MethodInfo, Set<ParameterInfo>> passThroughMemo = new HashMap<>();
+
+    private Map<Object, Set<Object>> predecessors() {
+        int size = flows.size() + gatedSites.size();
+        if (predecessors == null || predecessorsOf != size) {
+            predecessors = new HashMap<>();
+            successors.forEach((from, tos) -> tos.forEach(to ->
+                    predecessors.computeIfAbsent(to, _ -> new HashSet<>()).add(from)));
+            // a gated result's predecessor is its callee: over-approximates "by itself" (conservative)
+            gatedSites.forEach(g -> predecessors.computeIfAbsent(g.target(), _ -> new HashSet<>()).add(g.callee()));
+            predecessorsOf = size;
+            passThroughMemo.clear();
+        }
+        return predecessors;
+    }
+
+    /* the callee's own (non-varargs) parameters from which the graph reaches its return value */
+    private Set<ParameterInfo> passThrough(MethodInfo callee) {
+        Map<Object, Set<Object>> pred = predecessors();
+        return passThroughMemo.computeIfAbsent(callee, m -> {
+            Set<ParameterInfo> out = new HashSet<>();
+            Set<Object> seen = new HashSet<>();
+            Deque<Object> todo = new ArrayDeque<>(List.of(m));
+            while (!todo.isEmpty()) {
+                Object n = todo.removeFirst();
+                if (!seen.add(n)) continue;
+                if (n instanceof ParameterInfo pi && pi.methodInfo() == m && !pi.isVarArgs()) {
+                    out.add(pi);
+                    continue;
+                }
+                todo.addAll(pred.getOrDefault(n, Set.of()));
+            }
+            return out;
+        });
+    }
+
+    /* whether null reaches 'callee' backwards from a seed, without passing through one of 'through' */
+    private boolean reachedWithout(MethodInfo callee, Set<ParameterInfo> through, Set<Object> reached) {
+        Map<Object, Set<Object>> pred = predecessors();
+        Set<Object> seen = new HashSet<>();
+        Deque<Object> todo = new ArrayDeque<>(List.of(callee));
+        while (!todo.isEmpty()) {
+            Object n = todo.removeFirst();
+            if (!seen.add(n) || through.contains(n) || !reached.contains(n)) continue;
+            if (seedOrigin.containsKey(n)) return true;
+            todo.addAll(pred.getOrDefault(n, Set.of()));
+        }
+        return false;
     }
 
     private static boolean isTypeVariable(ParameterizedType pt) {
@@ -1153,6 +1268,18 @@ public final class NullabilityPass {
         public String toString() {
             return "elements of " + Report.label(of);
         }
+    }
+
+    /** What argument {@code index} of call {@code call} carries (gap 9): a node with no successors. */
+    record SiteArg(int call, int index) {
+        @Override
+        public String toString() {
+            return "argument " + index + " of call #" + call;
+        }
+    }
+
+    /** {@code callee -> target}, followed only where that call's own arguments let the null through (gap 9). */
+    record GatedSite(MethodInfo callee, Object target, int call) {
     }
 
     /** Type argument {@code index} of a node's declared type: the elements of a {@code List<String>}, a map's values. */
@@ -2701,7 +2828,10 @@ public final class NullabilityPass {
                               && (!rt.typeParameter().isMethodTypeParameter()
                                   || callee.parameters().stream().noneMatch(pi ->
                                          rt.typeParameter().equals(pi.parameterizedType().typeParameter())));
-            if (policy.callResults() && (!isTypeVariable(rt) || ownNull)) addEdge(callee, target);
+            if (policy.callResults() && (!isTypeVariable(rt) || ownNull)) {
+                if (GAP9_OFF || callee.parameters().isEmpty()) addEdge(callee, target);
+                else gatedSites.add(new GatedSite(callee, target, callId(mc, callee)));
+            }
             // a result typed with the callee's class type variables inside a generic type ('FastFixedSet<E>
             // spawnEmptySet()'): those positions are the receiver's slots (instantiatedSlots)
             if (readScope != null && !callee.isStatic() && rt.arrays() == 0 && !rt.parameters().isEmpty()
@@ -3110,6 +3240,14 @@ public final class NullabilityPass {
                 LinkComputerImpl.ListOfLinksImpl.class);
         receiverSlots(mi, scope, statement, call, callee, list, arguments);
         instantiatedArguments(mi, scope, call, callee, arguments);
+        if (call instanceof MethodCall && analysed.contains(callee) && !callee.returnType().isVoid()) {
+            int id = callId(call, callee);
+            argumentsSeen.add(id);
+            for (int i = 0; i < arguments.size() && i < parameters.size(); i++) {
+                if (parameters.get(i).isVarArgs()) break;
+                siteArgument(mi, scope, statement, call, list, arguments, i, new SiteArg(id, i));
+            }
+        }
         for (int i = 0; i < arguments.size(); i++) {
             ParameterInfo parameter = parameters.get(Math.min(i, parameters.size() - 1)); // varargs: the last one
             if (parameter.isVarArgs() && !passesTheArray(arguments, parameters, i)) {
@@ -3255,6 +3393,57 @@ public final class NullabilityPass {
             }
         }
         return targets;
+    }
+
+    private int callId(Expression call, MethodInfo callee) {
+        Integer id = callIds.get(call);
+        if (id == null) {
+            id = callIds.size();
+            callIds.put(call, id);
+            callees.put(id, callee);
+        }
+        return id;
+    }
+
+    /*
+     Gap 9: the null-carrying half of argument(), into this call's own SiteArg instead of the shared parameter (no
+     slots, no content: only whether the argument itself may be null here).
+     */
+    private void siteArgument(MethodInfo mi, Scope scope, Statement statement, Expression call,
+                              LinkComputer.ListOfLinks list, List<Expression> arguments, int i, SiteArg site) {
+        Expression argument = arguments.get(i);
+        Expression unwrapped = NonNullFacts.unwrap(argument);
+        if (unwrapped instanceof NullConstant) {
+            seed(site, "null argument in " + mi.fullyQualifiedName());
+            return;
+        }
+        if (unwrapped instanceof VariableExpression ve
+            && (facts.nonNullWhenCalled(call, ve.variable()) || facts.nonNullAt(statement, ve.variable()))) {
+            return;
+        }
+        String lib = nullableLibraryCall(argument);
+        if (lib != null) {
+            seedIndirect(site, "argument " + lib + " in " + mi.fullyQualifiedName());
+            return;
+        }
+        if (unwrapped instanceof MethodCall amc && amc.methodInfo() != null && analysed.contains(amc.methodInfo())
+            && !amc.methodInfo().isConstructor() && !amc.methodInfo().returnType().isVoid()) {
+            addEdge(amc.methodInfo(), site); // conservative: the nested call's result, ungated
+        }
+        if (list == null || i >= list.list().size()) {
+            if (!(unwrapped instanceof MethodCall)) addEdge(argumentNode(mi, scope, argument), site);
+            return;
+        }
+        Links links = list.list().get(i);
+        Variable primary = links.primary();
+        if (primary == null) return;
+        if (isNullMarker(primary)) {
+            nullMarker(mi, primary, site, "null argument in " + mi.fullyQualifiedName());
+            return;
+        }
+        Object node = node(mi, scope, primary);
+        if (node != null) addEdge(node, site);
+        sourcesOf(mi, scope, primary, links, site);
     }
 
     // pi: the parameter, or the Content of a varargs parameter

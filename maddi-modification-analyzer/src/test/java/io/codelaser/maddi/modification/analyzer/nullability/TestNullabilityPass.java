@@ -21,6 +21,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -2654,5 +2655,70 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("ClassLoader", s.get("literal()"), s.toString());
         assertEquals("ClassLoader", s.get("of()"), s.toString());
         assertEquals("ClassLoader?", s.get("bootstrap()"), "String is loaded by the bootstrap loader: " + s);
+    }
+
+    // CodeLaser/maddi-mod#22 gap 9 (nacos SearchableProperties): the return is nullable only through 'defaultValue', so the
+    // result of a call passing a non-null default is not
+    @Language("java")
+    private static final String GAP9 = """
+            package a.b;
+            import java.util.HashMap;
+            import java.util.Map;
+            import java.util.Optional;
+            class G9 {
+                private final Map<String, Object> map = new HashMap<>();
+                <T> Optional<T> search(String key, Class<T> type) { return Optional.ofNullable(type.cast(map.get(key))); }
+                Integer getInteger(String key) { return getInteger(key, null); }
+                Integer getInteger(String key, Integer defaultValue) {
+                    return search(key, Integer.class).orElse(defaultValue);
+                }
+                int timeout() {
+                    Integer n = getInteger("timeout", 5);
+                    return n.intValue();
+                }
+                int retries() {
+                    Integer r = getInteger("retries");
+                    return r == null ? 0 : r;
+                }
+                Integer timeoutValue() { return getInteger("timeout", 5); }
+                Integer retriesValue() { return getInteger("retries"); }
+            }
+            """;
+
+    private List<io.codelaser.maddi.cst.api.expression.MethodCall> calls(String method, String callee) {
+        MethodInfo mi = parsed.methods().stream().filter(m -> m.name().equals(method)).findFirst().orElseThrow();
+        List<io.codelaser.maddi.cst.api.expression.MethodCall> out = new java.util.ArrayList<>();
+        mi.methodBody().visit(e -> {
+            if (e instanceof io.codelaser.maddi.cst.api.expression.MethodCall mc && mc.methodInfo() != null
+                && mc.methodInfo().name().equals(callee)) out.add(mc);
+            return true;
+        });
+        return out;
+    }
+
+    @DisplayName("gap 9: a return nullable only through a parameter is not nullable at a call whose argument is not")
+    @Test
+    public void returnThroughParameterPerCall() {
+        NullabilityPass.Report report = run("a.b.G9", GAP9);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(label(info), k(pt)));
+        assertEquals("Integer?", s.get("getInteger(1:defaultValue)"), s.toString());
+        String r = s.entrySet().stream().filter(e -> e.getKey().equals("getInteger()")).map(Map.Entry::getValue)
+                .collect(Collectors.joining(","));
+        assertTrue(r.contains("Integer?"), "the declaration stays nullable: " + s);
+        assertTrue(report.callResultNonNull(calls("timeout", "getInteger").getFirst()), report.explain(
+                calls("timeout", "getInteger").getFirst().methodInfo()));
+        assertFalse(report.callResultNonNull(calls("getInteger", "getInteger").getFirst()),
+                "getInteger(key, null) passes the null");
+    }
+
+    @DisplayName("gap 9, Kotlin: a return assigned a call passing a non-null default is non-null")
+    @Test
+    public void returnThroughParameterPerCallKotlin() {
+        NullabilityPass.Report report = run("a.b.G9", GAP9, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(label(info), k(pt)));
+        assertEquals("Integer", s.get("timeoutValue()"), s.toString());
+        assertEquals("Integer?", s.get("retriesValue()"), s.toString());
     }
 }
