@@ -67,13 +67,13 @@ public class TestModificationInConditionalExpression2 extends CommonTest {
         assertFalse(Y.findUniqueMethod("has", 2).isModifying(),
                 "`contains` is @NotModified[O]: a read-only call in an arm stays read-only");
 
-        // ⚠ ...and the one that is NOT the fix's doing. `Collections.unmodifiableList` carries
-        // `@Independent[M]` and no `@NotModified`, so the archive says it MODIFIES its argument
-        // (`Mark argument primary integerList as modified by java.util.Collections.unmodifiableList`).
-        // Before the fix the ternary discarded that record and the method read as non-modifying; it is the
-        // hint that decides this, not the conditional. Asserted as-is so that a later hint change is visible
-        // here rather than only in the clone-bench ratchet, where it cost ten reverse divergences.
-        assertTrue(Y.findUniqueMethod("viaUnmodifiable", 1).isModifying(),
-                "the archive marks unmodifiableList's argument modified; the ternary must not hide it");
+        // ...and the one that is NOT the fix's doing: the hint decides it. Until 2026-10-10
+        // `Collections.unmodifiableList` carried `@Independent[M]` and no `@NotModified`, so the archive said it
+        // MODIFIED its argument, and this method read as modifying once the ternary kept the record. The hint now
+        // says `@NotModified` (as for all eleven unmodifiable* views): a view that rejects every write does not
+        // write its backing collection. In langchain4j, `Utils.copy(list)` returns `unmodifiableList(list)`, and
+        // the wrong hint made every constructor parameter stored through it modified (no read-only Kotlin type).
+        assertFalse(Y.findUniqueMethod("viaUnmodifiable", 1).isModifying(),
+                "unmodifiableList does not modify its argument");
     }
 }
