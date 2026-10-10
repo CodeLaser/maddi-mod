@@ -789,6 +789,9 @@ public final class NullabilityPass {
         Set<Object> out = null;
         for (MethodInfo mi : methods) {
             if (mi.isConstructor() || mi.isStatic() || mi.methodBody() == null || mi.methodBody().isEmpty()) continue;
+            // after the closure, so nothing carries the change through a hierarchy: an override's parameter must
+            // keep its overridden one's state (fernflower SwitchStatement.replaceExprent overrode nothing)
+            if (!mi.overrides().isEmpty() || implementations.containsKey(mi)) continue;
             for (ParameterInfo pi : mi.parameters()) {
                 if (reached.contains(pi) || pi.parameterizedType().isPrimitiveExcludingVoid()
                     || pi.isVarArgs()) continue;
