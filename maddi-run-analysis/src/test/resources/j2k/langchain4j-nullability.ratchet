@@ -17,12 +17,17 @@
 # 2026-10-09, maddi-mod 7c73f6ae (an analysed call's result flows into an argument where its links are empty: the
 # Json*Schema builders' description parameters nullable) with maddi 3f3faedd7 (a nullable parameter beside a varargs
 # overload keeps Java's choice): 200 type errors; 1,063 tests pass with the Kotlin classes, 1,022 translated.
+# 2026-10-10, nullable vararg elements and holder fields (f6cd7375, fa979a69) with maddi's T : Any bound for a T? parameter
+# and non-null T result: ValidationUtils compiles, 281 files compiling, 279 to class files (176 type errors), 118 test
+# files compile. Mockito matchers and a collection overload beside Object keep Java's behaviour: 1,049 translated tests.
+# testsPassing goes DOWN 2, knowingly: ModelDescription.Builder.maxInputTokens(Integer), judged non-null, is an int in
+# the Kotlin class, and the Java tests miss the method.
 types	346
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	346
-compilingFiles	276
-bytecodeFiles	240
-testsPassing	1063
-testBytecodeFiles	115
-translatedTestsPassing	1022
+compilingFiles	281
+bytecodeFiles	279
+testsPassing	1061
+testBytecodeFiles	118
+translatedTestsPassing	1049
