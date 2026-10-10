@@ -22,12 +22,14 @@
 # files compile. Mockito matchers and a collection overload beside Object keep Java's behaviour: 1,049 translated tests.
 # testsPassing goes DOWN 2, knowingly: ModelDescription.Builder.maxInputTokens(Integer), judged non-null, is an int in
 # the Kotlin class, and the Java tests miss the method.
+# 2026-10-10, maddi prints a non-generic override of a generic member (AiServiceEvent.eventClass()/toBuilder()) with
+# the member's type parameters and a cast: 295 files compiling (123 type errors), 293 to class files.
 types	346
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	346
-compilingFiles	281
-bytecodeFiles	279
+compilingFiles	295
+bytecodeFiles	293
 testsPassing	1061
 testBytecodeFiles	118
 translatedTestsPassing	1049
