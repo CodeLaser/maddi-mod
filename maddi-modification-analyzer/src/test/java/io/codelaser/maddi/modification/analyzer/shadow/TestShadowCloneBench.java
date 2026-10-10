@@ -282,7 +282,14 @@ public class TestShadowCloneBench extends CommonTest {
         // `Collections.unmodifiableList(integerList)`, and setParameter iterates over that result. Both are
         // nonModifyingMethod; the pass now agrees, and the fixpoint's FALSE is the pessimism. The receiver-chain
         // rules of the same day (CodeLaser/maddi-mod#24 R1/R2) move nothing on this corpus (A/B: identical lists).
-        org.junit.jupiter.api.Assertions.assertEquals(269, totalRev,
+        // ⭐ Re-baselined 2026-10-10 for maddi c9c882e98 (String.format/formatted, PrintStream.format/printf and
+        // System.Logger.log do not modify their Object... arguments; CodeLaser/maddi-mod#24 R4). A/B against the
+        // run just above, only the hint changed: divergences 706 -> 701 {unmodifiedField 23 -> 20,
+        // unmodifiedParameter 676 -> 674} {propagated 685 -> 683, seed 21 -> 18}, reverse 269 -> 262. Every mover
+        // is closed and is a formatting shape: ArrayList_AddAt.TestCase's fields handed to a message format by
+        // $5.apply, and printAscii(String, Object[]):1:args; reverse byteArrayToHex(byte[]) (String.format of an
+        // element), print(double[][]) and print(double[],int,int) (printf, five clones) and TpchResultComparator.main.
+        org.junit.jupiter.api.Assertions.assertEquals(262, totalRev,
                 "reverse divergences are expected since design A (110695ece) retired the "
                 + "walkable-summary seed channel; re-baseline deliberately, and reclassify");
         // Re-baselined 2026-09-22 for the RECEIVER-DISCLAIMER rule (@IgnoreModifications on a parameter now
@@ -297,9 +304,9 @@ public class TestShadowCloneBench extends CommonTest {
         // mirror was found in the first place.
         // Both fixes above apply together, measured on this corpus with both present.
         org.junit.jupiter.api.Assertions.assertEquals(
-                Map.of("nonModifyingMethod", 7, "unmodifiedField", 23, "unmodifiedParameter", 676),
+                Map.of("nonModifyingMethod", 7, "unmodifiedField", 20, "unmodifiedParameter", 674),
                 byProperty);
-        org.junit.jupiter.api.Assertions.assertEquals(Map.of("propagated", 685, "seed", 21), byClass);
+        org.junit.jupiter.api.Assertions.assertEquals(Map.of("propagated", 683, "seed", 18), byClass);
     }
 
     private volatile int totalMethods, totalSeeds, totalEdges, totalMissingArgLinks, totalUnprojectedReceivers;
