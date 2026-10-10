@@ -2612,23 +2612,25 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("Box<String?>", s.get("box()"), "a null from outside is the instance's: " + s);
     }
 
-    // a library return annotated nullable in its class file, with no hint: JUnit 6's 'ExtensionContext.Store.get'
-    // is '@Nullable Object get(Object)' (JSpecify, type use). Before 2026-10-10 only the hints seeded a library
-    // return: nacos' io.kubernetes.client getters ('@jakarta.annotation.Nullable') never reached a dereference.
+    // a library return annotated nullable in its class file, with no hint: maddi-support's 'SetOnce.getOrDefaultNull'
+    // is '@Nullable T getOrDefaultNull()' (libs/support hints are not loaded). Before 2026-10-10 only the hints seeded
+    // a library return: nacos' io.kubernetes.client getters ('@jakarta.annotation.Nullable') never reached a
+    // dereference. (JUnit 6's JSpecify-annotated 'ExtensionContext.Store.get' cannot serve: jspecify is not on the
+    // test class path, so its annotations are skipped as unmappable.)
     @DisplayName("a library return annotated nullable in its class file seeds, like a hinted one")
     @Test
     public void libraryReturnAnnotatedInClassFile() {
         NullabilityPass.Report report = run("a.b.LR", """
                 package a.b;
-                import org.junit.jupiter.api.extension.ExtensionContext;
+                import io.codelaser.maddi.support.SetOnce;
                 class LR {
-                    static Object value(ExtensionContext.Store store) { return store.get("k"); }
+                    static String value(SetOnce<String> once) { return once.getOrDefaultNull(); }
                     static String trimmed(String s) { return s.trim(); }
                 }
                 """);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(label(info), k(pt)));
-        assertEquals("Object?", s.get("value()"), s.toString());
+        assertEquals("String?", s.get("value()"), s.toString());
         assertEquals("String", s.get("trimmed()"), s.toString());
     }
 
