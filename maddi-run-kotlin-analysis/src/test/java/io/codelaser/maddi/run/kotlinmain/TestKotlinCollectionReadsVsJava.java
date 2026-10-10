@@ -69,7 +69,7 @@ public class TestKotlinCollectionReadsVsJava {
             "FilterIsInstanceArr", "SeqPlus", "OrEmptyCall", "Decode", "StringBytes",
             "RangeContains", "MatchValues", "KClassName", "FileExt", "DequeFirst", "DelegateRead", "SumInt", "SumLong",
             "JavaClass",
-            "MapIndexed", "MaxBy", "ZipArr", "FilterValues", "ToMapPairs", "ArrTakeWhile", "ArrIsEmpty", "CharsString", "SeqFlatMapIterable", "SeqWithIndex", "IndexedVal", "MatchDestructured", "ProgressionFirst", "LazyMode", "FileWrite", "PathWrite", "ToRegexOpt", "SeqBuilder", "MapIndex", "Control");
+            "MapIndexed", "MaxBy", "ZipArr", "FilterValues", "ToMapPairs", "ArrTakeWhile", "ArrIsEmpty", "CharsString", "SeqFlatMapIterable", "SeqWithIndex", "IndexedVal", "MatchDestructured", "ProgressionFirst", "LazyMode", "FileWrite", "PathWrite", "ToRegexOpt", "SeqBuilder", "MapIndex", "OnEach", "ArrAsList", "ArrBinarySearch", "Control");
 
     private static final String KOTLIN = """
             package a
@@ -144,6 +144,9 @@ public class TestKotlinCollectionReadsVsJava {
             class ToRegexOpt(private val s: RegexOption) { fun f(x: String): Regex = x.toRegex(s) }
             class SeqBuilder(private val s: List<String>) { fun f(): Sequence<String> = sequence { yieldAll(s) } }
             class MapIndex(private val s: Map<String, String>) { fun f(k: String): String? = s[k] }
+            class OnEach(private val s: List<String>) { fun f(): List<String> = s.onEach { it.length } }
+            class ArrAsList(private val s: Array<String>) { fun f(): List<String> = s.asList() }
+            class ArrBinarySearch(private val s: IntArray) { fun f(): Int = s.binarySearch(3) }
             class Control(private val s: MutableList<String>) { fun f() { s.clear() } }
             """;
 
@@ -216,6 +219,8 @@ public class TestKotlinCollectionReadsVsJava {
         // ArrIsEmpty, CharsString and ToRegexOpt are front-end lowerings of @InlineOnly calls, already in place for that
         // run, as is MapIndex (`s[k]`, the @InlineOnly Map.get); IndexedVal, MatchDestructured, ProgressionFirst and
         // PathWrite were already true and guard parity.
+        // OnEach, ArrAsList and ArrBinarySearch were false before their contracts (2026-10-10). Array.orEmpty() is REIFIED,
+        // so ACC_SYNTHETIC like filterIsInstance: no method the hints parser can see; it needs a lowering instead.
         // ⚠ Every negative control in these notes was measured with the stdlib on the class path ONLY; the setup has since
         // been made the one a build tool hands over (see above), and the rows still agree with Java under it.
         // SeqBuilder needs the right overload too (ResolvedOverloadTest: `yieldAll(list)` bound the draining Iterator one).
@@ -291,6 +296,9 @@ public class TestKotlinCollectionReadsVsJava {
                 a.ToRegexOpt true
                 a.SeqBuilder true
                 a.MapIndex true
+                a.OnEach true
+                a.ArrAsList true
+                a.ArrBinarySearch true
                 a.Control false""", verdicts);
     }
 
