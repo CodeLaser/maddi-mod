@@ -21,6 +21,7 @@ import io.codelaser.maddi.cst.api.expression.ArrayInitializer;
 import io.codelaser.maddi.cst.api.expression.Assignment;
 import io.codelaser.maddi.cst.api.expression.BinaryOperator;
 import io.codelaser.maddi.cst.api.expression.Cast;
+import io.codelaser.maddi.cst.api.expression.ClassExpression;
 import io.codelaser.maddi.cst.api.expression.ConstantExpression;
 import io.codelaser.maddi.cst.api.expression.ConstructorCall;
 import io.codelaser.maddi.cst.api.expression.Expression;
@@ -56,6 +57,7 @@ import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.api.variable.DependentVariable;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.cst.api.variable.LocalVariable;
+import io.codelaser.maddi.cst.api.variable.This;
 import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.cst.impl.analysis.NullAnnotations;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
@@ -589,7 +591,7 @@ public final class NullabilityPass {
                 if (analysed.contains(callee)) {
                     yield reached.contains(callee) || external.contains(callee) || degraded.contains(callee);
                 }
-                yield libraryNullableReturn(callee) != null;
+                yield libraryNullableCall(mc) != null;
             }
             default -> true;
         };
@@ -2727,7 +2729,7 @@ public final class NullabilityPass {
         }
         // 'x = map.get(k)' with k known present (NonNullFacts, CodeLaser/maddi-mod#22 gap 1): not the absent key's null; what
         // the map holds for k still flows through its value slot above
-        String lib = facts.keyPresentWhenCalled(mc) ? null : libraryNullableReturn(callee);
+        String lib = libraryNullableCall(mc);
         if (lib != null) {
             seedIndirect(target, "assigned " + lib);
         } else if (policy.contracts() && analysed.contains(callee)
@@ -2785,10 +2787,39 @@ public final class NullabilityPass {
 
     private String nullableLibraryCall(Expression e) {
         Expression unwrapped = e instanceof Cast c ? c.expression() : e;
-        if (unwrapped instanceof MethodCall mc && mc.methodInfo() != null && !facts.keyPresentWhenCalled(mc)) {
-            return libraryNullableReturn(mc.methodInfo());
-        }
+        if (unwrapped instanceof MethodCall mc && mc.methodInfo() != null) return libraryNullableCall(mc);
         return null;
+    }
+
+    /*
+     A library call that may return null, at this call: not 'map.get(k)' with k known present (NonNullFacts,
+     CodeLaser/maddi-mod#22 gap 1), not 'getClassLoader()' on the class of a type of this analysis, which the
+     bootstrap loader never loads ('getClass().getClassLoader()', 'X.class.getClassLoader()'; nacos 2026-10-10).
+     */
+    private String libraryNullableCall(MethodCall mc) {
+        if (mc.methodInfo() == null || facts.keyPresentWhenCalled(mc) || applicationClassLoader(mc)) return null;
+        return libraryNullableReturn(mc.methodInfo());
+    }
+
+    private boolean applicationClassLoader(MethodCall mc) {
+        if (!"java.lang.Class.getClassLoader()".equals(mc.methodInfo().fullyQualifiedName())) return false;
+        Expression receiver = mc.object() == null ? null : NonNullFacts.unwrap(mc.object());
+        ParameterizedType classOf = null;
+        if (receiver instanceof ClassExpression ce) {
+            classOf = ce.type();
+            if (classOf != null && classOf.typeInfo() != null && "java.lang.Class".equals(classOf.typeInfo()
+                    .fullyQualifiedName()) && !classOf.parameters().isEmpty()) {
+                classOf = classOf.parameters().getFirst();
+            }
+        } else if (receiver instanceof MethodCall getClass && getClass.methodInfo() != null
+                   && "getClass".equals(getClass.methodInfo().name()) && getClass.parameterExpressions().isEmpty()) {
+            Expression of = getClass.object() == null ? null : NonNullFacts.unwrap(getClass.object());
+            if (of == null || of instanceof VariableExpression ve && ve.variable() instanceof This) return true;
+            classOf = of.parameterizedType();
+        }
+        if (classOf == null || classOf.arrays() > 0 || classOf.typeInfo() == null) return false;
+        TypeInfo primary = classOf.typeInfo().primaryType();
+        return analysed.stream().anyMatch(m -> m.typeInfo().primaryType().equals(primary));
     }
 
     // in Java only == and != take a null operand

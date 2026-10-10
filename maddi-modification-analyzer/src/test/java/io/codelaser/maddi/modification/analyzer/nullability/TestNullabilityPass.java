@@ -2630,4 +2630,26 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("Object?", s.get("value()"), s.toString());
         assertEquals("String", s.get("trimmed()"), s.toString());
     }
+
+    // Class.getClassLoader() is null only for a class of the bootstrap loader: never for this analysis' own types
+    // (nacos MysqlHealthCheckProcessor-style 'getClass().getClassLoader()'), still for 'String.class'
+    @DisplayName("getClassLoader() of an analysed type's class is not a null source")
+    @Test
+    public void applicationClassLoader() {
+        NullabilityPass.Report report = run("a.b.CL", """
+                package a.b;
+                class CL {
+                    ClassLoader own() { return getClass().getClassLoader(); }
+                    static ClassLoader literal() { return CL.class.getClassLoader(); }
+                    static ClassLoader of(CL cl) { return cl.getClass().getClassLoader(); }
+                    static ClassLoader bootstrap() { return String.class.getClassLoader(); }
+                }
+                """);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(label(info), k(pt)));
+        assertEquals("ClassLoader", s.get("own()"), s.toString());
+        assertEquals("ClassLoader", s.get("literal()"), s.toString());
+        assertEquals("ClassLoader", s.get("of()"), s.toString());
+        assertEquals("ClassLoader?", s.get("bootstrap()"), "String is loaded by the bootstrap loader: " + s);
+    }
 }
