@@ -2577,4 +2577,37 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("Object?[]", s.get("illegalArgument(1:args)"), s.toString());
         assertEquals("Object?[]", s.get("runtime(1:args)"), "a null argument, as before: " + s);
     }
+
+    // langchain4j EmbeddingStoreRequestContext.Add: 'Add(store, attributes, embedding)' calls 'this(..., null)' into
+    // its 'Embedded embedded' field. That null is the class's own: Kotlin's 'val embedded: Embedded?', not an
+    // Add<X?> for every instance (which spread to ListeningEmbeddingStore's 'delegate' and clashed with 'this').
+    // A null written outside the class into the same kind of field is still the instance's.
+    @DisplayName("a holder field's own null makes the field nullable, an outside null the instance's slot")
+    @Test
+    public void holderFieldOwnNull() {
+        NullabilityPass.Report report = run("a.b.HF", """
+                package a.b;
+                class HF {
+                    static class Store<E> { }
+                    static class Ctx<E> {
+                        final Store<E> store;
+                        final E embedded;
+                        Ctx(Store<E> store, E embedded) { this.store = store; this.embedded = embedded; }
+                        Ctx(Store<E> store) { this(store, null); }
+                        E embedded() { return embedded; }
+                    }
+                    static class Box<T> {
+                        final T t;
+                        Box(T t) { this.t = t; }
+                    }
+                    static <X> Ctx<X> make(Store<X> s) { return new Ctx<>(s); }
+                    static Box<String> box() { return new Box<>(null); }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(label(info), k(pt)));
+        assertEquals("E?", s.get("embedded"), s.toString());
+        assertEquals("Ctx<X>", s.get("make()"), "the class's own null stays in the class: " + s);
+        assertEquals("Box<String?>", s.get("box()"), "a null from outside is the instance's: " + s);
+    }
 }

@@ -327,6 +327,12 @@ public final class NullabilityPass {
     // nodes seeded by a null that is written (a literal, an argument, an initializer, an annotation), not by indirect
     // evidence only (seedLibrary): Policy.assertContentWrites
     private final Set<Object> strictSeeds = new HashSet<>();
+    // per seed, the types whose code writes its null (a literal, a default value, a comparison); a null element: a
+    // seed without a writer in the code (an annotation, a library contract). Read by holderFields.
+    private final Map<Object, List<TypeInfo>> seedWriters = new HashMap<>();
+    // holderFields under Policy.assertContentWrites: a field's edges to the instances' slots, added only when a null
+    // written outside the field's class reaches it
+    private final Map<FieldInfo, List<Arg>> pendingHolders = new LinkedHashMap<>();
     private final Map<Object, Set<Object>> successors = new LinkedHashMap<>();
     private final Map<Object, String> seedOrigin = new LinkedHashMap<>();
     private final Set<MethodInfo> degraded = new LinkedHashSet<>();
@@ -1035,16 +1041,33 @@ public final class NullabilityPass {
     }
 
     private void seed(Object node, String origin) {
+        seed(node, origin, null);
+    }
+
+    // writer: the type whose code writes the null; null when the seed has none (an annotation, a contract)
+    private void seed(Object node, String origin, TypeInfo writer) {
         if (node != null) {
             seedOrigin.putIfAbsent(node, origin);
             strictSeeds.add(node);
+            seedWriters.computeIfAbsent(node, _ -> new ArrayList<>()).add(writer);
         }
+    }
+
+    private void seedIndirect(Object node, String origin) {
+        seedIndirect(node, origin, null);
     }
 
     // indirect evidence (Policy.assertContentWrites): a library contract, a field's default value (the Kotlin
     // reading is a 'lateinit' field), a comparison with null (the nullTests heuristic). Not a null that is written.
-    private void seedIndirect(Object node, String origin) {
-        if (node != null) seedOrigin.putIfAbsent(node, origin);
+    private void seedIndirect(Object node, String origin, TypeInfo writer) {
+        if (node != null) {
+            seedOrigin.putIfAbsent(node, origin);
+            seedWriters.computeIfAbsent(node, _ -> new ArrayList<>()).add(writer);
+        }
+    }
+
+    private static TypeInfo writer(MethodInfo mi) {
+        return mi == null ? null : mi.typeInfo();
     }
 
     private Set<Object> closure(Map<Object, Object> cause) {
@@ -1169,9 +1192,51 @@ public final class NullabilityPass {
             if (type == null || type.arrays() > 0 || type.typeInfo() == null) continue;
             for (FieldInfo fi : byOwner.getOrDefault(type.typeInfo(), List.of())) {
                 int index = classTypeVariable(fi);
-                if (index < type.parameters().size()) addEdge(fi, new Arg(n, index));
+                if (index >= type.parameters().size()) continue;
+                if (policy.assertContentWrites()) {
+                    pendingHolders.computeIfAbsent(fi, _ -> new ArrayList<>()).add(new Arg(n, index));
+                } else {
+                    addEdge(fi, new Arg(n, index));
+                }
             }
         }
+        if (!pendingHolders.isEmpty()) holdersReachedFromOutside();
+    }
+
+    /*
+     Policy.assertContentWrites (Kotlin): a null the field's own class writes ('this(store, attributes, embedding,
+     null)' into 'Embedded embedded', a default value, 'this.t = null') says the field is 'T?', not that every
+     instance is a 'Box<X?>': Kotlin writes 'val embedded: Embedded?' and leaves the type argument alone. Only a null
+     written outside the class, through its parameters ('new Box<>(null)', a setter), is the instantiation's. Without
+     this, langchain4j's EmbeddingStoreRequestContext.Add made every request context an Add<X?>, and through them
+     ListeningEmbeddingStore's 'delegate' an EmbeddingStore<Embedded?> that 'this' is not (13 type errors).
+     A field is the instances' when a closure from the seeds written outside its class (or by no code at all)
+     reaches it. Not iterated: a holder reached only through another holder's instance slot stays the field's.
+     */
+    private void holdersReachedFromOutside() {
+        Map<TypeInfo, List<FieldInfo>> byOwner = new LinkedHashMap<>();
+        pendingHolders.keySet().forEach(fi -> byOwner.computeIfAbsent(fi.owner(), _ -> new ArrayList<>()).add(fi));
+        byOwner.forEach((holder, holders) -> {
+            Set<Object> outside = new LinkedHashSet<>();
+            seedOrigin.keySet().forEach(seed -> {
+                List<TypeInfo> writers = seedWriters.getOrDefault(seed, List.of());
+                if (writers.isEmpty() || writers.stream().anyMatch(w -> !within(w, holder))) outside.add(seed);
+            });
+            Set<Object> reachedFromOutside = closure(new HashMap<>(), outside, null);
+            for (FieldInfo fi : holders) {
+                if (reachedFromOutside.contains(fi)) pendingHolders.get(fi).forEach(arg -> addEdge(fi, arg));
+            }
+        });
+    }
+
+    // the code of 'type' is the code of 'holder': the class itself or a class nested in it (a lambda's, an
+    // anonymous class's); null (no writer) is not
+    private static boolean within(TypeInfo type, TypeInfo holder) {
+        for (TypeInfo t = type; t != null; t = t.compilationUnitOrEnclosingType().isRight()
+                ? t.compilationUnitOrEnclosingType().getRight() : null) {
+            if (t.equals(holder)) return true;
+        }
+        return false;
     }
 
     /*
@@ -1454,7 +1519,7 @@ public final class NullabilityPass {
         if (owner != null && !owner.equals(mi) && analysed.contains(owner) && !owner.returnType().isVoid()) {
             addEdge(owner, target);
         } else {
-            seed(target, origin);
+            seed(target, origin, writer(mi));
         }
     }
 
@@ -2050,7 +2115,7 @@ public final class NullabilityPass {
             lvc.localVariableStream().forEach(lv -> {
                 Object local = local(mi, scope, lv.simpleName());
                 if (lv.assignmentExpression() instanceof NullConstant) {
-                    seed(local, "initialized null in " + mi.fullyQualifiedName());
+                    seed(local, "initialized null in " + mi.fullyQualifiedName(), mi.typeInfo());
                 }
                 callResult(local, lv.assignmentExpression());
                 seedCreated(local, lv.assignmentExpression(), mi);
@@ -2058,7 +2123,7 @@ public final class NullabilityPass {
             });
         } else if (statement.expression() instanceof Assignment a && a.variableTarget() != null) {
             Object target = assignmentTarget(mi, scope, a.variableTarget());
-            if (a.value() instanceof NullConstant) seed(target, "assigned null in " + mi.fullyQualifiedName());
+            if (a.value() instanceof NullConstant) seed(target, "assigned null in " + mi.fullyQualifiedName(), mi.typeInfo());
             callResult(target, a.value());
             seedCreated(target, a.value(), mi);
             constructorCopies(mi, scope, target, a.value());
@@ -2087,7 +2152,7 @@ public final class NullabilityPass {
             if (e instanceof Lambda) return false;
             if (e instanceof Assignment a && a != top && a.variableTarget() != null && a.assignmentOperator() == null) {
                 Object target = assignmentTarget(mi, scope, a.variableTarget());
-                if (a.value() instanceof NullConstant) seed(target, "assigned null in " + mi.fullyQualifiedName());
+                if (a.value() instanceof NullConstant) seed(target, "assigned null in " + mi.fullyQualifiedName(), mi.typeInfo());
                 callResult(target, a.value());
                 seedCreated(target, a.value(), mi);
             }
@@ -2532,7 +2597,7 @@ public final class NullabilityPass {
         if (depth > 0) {
             Object content = target;
             for (int d = 0; d < depth; d++) content = new Content(content);
-            seed(content, "array created with null elements in " + where(mi));
+            seed(content, "array created with null elements in " + where(mi), writer(mi));
         }
         Expression unwrapped = NonNullFacts.unwrap(value);
         ArrayInitializer initializer = unwrapped instanceof ArrayInitializer ai ? ai
@@ -2550,7 +2615,7 @@ public final class NullabilityPass {
             // also an alternative of the element: '{…, monitor ? "1" : null}' (fernflower FlattenStatementsHelper)
             for (Expression e : alternatives(element)) {
                 if (NonNullFacts.unwrap(e) instanceof NullConstant) {
-                    seed(elements, "null in an array initializer in " + where(mi));
+                    seed(elements, "null in an array initializer in " + where(mi), writer(mi));
                 } else {
                     seedCreated(elements, e, mi);
                 }
@@ -2692,7 +2757,7 @@ public final class NullabilityPass {
                 if (stateOf(p, PropertyImpl.NULLABILITY_PARAMETER) == NullableState.NULLABLE) continue;
                 Expression argument = arguments.get(a);
                 if (NonNullFacts.unwrap(argument) instanceof NullConstant) {
-                    seed(slot, "null passed to " + callee.fullyQualifiedName() + " in " + where(mi));
+                    seed(slot, "null passed to " + callee.fullyQualifiedName() + " in " + where(mi), writer(mi));
                     continue;
                 }
                 seedCreated(slot, argument, mi);
@@ -2722,7 +2787,7 @@ public final class NullabilityPass {
         if (other instanceof VariableExpression ve) {
             Object node = node(mi, scope, ve.variable());
             if (node instanceof ParameterInfo || node instanceof FieldInfo) {
-                seedIndirect(node, "compared with null in " + mi.fullyQualifiedName());
+                seedIndirect(node, "compared with null in " + mi.fullyQualifiedName(), mi.typeInfo());
             }
         }
     }
@@ -3152,7 +3217,7 @@ public final class NullabilityPass {
     private void argument(MethodInfo mi, Scope scope, Statement statement, Expression call,
                           LinkComputer.ListOfLinks list, List<Expression> arguments, int i, Object pi) {
         if (arguments.get(i) instanceof NullConstant) {
-            seed(pi, "null argument in " + mi.fullyQualifiedName());
+            seed(pi, "null argument in " + mi.fullyQualifiedName(), mi.typeInfo());
             return;
         }
         // M4: a variable argument known non-null at the call (or when its statement starts) carries no null
@@ -3186,7 +3251,7 @@ public final class NullabilityPass {
         }
         String lib = nullableLibraryCall(arguments.get(i));
         if (lib != null) {
-            seedIndirect(pi, "argument " + lib + " in " + mi.fullyQualifiedName());
+            seedIndirect(pi, "argument " + lib + " in " + mi.fullyQualifiedName(), mi.typeInfo());
             return;
         }
         if (list == null || i >= list.list().size()) {
@@ -3253,18 +3318,18 @@ public final class NullabilityPass {
             factorySlots(fi, initializer, null);
         }
         if (initializer instanceof NullConstant) {
-            seed(fi, "initializer null");
+            seed(fi, "initializer null", fi.owner());
             return;
         }
         if (fi.isFinal() || initializer != null && !initializer.isEmpty()) return;
         List<MethodInfo> constructors = fi.owner().constructors();
         if (constructors.isEmpty()) {
-            seedIndirect(fi, "default value: no constructor assigns it");
+            seedIndirect(fi, "default value: no constructor assigns it", fi.owner());
             return;
         }
         for (MethodInfo constructor : constructors) {
             if (!assigns(constructor, fi)) {
-                seedIndirect(fi, "default value: not assigned in " + constructor.fullyQualifiedName());
+                seedIndirect(fi, "default value: not assigned in " + constructor.fullyQualifiedName(), fi.owner());
                 return;
             }
         }
