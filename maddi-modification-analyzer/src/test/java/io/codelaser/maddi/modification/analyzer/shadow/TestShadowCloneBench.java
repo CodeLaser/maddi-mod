@@ -276,7 +276,13 @@ public class TestShadowCloneBench extends CommonTest {
         // with their constructor parameters propagated; the three closed reverse are `testNativeVersion()`-style
         // nonModifyingMethod verdicts (Map_Compute_RV, Map_ComputeIfPresent_RV, Map_Merge_RV). The assertion's
         // parameters now default to unmodified, as the runtime default would have given them.
-        org.junit.jupiter.api.Assertions.assertEquals(279, totalRev,
+        // ⭐ Re-baselined 2026-10-10 for maddi adb077200 (Collections.unmodifiable* hinted @NotModified on their
+        // argument): reverse 279 -> 269, divergences unchanged. A/B on JavaUtil.json alone, everything else equal.
+        // All ten closed are one shape, five clones of Function519090N_file1956686: getParameterPositions returns
+        // `Collections.unmodifiableList(integerList)`, and setParameter iterates over that result. Both are
+        // nonModifyingMethod; the pass now agrees, and the fixpoint's FALSE is the pessimism. The receiver-chain
+        // rules of the same day (CodeLaser/maddi-mod#24 R1/R2) move nothing on this corpus (A/B: identical lists).
+        org.junit.jupiter.api.Assertions.assertEquals(269, totalRev,
                 "reverse divergences are expected since design A (110695ece) retired the "
                 + "walkable-summary seed channel; re-baseline deliberately, and reclassify");
         // Re-baselined 2026-09-22 for the RECEIVER-DISCLAIMER rule (@IgnoreModifications on a parameter now
