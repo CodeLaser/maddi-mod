@@ -31,6 +31,12 @@ import java.util.Set;
 
 public class VariableInfoImpl implements VariableInfo {
     public static final Property UNMODIFIED_VARIABLE = new PropertyImpl("unmodifiedVariable");
+    /**
+     * The structural twin of {@link #UNMODIFIED_VARIABLE}: the variable's object is not modified itself, its hidden
+     * content (elements) may be. Never FALSE where UNMODIFIED_VARIABLE is TRUE; a reader falls back to the latter
+     * when this one is absent. See {@code PropertyImpl.STRUCTURALLY_NON_MODIFYING_METHOD}.
+     */
+    public static final Property STRUCTURALLY_UNMODIFIED_VARIABLE = new PropertyImpl("structurallyUnmodifiedVariable");
 
     public static final Property DOWNCAST_VARIABLE = new PropertyImpl("downcastVariable",
             ValueImpl.SetOfTypeInfoImpl.EMPTY);
@@ -130,6 +136,13 @@ public class VariableInfoImpl implements VariableInfo {
     @Override
     public boolean isUnmodified() {
         return analysis.getOrDefault(UNMODIFIED_VARIABLE, ValueImpl.BoolImpl.FALSE).isTrue();
+    }
+
+    @Override
+    public boolean isStructurallyUnmodified() {
+        io.codelaser.maddi.cst.api.analysis.Value.Bool structural =
+                analysis.getOrNull(STRUCTURALLY_UNMODIFIED_VARIABLE, ValueImpl.BoolImpl.class);
+        return structural != null ? structural.isTrue() : isUnmodified();
     }
 
     @Override

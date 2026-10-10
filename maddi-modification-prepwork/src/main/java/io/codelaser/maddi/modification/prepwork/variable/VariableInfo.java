@@ -68,5 +68,13 @@ public interface VariableInfo {
         return !isUnmodified();
     }
 
+    /**
+     * The structural twin of {@link #isUnmodified()} (CodeLaser/maddi-mod#25): the object the variable holds is not
+     * modified itself -- no mutator is called on it, it is not handed to a structurally modified parameter, and no
+     * variable holding the same object is -- though the objects in its hidden content (a collection's elements) may
+     * be. Implied by unmodified, which is the fallback when the structural verdict is absent.
+     */
+    boolean isStructurallyUnmodified();
+
     Set<TypeInfo> downcast();
 }

@@ -55,8 +55,8 @@ public record ExpressionVisitor(Runtime runtime,
     }
 
     private static final Logger LOGGER = LoggerFactory.getLogger(ExpressionVisitor.class);
-    static final Result EMPTY = new Result(LinksImpl.EMPTY, LinkedVariablesImpl.EMPTY, Map.of(), List.of(), Map.of(),
-            Set.of(), Set.of());
+    static final Result EMPTY = new Result(LinksImpl.EMPTY, LinkedVariablesImpl.EMPTY, Map.of(), Set.of(), List.of(),
+            Map.of(), Set.of(), Set.of());
 
     public Result visit(Expression expression, VariableData variableData, Stage stage) {
         Result r = switch (expression) {
@@ -311,7 +311,8 @@ public record ExpressionVisitor(Runtime runtime,
                 .filter(v -> !(Util.primary(v) instanceof This t && t.typeInfo() == mr.methodInfo().typeInfo()))
                 .collect(Collectors.toUnmodifiableSet())
                 : tMlv.modified();
-        Result wrapped = new Result(newRv, new LinkedVariablesImpl(map)).addModified(leakedModified, null);
+        Set<Variable> leakedDeepOnly = deepOnlyAmong(tMlv, leakedModified);
+        Result wrapped = new Result(newRv, new LinkedVariablesImpl(map)).addModified(leakedModified, leakedDeepOnly, null);
         FunctionalInterfaceVariable fiv = new FunctionalInterfaceVariable(
                 runtime,
                 variableCounter.getAndIncrement(),
@@ -319,7 +320,28 @@ public record ExpressionVisitor(Runtime runtime,
                 wrapped);
         Links links = new LinksImpl.Builder(fiv).build();
         return new Result(links, LinkedVariablesImpl.EMPTY)
-                .addModified(leakedModified, null);
+                .addModified(leakedModified, leakedDeepOnly, null);
+    }
+
+    /** the deep-only subset of {@code variables}: deep-only in every result that has them (#25) */
+    private static Set<Variable> deepOnlyAmong(List<Result> results, Set<Variable> variables) {
+        Set<Variable> deepOnly = new HashSet<>();
+        Set<Variable> structural = new HashSet<>();
+        for (Result r : results) {
+            for (Variable v : r.modified().keySet()) {
+                if (!variables.contains(v)) continue;
+                if (r.deepOnlyModified().contains(v)) deepOnly.add(v);
+                else structural.add(v);
+            }
+        }
+        deepOnly.removeAll(structural);
+        return deepOnly;
+    }
+
+    /** the deep-only subset of {@code variables}, taken from the summary they came from (#25) */
+    private static Set<Variable> deepOnlyAmong(MethodLinkedVariables mlv, Set<Variable> variables) {
+        if (mlv.deepOnlyModified().isEmpty()) return Set.of();
+        return variables.stream().filter(mlv.deepOnlyModified()::contains).collect(Collectors.toUnmodifiableSet());
     }
 
     // the raw root of a variable, descending through both field scopes (including real, non-virtual fields, unlike
@@ -403,16 +425,18 @@ public record ExpressionVisitor(Runtime runtime,
 
         return new ResultVd(new Result(yieldResult, new LinkedVariablesImpl(d.map))
                 .merge(rc)
-                .addModified(d.modified, null)
+                .addModified(d.modified, d.deepOnly, null)
                 .addCasts(d.casts), vd);
     }
 
-    private record D(Map<Variable, Links> map, Set<Variable> modified, Map<Variable, Set<TypeInfo>> casts) {
+    private record D(Map<Variable, Links> map, Set<Variable> modified, Set<Variable> deepOnly,
+                     Map<Variable, Set<TypeInfo>> casts) {
     }
 
     private D copyLinksFromSwitchExpressionBlock(VariableData outer, VariableData vd) {
         Map<Variable, Links> map = new HashMap<>();
         Set<Variable> modified = new HashSet<>();
+        Set<Variable> deepOnly = new HashSet<>();
         Map<Variable, Set<TypeInfo>> casts = new HashMap<>();
         for (VariableInfo vi : vd.variableInfoIterable()) {
             // don't copy: variables local to the switch expression block
@@ -423,14 +447,17 @@ public record ExpressionVisitor(Runtime runtime,
                 if (links.primary() != null) {
                     map.merge(links.primary(), links, Links::merge);
                 }
-                if (vi.isModified()) modified.add(vi.variable());
+                if (vi.isModified()) {
+                    modified.add(vi.variable());
+                    if (vi.isStructurallyUnmodified()) deepOnly.add(vi.variable());
+                }
                 Set<TypeInfo> castTypes = vi.downcast();
                 if (!castTypes.isEmpty()) {
                     casts.computeIfAbsent(vi.variable(), _ -> new HashSet<>()).addAll(castTypes);
                 }
             }
         }
-        return new D(map, modified, casts);
+        return new D(map, modified, deepOnly, casts);
     }
 
     private @NotNull Result variableExpression(VariableExpression ve, VariableData variableData, Stage stage) {
@@ -586,7 +613,7 @@ public record ExpressionVisitor(Runtime runtime,
         Result created = new LinkMethodCall(javaInspector, runtime, linkComputerOptions, virtualFieldComputer,
                 variableCounter, currentMethod, variableData, stage)
                 .constructorCall(cc, object, params, mlvTranslated1)
-                .addModified(extraModified, null)
+                .addModified(extraModified, deepOnlyAmong(params, extraModified), null)
                 .addVariablesRepresentingConstant(params)
                 .addVariablesRepresentingConstant(object);
         return linkInnerClassToOuterInstance(cc, created);
@@ -669,6 +696,7 @@ public record ExpressionVisitor(Runtime runtime,
         Set<Variable> modifiedInLambda = mlv.modified().stream()
                 .filter(v -> doesNotBelongToLambda(v, lambda.methodInfo()))
                 .collect(Collectors.toUnmodifiableSet());
+        Set<Variable> deepOnlyInLambda = deepOnlyAmong(mlv, modifiedInLambda);
 
         int i = 0;
         Map<Variable, Links> map = new HashMap<>();
@@ -681,7 +709,7 @@ public record ExpressionVisitor(Runtime runtime,
         // not leak into the caller's modified set when the functional interface is applied (e.g. via forEach).
         // Mirrors anonymousClassAsLambda. See TestStreamForEachSpec.
         Result wrapped = new Result(mlvTranslated.ofReturnValue(), new LinkedVariablesImpl(map))
-                .addModified(modifiedInLambda, null);
+                .addModified(modifiedInLambda, deepOnlyInLambda, null);
 
         FunctionalInterfaceVariable fiv = new FunctionalInterfaceVariable(
                 runtime,
@@ -689,7 +717,7 @@ public record ExpressionVisitor(Runtime runtime,
                 lambda.concreteFunctionalType(),
                 wrapped);
         Links links = new LinksImpl.Builder(fiv).build();
-        return new Result(links, LinkedVariablesImpl.EMPTY).addModified(modifiedInLambda, null);
+        return new Result(links, LinkedVariablesImpl.EMPTY).addModified(modifiedInLambda, deepOnlyInLambda, null);
     }
 
     private boolean doesNotBelongToLambda(Variable v, MethodInfo methodInfo) {
@@ -724,16 +752,16 @@ public record ExpressionVisitor(Runtime runtime,
 
     // we collect modifications, but not more
     private Result anonymousClassAsClass(TypeInfo anonymousTypeInfo) {
-        Set<Variable> modifiedInAnonymous = new HashSet<>();
+        Result result = new Result(LinksImpl.EMPTY, LinkedVariablesImpl.EMPTY);
         for (MethodInfo methodInfo : anonymousTypeInfo.constructorsAndMethods()) {
             MethodLinkedVariables mlv = linkComputer.recurseMethod(methodInfo);
             Set<Variable> modifiedInMethod = mlv.modified().stream()
                     .filter(v -> doesNotBelongToLambda(v, methodInfo))
                     .collect(Collectors.toUnmodifiableSet());
-            modifiedInAnonymous.addAll(modifiedInMethod);
+            // per method, so that a variable one method modifies structurally stays structural
+            result.addModified(modifiedInMethod, deepOnlyAmong(mlv, modifiedInMethod), null);
         }
-        return new Result(LinksImpl.EMPTY, LinkedVariablesImpl.EMPTY)
-                .addModified(modifiedInAnonymous, null);
+        return result;
     }
 
     private Result anonymousClassAsLambda(ConstructorCall cc, MethodInfo sami) {
@@ -755,7 +783,7 @@ public record ExpressionVisitor(Runtime runtime,
             ++i;
         }
         return new Result(mlvTranslated.ofReturnValue(), new LinkedVariablesImpl(map))
-                .addModified(modifiedInLambda, null);
+                .addModified(modifiedInLambda, deepOnlyAmong(mlv, modifiedInLambda), null);
     }
 
     private MethodInfo anonymousTypeImplementsFunctionalInterface(TypeInfo typeInfo) {
@@ -849,7 +877,7 @@ public record ExpressionVisitor(Runtime runtime,
         Result r = new LinkMethodCall(javaInspector, runtime, linkComputerOptions, virtualFieldComputer, variableCounter,
                 currentMethod, variableData, stage)
                 .methodCall(mc.methodInfo(), mc.concreteReturnType(), object, params, mlvTranslated2);
-        Set<Variable> modified = new MethodModification(runtime, variableData, stage, mc, currentMethod,
+        MethodModification.Modified modified = new MethodModification(runtime, variableData, stage, mc, currentMethod,
                 sourceMethodComputer::recordModifiedThroughPassedFunction,
                 implementation -> linkComputer.recordSummaryConsumption(currentMethod, implementation))
                 .go(objectPrimary, params, mlvTranslated2);
@@ -885,9 +913,9 @@ public record ExpressionVisitor(Runtime runtime,
                     return p == null || !consumedIntoObject.contains(p);
                 })
                 .collect(Collectors.toUnmodifiableSet());
-        return r.addModified(modified, mc.methodInfo())
-                .addModified(extraModified, null)
-                .addModified(objectModified, null)
+        return r.addModified(modified.all(), modified.deepOnly(), mc.methodInfo())
+                .addModified(extraModified, deepOnlyAmong(params, extraModified), null)
+                .addModified(objectModified, object.deepOnlyAmong(objectModified), null)
                 .add(new WriteMethodCall(mc, object.links()))
                 .addVariablesRepresentingConstant(params)
                 .addVariablesRepresentingConstant(object);

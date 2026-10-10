@@ -35,7 +35,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 
 /**
  * The modification analysis on langchain4j-core, without printing: every collection-typed field, parameter and
- * method return, with what the analysis says about it. The Kotlin translation reads that to choose a read-only
+ * method return, with what the analysis says about it. The Kotlin translation reads the structural verdict
+ * (CodeLaser/maddi-mod#25) to choose a read-only
  * {@code List}/{@code Map} over {@code MutableList}/{@code MutableMap}. Written to
  * {@code build/langchain4j-collections.txt}: a summary per kind first, then one line per declaration. The
  * modification side's instrument for the second J2K corpus; the J2K ratchet is the printer's.
@@ -80,24 +81,29 @@ public class TestLangchain4jCollections {
             for (FieldInfo fi : t.fields()) {
                 if (!isCollection(fi.type())) continue;
                 count(summary, "FIELD", fi.isUnmodified());
+                count(summary, "FIELD-STRUCTURAL", fi.isStructurallyUnmodified());
                 lines.add("FIELD  " + fi.fullyQualifiedName() + " : " + fi.type().simpleString() + " |"
                           + values(fi, PropertyImpl.FINAL_FIELD, PropertyImpl.UNMODIFIED_FIELD,
-                        PropertyImpl.IMMUTABLE_FIELD, PropertyImpl.INDEPENDENT_FIELD));
+                        PropertyImpl.STRUCTURALLY_UNMODIFIED_FIELD, PropertyImpl.IMMUTABLE_FIELD,
+                        PropertyImpl.INDEPENDENT_FIELD));
             }
             t.constructorAndMethodStream().forEach(mi -> {
                 if (mi.isSyntheticConstructor()) return;
                 for (ParameterInfo pi : mi.parameters()) {
                     if (!isCollection(pi.parameterizedType())) continue;
                     count(summary, "PARAM", pi.isUnmodified());
+                    count(summary, "PARAM-STRUCTURAL", pi.isStructurallyUnmodified());
                     lines.add("PARAM  " + pi.fullyQualifiedName() + " : " + pi.parameterizedType().simpleString()
                               + " | overrides=" + !mi.overrides().isEmpty() + degraded(mi) + values(pi,
-                            PropertyImpl.UNMODIFIED_PARAMETER, PropertyImpl.PARAMETER_ASSIGNED_TO_FIELD,
+                            PropertyImpl.UNMODIFIED_PARAMETER, PropertyImpl.STRUCTURALLY_UNMODIFIED_PARAMETER,
+                            PropertyImpl.PARAMETER_ASSIGNED_TO_FIELD,
                             PropertyImpl.IMMUTABLE_PARAMETER, PropertyImpl.INDEPENDENT_PARAMETER));
                 }
                 if (!mi.isConstructor() && isCollection(mi.returnType())) {
                     lines.add("RETURN " + mi.fullyQualifiedName() + " : " + mi.returnType().simpleString()
                               + " | overrides=" + !mi.overrides().isEmpty() + degraded(mi) + values(mi,
-                            PropertyImpl.NON_MODIFYING_METHOD, PropertyImpl.GET_SET_FIELD,
+                            PropertyImpl.NON_MODIFYING_METHOD, PropertyImpl.STRUCTURALLY_NON_MODIFYING_METHOD,
+                            PropertyImpl.GET_SET_FIELD,
                             PropertyImpl.IMMUTABLE_METHOD, PropertyImpl.INDEPENDENT_METHOD));
                     summary.computeIfAbsent("RETURN", _ -> new int[2])[0]++;
                 }

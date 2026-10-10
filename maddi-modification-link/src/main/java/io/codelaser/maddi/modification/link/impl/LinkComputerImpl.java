@@ -458,6 +458,8 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
         final Set<LocalVariable> variablesRepresentingConstants = new HashSet<>();
         final Variable returnVariable;
         final Set<Variable> modificationsOutsideVariableData = new HashSet<>();
+        // #25: those of modificationsOutsideVariableData that some statement modified structurally
+        final Set<Variable> modificationsOutsideStructural = new HashSet<>();
         // own-field slots assigned by callees invoked on 'this' or an own-field chain, rehomed to this
         // method's receiver; see ExpressionVisitor.methodCall and MethodLinkedVariables.assigned
         final Set<Variable> assignedInCallees = new HashSet<>();
@@ -616,6 +618,16 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                     .collect(Collectors.toUnmodifiableSet());
             Set<Variable> allModified = Stream.concat(modified.stream(), modifiedOutside.stream())
                     .collect(Collectors.toUnmodifiableSet());
+            // #25: deep-only when every source that has the variable modified has it modified in its hidden content only
+            Set<Variable> deepOnlyInVd = vd == null ? Set.of()
+                    : vd.variableInfoStream()
+                    .filter(vi -> modified.contains(vi.variable()) && vi.isStructurallyUnmodified())
+                    .map(VariableInfo::variable)
+                    .collect(Collectors.toUnmodifiableSet());
+            java.util.function.Predicate<Variable> deepOnly = v ->
+                    (!modified.contains(v) || deepOnlyInVd.contains(v))
+                    && (!modifiedOutside.contains(v) || !modificationsOutsideStructural.contains(v));
+            Set<Variable> allDeepOnly = allModified.stream().filter(deepOnly).collect(Collectors.toUnmodifiableSet());
             // the SUMMARY must not carry IntermediateVariable-rooted entries ($__rvN, $__rvN.field faces):
             // per-evaluation scratch artifacts a caller cannot resolve — dead weight whose counter-dependent
             // names made recomputed summaries spuriously unequal. MarkerVariables ($_fiN, $_ceN) STAY: their
@@ -624,6 +636,8 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
             Set<Variable> summaryModified = allModified.stream()
                     .filter(v -> !(Util.primary(v) instanceof IntermediateVariable))
                     .filter(v -> EXPORT_FIELD_CYCLES || !goesRoundAFieldCycle(v))
+                    .collect(Collectors.toUnmodifiableSet());
+            Set<Variable> summaryDeepOnly = summaryModified.stream().filter(allDeepOnly::contains)
                     .collect(Collectors.toUnmodifiableSet());
             // own-field SLOT writes, orthogonal to the object-modification set above: prepwork's
             // per-variable assignment record is the source of truth for this method's body; callee
@@ -639,11 +653,11 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                             assignedInCallees.stream())
                     .collect(Collectors.toUnmodifiableSet());
             MethodLinkedVariables mlv = new MethodLinkedVariablesImpl(ofReturnValue, ofParameters, summaryModified,
-                    assignedOwnFields);
+                    assignedOwnFields, summaryDeepOnly);
             if (Gate.isSet("BTRACE") && methodInfo.name().contains(Gate.get("BTRACE"))) {
                 System.out.println("BTRACE go() mlv=" + mlv);
             }
-            copyModificationsIntoMethod(allModified, inClosure, mlv);
+            copyModificationsIntoMethod(allModified, allDeepOnly, inClosure, mlv);
             if (vd != null) copyDowncastIntoParameters(vd);
             writeModifiedThroughPassedFunction(allModified);
 
@@ -701,15 +715,20 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
             }
         }
 
-        private void copyModificationsIntoMethod(Set<Variable> modified, Set<Variable> inClosure, MethodLinkedVariables mlv) {
+        /** @param deepOnly the subset of {@code modified} modified only in its hidden content (#25) */
+        private void copyModificationsIntoMethod(Set<Variable> modified, Set<Variable> deepOnly, Set<Variable> inClosure,
+                                                 MethodLinkedVariables mlv) {
             // a throw-only placeholder with implementations: its modification is their union, written by the
             // abstract-method analyzer; the throwing body would claim @NotModified for every call (work list O2)
             if (!methodInfo.isAbstract() && io.codelaser.maddi.modification.prepwork.Util.unionOverImplementations(methodInfo)) {
                 return;
             }
             boolean methodModified = false;
+            boolean methodStructurallyModified = false;
             boolean[] paramsModified = new boolean[methodInfo.parameters().size()];
+            boolean[] paramsStructurallyModified = new boolean[methodInfo.parameters().size()];
             for (Variable v : modified) {
+                boolean structural = !deepOnly.contains(v);
                 // ENCLOSING types count too: a modified Outer.this (explicit or implicit receiver of a
                 // modifying call) is reachable from the inner this via the synthetic outer reference, so it
                 // is part of this method's receiver object graph (semantic audit 2026-07-18: guava
@@ -718,17 +737,25 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                     || v instanceof FieldReference fr && fr.scopeIsRecursivelyThis()
                     || inClosure.contains(v)) {
                     methodModified = true;
+                    // a field of the receiver is its accessible content: modified structurally, the receiver is too
+                    if (structural) methodStructurallyModified = true;
                 } else if (v instanceof ParameterInfo pi && pi.methodInfo().equals(methodInfo)) {
                     paramsModified[pi.index()] = true;
+                    if (structural) paramsStructurallyModified[pi.index()] = true;
                 }
             }
             // handed to one of our own functional parameters: recorded, not marked (PassedFunction) -- but for SOME
             // function it is modified, so the parameter's own verdict says so
             for (ParameterInfo pi : modifiedThroughPassedFunction.keySet()) {
                 paramsModified[pi.index()] = true;
+                paramsStructurallyModified[pi.index()] = true;
             }
             Value.Bool nonModifying = ValueImpl.BoolImpl.from(!methodModified);
             if (TolerantWrite.setAllowControlledOverwrite(methodInfo.analysis(), PropertyImpl.NON_MODIFYING_METHOD, nonModifying, methodInfo)) {
+                propertiesChanged.incrementAndGet();
+            }
+            if (TolerantWrite.setAllowControlledOverwrite(methodInfo.analysis(), PropertyImpl.STRUCTURALLY_NON_MODIFYING_METHOD,
+                    ValueImpl.BoolImpl.from(!methodStructurallyModified), methodInfo)) {
                 propertiesChanged.incrementAndGet();
             }
             for (ParameterInfo pi : methodInfo.parameters()) {
@@ -737,6 +764,10 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                         .anyMatch(v -> v instanceof FieldReference fr && inCurrentHierarchy(fr.fieldInfo().owner())))) {
                     Value.Bool unmodified = ValueImpl.BoolImpl.from(!paramsModified[pi.index()]);
                     if (TolerantWrite.setAllowControlledOverwrite(pi.analysis(), PropertyImpl.UNMODIFIED_PARAMETER, unmodified, pi)) {
+                        propertiesChanged.incrementAndGet();
+                    }
+                    if (TolerantWrite.setAllowControlledOverwrite(pi.analysis(), PropertyImpl.STRUCTURALLY_UNMODIFIED_PARAMETER,
+                            ValueImpl.BoolImpl.from(!paramsStructurallyModified[pi.index()]), pi)) {
                         propertiesChanged.incrementAndGet();
                     }
                 } // else: we'll need to wait until we know about all the links of the field; see TestFieldAnalyzer
@@ -988,11 +1019,15 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                 linkGraph.compute(statementIndex, r.extra().map(), r.erase(), replaceConstants,
                         r.modified());
             }
-            Set<Variable> previouslyModified = computePreviouslyModified(vd, previousVd, stageOfPrevious);
+            Set<Variable> previouslyModified = computePreviouslyModified(vd, previousVd, stageOfPrevious, false);
+            Set<Variable> previouslyStructurallyModified = computePreviouslyModified(vd, previousVd, stageOfPrevious, true);
             WriteLinksAndModification.WriteResult wr = writeLinksAndModification.go(statement, lastStatement, vd,
-                    previouslyModified, r == null ? Map.of() : r.modified());
+                    previouslyModified, previouslyStructurallyModified,
+                    r == null ? Map.of() : r.modified(), r == null ? Set.of() : r.deepOnlyModified());
             copyEvalIntoVariableData(wr.newLinks(), vd);
             modificationsOutsideVariableData.addAll(wr.modifiedOutsideVariableData());
+            wr.modifiedOutsideVariableData().stream().filter(v -> !wr.modifiedOutsideDeepOnly().contains(v))
+                    .forEach(modificationsOutsideStructural::add);
 
             writeCasts(r == null ? new HashMap<>() : r.casts(), previousVd, stageOfPrevious, vd);
 
@@ -1017,11 +1052,14 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
             return vd;
         }
 
-        private Set<Variable> computePreviouslyModified(VariableData vd, VariableData previousVd, Stage stageOfPrevious) {
+        /** @param structural only those modified structurally (#25) */
+        private Set<Variable> computePreviouslyModified(VariableData vd, VariableData previousVd, Stage stageOfPrevious,
+                                                        boolean structural) {
             if (previousVd != null) {
                 return previousVd.variableInfoStream(stageOfPrevious)
                         .filter(vi -> vd.isKnown(vi.variable().fullyQualifiedName()))
                         .filter(VariableInfo::isModified)
+                        .filter(vi -> !structural || !vi.isStructurallyUnmodified())
                         .map(VariableInfo::variable)
                         .collect(Collectors.toUnmodifiableSet());
             }
@@ -1278,6 +1316,7 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                             ? new LinksImpl.Builder(variable)
                             : new LinksImpl.Builder(eval);
                     AtomicBoolean unmodified = new AtomicBoolean(viEval.isUnmodified());
+                    AtomicBoolean structurallyUnmodified = new AtomicBoolean(viEval.isStructurallyUnmodified());
                     Set<TypeInfo> downcasts = new HashSet<>(viEval.analysis().getOrDefault(DOWNCAST_VARIABLE,
                             ValueImpl.SetOfTypeInfoImpl.EMPTY).typeInfoSet());
                     vds.forEach(subVd -> {
@@ -1289,6 +1328,7 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                                 collect.addAllDistinct(subTlv);
                             }
                             if (subVi.isModified()) unmodified.set(false);
+                            if (!subVi.isStructurallyUnmodified()) structurallyUnmodified.set(false);
 
                             Value.SetOfTypeInfo subDowncasts = subVi.analysis().getOrDefault(DOWNCAST_VARIABLE,
                                     ValueImpl.SetOfTypeInfoImpl.EMPTY);
@@ -1306,6 +1346,11 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                     }
                     if (TolerantWrite.setAllowControlledOverwrite(merge.analysis(), UNMODIFIED_VARIABLE,
                             ValueImpl.BoolImpl.from(unmodified.get()))) {
+                        propertiesChanged.incrementAndGet();
+                    }
+                    if (TolerantWrite.setAllowControlledOverwrite(merge.analysis(),
+                            VariableInfoImpl.STRUCTURALLY_UNMODIFIED_VARIABLE,
+                            ValueImpl.BoolImpl.from(unmodified.get() || structurallyUnmodified.get()))) {
                         propertiesChanged.incrementAndGet();
                     }
                     if (!downcasts.isEmpty()) {

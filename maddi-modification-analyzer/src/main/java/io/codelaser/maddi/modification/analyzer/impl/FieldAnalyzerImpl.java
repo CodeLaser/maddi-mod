@@ -70,7 +70,7 @@ public class FieldAnalyzerImpl extends CommonAnalyzerImpl implements FieldAnalyz
                     .toList();
 
             if (unmodifiedDone.isFalse()) {
-                Value.Bool unmodified = computeUnmodified(fieldInfo, methodsReferringToField);
+                Value.Bool unmodified = computeUnmodified(fieldInfo, methodsReferringToField, false);
                 if (unmodified != null) {
                     if (TolerantWrite.setAllowControlledOverwrite(fieldInfo.analysis(), PropertyImpl.UNMODIFIED_FIELD, unmodified, fieldInfo)) {
                         DECIDE.debug("FI: Decide unmodified of field {} = {}", fieldInfo, unmodified);
@@ -86,6 +86,23 @@ public class FieldAnalyzerImpl extends CommonAnalyzerImpl implements FieldAnalyz
                     }
                 } else {
                     UNDECIDED.debug("FI: Unmodified of field {} undecided", fieldInfo);
+                }
+            }
+            // #25: the structural twin, the same computation over the structural statement-level verdicts
+            Value.Bool structurallyDone = fieldInfo.analysis().getOrDefault(PropertyImpl.STRUCTURALLY_UNMODIFIED_FIELD, FALSE);
+            if (structurallyDone.isFalse()) {
+                Value.Bool structural = computeUnmodified(fieldInfo, methodsReferringToField, true);
+                if (structural != null) {
+                    if (TolerantWrite.setAllowControlledOverwrite(fieldInfo.analysis(),
+                            PropertyImpl.STRUCTURALLY_UNMODIFIED_FIELD, structural, fieldInfo)) {
+                        DECIDE.debug("FI: Decide structurally unmodified of field {} = {}", fieldInfo, structural);
+                        propertyChanges.incrementAndGet();
+                    }
+                } else if (cycleBreakingActive) {
+                    if (TolerantWrite.setAllowControlledOverwrite(fieldInfo.analysis(),
+                            PropertyImpl.STRUCTURALLY_UNMODIFIED_FIELD, TRUE, fieldInfo)) {
+                        propertyChanges.incrementAndGet();
+                    }
                 }
             }
 
@@ -237,7 +254,9 @@ public class FieldAnalyzerImpl extends CommonAnalyzerImpl implements FieldAnalyz
             }
         }
 
-        private Value.Bool computeUnmodified(FieldInfo fieldInfo, List<MethodInfo> methodsReferringToField) {
+        /** @param structural the structural twin (#25): the statement-level structural verdict, falling back to the deep one */
+        private Value.Bool computeUnmodified(FieldInfo fieldInfo, List<MethodInfo> methodsReferringToField,
+                                             boolean structural) {
             // hidden content: the field is never modified, whatever is done to the object in it
             if (io.codelaser.maddi.modification.prepwork.Util.isHiddenContentFieldDeclaration(fieldInfo)) return TRUE;
             Value.SetOfInfo poc = fieldInfo.owner().analysis().getOrDefault(PART_OF_CONSTRUCTION,
@@ -256,8 +275,7 @@ public class FieldAnalyzerImpl extends CommonAnalyzerImpl implements FieldAnalyz
                     VariableData vd = VariableDataImpl.of(lastStatement);
                     for (VariableInfo vi : vd.variableInfoIterable()) {
                         if (vi.variable() instanceof FieldReference fr && fr.fieldInfo() == fieldInfo) {
-                            Value.Bool v = vi.analysis().getOrNull(VariableInfoImpl.UNMODIFIED_VARIABLE,
-                                    ValueImpl.BoolImpl.class);
+                            Value.Bool v = unmodifiedVariable(vi, structural);
                             if (v == null) {
                                 undecided = true;
                             } else if (v.isFalse()) {
@@ -271,6 +289,14 @@ public class FieldAnalyzerImpl extends CommonAnalyzerImpl implements FieldAnalyz
             if (viaInheritedDefault == null) undecided = true;
             else if (viaInheritedDefault.isFalse()) return FALSE;
             return undecided ? null : TRUE;
+        }
+
+        private static Value.Bool unmodifiedVariable(VariableInfo vi, boolean structural) {
+            Value.Bool deep = vi.analysis().getOrNull(VariableInfoImpl.UNMODIFIED_VARIABLE, ValueImpl.BoolImpl.class);
+            if (!structural) return deep;
+            Value.Bool s = vi.analysis().getOrNull(VariableInfoImpl.STRUCTURALLY_UNMODIFIED_VARIABLE,
+                    ValueImpl.BoolImpl.class);
+            return s != null ? s : deep;
         }
 
         /*

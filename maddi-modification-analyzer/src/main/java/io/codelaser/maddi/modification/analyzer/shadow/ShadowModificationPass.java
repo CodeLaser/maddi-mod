@@ -65,6 +65,14 @@ import static io.codelaser.maddi.modification.prepwork.callgraph.ComputePartOfCo
  * shape — mirrored conservatively at call sites), plus the E1/E2/E6 edges for analyzed callees.
  * Methods the walk cannot
  * fully see keep full summary seeding (the E7 eager creation-site attributions live there).
+ * <p>
+ * The structural twins (CodeLaser/maddi-mod#25, {@code STRUCTURALLY_*}): the same graph, closed a second time from
+ * the seeds that are structural -- a modification of the node's object itself or of its accessible content, not of
+ * its hidden content (an element). Every edge is between variables holding the same object or its accessible
+ * content, so a structural modification stays structural along it, and a deep-only seed (a parameter that is
+ * modified but structurally unmodified, a summary's deep-only entry, a field whose statement-level structural verdict
+ * is true) reaches its nodes deep-only. The structural closure is a subset of the deep one, and the twin is written
+ * from it beside the deep property.
  * Abstract in-order methods seed from their frozen FALSE only when the E6 edges cannot re-derive
  * it (not all implementations analyzed, or an explicit source @Modified contract). Methods
  * carrying DEGRADED_ANALYSIS_METHOD seed their receiver and all parameters (soundness, plan §9.1).
@@ -92,6 +100,7 @@ public class ShadowModificationPass {
     }
 
     public record Report(Set<Object> reached,
+                         Set<Object> reachedStructural,
                          List<Divergence> divergences,
                          List<Divergence> reverseDivergences,
                          Map<Object, Object> cause,
@@ -145,6 +154,7 @@ public class ShadowModificationPass {
 
     private final Map<Object, Set<Object>> successors = new HashMap<>();
     private final Set<Object> seeds = new HashSet<>();
+    private final Set<Object> structuralSeeds = new HashSet<>(); // #25: the subset of seeds that is structural
     private final Map<Object, String> seedOrigin = new HashMap<>();
     private final Map<Object, Object> cause = new HashMap<>();
     private final Map<String, Integer> missingArgLinkAnalyzedCallees = new TreeMap<>();
@@ -171,9 +181,11 @@ public class ShadowModificationPass {
         }
         if (System.getenv("SHADOW_SEEDS") != null) {
             seeds.forEach(s -> System.out.println("SHADOW SEED " + Report.label(s)
+                                                  + (structuralSeeds.contains(s) ? "" : " (deep-only)")
                                                   + " <- " + seedOrigin.getOrDefault(s, "?")));
         }
-        Set<Object> reached = closure();
+        Set<Object> reached = closure(seeds, cause);
+        Set<Object> reachedStructural = closure(structuralSeeds, null);
         List<Divergence> divergences = new ArrayList<>();
         List<Divergence> reverse = new ArrayList<>();
         for (MethodInfo mi : methodInfos) {
@@ -188,7 +200,7 @@ public class ShadowModificationPass {
             diff(divergences, reverse, PropertyImpl.UNMODIFIED_FIELD.key(), fi.analysis(),
                     PropertyImpl.UNMODIFIED_FIELD, reached.contains(fi), fi, fi.fullyQualifiedName());
         }
-        Report report = new Report(reached, List.copyOf(divergences), List.copyOf(reverse),
+        Report report = new Report(reached, reachedStructural, List.copyOf(divergences), List.copyOf(reverse),
                 Map.copyOf(cause), Map.copyOf(seedOrigin),
                 methods, methodsWithoutLinks, seeds.size(), edgeCount,
                 callSitesWithoutArgumentLinks, unprojectedReceivers,
@@ -271,8 +283,8 @@ public class ShadowModificationPass {
         // soundness seeds: a degraded body contributes no reliable evidence
         Value.Bool degraded = mi.analysis().getOrNull(PropertyImpl.DEGRADED_ANALYSIS_METHOD, ValueImpl.BoolImpl.class);
         if (degraded != null && degraded.isTrue()) {
-            seeds.add(mi);
-            seeds.addAll(mi.parameters());
+            seed(mi, true);
+            mi.parameters().forEach(pi -> seed(pi, true));
         }
         MethodLinkedVariables mlv = mi.analysis().getOrNull(MethodLinkedVariablesImpl.METHOD_LINKS,
                 MethodLinkedVariablesImpl.class);
@@ -314,7 +326,8 @@ public class ShadowModificationPass {
             if (contracted && nmFalse
                 || outOfOrderImpl && (nm == null || nmFalse)
                 || !anyImpl && nmFalse) {
-                seedWithOrigin(mi, mi, "abstract non-modifying " + (nm == null ? "undecided" : "FALSE"));
+                seedWithOrigin(mi, mi, "abstract non-modifying " + (nm == null ? "undecided" : "FALSE"),
+                        !twinTrue(mi.analysis(), PropertyImpl.STRUCTURALLY_NON_MODIFYING_METHOD));
             }
             for (ParameterInfo pi : mi.parameters()) {
                 Value.Bool um = pi.analysis().getOrNull(PropertyImpl.UNMODIFIED_PARAMETER, ValueImpl.BoolImpl.class);
@@ -322,7 +335,8 @@ public class ShadowModificationPass {
                 if (contracted && umFalse
                     || outOfOrderImpl && (um == null || umFalse)
                     || !anyImpl && umFalse) {
-                    seedWithOrigin(pi, mi, "abstract unmodified " + (um == null ? "undecided" : "FALSE"));
+                    seedWithOrigin(pi, mi, "abstract unmodified " + (um == null ? "undecided" : "FALSE"),
+                            !twinTrue(pi.analysis(), PropertyImpl.STRUCTURALLY_UNMODIFIED_PARAMETER));
                 }
             }
             return;
@@ -333,7 +347,7 @@ public class ShadowModificationPass {
         // seeds: everything the converged analysis believes modified, projected onto nodes
         for (Variable v : mlv.modified()) {
             int before = seeds.size();
-            seedVariable(mi, v, skipReceiverRooted);
+            seedVariable(mi, v, skipReceiverRooted, !mlv.deepOnlyModified().contains(v));
             if (seeds.size() > before) {
                 seeds.stream().filter(sd -> !seedOrigin.containsKey(sd))
                         .forEach(sd -> seedOrigin.put(sd, mi.fullyQualifiedName() + " modified " + v));
@@ -455,8 +469,23 @@ public class ShadowModificationPass {
             Value.SetOfInfo poc = fieldInfo.owner().analysis().getOrDefault(PART_OF_CONSTRUCTION,
                     EMPTY_PART_OF_CONSTRUCTION);
             if (poc.infoSet().contains(mi)) continue;
-            if (isFieldNode(fieldInfo)) seedWithOrigin(fieldInfo, mi, "statement-level unmodified FALSE on " + fr);
+            // #25: deep-only when the statement-level structural verdict is TRUE (absent: it falls back to the deep one)
+            boolean structural = !twinTrue(vi.analysis(), VariableInfoImpl.STRUCTURALLY_UNMODIFIED_VARIABLE);
+            if (isFieldNode(fieldInfo)) {
+                seedWithOrigin(fieldInfo, mi, "statement-level unmodified FALSE on " + fr, structural);
+            }
         }
+    }
+
+    /** #25: is the structural twin of a modification property decided TRUE? Absent, it falls back to the deep one. */
+    private static boolean twinTrue(PropertyValueMap analysis, io.codelaser.maddi.cst.api.analysis.Property twin) {
+        Value.Bool s = analysis.getOrNull(twin, ValueImpl.BoolImpl.class);
+        return s != null && s.isTrue();
+    }
+
+    private void seed(Object node, boolean structural) {
+        seeds.add(node);
+        if (structural) structuralSeeds.add(node);
     }
 
     /** engine mirror (FieldAnalyzerImpl.computeUnmodified): a hidden-content field is never modified, so it is no
@@ -466,7 +495,13 @@ public class ShadowModificationPass {
     }
 
     private void seedWithOrigin(Object node, MethodInfo mi, String why) {
+        seedWithOrigin(node, mi, why, true);
+    }
+
+    /** @param structural the modification is of the node's object itself (#25); false: of its hidden content only */
+    private void seedWithOrigin(Object node, MethodInfo mi, String why, boolean structural) {
         if (seeds.add(node)) seedOrigin.put(node, mi.fullyQualifiedName() + " " + why);
+        if (structural) structuralSeeds.add(node);
     }
 
     /**
@@ -506,16 +541,17 @@ public class ShadowModificationPass {
         return ae.typeInfo() != null && MODIFIED_FQN.equals(ae.typeInfo().fullyQualifiedName());
     }
 
-    private void seedVariable(MethodInfo mi, Variable v, boolean skipReceiverRooted) {
+    /** @param structural the summary's modification of {@code v} is structural (#25), not of its hidden content only */
+    private void seedVariable(MethodInfo mi, Variable v, boolean skipReceiverRooted, boolean structural) {
         switch (v) {
             case This thisVar -> {
                 // P3: receiver-rooted summary entry of a walkable body — re-derived via primitives + E2
                 if (!skipReceiverRooted && mi.typeInfo().isEqualToOrInnerClassOf(thisVar.typeInfo())) {
-                    seeds.add(mi);
+                    seed(mi, structural);
                 }
             }
             case FieldReference fr -> {
-                if (!(skipReceiverRooted && fr.scopeIsRecursivelyThis())) seedFieldReference(mi, fr);
+                if (!(skipReceiverRooted && fr.scopeIsRecursivelyThis())) seedFieldReference(mi, fr, structural);
             }
             case ParameterInfo pi -> {
                 // own parameter of a walkable body: re-derived via E1/boundary seeds/assignment walk;
@@ -526,9 +562,9 @@ public class ShadowModificationPass {
                 // fixpoint's undecided-implementation pessimism -- an implementation delegating to the abstract
                 // kept both modified (#24 R3, TestDelegatingImplementation)
                 if (e6Rederivable(pi.methodInfo())) return;
-                seeds.add(pi);
+                seed(pi, structural);
             }
-            case DependentVariable dv -> seedVariable(mi, dv.arrayVariable(), skipReceiverRooted); // a[i] modified => a modified
+            case DependentVariable dv -> seedVariable(mi, dv.arrayVariable(), skipReceiverRooted, structural); // a[i] modified => a modified
             case LocalVariable lv -> {
                 // a method's own locals never appear in the mlv summary; a genuine LocalVariable here
                 // is a closure-captured variable of an enclosing method, and copyModificationsIntoMethod
@@ -536,7 +572,7 @@ public class ShadowModificationPass {
                 // The $_fi/$_ce markers are LocalVariables too but deliberately cross the boundary
                 // WITHOUT implying receiver modification — skip them (LinkVariable).
                 if (!(lv instanceof LinkVariable) && !(lv instanceof ObjectCreationVariable)) {
-                    seeds.add(mi);
+                    seed(mi, structural);
                 }
             }
             default -> {
@@ -559,13 +595,14 @@ public class ShadowModificationPass {
         return true;
     }
 
-    private void seedFieldReference(MethodInfo mi, FieldReference fr) {
+    private void seedFieldReference(MethodInfo mi, FieldReference fr, boolean structural) {
         // mirror MethodModification's Util.variableAndScopes(...).filter(!isIgnoreModifications):
         // modification through a disclaimed face never implicates the field node itself
-        if (!fr.isIgnoreModifications() && isFieldNode(fr.fieldInfo())) seeds.add(fr.fieldInfo());
-        if (fr.scopeIsRecursivelyThis()) seeds.add(mi);
-        // E5: modification of a component this.m.i implicates the containing field this.m
-        if (fr.scopeVariable() instanceof FieldReference outer) seedFieldReference(mi, outer);
+        if (!fr.isIgnoreModifications() && isFieldNode(fr.fieldInfo())) seed(fr.fieldInfo(), structural);
+        if (fr.scopeIsRecursivelyThis()) seed(mi, structural);
+        // E5: modification of a component this.m.i implicates the containing field this.m (its accessible content:
+        // the same kind, #25)
+        if (fr.scopeVariable() instanceof FieldReference outer) seedFieldReference(mi, outer, structural);
     }
 
     private void handleBlock(MethodInfo mi, Block block) {
@@ -668,7 +705,7 @@ public class ShadowModificationPass {
         // exact mirror of MethodModification.go's receiver guard: finalizer callees (the aapi marks
         // stream intermediates @Finalizer) never implicate their receiver, whatever their verdict
         if (callee.isModifying() && !callee.isIgnoreModification() && !callee.isFinalizer()) {
-            seedWithOrigin(callee, mi, "non-analyzed modifying callee");
+            seedWithOrigin(callee, mi, "non-analyzed modifying callee", !callee.isStructurallyNonModifying());
         }
         if (!receiverDisclaimed) seedBoundaryCalleeParameters(mi, callee);
     }
@@ -683,7 +720,7 @@ public class ShadowModificationPass {
         if (callee == null || orderMethods.contains(callee)) return;
         for (ParameterInfo cpi : callee.parameters()) {
             if (cpi.isModified() && !cpi.isIgnoreModifications()) {
-                seedWithOrigin(cpi, mi, "non-analyzed @Modified parameter");
+                seedWithOrigin(cpi, mi, "non-analyzed @Modified parameter", !cpi.isStructurallyUnmodified());
             }
         }
     }
@@ -1134,11 +1171,18 @@ public class ShadowModificationPass {
                     counts[write(mi.analysis(), PropertyImpl.NON_MODIFYING_METHOD,
                             report.reached().contains(mi), report.frontierIncomplete().contains(mi), false, mi,
                             contracted.test(mi))]++;
+                    // the structural twin (#25), from the structural closure; not counted
+                    write(mi.analysis(), PropertyImpl.STRUCTURALLY_NON_MODIFYING_METHOD,
+                            report.reachedStructural().contains(mi), report.frontierIncomplete().contains(mi), false, mi,
+                            contracted.test(mi));
                     for (ParameterInfo pi : mi.parameters()) {
                         boolean immutable = immutableForModification(pi.parameterizedType());
                         counts[write(pi.analysis(), PropertyImpl.UNMODIFIED_PARAMETER,
                                 report.reached().contains(pi), report.frontierIncomplete().contains(pi), immutable, pi,
                                 contracted.test(pi))]++;
+                        write(pi.analysis(), PropertyImpl.STRUCTURALLY_UNMODIFIED_PARAMETER,
+                                report.reachedStructural().contains(pi), report.frontierIncomplete().contains(pi),
+                                immutable, pi, contracted.test(pi));
                     }
                 }
                 case FieldInfo fi -> {
@@ -1146,6 +1190,9 @@ public class ShadowModificationPass {
                     counts[write(fi.analysis(), PropertyImpl.UNMODIFIED_FIELD,
                             report.reached().contains(fi), report.frontierIncomplete().contains(fi), immutable, fi,
                             false)]++;
+                    write(fi.analysis(), PropertyImpl.STRUCTURALLY_UNMODIFIED_FIELD,
+                            report.reachedStructural().contains(fi), report.frontierIncomplete().contains(fi), immutable,
+                            fi, false);
                 }
                 default -> {
                 }
@@ -1202,9 +1249,10 @@ public class ShadowModificationPass {
         return NO_CHANGE; // TRUE and unreached: agreement
     }
 
-    private Set<Object> closure() {
-        Set<Object> reached = new HashSet<>(seeds);
-        Deque<Object> todo = new ArrayDeque<>(seeds);
+    /** @param cause the BFS predecessor of each reached node, for explanations; null to record none */
+    private Set<Object> closure(Set<Object> from, Map<Object, Object> cause) {
+        Set<Object> reached = new HashSet<>(from);
+        Deque<Object> todo = new ArrayDeque<>(from);
         while (!todo.isEmpty()) {
             Object node = todo.poll();
             // an immutable-typed node cannot transmit modification: its object graph cannot change,
@@ -1214,7 +1262,7 @@ public class ShadowModificationPass {
             if (immutableTyped(node)) continue;
             for (Object next : successors.getOrDefault(node, Set.of())) {
                 if (reached.add(next)) {
-                    cause.put(next, node);
+                    if (cause != null) cause.put(next, node);
                     todo.add(next);
                 }
             }

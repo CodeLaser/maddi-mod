@@ -39,8 +39,41 @@ public record MethodModification(Runtime runtime, VariableData variableData, Sta
                                  Consumer<MethodInfo> dependsOn) {
     private static final Logger LOGGER = LoggerFactory.getLogger(MethodModification.class);
 
-    public Set<Variable> go(Variable objectPrimary, List<Result> params, MethodLinkedVariables methodLinkedVariables) {
-        Set<Variable> modified = new HashSet<>();
+    /**
+     * The variables this call modifies, and among them those whose objects are modified only in their hidden content
+     * (CodeLaser/maddi-mod#25): the argument to a parameter that is structurally unmodified yet modified, the receiver
+     * of a method that is structurally non-modifying yet modifying, the callee's own deep-only modifications
+     * translated into this scope. A variable is deep-only when every reason to mark it is.
+     */
+    public record Modified(Set<Variable> all, Set<Variable> deepOnly) {
+    }
+
+    /** Collects the two sets of {@link Modified} as the four recording sites of {@link #go} find them. */
+    private static class Collector {
+        private final Set<Variable> structural = new HashSet<>();
+        private final Set<Variable> deepOnlyCandidates = new HashSet<>();
+
+        void add(Variable v, boolean structural) {
+            if (structural) this.structural.add(v);
+            else this.deepOnlyCandidates.add(v);
+        }
+
+        /** The variable and its scopes, which hold it as (part of) their accessible content: the same kind. */
+        void addWithScopes(Variable v, boolean structural) {
+            Util.variableAndScopes(v).filter(x -> !x.isIgnoreModifications()).forEach(x -> add(x, structural));
+        }
+
+        Modified build() {
+            Set<Variable> all = new HashSet<>(structural);
+            all.addAll(deepOnlyCandidates);
+            Set<Variable> deepOnly = new HashSet<>(deepOnlyCandidates);
+            deepOnly.removeAll(structural);
+            return new Modified(all, deepOnly);
+        }
+    }
+
+    public Modified go(Variable objectPrimary, List<Result> params, MethodLinkedVariables methodLinkedVariables) {
+        Collector modified = new Collector();
         MethodInfo methodInfo = mc.methodInfo();
         // The RECEIVER carries @IgnoreModifications: the author has declared that whatever this object does is
         // not their modification. That must cover what it does to the ARGUMENTS it is handed, not only the
@@ -64,9 +97,8 @@ public record MethodModification(Runtime runtime, VariableData variableData, Sta
                     receiverExcused = true;
                 } else {
                     LOGGER.debug("Mark object primary {} as modified by {}", objectPrimary, methodInfo);
-                    Util.variableAndScopes(objectPrimary)
-                            .filter(v -> !v.isIgnoreModifications())
-                            .forEach(modified::add);
+                    // structurally non-modifying (a method touching only the elements of its receiver): deep-only
+                    modified.addWithScopes(objectPrimary, !methodInfo.isStructurallyNonModifying());
                 }
             }
         }
@@ -80,10 +112,12 @@ public record MethodModification(Runtime runtime, VariableData variableData, Sta
         if (!receiverDisclaimed) {
             for (ParameterInfo pi : methodInfo.parameters()) {
                 if (pi.isModified() && !pi.isIgnoreModifications() && !parameterExcusedByCone(pi, receiverType)) {
+                    // deep-modified but structurally unmodified (its elements are modified, it is not): deep-only
+                    boolean structural = !pi.isStructurallyUnmodified();
                     if (pi.isVarArgs()) {
                         for (int i = methodInfo.parameters().size() - 1; i < mc.parameterExpressions().size(); i++) {
                             Result rp = params.get(i);
-                            handleModifiedParameter(mc.parameterExpressions().get(i), rp, modified);
+                            handleModifiedParameter(mc.parameterExpressions().get(i), rp, modified, structural);
                         }
                     } else if (PassedFunction.unmodifiedAtCallSite(pi, mc.parameterExpressions())) {
                         LOGGER.debug("Argument {} of {} not modified: the function passed leaves it alone", pi.index(),
@@ -98,7 +132,7 @@ public record MethodModification(Runtime runtime, VariableData variableData, Sta
                                     PassedFunction.entry(functionalReceiver.index(), pi.index()));
                             recordedThroughPassedFunction.add(ownParameter);
                         } else {
-                            handleModifiedParameter(mc.parameterExpressions().get(pi.index()), rp, modified);
+                            handleModifiedParameter(mc.parameterExpressions().get(pi.index()), rp, modified, structural);
                         }
                     }
                 }
@@ -120,13 +154,11 @@ public record MethodModification(Runtime runtime, VariableData variableData, Sta
                 if (translated.equals(mv)
                     || variableData != null && variableData.isKnown(translated.fullyQualifiedName())) {
                     LOGGER.debug("Propagated modification to {}", translated);
-                    Util.variableAndScopes(translated)
-                            .filter(v -> !v.isIgnoreModifications())
-                            .forEach(modified::add);
+                    modified.addWithScopes(translated, !methodLinkedVariables.deepOnlyModified().contains(mv));
                 }
             }
         }
-        return modified;
+        return modified.build();
     }
 
     /*
@@ -153,7 +185,7 @@ public record MethodModification(Runtime runtime, VariableData variableData, Sta
         return cone != null && cone.isTrue();
     }
 
-    private void handleModifiedParameter(Expression argument, Result rp, Set<Variable> modified) {
+    private void handleModifiedParameter(Expression argument, Result rp, Collector modified, boolean structural) {
         if (rp.links() != null && rp.links().primary() != null && !Util.isHiddenContentField(rp.links().primary())) {
             if (ReceiverLevel.enabled()
                 && ReceiverLevel.immutableObject(rp.links().primary(), argument == null ? null : argument.parameterizedType())) {
@@ -168,20 +200,16 @@ public record MethodModification(Runtime runtime, VariableData variableData, Sta
             // does to it is not this type's modification -- exactly what the receiver and propagated sites
             // already honoured. ShadowModificationPass.project() has ALWAYS filtered it here (its FieldReference
             // arm), so before this the two implementations disagreed on the argument site by construction.
-            Util.variableAndScopes(rp.links().primary())
-                    .filter(v -> !v.isIgnoreModifications())
-                    .forEach(modified::add);
+            modified.addWithScopes(rp.links().primary(), structural);
         }
         if (argument instanceof MethodReference mr) {
             propagateModificationOfObject(modified, mr);
         }
     }
 
-    private void propagateModificationOfObject(Set<Variable> modified, MethodReference mr) {
+    private void propagateModificationOfObject(Collector modified, MethodReference mr) {
         if (mr.methodInfo().isModifying() && mr.scope() instanceof VariableExpression ve) {
-            Util.variableAndScopes(ve.variable())
-                    .filter(v -> !v.isIgnoreModifications())
-                    .forEach(modified::add);
+            modified.addWithScopes(ve.variable(), !mr.methodInfo().isStructurallyNonModifying());
         }
     }
 }
