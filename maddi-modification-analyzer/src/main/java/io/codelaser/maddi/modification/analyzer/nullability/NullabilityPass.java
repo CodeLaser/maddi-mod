@@ -371,6 +371,8 @@ public final class NullabilityPass {
     private final Map<Integer, MethodInfo> callees = new HashMap<>();
     private final List<GatedSite> gatedSites = new ArrayList<>();
     private final Set<Integer> argumentsSeen = new HashSet<>();
+    private NullPredicates predicates;
+    private java.util.function.BiPredicate<Object, TypeInfo> narrowedReads;
     // gate NOGAP9 for A/B: every call's result is the callee's return, as before
     private static final boolean GAP9_OFF = System.getenv("NOGAP9") != null;
     // a parameter the body assigns (CodeLaser/maddi-mod#22 gap 5, #9): the parameter node is the caller's value only; what
@@ -662,9 +664,11 @@ public final class NullabilityPass {
             }
         }
         indexKeyedMaps(methods, fields);
+        predicates = NullPredicates.infer(methods);
+        narrowedReads = narrowed.isEmpty() ? null : narrowed::nonNull;
         facts = new NonNullFacts(this::parameterContract, this::returnContract)
-                .withPredicates(NullPredicates.infer(methods))
-                .withNarrowedReads(narrowed.isEmpty() ? null : narrowed::nonNull);
+                .withPredicates(predicates)
+                .withNarrowedReads(narrowedReads);
         if (policy.contracts()) {
             for (FieldInfo fi : fields) contract(fi, fi);
             for (MethodInfo mi : methods) {
@@ -760,7 +764,13 @@ public final class NullabilityPass {
                 nonNullCallResults.add(call);
             }
         });
-        return new Report(verdicts, locals, cause, seedOrigin, facts, smartCasts, Set.copyOf(asserted),
+        // gap 7: the facts handed out know what the closure decided; the walk that built the graph could not
+        NonNullFacts useSites = new NonNullFacts(this::parameterContract, this::returnContract)
+                .withPredicates(predicates)
+                .withNarrowedReads(narrowedReads)
+                .withNotNullable(e -> notNullable(e, nonNullCallResults));
+        methods.forEach(useSites::walk);
+        return new Report(verdicts, locals, cause, seedOrigin, useSites, smartCasts, Set.copyOf(asserted),
                 Set.copyOf(unobservedCandidates), nonNullCallResults);
     }
 
@@ -1196,6 +1206,29 @@ public final class NullabilityPass {
         if (intrinsicMemo.computeIfAbsent(callee, m -> reachedWithout(m, through, reached))) return true;
         for (ParameterInfo pi : through) {
             if (isReached.test(new SiteArg(call, pi.index()))) return true;
+        }
+        return false;
+    }
+
+    /*
+     Gap 7, for the facts the report hands out: a value no null of the analysis reaches, once the closure is known. A
+     call to an analysed method whose return null does not reach (at this call: gap 9), a library call without a
+     nullable contract (as the pass treats it everywhere: the same as a local with that one assignment), a parameter or
+     a field null does not reach. A local is not looked up here: its node needs the scope of the read.
+     */
+    private boolean notNullable(Expression e, Set<Expression> nonNullCallResults) {
+        Expression x = NonNullFacts.unwrap(e);
+        if (x instanceof MethodCall mc && mc.methodInfo() != null) {
+            MethodInfo callee = mc.methodInfo();
+            if (analysed.contains(callee)) return !reached.contains(callee) || nonNullCallResults.contains(mc);
+            return libraryNullableCall(mc) == null;
+        }
+        if (x instanceof VariableExpression ve) {
+            return switch (ve.variable()) {
+                case ParameterInfo pi -> !reached.contains(pi);
+                case FieldReference fr -> fr.fieldInfo().isFinal() && !reached.contains(fr.fieldInfo());
+                default -> false;
+            };
         }
         return false;
     }

@@ -77,6 +77,9 @@ public final class NonNullFacts {
     private NullPredicates predicates;
     // is the member (a getter, a field) non-null on every instance of the type? (Narrowing, CodeLaser/maddi-mod#22 gap 3)
     private java.util.function.BiPredicate<Object, TypeInfo> narrowedNonNull;
+    // the pass's verdict on a value, once its closure is known: no null of the analysis reaches it (gap 7); null
+    // while the pass builds its graph
+    private java.util.function.Predicate<Expression> notNullable;
 
     /**
      * @param parameterContract the contract on a callee's parameter (NONNULL: passing null throws), or null
@@ -106,6 +109,17 @@ public final class NonNullFacts {
      */
     public NonNullFacts withNarrowedReads(java.util.function.BiPredicate<Object, TypeInfo> nonNull) {
         this.narrowedNonNull = nonNull;
+        return this;
+    }
+
+    /**
+     * CodeLaser/maddi-mod#22 gap 7: a value the pass's closure leaves unreached counts as non-null where it is assigned,
+     * so a local is non-null after 'statement = connection.createStatement()' although its declaration also holds a
+     * null ('Statement statement = null;', kept for the finally). Only for the facts the report hands out, after the
+     * closure: the pass's own walk must not use its result. Not in {@link #kotlinSmartCasts()}.
+     */
+    public NonNullFacts withNotNullable(java.util.function.Predicate<Expression> notNullable) {
+        this.notNullable = notNullable;
         return this;
     }
 
@@ -629,11 +643,13 @@ public final class NonNullFacts {
             case ConstructorCall _, StringConstant _, StringConcat _, ArrayInitializer _, Lambda _,
                  MethodReference _, ClassExpression _, ConstantExpression<?> _ -> true; // NullConstant is handled above
             case VariableExpression ve -> ve.variable() instanceof io.codelaser.maddi.cst.api.variable.This
-                                          || facts.contains(ve.variable());
+                                          || facts.contains(ve.variable())
+                                          || notNullable != null && !kotlinSmartCasts && notNullable.test(ve);
             case InlineConditional ic -> nonNull(ic.ifTrue(), facts) && nonNull(ic.ifFalse(), facts);
             case MethodCall mc -> !kotlinSmartCasts && mc.methodInfo() != null
                                   && (returnContract.apply(mc.methodInfo()) == NullableState.NONNULL
-                                      || pureCall(mc) instanceof Variable pc && facts.contains(pc));
+                                      || pureCall(mc) instanceof Variable pc && facts.contains(pc)
+                                      || notNullable != null && notNullable.test(mc));
             case Assignment a -> nonNull(a.value(), facts);
             default -> x.parameterizedType() != null && x.parameterizedType().isPrimitiveExcludingVoid()
                        && x.parameterizedType().arrays() == 0;

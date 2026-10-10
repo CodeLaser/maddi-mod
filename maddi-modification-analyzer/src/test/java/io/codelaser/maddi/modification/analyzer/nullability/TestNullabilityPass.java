@@ -2756,4 +2756,56 @@ public class TestNullabilityPass extends CommonTest {
         assertTrue(l.contains("unchecked.errMsg: String?"), l);
         assertTrue(l.contains("changed.errMsg: String?"), "initCause modifies the receiver: " + l);
     }
+
+    // CodeLaser/maddi-mod#22 gap 7 (nacos MysqlHealthCheckProcessor): a local initialized null for the finally, assigned
+    // a value no null reaches, then dereferenced: known non-null at that use, though its declaration stays nullable
+    @DisplayName("gap 7: a local is non-null after an assignment no null reaches, whatever its other assignments")
+    @Test
+    public void reassignedLocalUseSite() {
+        NullabilityPass.Report report = run("a.b.G7", """
+                package a.b;
+                class G7 {
+                    interface Stmt { void timeout(int t); void close(); }
+                    interface Conn { Stmt create(); }
+                    static Stmt maybe(boolean b) { return b ? null : new Stmt() {
+                        public void timeout(int t) { }
+                        public void close() { }
+                    }; }
+                    static void health(Conn connection) {
+                        Stmt statement = null;
+                        try {
+                            statement = connection.create();
+                            statement.timeout(1);
+                        } finally {
+                            if (statement != null) statement.close();
+                        }
+                    }
+                    static void risky(boolean b) {
+                        Stmt statement = null;
+                        statement = maybe(b);
+                        statement.timeout(1);
+                    }
+                }
+                """);
+        assertTrue(locals(report).contains("health.statement: Stmt?"), locals(report));
+        assertTrue(timeoutCallNonNull(report, "health"), "after 'statement = connection.create()'");
+        assertFalse(timeoutCallNonNull(report, "risky"), "maybe(b) may return null");
+    }
+
+    private boolean timeoutCallNonNull(NullabilityPass.Report report, String method) {
+        MethodInfo mi = parsed.methods().stream().filter(m -> m.name().equals(method)).findFirst().orElseThrow();
+        boolean[] found = {false, false};
+        mi.methodBody().visit(e -> {
+            if (e instanceof io.codelaser.maddi.cst.api.statement.ExpressionAsStatement eas
+                && eas.expression() instanceof io.codelaser.maddi.cst.api.expression.MethodCall mc
+                && mc.methodInfo() != null && "timeout".equals(mc.methodInfo().name())
+                && mc.object() instanceof io.codelaser.maddi.cst.api.expression.VariableExpression ve) {
+                found[0] = true;
+                found[1] = report.useSites().nonNullAt(eas, ve.variable());
+            }
+            return true;
+        });
+        assertTrue(found[0], "no 'statement.timeout(1)' in " + method);
+        return found[1];
+    }
 }
