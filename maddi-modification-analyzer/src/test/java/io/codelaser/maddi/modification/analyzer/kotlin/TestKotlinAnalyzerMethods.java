@@ -113,12 +113,16 @@ public class TestKotlinAnalyzerMethods extends CommonKotlinAnalyzerTest {
         a.assertSameAsJava("Ops", "fail", "fact");
     }
 
-    /* ⛔ CodeLaser/maddi#89: Iterable<Int>.sum() (sumOfInt) has no contract, so a read-only call modifies its argument */
+    /*
+    Iterable<Int>.sum() is sumOfInt on the JVM. Until the front end built the stdlib under its JVM names
+    (CodeLaser/maddi-mod#15), the seven sum(Iterable) overloads were one signature, no contract could name the right
+    one, and the read-only call modified its argument (unmodified=false).
+    */
     @Test
     public void stdlibSum() {
         assertEquals("method sumOf: nonModifying=true @Independent | 0: unmodified=true @Independent",
                 a.java("Ops", "sumOf").lines().skip(1).findFirst().orElseThrow());
-        assertEquals("method sumOf: nonModifying=true @Independent | 0: unmodified=false @Independent",
+        assertEquals("method sumOf: nonModifying=true @Independent | 0: unmodified=true @Independent",
                 a.kotlin("Ops", "sumOf").lines().skip(1).findFirst().orElseThrow());
     }
 }

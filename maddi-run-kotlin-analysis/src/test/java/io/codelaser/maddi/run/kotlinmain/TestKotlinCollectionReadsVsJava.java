@@ -67,10 +67,13 @@ public class TestKotlinCollectionReadsVsJava {
             "SiblingBuilder",
             "FilterNotNull", "Flatten", "IndexOfFirst", "SetPlus", "MapValues",
             "FilterIsInstanceArr", "SeqPlus", "OrEmptyCall", "Decode", "StringBytes",
-            "RangeContains", "MatchValues", "KClassName", "FileExt", "DequeFirst", "DelegateRead", "Control");
+            "RangeContains", "MatchValues", "KClassName", "FileExt", "DequeFirst", "DelegateRead", "SumInt", "SumLong",
+            "JavaClass",
+            "MapIndexed", "MaxBy", "ZipArr", "FilterValues", "ToMapPairs", "ArrTakeWhile", "ArrIsEmpty", "CharsString", "SeqFlatMapIterable", "SeqWithIndex", "IndexedVal", "MatchDestructured", "ProgressionFirst", "LazyMode", "FileWrite", "PathWrite", "ToRegexOpt", "SeqBuilder", "MapIndex", "Control");
 
     private static final String KOTLIN = """
             package a
+            import kotlin.io.path.writeText
             class JoinToString(private val s: List<String>) { fun f(): String = s.joinToString() }
             class IsNotEmpty(private val s: Collection<String>) { fun f(): Boolean = s.isNotEmpty() }
             class SingleOrNull(private val s: List<String>) { fun f(): String? = s.singleOrNull() }
@@ -119,6 +122,28 @@ public class TestKotlinCollectionReadsVsJava {
             class DelegateRead(private val s: kotlin.properties.ReadOnlyProperty<Any?, String>) {
                 fun f(p: kotlin.reflect.KProperty<*>): String = s.getValue(this, p)
             }
+            class SumInt(private val s: List<Int>) { fun f(): Int = s.sum() }
+            class SumLong(private val s: Collection<Long>) { fun f(): Long = s.sum() }
+            class JavaClass(private val s: kotlin.reflect.KClass<String>) { fun f(): Class<String> = s.java }
+            class MapIndexed(private val s: List<String>) { fun f(): List<String> = s.mapIndexed { i, x -> x + i } }
+            class MaxBy(private val s: List<String>) { fun f(): String? = s.maxByOrNull { it.length } }
+            class ZipArr(private val s: Array<String>) { fun f(l: List<String>): List<Pair<String, String>> = l.zip(s) }
+            class FilterValues(private val s: Map<String, String>) { fun f(): Map<String, String> = s.filterValues { it.isEmpty() } }
+            class ToMapPairs(private val s: Array<Pair<String, String>>) { fun f(): Map<String, String> = s.toMap() }
+            class ArrTakeWhile(private val s: Array<String>) { fun f(): List<String> = s.takeWhile { it.isEmpty() } }
+            class ArrIsEmpty(private val s: Array<String>) { fun f(): Boolean = s.isEmpty() }
+            class CharsString(private val s: CharArray) { fun f(): String = String(s) }
+            class SeqFlatMapIterable(private val s: Sequence<String>) { fun f(): List<String> = s.flatMap { listOf(it) }.toList() }
+            class SeqWithIndex(private val s: Sequence<String>) { fun f(): Int = s.withIndex().count() }
+            class IndexedVal(private val s: IndexedValue<String>) { fun f(): String = s.value }
+            class MatchDestructured(private val s: MatchResult) { fun f(): MatchResult = s.destructured.match }
+            class ProgressionFirst(private val s: IntProgression) { fun f(): Int = s.first }
+            class LazyMode(private val s: LazyThreadSafetyMode) { fun f(): Lazy<Int> = lazy(s) { 1 } }
+            class FileWrite(private val s: java.io.File) { fun f() { s.writeText("x") } }
+            class PathWrite(private val s: java.nio.file.Path) { fun f() { s.writeText("x") } }
+            class ToRegexOpt(private val s: RegexOption) { fun f(x: String): Regex = x.toRegex(s) }
+            class SeqBuilder(private val s: List<String>) { fun f(): Sequence<String> = sequence { yieldAll(s) } }
+            class MapIndex(private val s: Map<String, String>) { fun f(k: String): String? = s[k] }
             class Control(private val s: MutableList<String>) { fun f() { s.clear() } }
             """;
 
@@ -177,6 +202,17 @@ public class TestKotlinCollectionReadsVsJava {
         // The Sibling rows call removeSurrounding, which has NO contract but lives in a part class that has some: the
         // hints compiler used to ship defaults for such a sibling computed without the jdk results (String and
         // CharSequence mutable), so both fields read false. AnalysisHintsCompiler's preloadResults fixed it.
+        // SumInt, SumLong and JavaClass were false against the archive before their contracts, WITH the front end already
+        // building the stdlib under its JVM names (2026-10-10, #15): before that, no contract could have reached them,
+        // because `sum` over an Iterable<Int> and over an Iterable<Long> were one signature and `KClass.java` was `getJava`.
+        // The second batch (2026-10-10, #15): MapIndexed, MaxBy, ZipArr, FilterValues, ToMapPairs, ArrTakeWhile,
+        // SeqFlatMapIterable, SeqWithIndex, LazyMode and FileWrite were false against the archive before their contracts.
+        // ArrIsEmpty, CharsString and ToRegexOpt are front-end lowerings of @InlineOnly calls, already in place for that
+        // run, as is MapIndex (`s[k]`, the @InlineOnly Map.get); IndexedVal, MatchDestructured, ProgressionFirst and
+        // PathWrite were already true and guard parity.
+        // ⚠ SeqBuilder stays FALSE, a known gap: `sequence { yieldAll(s) }` binds the right overload (ResolvedOverloadTest)
+        // with `s` @NotModified, yet the field reads modified. `yield(s)` there, and `addAll(s)` in a forEach or apply
+        // lambda, read unmodified: the cause is the analysis of a suspend lambda's hidden-content link, not a contract.
         // isNotEmpty and orEmpty are @InlineOnly: no method for a contract to name. They were the two rows left wrong by
         // the contracts, and the front end's lowering to the call kotlinc inlines (TestInlineOnlyLowering) fixed them.
         assertEquals("""
@@ -227,6 +263,28 @@ public class TestKotlinCollectionReadsVsJava {
                 a.FileExt true
                 a.DequeFirst true
                 a.DelegateRead true
+                a.SumInt true
+                a.SumLong true
+                a.JavaClass true
+                a.MapIndexed true
+                a.MaxBy true
+                a.ZipArr true
+                a.FilterValues true
+                a.ToMapPairs true
+                a.ArrTakeWhile true
+                a.ArrIsEmpty true
+                a.CharsString true
+                a.SeqFlatMapIterable true
+                a.SeqWithIndex true
+                a.IndexedVal true
+                a.MatchDestructured true
+                a.ProgressionFirst true
+                a.LazyMode true
+                a.FileWrite true
+                a.PathWrite true
+                a.ToRegexOpt true
+                a.SeqBuilder false
+                a.MapIndex true
                 a.Control false""", verdicts);
     }
 
