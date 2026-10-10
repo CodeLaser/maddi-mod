@@ -2610,4 +2610,24 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("Ctx<X>", s.get("make()"), "the class's own null stays in the class: " + s);
         assertEquals("Box<String?>", s.get("box()"), "a null from outside is the instance's: " + s);
     }
+
+    // a library return annotated nullable in its class file, with no hint: JUnit 6's 'ExtensionContext.Store.get'
+    // is '@Nullable Object get(Object)' (JSpecify, type use). Before 2026-10-10 only the hints seeded a library
+    // return: nacos' io.kubernetes.client getters ('@jakarta.annotation.Nullable') never reached a dereference.
+    @DisplayName("a library return annotated nullable in its class file seeds, like a hinted one")
+    @Test
+    public void libraryReturnAnnotatedInClassFile() {
+        NullabilityPass.Report report = run("a.b.LR", """
+                package a.b;
+                import org.junit.jupiter.api.extension.ExtensionContext;
+                class LR {
+                    static Object value(ExtensionContext.Store store) { return store.get("k"); }
+                    static String trimmed(String s) { return s.trim(); }
+                }
+                """);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(label(info), k(pt)));
+        assertEquals("Object?", s.get("value()"), s.toString());
+        assertEquals("String", s.get("trimmed()"), s.toString());
+    }
 }

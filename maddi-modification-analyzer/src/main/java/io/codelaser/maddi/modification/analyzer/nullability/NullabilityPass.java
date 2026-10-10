@@ -871,8 +871,21 @@ public final class NullabilityPass {
     private String libraryNullableReturn(MethodInfo mi) {
         return java.util.stream.Stream.concat(java.util.stream.Stream.of(mi), overrides(mi).stream())
                 .filter(m -> !analysed.contains(m))
-                .filter(m -> stateOf(m, PropertyImpl.NULLABILITY_METHOD) == NullableState.NULLABLE)
+                .filter(m -> libraryReturnState(m) == NullableState.NULLABLE)
                 .map(MethodInfo::fullyQualifiedName).findFirst().orElse(null);
+    }
+
+    /*
+     What a library method's return declares: the hints first, then the class file's own annotations, as for a
+     library parameter (libraryParameterState). Without the second, only the JDK hints seeded: io.kubernetes.client's
+     model getters, '@jakarta.annotation.Nullable V1EndpointSubset getSubsets()', never did (nacos K8sSyncServer,
+     21 SpotBugs results we missed, 2026-10-10). No @NullMarked default here: a non-null return seeds nothing.
+     */
+    private static NullableState libraryReturnState(MethodInfo mi) {
+        NullableState hint = stateOf(mi, PropertyImpl.NULLABILITY_METHOD);
+        if (hint != NullableState.UNSPECIFIED) return hint;
+        NullableState explicit = NullAnnotations.explicitState(mi);
+        return explicit != null ? explicit : NullableState.UNSPECIFIED;
     }
 
     /** A library method, {@code mi} or one it overrides, whose parameter {@code index} accepts null. */
