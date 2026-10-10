@@ -1159,3 +1159,42 @@ the caller's locals: 29 type errors in fernflower).
 Gate `NOPARAMSHADOW` restores one node. Guava: unchanged under all four policies. Fernflower: 199 files, 0 type
 errors, unchanged. `TestNullabilityPass.reassignedParameter` pins the incoming, loop, conditional and constant
 shapes. The link-engine side of #9 (the reassigned parameter in `MethodLinkedVariables` summaries) stays open.
+
+### 2026-10-09 — issue #22 gap 2: a map field's values per constant key (`NullabilityPass.Keyed`)
+
+nacos's `MapperContext.whereParamMap` is a `Map<String, Object>` written and read only through
+`putWhereParameter(KEY, value)` and `getWhereParameter(KEY)`. Its one value slot carried every key's values, so a
+null `dataId` put under `DATA_ID` made `tagArr` (`TAG_ARR`) and `ids` (`IDS`) nullable. A map field now has a node
+per constant key, `Keyed(slot, key)`, when every use the analysed code makes of it is seen: final, initialised with an
+empty new map, and used only as the receiver of reads, removals, `get(k)` and `put(k, v)`, or in a string
+concatenation; anything else (passed on, returned, `putAll`, `compute`, `entrySet`) keeps one slot. An accessor is a
+method whose single statement is `return field.get(k)` or `field.put(k, v)` with its own parameters, and its callers
+read and write the key they pass. A key is a constant by value: a literal, a static final field whose initializer is
+one (`FieldConstant.DATA_ID` and `"dataId"` are the same key), an enum constant. A write under a key not known
+reaches every key; every key's values still flow into the field's slot, so the declarations keep all of them
+(`whereParamMap` stays `Map<String, Object?>`). A keyed getter that an analysed override replaces is not keyed; in
+an open world neither is one that can be overridden, and an outside caller of a keyed putter writes under any key.
+`Map.get`'s own contract on a direct read (the key may be absent) is unchanged. Gate `NOKEYEDMAPS`.
+
+### 2026-10-09 — issue #22 gap 3: a read narrowed by `instanceof` (`Narrowing`, `NarrowedReads`)
+
+nacos's `ClientFuzzyWatchEvent` calls `super(clientId, null)`, which made `ClientOperationEvent.service` nullable,
+and with it `handleClientOperation`'s `Service service = event.getService()` everywhere it went, also into the
+branches `if (event instanceof ClientRegisterServiceEvent) addPublisherIndexes(service, clientId)` and on to
+`ServiceEvent.service` and `PushExecuteTask.service`. The facts walk now records a local read as `x.getF()` or `x.f`
+and a true `x instanceof T` (also after `if (!(x instanceof T)) return;`), both forgotten when x or the local is
+assigned; where both hold, the local is non-null if no class an instance of T can be leaves null in F. That is
+computed at the end of each round from its reachability, for the next round (as trusted returns are): per final
+instance field whose class has an analysed subclass, the concrete classes along whose constructor chains a null can
+arrive, evaluating `this(...)`/`super(...)` arguments against what reaches each constructor's parameters. A getter
+qualifies when no analysed override replaces it. Closed world only; Java only (Kotlin does not smart-cast the local).
+The declarations keep the null (`ClientOperationEvent.service`, the getter, the local stay nullable); only the uses
+under the test drop it. Gate `NONARROWING`.
+
+Measured: guava unchanged under all four policies (the same disagreements; cause chains spelled differently).
+Fernflower: 199 files, 0 type errors, the translation unchanged. nacos (`NULL_MARKED_FLOW_ONLY.withoutContracts()`,
+the 15 compilation units that fail to inspect left out, gates off versus on): `tagArr` in both mappers, `ids` in
+`ConfigMigrateMapper`, the three index methods' `service`, `ServiceEvent.service` and `PushExecuteTask.service` go
+from reached to unreached; nothing else of the sites #22 names changes. `TestNullabilityPass.keyedMaps` and
+`narrowedReads` pin the shapes, including those that must stay nullable (a key not known, a map that escapes, a
+subclass that stores null, an overriding getter, a non-final field, the tested variable reassigned).

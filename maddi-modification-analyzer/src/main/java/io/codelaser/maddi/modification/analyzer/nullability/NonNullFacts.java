@@ -75,6 +75,8 @@ public final class NonNullFacts {
     private final boolean kotlinSmartCasts;
     // null-check predicates ('StringUtils.isNotBlank(s)'), as conditions; never for Kotlin's smart casts
     private NullPredicates predicates;
+    // is the member (a getter, a field) non-null on every instance of the type? (Narrowing, CodeLaser/maddi-mod#22 gap 3)
+    private java.util.function.BiPredicate<Object, TypeInfo> narrowedNonNull;
 
     /**
      * @param parameterContract the contract on a callee's parameter (NONNULL: passing null throws), or null
@@ -95,6 +97,15 @@ public final class NonNullFacts {
     /** Null-check predicates count as conditions ({@link NullPredicates}); not in {@link #kotlinSmartCasts()}. */
     public NonNullFacts withPredicates(NullPredicates predicates) {
         this.predicates = predicates;
+        return this;
+    }
+
+    /**
+     * A read narrowed by the receiver's type ({@link Narrowing}): {@code nonNull.test(member, type)} says that
+     * {@code x.member} is not null on any instance of {@code type}. Not in {@link #kotlinSmartCasts()}.
+     */
+    public NonNullFacts withNarrowedReads(java.util.function.BiPredicate<Object, TypeInfo> nonNull) {
+        this.narrowedNonNull = nonNull;
         return this;
     }
 
@@ -198,6 +209,7 @@ public final class NonNullFacts {
                     facts.remove(lv);
                     facts.removeIf(v -> dependsOnAssigned(v, Set.of(lv)));
                     if (nonNull(lv.assignmentExpression(), facts)) facts.add(lv);
+                    narrowedRead(lv, lv.assignmentExpression(), facts);
                 });
                 return new Out(facts, true);
             }
@@ -215,16 +227,16 @@ public final class NonNullFacts {
             }
             case AssertStatement as -> {
                 effects(as.expression(), facts);
-                if (!kotlinSmartCasts) facts.addAll(whenTrue(as.expression()));
+                if (!kotlinSmartCasts) addCondition(facts, whenTrue(as.expression()));
                 return new Out(facts, true);
             }
             case IfElseStatement ifElse -> {
                 Expression condition = ifElse.expression();
                 effects(condition, facts);
                 Set<Variable> thenIn = new HashSet<>(facts);
-                thenIn.addAll(whenTrue(condition));
+                addCondition(thenIn, whenTrue(condition));
                 Set<Variable> elseIn = new HashSet<>(facts);
-                elseIn.addAll(whenFalse(condition));
+                addCondition(elseIn, whenFalse(condition));
                 Out thenOut = block(ifElse.block(), thenIn);
                 Block elseBlock = ifElse.elseBlock();
                 Out elseOut = elseBlock == null || elseBlock.isEmpty() ? new Out(elseIn, true) : block(elseBlock, elseIn);
@@ -278,7 +290,7 @@ public final class NonNullFacts {
         if (statement.expression() != null) effects(statement.expression(), facts);
         statement.subBlockStream().forEach(sb -> {
             Set<Variable> blockIn = new HashSet<>(facts);
-            if (statement.expression() != null) blockIn.addAll(whenTrue(statement.expression()));
+            if (statement.expression() != null) addCondition(blockIn, whenTrue(statement.expression()));
             if (statement instanceof ForEachStatement fe) {
                 Variable present = keySetLoop(fe);
                 if (present != null) blockIn.add(present);
@@ -397,7 +409,9 @@ public final class NonNullFacts {
         return v instanceof DependentVariable dv
                && (dv.arrayVariable() != null && assigned.contains(dv.arrayVariable())
                    || dv.indexVariable() != null && assigned.contains(dv.indexVariable()))
-               || v instanceof KeyPresence kp && (assigned.contains(kp.map()) || assigned.contains(kp.key()));
+               || v instanceof KeyPresence kp && (assigned.contains(kp.map()) || assigned.contains(kp.key()))
+               || v instanceof Narrowing n && (assigned.contains(n.subject())
+                                               || n.local() != null && assigned.contains(n.local()));
     }
 
     // a call may change any non-final field and the elements of any array; a map's keys stay present unless the
@@ -416,6 +430,55 @@ public final class NonNullFacts {
     private static boolean touches(Variable map, Variable receiver, boolean read, List<Expression> arguments) {
         if (map.equals(receiver) && !read) return true;
         return arguments.stream().anyMatch(a -> unwrap(a) instanceof VariableExpression ve && map.equals(ve.variable()));
+    }
+
+    // ------------------------------------------------------------------ narrowed reads (CodeLaser/maddi-mod#22 gap 3)
+
+    // a condition's facts, and what they make of the narrowed reads already known
+    private void addCondition(Set<Variable> facts, Set<Variable> condition) {
+        facts.addAll(condition);
+        derive(facts);
+    }
+
+    /*
+     'l = x.getF()' / 'l = x.f' with x a tracked variable: remembered, so that a later 'x instanceof T' (or an earlier
+     one still holding) makes l non-null when no instance of T has a null there. Java only: Kotlin does not smart-cast
+     l on a test of x.
+     */
+    private void narrowedRead(Variable local, Expression value, Set<Variable> facts) {
+        if (kotlinSmartCasts || narrowedNonNull == null || !(local instanceof LocalVariable)) return;
+        Expression x = unwrap(value);
+        Narrowing read = null;
+        if (x instanceof MethodCall mc && mc.methodInfo() != null && !mc.methodInfo().isStatic()
+            && mc.parameterExpressions().isEmpty() && mc.object() != null) {
+            Variable subject = trackableVariable(mc.object());
+            if (subject != null) read = Narrowing.read(local, subject, mc.methodInfo());
+        } else if (x instanceof VariableExpression ve && ve.variable() instanceof FieldReference fr
+                   && !fr.fieldInfo().isStatic() && fr.scope() != null) {
+            Variable subject = trackableVariable(fr.scope());
+            if (subject != null) read = Narrowing.read(local, subject, fr.fieldInfo());
+        }
+        if (read != null) {
+            facts.add(read);
+            derive(facts);
+        }
+    }
+
+    // a narrowed read whose subject is known to be an instance of a type with no null there: the local is non-null
+    private void derive(Set<Variable> facts) {
+        if (kotlinSmartCasts || narrowedNonNull == null) return;
+        List<Narrowing> instances = new ArrayList<>();
+        List<Narrowing> reads = new ArrayList<>();
+        for (Variable v : facts) {
+            if (v instanceof Narrowing n) (n.isInstance() ? instances : reads).add(n);
+        }
+        for (Narrowing read : reads) {
+            for (Narrowing instance : instances) {
+                if (read.subject().equals(instance.subject()) && narrowedNonNull.test(read.member(), instance.type())) {
+                    facts.add(read.local());
+                }
+            }
+        }
     }
 
     // ------------------------------------------------------------------ conditions
@@ -458,7 +521,13 @@ public final class NonNullFacts {
             case UnaryOperator uo when isNot(uo) -> set.addAll(whenFalse(uo.expression()));
             case Negation n -> set.addAll(whenFalse(n.expression()));
             case InstanceOf io when unwrap(io.expression()) instanceof VariableExpression ve
-                                    && trackable(ve.variable()) -> set.add(ve.variable());
+                                    && trackable(ve.variable()) -> {
+                set.add(ve.variable());
+                ParameterizedType tested = io.testType();
+                if (!kotlinSmartCasts && tested != null && tested.arrays() == 0 && tested.typeInfo() != null) {
+                    set.add(Narrowing.instance(ve.variable(), tested.typeInfo()));
+                }
+            }
             case MethodCall mc -> {
                 set.addAll(predicated(mc, NullPredicates.When.FALSE_IF_NULL));
                 Variable present = keyPresence(mc, "containsKey");
@@ -617,6 +686,7 @@ public final class NonNullFacts {
                         boolean nonNull = a.assignmentOperator() == null && nonNull(a.value(), facts);
                         facts.remove(target);
                         if (nonNull) facts.add(target);
+                        if (a.assignmentOperator() == null) narrowedRead(target, a.value(), facts);
                     }
                     return false;
                 }
@@ -671,7 +741,7 @@ public final class NonNullFacts {
     // a part evaluated only when the condition holds: walked on a copy, so what it establishes is not kept
     private void conditionally(Expression e, Set<Variable> facts, Set<Variable> condition) {
         Set<Variable> copy = new HashSet<>(facts);
-        copy.addAll(condition);
+        addCondition(copy, condition);
         effects(e, copy);
     }
 
@@ -681,7 +751,7 @@ public final class NonNullFacts {
         effects(operands.getFirst(), facts);
         Set<Variable> copy = new HashSet<>(facts);
         for (int i = 1; i < operands.size(); i++) {
-            copy.addAll(and ? whenTrue(operands.get(i - 1)) : whenFalse(operands.get(i - 1)));
+            addCondition(copy, and ? whenTrue(operands.get(i - 1)) : whenFalse(operands.get(i - 1)));
             effects(operands.get(i), copy);
         }
     }
