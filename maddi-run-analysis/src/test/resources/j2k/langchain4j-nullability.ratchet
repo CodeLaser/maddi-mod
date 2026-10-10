@@ -34,12 +34,16 @@
 # the static SUCCESS initializer (OutputGuardrailResultTest, JsonExtractorOutputGuardrailTests,
 # DefaultAiServiceListenerRegistrarTests); 1,045 pass with the Kotlin classes, 1,033 translated. Reported to the
 # nullability side.
+# 2026-10-10, maddi's comparingDouble key, List::of over an array, qualified constructor references, annotation value
+# naming and SAM constructors beside an overload taking T: 315 files compiling (47 type errors), 314 to class files.
+# The tests go DOWN 2, knowingly: DefaultRetrievalAugmentor now compiles, and its tests hand builder.executor(null) a
+# setter judged non-null; 1,043 pass with the Kotlin classes, 1,031 translated.
 types	346
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	346
-compilingFiles	311
-bytecodeFiles	309
-testsPassing	1045
+compilingFiles	315
+bytecodeFiles	314
+testsPassing	1043
 testBytecodeFiles	128
-translatedTestsPassing	1033
+translatedTestsPassing	1031
