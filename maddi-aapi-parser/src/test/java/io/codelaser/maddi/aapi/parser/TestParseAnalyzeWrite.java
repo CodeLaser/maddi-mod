@@ -91,12 +91,13 @@ public class TestParseAnalyzeWrite extends CommonTest {
         // merely makes more types resolvable can move verdicts in every modification-* test that shares it.
         // ⚠ JDK 27's javac recovers the unresolvable kotlin.* names, maddi stubs them, and the three Kotlin units
         // (Kotlin, KotlinCollections, KotlinText) survive; the parser then skips each stubbed target with a warning.
-        // KotlinJvmFunctions, KotlinIo, KotlinRanges, KotlinReflect and KotlinJvm import nothing from kotlin.* (their
-        // targets are named by PACKAGE_NAME + class name, kotlin.* types in full), so they survive on every JDK; their
-        // targets are skipped the same way. The five units that do import kotlin.* (Kotlin, KotlinCollections,
-        // KotlinProperties, KotlinSequences, KotlinText) survive on 27 only. Measured on 27 (9 of 9) and on the JDK 26
-        // gate (4) before KotlinJvm; KotlinJvm (2026-10-10) measured on 27 only, and counted on 26 as KotlinReflect is.
-        int kotlinUnits = java.lang.Runtime.version().feature() >= 27 ? 10 : 5;
+        // KotlinJvmFunctions, KotlinIo, KotlinRanges, KotlinReflect, KotlinJvm and KotlinIoPath import nothing from
+        // kotlin.* (their targets are named by PACKAGE_NAME + class name, kotlin.* types in full), so they survive on
+        // every JDK; their targets are skipped the same way. The five units that do import kotlin.* (Kotlin,
+        // KotlinCollections, KotlinProperties, KotlinSequences, KotlinText) survive on 27 only. Measured on 27 (9 of 9)
+        // and on the JDK 26 gate (4) before KotlinJvm; KotlinJvm and KotlinIoPath (2026-10-10) measured on 27 only, and
+        // counted on 26 as KotlinReflect is.
+        int kotlinUnits = java.lang.Runtime.version().feature() >= 27 ? 11 : 6;
         // The side-loaded hints (libs/eclipsecollections, 43 units naming org.eclipse.collections types; libs/guava,
         // naming com.google.common.collect ones) are in the same position as the Kotlin ones: no library jar on the
         // shared factory, so how many units survive is javac's recovery (21 of 43 EC units on JDK 27). They are

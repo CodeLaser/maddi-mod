@@ -94,14 +94,15 @@ public class TestKotlinAnalyzerSuspend extends CommonKotlinAnalyzerTest {
     }
 
     /*
-     ⚠ CodeLaser/maddi#89, Java too: `sequence`/`yieldAll` have no contract. `all` returns a sequence over the StringBuilders
-     of `xs`, yet reads @Independent on both sides (a copy would be @Independent(hc=true), a view @Dependent), and
-     `xs` reads modified although nothing modifies it.
+     `sequence`, `yield` and `yieldAll` are contracted since 2026-10-10 (CodeLaser/maddi-mod#15): `xs` reads unmodified,
+     which it was not before. ⚠ Still open, and no longer a contract question: `all` returns a sequence over the
+     StringBuilders of `xs`, yet reads @Independent (a view is @Dependent). The contract says `sequence` is dependent on
+     its block; the block captures `xs`, and the analysis does not carry that capture into the call's result.
      */
     @Test
     public void uncontractedBuilder() {
         assertEquals("""
                 type Q: @FinalFields @Dependent
-                method all: nonModifying=true @Independent | 0: unmodified=false @Independent""", q.kotlin("Q", "all"));
+                method all: nonModifying=true @Independent | 0: unmodified=true @Independent""", q.kotlin("Q", "all"));
     }
 }
