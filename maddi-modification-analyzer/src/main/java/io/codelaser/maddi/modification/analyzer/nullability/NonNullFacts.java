@@ -410,6 +410,7 @@ public final class NonNullFacts {
                && (dv.arrayVariable() != null && assigned.contains(dv.arrayVariable())
                    || dv.indexVariable() != null && assigned.contains(dv.indexVariable()))
                || v instanceof KeyPresence kp && (assigned.contains(kp.map()) || assigned.contains(kp.key()))
+               || v instanceof PureCall pc && assigned.contains(pc.receiver())
                || v instanceof Narrowing n && (assigned.contains(n.subject())
                                                || n.local() != null && assigned.contains(n.local()));
     }
@@ -423,8 +424,14 @@ public final class NonNullFacts {
                        && MAP_READS.contains(mc.methodInfo().name());
         List<Expression> arguments = call instanceof MethodCall mc ? mc.parameterExpressions()
                 : call instanceof ConstructorCall cc ? cc.parameterExpressions() : List.of();
+        // a pure call's result stays across calls that cannot change its receiver: a non-modifying one (the repeated
+        // call itself), or one that neither runs on the receiver nor is handed it, unless the receiver is a field
+        boolean modifying = call instanceof MethodCall mc ? mc.methodInfo() == null || mc.methodInfo().isModifying()
+                : call instanceof ConstructorCall;
         facts.removeIf(v -> isNonFinalField(v) || v instanceof DependentVariable
-                            || v instanceof KeyPresence kp && touches(kp.map(), receiver, read, arguments));
+                            || v instanceof KeyPresence kp && touches(kp.map(), receiver, read, arguments)
+                            || v instanceof PureCall pc && modifying
+                               && (isNonFinalField(pc.receiver()) || touches(pc.receiver(), receiver, false, arguments)));
     }
 
     private static boolean touches(Variable map, Variable receiver, boolean read, List<Expression> arguments) {
@@ -497,7 +504,29 @@ public final class NonNullFacts {
         Expression other = bo.lhs() instanceof NullConstant ? bo.rhs()
                 : bo.rhs() instanceof NullConstant ? bo.lhs() : null;
         if (unwrap(other) instanceof VariableExpression ve && trackable(ve.variable())) return ve.variable();
+        if (unwrap(other) instanceof MethodCall mc) return pureCall(mc);
         return null;
+    }
+
+    // ------------------------------------------------------------------ pure calls (CodeLaser/maddi-mod#22 gap 8)
+
+    /*
+     'x.m()' as a fact (PureCall): a non-static, non-modifying method without arguments, on a tracked variable; never in
+     Kotlin's smart casts. 'if (ioe.getMessage() != null) { String errMsg = ioe.getMessage(); errMsg.contains(..) }'
+     (nacos ConfigCacheService).
+     */
+    private Variable pureCall(MethodCall mc) {
+        MethodInfo mi = mc.methodInfo();
+        if (kotlinSmartCasts || mi == null || mi.isStatic() || !mc.parameterExpressions().isEmpty()
+            || mc.object() == null || !mi.isNonModifying() || mi.returnType().isPrimitiveExcludingVoid()) return null;
+        Variable receiver = trackableVariable(mc.object());
+        return receiver == null ? null : new PureCall(receiver, mi, mi.returnType());
+    }
+
+    /** Is the result of {@code call} known non-null when it is made, by an earlier test of the same call (gap 8)? */
+    public boolean pureCallNonNullWhenCalled(MethodCall call) {
+        Variable v = pureCall(call);
+        return v != null && whenCalled.getOrDefault(call, Set.of()).contains(v);
     }
 
     /** The variables non-null when {@code condition} evaluates to true. */
@@ -603,7 +632,8 @@ public final class NonNullFacts {
                                           || facts.contains(ve.variable());
             case InlineConditional ic -> nonNull(ic.ifTrue(), facts) && nonNull(ic.ifFalse(), facts);
             case MethodCall mc -> !kotlinSmartCasts && mc.methodInfo() != null
-                                  && returnContract.apply(mc.methodInfo()) == NullableState.NONNULL;
+                                  && (returnContract.apply(mc.methodInfo()) == NullableState.NONNULL
+                                      || pureCall(mc) instanceof Variable pc && facts.contains(pc));
             case Assignment a -> nonNull(a.value(), facts);
             default -> x.parameterizedType() != null && x.parameterizedType().isPrimitiveExcludingVoid()
                        && x.parameterizedType().arrays() == 0;

@@ -2721,4 +2721,39 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("Integer", s.get("timeoutValue()"), s.toString());
         assertEquals("Integer?", s.get("retriesValue()"), s.toString());
     }
+
+    // CodeLaser/maddi-mod#22 gap 8 (nacos ConfigCacheService): the same non-modifying call, after its own null test
+    @DisplayName("gap 8: a repeated pure call after its own null check is not the library's null")
+    @Test
+    public void repeatedPureCall() {
+        NullabilityPass.Report report = run("a.b.G8", """
+                package a.b;
+                import java.io.IOException;
+                class G8 {
+                    static boolean checked(IOException ioe) {
+                        if (ioe.getMessage() != null) {
+                            String errMsg = ioe.getMessage();
+                            return errMsg.contains("x");
+                        }
+                        return false;
+                    }
+                    static boolean unchecked(IOException ioe) {
+                        String errMsg = ioe.getMessage();
+                        return errMsg != null && errMsg.isEmpty();
+                    }
+                    static boolean changed(IOException ioe) {
+                        if (ioe.getMessage() != null) {
+                            ioe.initCause(new RuntimeException());
+                            String errMsg = ioe.getMessage();
+                            return errMsg != null;
+                        }
+                        return false;
+                    }
+                }
+                """);
+        String l = locals(report);
+        assertTrue(l.contains("checked.errMsg: String\n"), l);
+        assertTrue(l.contains("unchecked.errMsg: String?"), l);
+        assertTrue(l.contains("changed.errMsg: String?"), "initCause modifies the receiver: " + l);
+    }
 }
