@@ -3505,7 +3505,8 @@ public final class NullabilityPass {
     // pi: the parameter, or the Content of a varargs parameter
     private void argument(MethodInfo mi, Scope scope, Statement statement, Expression call,
                           LinkComputer.ListOfLinks list, List<Expression> arguments, int i, Object pi) {
-        if (arguments.get(i) instanceof NullConstant) {
+        // also a cast null: '(AiMessage) null' choosing between overloads (langchain4j OutputGuardrailResult)
+        if (NonNullFacts.unwrap(arguments.get(i)) instanceof NullConstant) {
             seed(pi, "null argument in " + mi.fullyQualifiedName(), mi.typeInfo());
             return;
         }
@@ -3544,9 +3545,19 @@ public final class NullabilityPass {
             return;
         }
         if (list == null || i >= list.list().size()) {
-            // no argument links ('super(attributes)', 'this(...)' carry none): the argument's own node
-            if (!(unwrappedArgument instanceof MethodCall)) addEdge(argumentNode(mi, scope, arguments.get(i)), pi);
-            else callResultArgument(unwrappedArgument, pi);
+            // no argument links ('super(attributes)', 'this(...)' carry none): each value the argument may take, its
+            // own node; a null branch seeds ('this(r, text == null ? null : AiMessage.from(text), …)', langchain4j
+            // OutputGuardrailResult, whose translated SUCCESS threw an NPE when this was dropped)
+            for (Expression alternative : alternatives(arguments.get(i))) {
+                Expression unwrappedAlternative = NonNullFacts.unwrap(alternative);
+                if (unwrappedAlternative instanceof NullConstant) {
+                    seed(pi, "null argument in " + mi.fullyQualifiedName(), mi.typeInfo());
+                } else if (!(unwrappedAlternative instanceof MethodCall)) {
+                    addEdge(argumentNode(mi, scope, alternative), pi);
+                } else {
+                    callResultArgument(unwrappedAlternative, pi);
+                }
+            }
             return;
         }
         Links links = list.list().get(i);

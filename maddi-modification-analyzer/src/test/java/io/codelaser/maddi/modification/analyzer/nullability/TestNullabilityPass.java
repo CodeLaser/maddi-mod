@@ -2874,4 +2874,127 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("String", s.get("os()"), s.toString());
         assertEquals("String?", s.get("custom()"), s.toString());
     }
+
+    /*
+     A null literal, a cast null, or a conditional with a null branch handed on through this(...) makes the parameter,
+     and the field it is assigned to, nullable (langchain4j OutputGuardrailResult: the static SUCCESS is built by the
+     no-arg constructor, which passes '(AiMessage) null').
+     */
+    @DisplayName("a null passed through this(...) makes the parameter nullable")
+    @Test
+    public void nullThroughThis() {
+        NullabilityPass.Report report = run("a.b.OG", """
+                package a.b;
+                import java.util.List;
+                class OG {
+                    static class Msg { static Msg from(String s) { return new Msg(); } }
+                    private static final OG SUCCESS = new OG();
+                    private final String result;
+                    private final Msg successfulMsg;
+                    private final Object successfulResult;
+                    private final Msg castMsg;
+                    private final Msg condMsg;
+                    private OG() { this("ok", (Msg) null, null, null, null); }
+                    private OG(String text) { this("ok", null, text, null, text == null ? null : Msg.from(text)); }
+                    private OG(Msg cast) { this("ok", null, null, (Msg) null, null); }
+                    private OG(String result, Msg successfulMsg, Object successfulResult, Msg castMsg, Msg condMsg) {
+                        this.result = result;
+                        this.successfulMsg = successfulMsg;
+                        this.successfulResult = successfulResult;
+                        this.castMsg = castMsg;
+                        this.condMsg = condMsg;
+                    }
+                    Msg successfulMsg() { return successfulMsg; }
+                }
+                """);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(label(info), k(pt)));
+        assertEquals("Msg?", s.get("<init>(1:successfulMsg)"), s.toString());
+        assertEquals("Msg?", s.get("successfulMsg"), s.toString());
+        assertEquals("Object?", s.get("<init>(2:successfulResult)"), s.toString());
+        assertEquals("Msg?", s.get("<init>(3:castMsg)"), s.toString());
+        assertEquals("Msg?", s.get("<init>(4:condMsg)"), s.toString());
+        assertEquals("String", s.get("<init>(0:result)"), s.toString());
+    }
+
+    @Language("java")
+    private static final String OVERLOADED_THIS = """
+            package a.b;
+            import java.util.Collections;
+            import java.util.List;
+            import java.util.Optional;
+            final class OGR {
+                enum Result { SUCCESS, SUCCESS_WITH_RESULT, FAILURE, FATAL }
+                static final class Msg { static Msg from(String s) { return new Msg(); } }
+                record Failure(String message) { }
+                private static final OGR SUCCESS = new OGR();
+                private final Result result;
+                private final Msg successfulMsg;
+                private final Object successfulResult;
+                private final List<Failure> failures;
+                private OGR(Result result, Msg successfulMsg, Object successfulResult, List<Failure> failures) {
+                    this.result = java.util.Objects.requireNonNull(result, "result");
+                    this.successfulMsg = successfulMsg;
+                    this.successfulResult = successfulResult;
+                    this.failures = Optional.ofNullable(failures).orElseGet(List::of);
+                }
+                private OGR(Result result, String successfulText, Object successfulResult, List<Failure> failures) {
+                    this(result, successfulText == null ? null : Msg.from(successfulText), successfulResult, failures);
+                }
+                private OGR() { this(Result.SUCCESS, (Msg) null, null, Collections.emptyList()); }
+                private OGR(String successfulText) { this(Result.SUCCESS_WITH_RESULT, successfulText, null, Collections.emptyList()); }
+                private OGR(Msg successfulMsg) { this(Result.SUCCESS_WITH_RESULT, successfulMsg, null, Collections.emptyList()); }
+                OGR(List<Failure> failures, boolean fatal) { this(fatal ? Result.FATAL : Result.FAILURE, (Msg) null, null, failures); }
+                static OGR success() { return SUCCESS; }
+                static OGR successWith(String text) { return text == null ? success() : new OGR(text); }
+                static OGR successWith(Msg msg) { return msg == null ? success() : new OGR(msg); }
+                static OGR failure(List<Failure> failures) { return new OGR(failures, false); }
+                Msg successfulMsg() { return successfulMsg; }
+            }
+            """;
+
+    private void overloadedThis(NullabilityPass.Policy policy) {
+        NullabilityPass.Report report = run("a.b.OGR", OVERLOADED_THIS, policy);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(label(info) + (info instanceof ParameterInfo pi
+                ? pi.methodInfo().parameters().stream().map(q -> q.parameterizedType().typeInfo().simpleName())
+                        .collect(Collectors.joining(",", "[", "]")) : ""), k(pt)));
+        assertEquals("Msg?", s.get("<init>(1:successfulMsg)[Result,Msg,Object,List]"), explain(report));
+        assertEquals("Msg?", s.get("successfulMsg"), s.toString());
+    }
+
+    @DisplayName("a cast null through an overloaded this(...) makes the parameter nullable")
+    @Test
+    public void nullThroughOverloadedThis() {
+        overloadedThis(NullabilityPass.Policy.NULL_MARKED);
+    }
+
+    @DisplayName("a cast null through an overloaded this(...) makes the parameter nullable: Kotlin")
+    @Test
+    public void nullThroughOverloadedThisKotlin() {
+        overloadedThis(NullabilityPass.Policy.KOTLIN);
+    }
+
+    @DisplayName("a conditional's null branch through an overloaded this(...) makes the parameter nullable")
+    @Test
+    public void conditionalNullThroughOverloadedThis() {
+        NullabilityPass.Report report = run("a.b.OGC", """
+                package a.b;
+                final class OGC {
+                    static final class Msg { static Msg from(String s) { return new Msg(); } }
+                    private final Msg msg;
+                    private OGC(int code, Msg msg) { this.msg = msg; }
+                    private OGC(int code, String text) { this(code, text == null ? null : Msg.from(text)); }
+                    static OGC of(String text) { return new OGC(1, text); }
+                    static OGC of(Msg msg) { return new OGC(1, java.util.Objects.requireNonNull(msg)); }
+                    Msg msg() { return msg; }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(label(info) + (info instanceof ParameterInfo pi
+                ? pi.methodInfo().parameters().stream().map(q -> q.parameterizedType().typeInfo().simpleName())
+                        .collect(Collectors.joining(",", "[", "]")) : ""), k(pt)));
+        assertEquals("Msg?", s.get("<init>(1:msg)[int,Msg]"), s.toString());
+        assertEquals("Msg?", s.get("msg"), s.toString());
+    }
 }
