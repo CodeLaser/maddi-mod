@@ -77,6 +77,9 @@ public final class NonNullFacts {
     private NullPredicates predicates;
     // is the member (a getter, a field) non-null on every instance of the type? (Narrowing, CodeLaser/maddi-mod#22 gap 3)
     private java.util.function.BiPredicate<Object, TypeInfo> narrowedNonNull;
+    // the pass's verdict on a value, once its closure is known: no null of the analysis reaches it (gap 7); null
+    // while the pass builds its graph
+    private java.util.function.Predicate<Expression> notNullable;
 
     /**
      * @param parameterContract the contract on a callee's parameter (NONNULL: passing null throws), or null
@@ -106,6 +109,17 @@ public final class NonNullFacts {
      */
     public NonNullFacts withNarrowedReads(java.util.function.BiPredicate<Object, TypeInfo> nonNull) {
         this.narrowedNonNull = nonNull;
+        return this;
+    }
+
+    /**
+     * CodeLaser/maddi-mod#22 gap 7: a value the pass's closure leaves unreached counts as non-null where it is assigned,
+     * so a local is non-null after 'statement = connection.createStatement()' although its declaration also holds a
+     * null ('Statement statement = null;', kept for the finally). Only for the facts the report hands out, after the
+     * closure: the pass's own walk must not use its result. Not in {@link #kotlinSmartCasts()}.
+     */
+    public NonNullFacts withNotNullable(java.util.function.Predicate<Expression> notNullable) {
+        this.notNullable = notNullable;
         return this;
     }
 
@@ -377,6 +391,64 @@ public final class NonNullFacts {
         return keyPresence(map, key, mc.object().parameterizedType());
     }
 
+    /*
+     A method of this class that leaves its key parameter present in a field map at every exit ('void ensure(String k)
+     { if (!cache.containsKey(k)) cache.put(k, new X()); }'): after 'ensure(k)' on this, the argument is present in that
+     map (nacos' initConfigGrayIfEmpty). Needs the callee walked first, as the analysis order has it.
+     */
+    private void presentAtCalleeExit(MethodCall mc, Set<Variable> facts) {
+        MethodInfo callee = mc.methodInfo();
+        if (kotlinSmartCasts || callee == null || callee.isStatic()
+            || mc.object() != null && !(unwrap(mc.object()) instanceof VariableExpression ve
+                                        && ve.variable() instanceof io.codelaser.maddi.cst.api.variable.This)) return;
+        for (Variable v : atExit.getOrDefault(callee, Set.of())) {
+            if (v instanceof KeyPresence kp && kp.map() instanceof FieldReference fr && fr.scopeIsRecursivelyThis()
+                && kp.key() instanceof ParameterInfo p && p.methodInfo() == callee
+                && p.index() < mc.parameterExpressions().size()) {
+                Variable key = trackableVariable(mc.parameterExpressions().get(p.index()));
+                if (key != null) facts.add(new KeyPresence(kp.map(), key, kp.valueType()));
+            }
+        }
+    }
+
+    /*
+     A function that never returns null: a constructor reference ('X::new'), or a lambda whose single result is non-null
+     by itself ('k -> new X()'). For computeIfAbsent's mapping function and ThreadLocal.withInitial's supplier.
+     */
+    static boolean nonNullFunction(Expression e) {
+        Expression f = unwrap(e);
+        if (f instanceof MethodReference mr) return mr.methodInfo() != null && mr.methodInfo().isConstructor();
+        if (f instanceof Lambda lambda && lambda.methodBody() != null
+            && lambda.methodBody().statements().size() == 1
+            && lambda.methodBody().statements().getFirst() instanceof ReturnStatement rs) {
+            Expression r = unwrap(rs.expression());
+            return r instanceof ConstructorCall || r instanceof StringConstant || r instanceof StringConcat
+                   || r instanceof ArrayInitializer;
+        }
+        return false;
+    }
+
+    /** Gap 1: {@code map.computeIfAbsent(k, f)} with f never returning null does not return null. */
+    public static boolean computedNonNull(MethodCall mc) {
+        return mc.methodInfo() != null && "computeIfAbsent".equals(mc.methodInfo().name())
+               && mc.parameterExpressions().size() == 2 && nonNullFunction(mc.parameterExpressions().get(1));
+    }
+
+    /**
+     * Gap 1: {@code TL.get()} on a final field initialized with {@code ThreadLocal.withInitial(s)}, s never returning
+     * null (nacos). Not when anything calls {@code set}/{@code remove} on it: that is the field's analysis, not this.
+     */
+    public static boolean initialThreadLocal(MethodCall mc) {
+        if (mc.methodInfo() == null || !"get".equals(mc.methodInfo().name()) || !mc.parameterExpressions().isEmpty()
+            || !(unwrap(mc.object()) instanceof VariableExpression ve) || !(ve.variable() instanceof FieldReference fr)
+            || !fr.fieldInfo().isFinal()) return false;
+        Expression init = fr.fieldInfo().initializer();
+        return unwrap(init) instanceof MethodCall wi && wi.methodInfo() != null
+               && "withInitial".equals(wi.methodInfo().name())
+               && "java.lang.ThreadLocal".equals(wi.methodInfo().typeInfo().fullyQualifiedName())
+               && wi.parameterExpressions().size() == 1 && nonNullFunction(wi.parameterExpressions().getFirst());
+    }
+
     // 'for (K k : map.keySet())': k is present in map throughout the body
     private Variable keySetLoop(ForEachStatement fe) {
         if (kotlinSmartCasts || !(unwrap(fe.expression()) instanceof MethodCall mc) || mc.methodInfo() == null
@@ -410,6 +482,7 @@ public final class NonNullFacts {
                && (dv.arrayVariable() != null && assigned.contains(dv.arrayVariable())
                    || dv.indexVariable() != null && assigned.contains(dv.indexVariable()))
                || v instanceof KeyPresence kp && (assigned.contains(kp.map()) || assigned.contains(kp.key()))
+               || v instanceof PureCall pc && assigned.contains(pc.receiver())
                || v instanceof Narrowing n && (assigned.contains(n.subject())
                                                || n.local() != null && assigned.contains(n.local()));
     }
@@ -423,8 +496,14 @@ public final class NonNullFacts {
                        && MAP_READS.contains(mc.methodInfo().name());
         List<Expression> arguments = call instanceof MethodCall mc ? mc.parameterExpressions()
                 : call instanceof ConstructorCall cc ? cc.parameterExpressions() : List.of();
+        // a pure call's result stays across calls that cannot change its receiver: a non-modifying one (the repeated
+        // call itself), or one that neither runs on the receiver nor is handed it, unless the receiver is a field
+        boolean modifying = call instanceof MethodCall mc ? mc.methodInfo() == null || mc.methodInfo().isModifying()
+                : call instanceof ConstructorCall;
         facts.removeIf(v -> isNonFinalField(v) || v instanceof DependentVariable
-                            || v instanceof KeyPresence kp && touches(kp.map(), receiver, read, arguments));
+                            || v instanceof KeyPresence kp && touches(kp.map(), receiver, read, arguments)
+                            || v instanceof PureCall pc && modifying
+                               && (isNonFinalField(pc.receiver()) || touches(pc.receiver(), receiver, false, arguments)));
     }
 
     private static boolean touches(Variable map, Variable receiver, boolean read, List<Expression> arguments) {
@@ -497,7 +576,29 @@ public final class NonNullFacts {
         Expression other = bo.lhs() instanceof NullConstant ? bo.rhs()
                 : bo.rhs() instanceof NullConstant ? bo.lhs() : null;
         if (unwrap(other) instanceof VariableExpression ve && trackable(ve.variable())) return ve.variable();
+        if (unwrap(other) instanceof MethodCall mc) return pureCall(mc);
         return null;
+    }
+
+    // ------------------------------------------------------------------ pure calls (CodeLaser/maddi-mod#22 gap 8)
+
+    /*
+     'x.m()' as a fact (PureCall): a non-static, non-modifying method without arguments, on a tracked variable; never in
+     Kotlin's smart casts. 'if (ioe.getMessage() != null) { String errMsg = ioe.getMessage(); errMsg.contains(..) }'
+     (nacos ConfigCacheService).
+     */
+    private Variable pureCall(MethodCall mc) {
+        MethodInfo mi = mc.methodInfo();
+        if (kotlinSmartCasts || mi == null || mi.isStatic() || !mc.parameterExpressions().isEmpty()
+            || mc.object() == null || !mi.isNonModifying() || mi.returnType().isPrimitiveExcludingVoid()) return null;
+        Variable receiver = trackableVariable(mc.object());
+        return receiver == null ? null : new PureCall(receiver, mi, mi.returnType());
+    }
+
+    /** Is the result of {@code call} known non-null when it is made, by an earlier test of the same call (gap 8)? */
+    public boolean pureCallNonNullWhenCalled(MethodCall call) {
+        Variable v = pureCall(call);
+        return v != null && whenCalled.getOrDefault(call, Set.of()).contains(v);
     }
 
     /** The variables non-null when {@code condition} evaluates to true. */
@@ -600,10 +701,13 @@ public final class NonNullFacts {
             case ConstructorCall _, StringConstant _, StringConcat _, ArrayInitializer _, Lambda _,
                  MethodReference _, ClassExpression _, ConstantExpression<?> _ -> true; // NullConstant is handled above
             case VariableExpression ve -> ve.variable() instanceof io.codelaser.maddi.cst.api.variable.This
-                                          || facts.contains(ve.variable());
+                                          || facts.contains(ve.variable())
+                                          || notNullable != null && !kotlinSmartCasts && notNullable.test(ve);
             case InlineConditional ic -> nonNull(ic.ifTrue(), facts) && nonNull(ic.ifFalse(), facts);
             case MethodCall mc -> !kotlinSmartCasts && mc.methodInfo() != null
-                                  && returnContract.apply(mc.methodInfo()) == NullableState.NONNULL;
+                                  && (returnContract.apply(mc.methodInfo()) == NullableState.NONNULL
+                                      || pureCall(mc) instanceof Variable pc && facts.contains(pc)
+                                      || notNullable != null && notNullable.test(mc));
             case Assignment a -> nonNull(a.value(), facts);
             default -> x.parameterizedType() != null && x.parameterizedType().isPrimitiveExcludingVoid()
                        && x.parameterizedType().arrays() == 0;
@@ -704,6 +808,12 @@ public final class NonNullFacts {
                         Variable present = keyPresence(mc, "put");
                         if (present != null) facts.add(present);
                     }
+                    // 'map.computeIfAbsent(k, f)' with f never returning null: k is present from here on
+                    if (arguments.size() == 2 && nonNullFunction(arguments.get(1))) {
+                        Variable present = keyPresence(mc, "computeIfAbsent");
+                        if (present != null) facts.add(present);
+                    }
+                    presentAtCalleeExit(mc, facts);
                     return false;
                 }
                 case ConstructorCall cc -> {
