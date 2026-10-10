@@ -2607,7 +2607,8 @@ public class TestNullabilityPass extends CommonTest {
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(label(info), k(pt)));
         assertEquals("E?", s.get("embedded"), s.toString());
-        assertEquals("Ctx<X>", s.get("make()"), "the class's own null stays in the class: " + s);
+        // X!: no claim about X, which is the point -- not X?
+        assertEquals("Ctx<X!>", s.get("make()"), "the class's own null stays in the class: " + s);
         assertEquals("Box<String?>", s.get("box()"), "a null from outside is the instance's: " + s);
     }
 
