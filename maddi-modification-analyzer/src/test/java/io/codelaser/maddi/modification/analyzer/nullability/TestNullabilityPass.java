@@ -2546,4 +2546,35 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("Service?", s.get("a.b.EW.addOther(a.b.EW.Service):0:service"), "Weird overrides the getter");
         assertEquals("Service?", s.get("a.b.EW.addMutable(a.b.EW.Service):0:service"), "not a final field");
     }
+
+    // langchain4j ValidationUtils: 'if (i == null || i < 0) throw illegalArgument("...%s", name, i)' hands the
+    // vararg a value that is null on that branch. 'i' is nullable only through the comparison (indirect evidence),
+    // which under assertContentWrites does not reach a slot; but a vararg's elements are not stored content: the
+    // call builds the array, and asserting at the call ('i!!') would throw where Java formats "null"
+    @DisplayName("a value null on the throwing branch passed as a vararg element")
+    @Test
+    public void varargElementAfterNullTest() {
+        NullabilityPass.Report report = run("a.b.VA", """
+                package a.b;
+                class VA {
+                    static IllegalArgumentException illegalArgument(String format, Object... args) {
+                        return new IllegalArgumentException(String.format(format, args));
+                    }
+                    static RuntimeException runtime(String format, Object... args) {
+                        return new RuntimeException(String.format(format, args));
+                    }
+                    static int ensureNotNegative(Integer i, String name) {
+                        if (i == null || i < 0) throw illegalArgument("%s must not be negative, but is: %s", name, i);
+                        return i;
+                    }
+                    static Object plain(Integer j) { return runtime("%s", j); }
+                    static void caller() { plain(null); }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(label(info), k(pt)));
+        assertEquals("Integer?", s.get("ensureNotNegative(0:i)"), s.toString());
+        assertEquals("Object?[]", s.get("illegalArgument(1:args)"), s.toString());
+        assertEquals("Object?[]", s.get("runtime(1:args)"), "a null argument, as before: " + s);
+    }
 }

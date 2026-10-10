@@ -1070,6 +1070,16 @@ public final class NullabilityPass {
         return node instanceof Arg || node instanceof Content || node instanceof Keyed;
     }
 
+    /*
+     The elements of a varargs parameter are not stored content: the call builds the array from its arguments, so an
+     argument nullable only through indirect evidence ('if (i == null || i < 0) throw illegalArgument("%s", i)')
+     still makes them nullable. Asserting at the call instead ('i!!') would throw where Java formats "null"
+     (langchain4j Exceptions.illegalArgument(format, vararg args: Any?)).
+     */
+    private static boolean isVarargElements(Object node) {
+        return node instanceof Content c && c.of() instanceof ParameterInfo pi && pi.isVarArgs();
+    }
+
     // strict: when not null, an edge from a value into a slot is followed only from a node in it
     private Set<Object> closure(Map<Object, Object> cause, Set<Object> seeds, Set<Object> strict) {
         // a seed on a non-null contract is the caller's error (an M5 finding), not a source of null
@@ -1079,7 +1089,7 @@ public final class NullabilityPass {
         while (!queue.isEmpty()) {
             Object n = queue.removeFirst();
             for (Object s : successors.getOrDefault(n, Set.of())) {
-                if (strict != null && isSlot(s) && !isSlot(n) && !strict.contains(n)) continue;
+                if (strict != null && isSlot(s) && !isSlot(n) && !strict.contains(n) && !isVarargElements(s)) continue;
                 if (!nonNullContracts.contains(s) && reached.add(s)) {
                     cause.put(s, n);
                     queue.addLast(s);
