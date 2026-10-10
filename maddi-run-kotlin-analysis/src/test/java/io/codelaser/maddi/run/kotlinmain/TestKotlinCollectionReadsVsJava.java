@@ -67,7 +67,8 @@ public class TestKotlinCollectionReadsVsJava {
             "SiblingBuilder",
             "FilterNotNull", "Flatten", "IndexOfFirst", "SetPlus", "MapValues",
             "FilterIsInstanceArr", "SeqPlus", "OrEmptyCall", "Decode", "StringBytes",
-            "RangeContains", "MatchValues", "KClassName", "FileExt", "DequeFirst", "DelegateRead", "Control");
+            "RangeContains", "MatchValues", "KClassName", "FileExt", "DequeFirst", "DelegateRead", "SumInt", "SumLong",
+            "JavaClass", "Control");
 
     private static final String KOTLIN = """
             package a
@@ -119,6 +120,9 @@ public class TestKotlinCollectionReadsVsJava {
             class DelegateRead(private val s: kotlin.properties.ReadOnlyProperty<Any?, String>) {
                 fun f(p: kotlin.reflect.KProperty<*>): String = s.getValue(this, p)
             }
+            class SumInt(private val s: List<Int>) { fun f(): Int = s.sum() }
+            class SumLong(private val s: Collection<Long>) { fun f(): Long = s.sum() }
+            class JavaClass(private val s: kotlin.reflect.KClass<String>) { fun f(): Class<String> = s.java }
             class Control(private val s: MutableList<String>) { fun f() { s.clear() } }
             """;
 
@@ -177,6 +181,9 @@ public class TestKotlinCollectionReadsVsJava {
         // The Sibling rows call removeSurrounding, which has NO contract but lives in a part class that has some: the
         // hints compiler used to ship defaults for such a sibling computed without the jdk results (String and
         // CharSequence mutable), so both fields read false. AnalysisHintsCompiler's preloadResults fixed it.
+        // SumInt, SumLong and JavaClass were false against the archive before their contracts, WITH the front end already
+        // building the stdlib under its JVM names (2026-10-10, #15): before that, no contract could have reached them,
+        // because `sum` over an Iterable<Int> and over an Iterable<Long> were one signature and `KClass.java` was `getJava`.
         // isNotEmpty and orEmpty are @InlineOnly: no method for a contract to name. They were the two rows left wrong by
         // the contracts, and the front end's lowering to the call kotlinc inlines (TestInlineOnlyLowering) fixed them.
         assertEquals("""
@@ -227,6 +234,9 @@ public class TestKotlinCollectionReadsVsJava {
                 a.FileExt true
                 a.DequeFirst true
                 a.DelegateRead true
+                a.SumInt true
+                a.SumLong true
+                a.JavaClass true
                 a.Control false""", verdicts);
     }
 
