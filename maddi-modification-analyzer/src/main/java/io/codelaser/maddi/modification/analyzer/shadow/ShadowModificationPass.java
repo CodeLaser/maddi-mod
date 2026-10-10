@@ -565,7 +565,7 @@ public class ShadowModificationPass {
                     // implementations instead
                     List<MethodInfo> cone = ReceiverLevel.enabled()
                             ? ReceiverLevel.coneImplementations(mc.methodInfo(), receiverType) : null;
-                    for (Object node : projectReceiverChain(mi, vd, mc.object())) {
+                    for (Object node : projectReceiverChain(mi, vd, mc.object(), mc.methodInfo())) {
                         if (cone == null) {
                             addEdge(mc.methodInfo(), node);
                         } else {
@@ -692,7 +692,7 @@ public class ShadowModificationPass {
             if (callee.methodBody() != null && !callee.methodBody().isEmpty() && !callee.isAbstract()) {
                 missingArgLinkAnalyzedCallees.merge(callee.fullyQualifiedName(), 1, Integer::sum);
                 for (io.codelaser.maddi.cst.api.expression.Expression arg : argumentExpressions) {
-                    frontierIncomplete.addAll(projectReceiverChain(mi, vd, arg));
+                    frontierIncomplete.addAll(projectReceiverChain(mi, vd, arg, null));
                 }
             } else if (!orderMethods.contains(callee)) {
                 // P3: the summary fold no longer seeds a walkable caller's own nodes, so a boundary
@@ -703,14 +703,14 @@ public class ShadowModificationPass {
                     if (PassedFunction.unmodifiedAtCallSite(cpi, argumentExpressions)) continue;
                     if (cpi.isVarArgs()) {
                         for (int i = cpi.index(); i < argumentExpressions.size(); i++) {
-                            for (Object node : projectReceiverChain(mi, vd, argumentExpressions.get(i))) {
+                            for (Object node : projectReceiverChain(mi, vd, argumentExpressions.get(i), null)) {
                                 addEdge(cpi, node);
                             }
                         }
                     } else if (cpi.index() < argumentExpressions.size()) {
                         io.codelaser.maddi.cst.api.expression.Expression arg = argumentExpressions.get(cpi.index());
                         if (arg instanceof VariableExpression ve && Util.isHiddenContentField(ve.variable())) continue;
-                        for (Object node : projectReceiverChain(mi, vd, arg)) {
+                        for (Object node : projectReceiverChain(mi, vd, arg, null)) {
                             addEdge(cpi, node);
                         }
                     }
@@ -771,23 +771,27 @@ public class ShadowModificationPass {
     // expression alone, whichever walk came first won: the enclosing method got the lambda's receiver node, no edge
     // reached it, and the cutover wrote `list.forEach(x -> this.items.add(x))` non-modifying (EC work list O1,
     // TestOptimisticModificationShapes.o1c).
-    private final Map<MethodInfo, Map<io.codelaser.maddi.cst.api.expression.Expression, Set<Object>>>
+    // ... and by the OUTER callee, the method invoked on the chain's result (null: an argument), which decides which
+    // of the inner callee's return-value links carry the modification (followsReturnLink)
+    private final Map<MethodInfo, Map<io.codelaser.maddi.cst.api.expression.Expression, Map<MethodInfo, Set<Object>>>>
             receiverChainCache = new HashMap<>();
 
     private Set<Object> projectReceiverChain(MethodInfo mi, VariableData vd,
-                                             io.codelaser.maddi.cst.api.expression.Expression receiver) {
+                                             io.codelaser.maddi.cst.api.expression.Expression receiver,
+                                             MethodInfo outer) {
         if (receiver == null) return Set.of();
-        Map<io.codelaser.maddi.cst.api.expression.Expression, Set<Object>> cache =
-                receiverChainCache.computeIfAbsent(mi, _ -> new IdentityHashMap<>());
-        Set<Object> cached = cache.get(receiver);
+        Map<MethodInfo, Set<Object>> cache = receiverChainCache.computeIfAbsent(mi, _ -> new IdentityHashMap<>())
+                .computeIfAbsent(receiver, _ -> new HashMap<>());
+        Set<Object> cached = cache.get(outer);
         if (cached != null) return cached;
-        Set<Object> result = computeReceiverChain(mi, vd, receiver);
-        cache.put(receiver, result);
+        Set<Object> result = computeReceiverChain(mi, vd, receiver, outer);
+        cache.put(outer, result);
         return result;
     }
 
     private Set<Object> computeReceiverChain(MethodInfo mi, VariableData vd,
-                                             io.codelaser.maddi.cst.api.expression.Expression receiver) {
+                                             io.codelaser.maddi.cst.api.expression.Expression receiver,
+                                             MethodInfo outer) {
         switch (receiver) {
             case null -> {
                 return Set.of();
@@ -806,22 +810,32 @@ public class ShadowModificationPass {
                     return Set.of();
                 }
                 Set<Object> out = new LinkedHashSet<>();
-                mlv.ofReturnValue().stream().forEach(link -> link.to().variableStreamDescend().forEach(v -> {
+                // R2: an ANALYZED outer callee's modification of a field of the result reaches that field's node (and,
+                // through E3, whatever was assigned to it) by its own body; only the result object as a whole is
+                // projected here. A builder setter returns 'this' and 'anyOf.anyOf <- 0:anyOf': following the
+                // component link made the next setter in the chain modify the first one's argument (#24 R2,
+                // TestBuilderFieldAssignment). A boundary outer callee, or an argument (outer null), keeps it.
+                String resultFqn = mlv.ofReturnValue().primary() == null ? null
+                        : mlv.ofReturnValue().primary().fullyQualifiedName();
+                boolean wholeResultOnly = outer != null && orderMethods.contains(outer) && resultFqn != null;
+                mlv.ofReturnValue().stream().filter(link -> followsReturnLink(link, outer))
+                        .filter(link -> !wholeResultOnly || resultFqn.equals(link.from().fullyQualifiedName()))
+                        .forEach(link -> link.to().variableStreamDescend().forEach(v -> {
                     switch (v) {
                         case This thisVar -> {
                             if (callee.typeInfo().isEqualToOrInnerClassOf(thisVar.typeInfo())) {
-                                out.addAll(projectReceiverChain(mi, vd, mc.object()));
+                                out.addAll(projectReceiverChain(mi, vd, mc.object(), outer));
                             }
                         }
                         case FieldReference fr -> {
                             if (!fr.isIgnoreModifications() && isFieldNode(fr.fieldInfo())) out.add(fr.fieldInfo());
                             if (fr.scopeIsRecursivelyThis()) {
-                                out.addAll(projectReceiverChain(mi, vd, mc.object()));
+                                out.addAll(projectReceiverChain(mi, vd, mc.object(), outer));
                             }
                         }
                         case ParameterInfo pi -> {
                             if (pi.methodInfo() == callee && pi.index() < mc.parameterExpressions().size()) {
-                                out.addAll(projectReceiverChain(mi, vd, mc.parameterExpressions().get(pi.index())));
+                                out.addAll(projectReceiverChain(mi, vd, mc.parameterExpressions().get(pi.index()), outer));
                             }
                         }
                         default -> {
@@ -850,7 +864,7 @@ public class ShadowModificationPass {
                             .anyMatch(link -> link.to().variableStreamDescend()
                                     .anyMatch(v -> v instanceof FieldReference fr && fr.scopeIsRecursivelyThis()));
                     if (captured) {
-                        out.addAll(projectReceiverChain(mi, vd, cc.parameterExpressions().get(pi.index())));
+                        out.addAll(projectReceiverChain(mi, vd, cc.parameterExpressions().get(pi.index()), null));
                     }
                 }
                 return out;
@@ -968,6 +982,25 @@ public class ShadowModificationPass {
      */
     static boolean carriesWholeObjectModification(Link link) {
         return link.linkNature().isAssignedFrom() && !Util.virtual(link.from()) && !Util.virtual(link.to());
+    }
+
+    /**
+     * Whether modification of a call's result, by {@code outer} invoked on it (null: by whatever the result is passed
+     * to), reaches the inner callee's receiver or argument along this return-value link. Between real faces, as
+     * before: the result IS (part of) that object. Between virtual faces only a modification identity carries it:
+     * ≡, or ☷ when its pass set admits {@code outer} -- the rule projectModificationIdenticals applies to a local
+     * receiver. Element and content links on virtual faces (⊆, ∈, ~) never do: {@code list.iterator()} returns
+     * {@code iterator.§es ⊆ this.§es} and {@code iterator.§m ☷(remove) this.§m}, and following either made
+     * {@code values.iterator().next()} modify {@code values} (CodeLaser/maddi-mod#24 R1,
+     * TestReceiverChainThroughLibrary).
+     */
+    static boolean followsReturnLink(Link link, MethodInfo outer) {
+        if (!Util.virtual(link.from()) && !Util.virtual(link.to())) return true;
+        if (!link.linkNature().isIdenticalTo()
+            || !Util.isVirtualModification(link.from()) || !Util.isVirtualModification(link.to())) return false;
+        Set<MethodInfo> pass = link.linkNature().pass();
+        return pass.isEmpty() || outer == null || pass.contains(outer)
+               || outer.overrides().stream().anyMatch(pass::contains);
     }
 
     private static void push(Deque<Variable> todo, Variable v) {
