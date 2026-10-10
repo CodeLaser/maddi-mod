@@ -391,6 +391,64 @@ public final class NonNullFacts {
         return keyPresence(map, key, mc.object().parameterizedType());
     }
 
+    /*
+     A method of this class that leaves its key parameter present in a field map at every exit ('void ensure(String k)
+     { if (!cache.containsKey(k)) cache.put(k, new X()); }'): after 'ensure(k)' on this, the argument is present in that
+     map (nacos' initConfigGrayIfEmpty). Needs the callee walked first, as the analysis order has it.
+     */
+    private void presentAtCalleeExit(MethodCall mc, Set<Variable> facts) {
+        MethodInfo callee = mc.methodInfo();
+        if (kotlinSmartCasts || callee == null || callee.isStatic()
+            || mc.object() != null && !(unwrap(mc.object()) instanceof VariableExpression ve
+                                        && ve.variable() instanceof io.codelaser.maddi.cst.api.variable.This)) return;
+        for (Variable v : atExit.getOrDefault(callee, Set.of())) {
+            if (v instanceof KeyPresence kp && kp.map() instanceof FieldReference fr && fr.scopeIsRecursivelyThis()
+                && kp.key() instanceof ParameterInfo p && p.methodInfo() == callee
+                && p.index() < mc.parameterExpressions().size()) {
+                Variable key = trackableVariable(mc.parameterExpressions().get(p.index()));
+                if (key != null) facts.add(new KeyPresence(kp.map(), key, kp.valueType()));
+            }
+        }
+    }
+
+    /*
+     A function that never returns null: a constructor reference ('X::new'), or a lambda whose single result is non-null
+     by itself ('k -> new X()'). For computeIfAbsent's mapping function and ThreadLocal.withInitial's supplier.
+     */
+    static boolean nonNullFunction(Expression e) {
+        Expression f = unwrap(e);
+        if (f instanceof MethodReference mr) return mr.methodInfo() != null && mr.methodInfo().isConstructor();
+        if (f instanceof Lambda lambda && lambda.methodBody() != null
+            && lambda.methodBody().statements().size() == 1
+            && lambda.methodBody().statements().getFirst() instanceof ReturnStatement rs) {
+            Expression r = unwrap(rs.expression());
+            return r instanceof ConstructorCall || r instanceof StringConstant || r instanceof StringConcat
+                   || r instanceof ArrayInitializer;
+        }
+        return false;
+    }
+
+    /** Gap 1: {@code map.computeIfAbsent(k, f)} with f never returning null does not return null. */
+    public static boolean computedNonNull(MethodCall mc) {
+        return mc.methodInfo() != null && "computeIfAbsent".equals(mc.methodInfo().name())
+               && mc.parameterExpressions().size() == 2 && nonNullFunction(mc.parameterExpressions().get(1));
+    }
+
+    /**
+     * Gap 1: {@code TL.get()} on a final field initialized with {@code ThreadLocal.withInitial(s)}, s never returning
+     * null (nacos). Not when anything calls {@code set}/{@code remove} on it: that is the field's analysis, not this.
+     */
+    public static boolean initialThreadLocal(MethodCall mc) {
+        if (mc.methodInfo() == null || !"get".equals(mc.methodInfo().name()) || !mc.parameterExpressions().isEmpty()
+            || !(unwrap(mc.object()) instanceof VariableExpression ve) || !(ve.variable() instanceof FieldReference fr)
+            || !fr.fieldInfo().isFinal()) return false;
+        Expression init = fr.fieldInfo().initializer();
+        return unwrap(init) instanceof MethodCall wi && wi.methodInfo() != null
+               && "withInitial".equals(wi.methodInfo().name())
+               && "java.lang.ThreadLocal".equals(wi.methodInfo().typeInfo().fullyQualifiedName())
+               && wi.parameterExpressions().size() == 1 && nonNullFunction(wi.parameterExpressions().getFirst());
+    }
+
     // 'for (K k : map.keySet())': k is present in map throughout the body
     private Variable keySetLoop(ForEachStatement fe) {
         if (kotlinSmartCasts || !(unwrap(fe.expression()) instanceof MethodCall mc) || mc.methodInfo() == null
@@ -750,6 +808,12 @@ public final class NonNullFacts {
                         Variable present = keyPresence(mc, "put");
                         if (present != null) facts.add(present);
                     }
+                    // 'map.computeIfAbsent(k, f)' with f never returning null: k is present from here on
+                    if (arguments.size() == 2 && nonNullFunction(arguments.get(1))) {
+                        Variable present = keyPresence(mc, "computeIfAbsent");
+                        if (present != null) facts.add(present);
+                    }
+                    presentAtCalleeExit(mc, facts);
                     return false;
                 }
                 case ConstructorCall cc -> {

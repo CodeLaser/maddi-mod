@@ -2957,11 +2957,13 @@ public final class NullabilityPass {
     /*
      A library call that may return null, at this call: not 'map.get(k)' with k known present (NonNullFacts,
      CodeLaser/maddi-mod#22 gap 1), not 'x.m()' after its own null test (gap 8: 'if (ioe.getMessage() != null) {
-     String errMsg = ioe.getMessage(); ...'), not 'getClassLoader()' on the class of a type of this analysis, which the
+     String errMsg = ioe.getMessage(); ...'), not 'computeIfAbsent(k, X::new)', not 'TL.get()' on a
+     'ThreadLocal.withInitial(X::new)' (gap 1's residue), not 'getClassLoader()' on the class of a type of this analysis, which the
      bootstrap loader never loads ('getClass().getClassLoader()', 'X.class.getClassLoader()'; nacos 2026-10-10).
      */
     private String libraryNullableCall(MethodCall mc) {
         if (mc.methodInfo() == null || facts.keyPresentWhenCalled(mc) || facts.pureCallNonNullWhenCalled(mc)
+            || NonNullFacts.computedNonNull(mc) || NonNullFacts.initialThreadLocal(mc)
             || applicationClassLoader(mc)) return null;
         return libraryNullableReturn(mc.methodInfo());
     }

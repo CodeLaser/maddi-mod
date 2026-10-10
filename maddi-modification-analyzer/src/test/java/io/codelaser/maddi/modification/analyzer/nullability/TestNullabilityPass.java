@@ -2808,4 +2808,54 @@ public class TestNullabilityPass extends CommonTest {
         assertTrue(found[0], "no 'statement.timeout(1)' in " + method);
         return found[1];
     }
+
+    // CodeLaser/maddi-mod#22 gap 1, the residue in nacos' 2026-10-10 sample: the key made present by computeIfAbsent, by a
+    // containsKey-or-throw, by a helper that puts it; a ThreadLocal with an initial value
+    @DisplayName("gap 1 residue: computeIfAbsent, containsKey-or-throw, a putting helper, ThreadLocal.withInitial")
+    @Test
+    public void keyPresentResidue() {
+        NullabilityPass.Report report = run("a.b.G1", """
+                package a.b;
+                import java.util.HashMap;
+                import java.util.Map;
+                class G1 {
+                    private final Map<String, StringBuilder> cache = new HashMap<>();
+                    private static final ThreadLocal<StringBuilder> BUFFER = ThreadLocal.withInitial(StringBuilder::new);
+                    int computed(String k) {
+                        cache.computeIfAbsent(k, x -> new StringBuilder());
+                        StringBuilder sb = cache.get(k);
+                        return sb.length();
+                    }
+                    int orThrow(String k) {
+                        if (!cache.containsKey(k)) throw new IllegalArgumentException(k);
+                        StringBuilder sb = cache.get(k);
+                        return sb.length();
+                    }
+                    void ensure(String k) {
+                        if (!cache.containsKey(k)) cache.put(k, new StringBuilder());
+                    }
+                    int helper(String k) {
+                        ensure(k);
+                        StringBuilder sb = cache.get(k);
+                        return sb.length();
+                    }
+                    int threadLocal() {
+                        StringBuilder sb = BUFFER.get();
+                        return sb.length();
+                    }
+                    int absent(String k) {
+                        StringBuilder sb = cache.get(k);
+                        return sb == null ? 0 : sb.length();
+                    }
+                }
+                """);
+        String l = locals(report);
+        assertEquals("""
+                absent.sb: StringBuilder?
+                computed.sb: StringBuilder
+                helper.sb: StringBuilder
+                orThrow.sb: StringBuilder
+                threadLocal.sb: StringBuilder""", l.lines().filter(x -> x.contains(".sb:"))
+                .collect(Collectors.joining("\n")), l);
+    }
 }
