@@ -69,7 +69,7 @@ public class TestKotlinCollectionReadsVsJava {
             "FilterIsInstanceArr", "SeqPlus", "OrEmptyCall", "Decode", "StringBytes",
             "RangeContains", "MatchValues", "KClassName", "FileExt", "DequeFirst", "DelegateRead", "SumInt", "SumLong",
             "JavaClass",
-            "MapIndexed", "MaxBy", "ZipArr", "FilterValues", "ToMapPairs", "ArrTakeWhile", "ArrIsEmpty", "CharsString", "SeqFlatMapIterable", "SeqWithIndex", "IndexedVal", "MatchDestructured", "ProgressionFirst", "LazyMode", "FileWrite", "PathWrite", "ToRegexOpt", "SeqBuilder", "MapIndex", "Control");
+            "MapIndexed", "MaxBy", "ZipArr", "FilterValues", "ToMapPairs", "ArrTakeWhile", "ArrIsEmpty", "CharsString", "SeqFlatMapIterable", "SeqWithIndex", "IndexedVal", "MatchDestructured", "ProgressionFirst", "LazyMode", "FileWrite", "PathWrite", "ToRegexOpt", "SeqBuilder", "MapIndex", "OnEach", "ArrAsList", "ArrBinarySearch", "Control");
 
     private static final String KOTLIN = """
             package a
@@ -144,6 +144,9 @@ public class TestKotlinCollectionReadsVsJava {
             class ToRegexOpt(private val s: RegexOption) { fun f(x: String): Regex = x.toRegex(s) }
             class SeqBuilder(private val s: List<String>) { fun f(): Sequence<String> = sequence { yieldAll(s) } }
             class MapIndex(private val s: Map<String, String>) { fun f(k: String): String? = s[k] }
+            class OnEach(private val s: List<String>) { fun f(): List<String> = s.onEach { it.length } }
+            class ArrAsList(private val s: Array<String>) { fun f(): List<String> = s.asList() }
+            class ArrBinarySearch(private val s: IntArray) { fun f(): Int = s.binarySearch(3) }
             class Control(private val s: MutableList<String>) { fun f() { s.clear() } }
             """;
 
@@ -165,13 +168,19 @@ public class TestKotlinCollectionReadsVsJava {
         Files.createDirectories(jDir.resolve("b"));
         Files.writeString(kDir.resolve("a/K.kt"), KOTLIN);
         Files.writeString(jDir.resolve("b/J.java"), JAVA);
+        // the stdlib as a build tool hands it over: a library source set that each source set DEPENDS on, and a class
+        // path part (detekt's inputConfiguration.json lists it both ways). On the class path alone, a field read in
+        // `sequence { yieldAll(s) }` came out modified (SeqBuilder) where every real configuration has it unmodified.
+        Path stdlibJar = Path.of(kotlinStdlibJar());
+        SourceSet stdlib = new SourceSetImpl.Builder().setName(stdlibJar.getFileName().toString())
+                .setExternalLibrary(true).setLibrary(true).setUri(stdlibJar.toUri()).build();
         SourceSet javaSet = new SourceSetImpl.Builder().setName("java/main")
-                .setSourceDirectories(List.of(jDir)).setUri(jDir.toUri()).build();
+                .setSourceDirectories(List.of(jDir)).setUri(jDir.toUri()).setDependencies(List.of(stdlib)).build();
         SourceSet kotlinSet = new SourceSetImpl.Builder().setName("kotlin/main")
                 .setSourceDirectories(List.of(kDir)).setUri(kDir.toUri())
-                .setDependencies(List.of(javaSet)).build();
+                .setDependencies(List.of(javaSet, stdlib)).build();
         InputConfiguration config = new InputConfigurationImpl.Builder()
-                .addSourceSets(javaSet).addSourceSets(kotlinSet).addClassPath(kotlinStdlibJar()).build();
+                .addSourceSets(javaSet).addSourceSets(kotlinSet).addClassPathParts(stdlib).build();
         MixedProjectInspector.Result parsed = new MixedProjectInspector().parse(config);
         Runtime runtime = parsed.getRuntime();
         Set<TypeInfo> primaryTypes = Stream.concat(parsed.getKotlinTypes().stream(), parsed.getJavaTypes().stream())
@@ -210,9 +219,11 @@ public class TestKotlinCollectionReadsVsJava {
         // ArrIsEmpty, CharsString and ToRegexOpt are front-end lowerings of @InlineOnly calls, already in place for that
         // run, as is MapIndex (`s[k]`, the @InlineOnly Map.get); IndexedVal, MatchDestructured, ProgressionFirst and
         // PathWrite were already true and guard parity.
-        // ⚠ SeqBuilder stays FALSE, a known gap: `sequence { yieldAll(s) }` binds the right overload (ResolvedOverloadTest)
-        // with `s` @NotModified, yet the field reads modified. `yield(s)` there, and `addAll(s)` in a forEach or apply
-        // lambda, read unmodified: the cause is the analysis of a suspend lambda's hidden-content link, not a contract.
+        // OnEach, ArrAsList and ArrBinarySearch were false before their contracts (2026-10-10). Array.orEmpty() is REIFIED,
+        // so ACC_SYNTHETIC like filterIsInstance: no method the hints parser can see; it needs a lowering instead.
+        // ⚠ Every negative control in these notes was measured with the stdlib on the class path ONLY; the setup has since
+        // been made the one a build tool hands over (see above), and the rows still agree with Java under it.
+        // SeqBuilder needs the right overload too (ResolvedOverloadTest: `yieldAll(list)` bound the draining Iterator one).
         // isNotEmpty and orEmpty are @InlineOnly: no method for a contract to name. They were the two rows left wrong by
         // the contracts, and the front end's lowering to the call kotlinc inlines (TestInlineOnlyLowering) fixed them.
         assertEquals("""
@@ -283,8 +294,11 @@ public class TestKotlinCollectionReadsVsJava {
                 a.FileWrite true
                 a.PathWrite true
                 a.ToRegexOpt true
-                a.SeqBuilder false
+                a.SeqBuilder true
                 a.MapIndex true
+                a.OnEach true
+                a.ArrAsList true
+                a.ArrBinarySearch true
                 a.Control false""", verdicts);
     }
 
