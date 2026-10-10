@@ -358,7 +358,7 @@ public class ShadowModificationPass {
             if (vdDumpMatches(mi.fullyQualifiedName())) dumpVariableData(mi.methodBody(), mi.fullyQualifiedName());
             handleBlock(mi, mi.methodBody());
         }
-        seedStatementLevelFieldModifications(mi);
+        seedStatementLevelFieldModifications(mi, skipReceiverRooted ? fieldsOnlyCallReceivers(mi) : Set.of());
     }
 
     // gate VDDUMP=<fqn substrings, comma-separated> (docs/design/eventual-info-hierarchy.md §"The
@@ -407,7 +407,34 @@ public class ShadowModificationPass {
      * (construction-time writes don't count), the field's own getter/setter, and only fields of this
      * method's own primary type (the field analyzer scans just its primary type's methods).
      */
-    private void seedStatementLevelFieldModifications(MethodInfo mi) {
+    /*
+     this-scoped fields of a walkable body that occur ONLY as the direct receiver of calls to in-order methods: E2 carries
+     those calls' modification onto the field node, so the walk re-derives it. Any other occurrence (a for-each over the
+     field, an argument, a chained or element read) keeps the statement-level seed, the one channel for modification
+     the walk does not model (element modification: 'for (File f : tempFiles) f.delete()').
+     */
+    private Set<FieldInfo> fieldsOnlyCallReceivers(MethodInfo mi) {
+        Map<FieldInfo, Integer> all = new HashMap<>();
+        Map<FieldInfo, Integer> receivers = new HashMap<>();
+        mi.methodBody().visit(e -> {
+            if (e instanceof MethodCall mc && mc.object() instanceof VariableExpression ve
+                && ve.variable() instanceof FieldReference fr && fr.scopeIsRecursivelyThis()
+                && mc.methodInfo() != null && orderMethods.contains(mc.methodInfo())) {
+                receivers.merge(fr.fieldInfo(), 1, Integer::sum);
+            }
+            if (e instanceof VariableExpression ve && ve.variable() instanceof FieldReference fr) {
+                all.merge(fr.fieldInfo(), 1, Integer::sum);
+            }
+            return true;
+        });
+        Set<FieldInfo> out = new HashSet<>();
+        receivers.forEach((fi, n) -> {
+            if (n.equals(all.get(fi))) out.add(fi);
+        });
+        return out;
+    }
+
+    private void seedStatementLevelFieldModifications(MethodInfo mi, Set<FieldInfo> rederivedByWalk) {
         if (mi.methodBody() == null || mi.methodBody().isEmpty()) return;
         VariableData vd = VariableDataImpl.of(mi.methodBody().lastStatement());
         if (vd == null) return;
@@ -417,6 +444,8 @@ public class ShadowModificationPass {
             if (!(vi.variable() instanceof FieldReference fr)) continue;
             if (fr.isIgnoreModifications()) continue; // disclaimed face (engine mirror)
             FieldInfo fieldInfo = fr.fieldInfo();
+            // P3 (#24 R3): the walk re-derives a field that only receives calls to in-order methods
+            if (fr.scopeIsRecursivelyThis() && rederivedByWalk.contains(fieldInfo)) continue;
             if (fieldInfo == getSet.field()) continue;
             if (fieldInfo.owner().primaryType() != mi.typeInfo().primaryType()) continue;
             Value.Bool unmodified = vi.analysis().getOrNull(VariableInfoImpl.UNMODIFIED_VARIABLE,
@@ -491,7 +520,13 @@ public class ShadowModificationPass {
             case ParameterInfo pi -> {
                 // own parameter of a walkable body: re-derived via E1/boundary seeds/assignment walk;
                 // ANOTHER method's parameter is cross-method local evidence with no other channel
-                if (!(skipReceiverRooted && pi.methodInfo().equals(mi))) seeds.add(pi);
+                if (skipReceiverRooted && pi.methodInfo().equals(mi)) return;
+                // ... or a parameter of an in-order abstract whose union the E6 edges re-derive: the summary of a call
+                // to it carries its parameter untranslated (MethodModification's propagated set), and with it the
+                // fixpoint's undecided-implementation pessimism -- an implementation delegating to the abstract
+                // kept both modified (#24 R3, TestDelegatingImplementation)
+                if (e6Rederivable(pi.methodInfo())) return;
+                seeds.add(pi);
             }
             case DependentVariable dv -> seedVariable(mi, dv.arrayVariable(), skipReceiverRooted); // a[i] modified => a modified
             case LocalVariable lv -> {
@@ -508,6 +543,20 @@ public class ShadowModificationPass {
                 // markers, intermediates: no nodes
             }
         }
+    }
+
+    /** an in-order abstract with implementations, all in order and overriding it: its union is the E6 edges' */
+    private boolean e6Rederivable(MethodInfo method) {
+        if (!orderMethods.contains(method)
+            || !io.codelaser.maddi.modification.prepwork.Util.unionOverImplementations(method)
+            || explicitlyContractedModified(method)) return false;
+        Value.SetOfMethodInfo impls = method.analysis().getOrDefault(PropertyImpl.IMPLEMENTATIONS,
+                ValueImpl.SetOfMethodInfoImpl.EMPTY);
+        if (impls.isEmpty()) return false;
+        for (MethodInfo impl : impls.methodInfoSet()) {
+            if (!orderMethods.contains(impl) || !impl.overrides().contains(method)) return false;
+        }
+        return true;
     }
 
     private void seedFieldReference(MethodInfo mi, FieldReference fr) {
