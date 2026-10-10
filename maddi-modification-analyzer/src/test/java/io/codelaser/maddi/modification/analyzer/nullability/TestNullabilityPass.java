@@ -2997,4 +2997,38 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("Msg?", s.get("<init>(1:msg)[int,Msg]"), s.toString());
         assertEquals("Msg?", s.get("msg"), s.toString());
     }
+
+    /*
+     Gap 8 for a library outside the JDK, which has no hints: a getter's unannotated default is modifying, so the
+     repeated call never had the fact. Spring 'coreContext = null == ctx.getParent() ? ctx : ctx.getParent()' (nacos
+     AbstractNacosDuplicateBeanPostProcessor), here on opentest4j's AssertionFailedError.getExpected(), null when no expected value was given. A call that is not a getter still forgets it.
+     */
+    @DisplayName("gap 8: a library getter repeated after its own null test")
+    @Test
+    public void libraryGetterRepeated() {
+        NullabilityPass.Report report = run("a.b.LG", """
+                package a.b;
+                import org.opentest4j.AssertionFailedError;
+                import org.opentest4j.ValueWrapper;
+                class LG {
+                    private ValueWrapper expected;
+                    void conditional(AssertionFailedError e, ValueWrapper none) {
+                        expected = null == e.getExpected() ? none : e.getExpected();
+                    }
+                    void interrupted(AssertionFailedError e) {
+                        if (e.getExpected() != null) {
+                            e.addSuppressed(new RuntimeException());
+                            expected = e.getExpected();
+                        }
+                    }
+                }
+                """);
+        List<io.codelaser.maddi.cst.api.expression.MethodCall> conditional = calls("conditional", "getExpected");
+        assertEquals(2, conditional.size());
+        assertFalse(report.useSites().pureCallNonNullWhenCalled(conditional.get(0)), "the test itself");
+        assertTrue(report.useSites().pureCallNonNullWhenCalled(conditional.get(1)), "the else branch");
+        List<io.codelaser.maddi.cst.api.expression.MethodCall> interrupted = calls("interrupted", "getExpected");
+        assertEquals(2, interrupted.size());
+        assertFalse(report.useSites().pureCallNonNullWhenCalled(interrupted.get(1)), "after a modifying call");
+    }
 }

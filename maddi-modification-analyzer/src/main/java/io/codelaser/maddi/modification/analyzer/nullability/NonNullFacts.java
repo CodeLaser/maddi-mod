@@ -590,9 +590,25 @@ public final class NonNullFacts {
     private Variable pureCall(MethodCall mc) {
         MethodInfo mi = mc.methodInfo();
         if (kotlinSmartCasts || mi == null || mi.isStatic() || !mc.parameterExpressions().isEmpty()
-            || mc.object() == null || !mi.isNonModifying() || mi.returnType().isPrimitiveExcludingVoid()) return null;
+            || mc.object() == null || !(mi.isNonModifying() || libraryGetter(mi))
+            || mi.returnType().isPrimitiveExcludingVoid()) return null;
         Variable receiver = trackableVariable(mc.object());
         return receiver == null ? null : new PureCall(receiver, mi, mi.returnType());
+    }
+
+    /*
+     A getter of a library outside the JDK, which has no hints: its unannotated default is modifying, so the
+     non-modifying test alone never admits it. Named 'getX'/'isX', no arguments; the fact is still forgotten at any
+     call that may modify the receiver. Spring 'coreContext = null == ctx.getParent() ? ctx : ctx.getParent()' (nacos
+     AbstractNacosDuplicateBeanPostProcessor).
+     */
+    private static boolean libraryGetter(MethodInfo mi) {
+        if (mi.isConstructor() || mi.returnType().isVoid()) return false;
+        var cu = mi.typeInfo().primaryType().compilationUnit();
+        if (cu == null || !cu.externalLibrary() || cu.partOfJdk()) return false;
+        String name = mi.name();
+        int prefix = name.startsWith("get") ? 3 : name.startsWith("is") ? 2 : 0;
+        return prefix > 0 && name.length() > prefix && Character.isUpperCase(name.charAt(prefix));
     }
 
     /** Is the result of {@code call} known non-null when it is made, by an earlier test of the same call (gap 8)? */
