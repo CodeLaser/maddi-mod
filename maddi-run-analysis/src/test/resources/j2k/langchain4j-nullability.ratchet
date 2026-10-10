@@ -27,12 +27,19 @@
 # 2026-10-10, devel f2a4e424 (the reachability fixes: fromMap's map unmodified, read-only) with maddi's annotation
 # arguments, toArray(T[]), mapped static references, raw Comparable, annotated parameters and primary constructors:
 # 307 files compiling (82 type errors), 303 to class files, 124 test files compile.
+# 2026-10-10, maddi's stream inference (bound references on nullable stream elements, Collection<?> elements, explicit
+# type arguments for type parameters only the result mentions): 311 files compiling (59 type errors), 309 to class
+# files, 128 test files compile. The tests go DOWN 16, knowingly: OutputGuardrailResult now compiles, and its
+# successfulAiMessage parameter, judged non-null though its callers pass (AiMessage) null, fails `null as AiMessage` in
+# the static SUCCESS initializer (OutputGuardrailResultTest, JsonExtractorOutputGuardrailTests,
+# DefaultAiServiceListenerRegistrarTests); 1,045 pass with the Kotlin classes, 1,033 translated. Reported to the
+# nullability side.
 types	346
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	346
-compilingFiles	307
-bytecodeFiles	303
-testsPassing	1061
-testBytecodeFiles	124
-translatedTestsPassing	1049
+compilingFiles	311
+bytecodeFiles	309
+testsPassing	1045
+testBytecodeFiles	128
+translatedTestsPassing	1033
