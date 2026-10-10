@@ -46,6 +46,9 @@ public class TestReceiverChainThroughLibrary extends CommonTest {
             import java.util.Map;
             import java.util.Set;
             class R1 {
+                static IllegalArgumentException illegalArgument(String format, Object... args) {
+                    return new IllegalArgumentException(format.formatted(args));
+                }
                 static class Template {
                     private final Set<String> allVariables;
                     private final Iterable<String> names;
@@ -55,7 +58,7 @@ public class TestReceiverChainThroughLibrary extends CommonTest {
                     }
                     void ensureAllVariablesProvided(Map<String, Object> variables) {
                         for (String variable : allVariables) {
-                            if (!variables.containsKey(variable)) throw new IllegalArgumentException(variable);
+                            if (!variables.containsKey(variable)) throw illegalArgument("missing %s", variable);
                         }
                     }
                     int count() {
