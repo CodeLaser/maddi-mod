@@ -3031,4 +3031,42 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals(2, interrupted.size());
         assertFalse(report.useSites().pureCallNonNullWhenCalled(interrupted.get(1)), "after a modifying call");
     }
+
+    /*
+     A setter whose parameter is only stored into a field that is nullable anyway: null means what not calling it
+     means (langchain4j DefaultRetrievalAugmentorBuilder.executor, which its tests call with null). Not a setter that
+     checks its argument, nor one of a field that is never null.
+     */
+    @DisplayName("a parameter only stored into a nullable field takes null")
+    @Test
+    public void storedOnlyIntoNullableField() {
+        NullabilityPass.Report report = run("a.b.RA", """
+                package a.b;
+                import java.util.Objects;
+                import java.util.concurrent.Executor;
+                import java.util.function.Supplier;
+                class RA {
+                    private final Executor executor;
+                    RA(Executor executor) { this.executor = orDefault(executor, RA::defaultExecutor); }
+                    static <T> T orDefault(T value, Supplier<T> supplier) { return value != null ? value : supplier.get(); }
+                    static Executor defaultExecutor() { return Runnable::run; }
+                    Executor executor() { return executor; }
+                    static Builder builder() { return new Builder(); }
+                    static class Builder {
+                        private Executor executor;
+                        private String name;
+                        private String label = "none";
+                        Builder executor(Executor executor) { this.executor = executor; return this; }
+                        Builder name(String name) { this.name = Objects.requireNonNull(name); return this; }
+                        Builder label(String label) { this.label = label; return this; }
+                        RA build() { return new RA(executor); }
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("Executor?", s.get("a.b.RA.Builder.executor(java.util.concurrent.Executor):0:executor"), s.toString());
+        assertEquals("String", s.get("a.b.RA.Builder.name(String):0:name"), s.toString());
+        assertEquals("String", s.get("a.b.RA.Builder.label(String):0:label"), s.toString());
+    }
 }

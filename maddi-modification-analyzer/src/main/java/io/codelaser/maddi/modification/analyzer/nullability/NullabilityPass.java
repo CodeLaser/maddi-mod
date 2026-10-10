@@ -733,6 +733,7 @@ public final class NullabilityPass {
             }
         }
         if (policy.world() != World.CLOSED) external = externalClosure(methods);
+        if (policy.callResults()) reached = storedOnlyIntoNullableFields(methods, reached, cause);
 
         Map<Info, ParameterizedType> verdicts = new LinkedHashMap<>();
         Map<Local, ParameterizedType> locals = new LinkedHashMap<>();
@@ -773,6 +774,50 @@ public final class NullabilityPass {
         methods.forEach(useSites::walk);
         return new Report(verdicts, locals, cause, seedOrigin, useSites, smartCasts, Set.copyOf(asserted),
                 Set.copyOf(unobservedCandidates), nonNullCallResults);
+    }
+
+    /*
+     A parameter whose only use is 'this.f = p', where f is nullable: passing null there means what not calling the
+     method means, so the parameter takes null. A builder's setter of a field that starts null and is read through
+     'getOrDefault(executor, ...)' (langchain4j DefaultRetrievalAugmentorBuilder.executor; its tests call
+     executor(null), which no analysed caller does). Nothing downstream changes: the parameter flows into f only.
+     Kotlin only (Policy.callResults), where the translated callers include the tests: under the Java policies a
+     declared '@NonNull' setter parameter is the API's statement, and the oracles compare against it.
+     */
+    private Set<Object> storedOnlyIntoNullableFields(List<MethodInfo> methods, Set<Object> reached,
+                                                     Map<Object, Object> cause) {
+        Set<Object> out = null;
+        for (MethodInfo mi : methods) {
+            if (mi.isConstructor() || mi.isStatic() || mi.methodBody() == null || mi.methodBody().isEmpty()) continue;
+            for (ParameterInfo pi : mi.parameters()) {
+                if (reached.contains(pi) || pi.parameterizedType().isPrimitiveExcludingVoid()
+                    || pi.isVarArgs()) continue;
+                FieldInfo stored = storedOnlyInto(mi, pi);
+                if (stored != null && reached.contains(stored)) {
+                    if (out == null) out = new LinkedHashSet<>(reached);
+                    out.add(pi);
+                    cause.put(pi, stored);
+                }
+            }
+        }
+        return out == null ? reached : out;
+    }
+
+    // the field of this object that 'this.f = p' assigns, when that is the parameter's only use in the body
+    private static FieldInfo storedOnlyInto(MethodInfo mi, ParameterInfo pi) {
+        FieldInfo[] field = {null};
+        int[] uses = {0};
+        mi.methodBody().visit(e -> {
+            if (e instanceof Assignment a && a.assignmentOperator() == null
+                && a.value() instanceof VariableExpression ve && pi.equals(ve.variable())
+                && a.variableTarget() instanceof FieldReference fr && fr.scopeIsThis()
+                && !fr.fieldInfo().isStatic() && fr.fieldInfo().owner() == mi.typeInfo()) {
+                field[0] = fr.fieldInfo();
+            }
+            if (e instanceof VariableExpression ve && pi.equals(ve.variable())) uses[0]++;
+            return true;
+        });
+        return uses[0] == 1 ? field[0] : null;
     }
 
     /**
