@@ -31,6 +31,7 @@ import java.util.*;
 import java.util.stream.Stream;
 
 import static io.codelaser.maddi.modification.link.impl.LinkNatureImpl.*;
+import static io.codelaser.maddi.modification.prepwork.variable.impl.VariableInfoImpl.STRUCTURALLY_UNMODIFIED_VARIABLE;
 import static io.codelaser.maddi.modification.prepwork.variable.impl.VariableInfoImpl.UNMODIFIED_VARIABLE;
 
 class WriteLinksAndModification {
@@ -46,7 +47,9 @@ class WriteLinksAndModification {
         this.followGraph = followGraph;
     }
 
-    record WriteResult(Map<Variable, Links> newLinks, Set<Variable> modifiedOutsideVariableData, int newLinksSize) {
+    /** {@code modifiedOutsideDeepOnly}: the subset of {@code modifiedOutsideVariableData} that is deep-only (#25) */
+    record WriteResult(Map<Variable, Links> newLinks, Set<Variable> modifiedOutsideVariableData,
+                       Set<Variable> modifiedOutsideDeepOnly, int newLinksSize) {
     }
 
     /*
@@ -93,11 +96,18 @@ class WriteLinksAndModification {
         return new ReuseContext(dirty);
     }
 
+    /**
+     * @param previouslyStructurallyModified the subset of {@code previouslyModified} modified structurally (#25)
+     * @param deepOnlyDuringEvaluation       the subset of {@code modifiedDuringEvaluation}'s keys modified only in
+     *                                       their hidden content (#25)
+     */
     @NotNull WriteResult go(Statement statement,
                             boolean lastStatement,
                             VariableData vd,
                             Set<Variable> previouslyModified,
-                            Map<Variable, Set<MethodInfo>> modifiedDuringEvaluation) {
+                            Set<Variable> previouslyStructurallyModified,
+                            Map<Variable, Set<MethodInfo>> modifiedDuringEvaluation,
+                            Set<Variable> deepOnlyDuringEvaluation) {
         Set<Variable> unmarkedModifications = new HashSet<>(modifiedDuringEvaluation.keySet());
         Map<Variable, Links.Builder> newLinkedVariables = new HashMap<>();
         List<Link> toRemove = new ArrayList<>();
@@ -109,29 +119,20 @@ class WriteLinksAndModification {
                                + modifiedDuringEvaluation.keySet());
         }
 
-        Map<Variable, Set<MethodInfo>> expandedModifiedDuringEvaluation = new HashMap<>();
-        for (Map.Entry<Variable, Set<MethodInfo>> entry : modifiedDuringEvaluation.entrySet()) {
-            for (Variable v : followGraph.graph().allShared(entry.getKey())) {
-                expandedModifiedDuringEvaluation.put(v, entry.getValue());
-                // a join detached them from the group, but in one alternative they hold this very object
-                for (Variable alias : followGraph.graph().detachedAliases(v)) {
-                    expandedModifiedDuringEvaluation.putIfAbsent(alias, entry.getValue());
-                }
-            }
-            // a modified key that never existed as a graph vertex (ldIn.variables[1], marked through a
-            // functional-interface call) still denotes the same runtime slot as its source-chain group faces
-            // ({matrix, 0:ld.variables[1]}); expand through the derived-face composition as well
-            for (Variable v : followGraph.graph().derivedShared(entry.getKey())) {
-                expandedModifiedDuringEvaluation.put(v, entry.getValue());
-            }
-        }
+        Map<Variable, Set<MethodInfo>> expandedModifiedDuringEvaluation = expand(modifiedDuringEvaluation, Set.of());
+        // #25: the structural view of the same evaluation, the deep-only keys left out. The expansion is over
+        // variables holding the SAME object, so a key's kind is its expansion's kind. The same map when nothing is
+        // deep-only: the completion a ≡-hit writes into it (notLinkedToModified) then serves both views, as it must.
+        Map<Variable, Set<MethodInfo>> expandedStructurallyModifiedDuringEvaluation = deepOnlyDuringEvaluation.isEmpty()
+                ? expandedModifiedDuringEvaluation
+                : expand(modifiedDuringEvaluation, deepOnlyDuringEvaluation);
 
         RedundantLinks redundantLinks = new RedundantLinks();
         Map<Link, Variable> flipOwner = new HashMap<>();
         for (VariableInfo vi : vd.variableInfoIterable(Stage.EVALUATION)) {
             List<Link> tr = doVariableReturnRecompute(statement, lastStatement, vi, unmarkedModifications,
-                    previouslyModified, expandedModifiedDuringEvaluation, newLinkedVariables, redundantLinks,
-                    reuse);
+                    previouslyModified, previouslyStructurallyModified, expandedModifiedDuringEvaluation,
+                    expandedStructurallyModifiedDuringEvaluation, newLinkedVariables, redundantLinks, reuse);
             for (Link l : tr) flipOwner.putIfAbsent(l, vi.variable());
             toRemove.addAll(tr);
         }
@@ -186,7 +187,33 @@ class WriteLinksAndModification {
             if (!NO_REUSE) lastExtracted.put(e.getKey(), links);
             return links.size();
         }).sum();
-        return new WriteResult(builtNewLinkedVariables, unmarkedModifications, sum);
+        Set<Variable> unmarkedDeepOnly = deepOnlyDuringEvaluation.isEmpty() ? Set.of()
+                : unmarkedModifications.stream().filter(deepOnlyDuringEvaluation::contains)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        return new WriteResult(builtNewLinkedVariables, unmarkedModifications, unmarkedDeepOnly, sum);
+    }
+
+    // the variables modified during the evaluation, expanded to every variable holding the same object
+    private Map<Variable, Set<MethodInfo>> expand(Map<Variable, Set<MethodInfo>> modifiedDuringEvaluation,
+                                                  Set<Variable> excludeKeys) {
+        Map<Variable, Set<MethodInfo>> expanded = new HashMap<>();
+        for (Map.Entry<Variable, Set<MethodInfo>> entry : modifiedDuringEvaluation.entrySet()) {
+            if (excludeKeys.contains(entry.getKey())) continue;
+            for (Variable v : followGraph.graph().allShared(entry.getKey())) {
+                expanded.put(v, entry.getValue());
+                // a join detached them from the group, but in one alternative they hold this very object
+                for (Variable alias : followGraph.graph().detachedAliases(v)) {
+                    expanded.putIfAbsent(alias, entry.getValue());
+                }
+            }
+            // a modified key that never existed as a graph vertex (ldIn.variables[1], marked through a
+            // functional-interface call) still denotes the same runtime slot as its source-chain group faces
+            // ({matrix, 0:ld.variables[1]}); expand through the derived-face composition as well
+            for (Variable v : followGraph.graph().derivedShared(entry.getKey())) {
+                expanded.put(v, entry.getValue());
+            }
+        }
+        return expanded;
     }
 
     // FIXME should be replaced by real code that goes as far as §m equivalence: anything @Dependent
@@ -228,7 +255,9 @@ class WriteLinksAndModification {
                                                  VariableInfo vi,
                                                  Set<Variable> unmarkedModifications,
                                                  Set<Variable> previouslyModified,
+                                                 Set<Variable> previouslyStructurallyModified,
                                                  Map<Variable, Set<MethodInfo>> modifiedInThisEvaluation,
+                                                 Map<Variable, Set<MethodInfo>> structurallyModifiedInThisEvaluation,
                                                  Map<Variable, Links.Builder> newLinkedVariables,
                                                  RedundantLinks redundantLinks,
                                                  ReuseContext reuse) {
@@ -252,7 +281,8 @@ class WriteLinksAndModification {
                 Links.Builder fastBuilder = new LinksImpl.Builder(prev);
                 List<Link> fastToRemove = new ArrayList<>();
                 verdictAndFlips(statement, vi, variable, fastBuilder, previouslyModified,
-                        modifiedInThisEvaluation, fastToRemove);
+                        previouslyStructurallyModified, modifiedInThisEvaluation,
+                        structurallyModifiedInThisEvaluation, fastToRemove);
                 if (newLinkedVariables.put(variable, fastBuilder) != null) {
                     throw new UnsupportedOperationException("Each real variable must be a primary");
                 }
@@ -405,8 +435,8 @@ class WriteLinksAndModification {
                 && (!lastStatement || !(variable instanceof io.codelaser.maddi.cst.api.info.ParameterInfo))) {
                 redundantLinks.redundantLinks(builder);
             }
-            verdictAndFlips(statement, vi, variable, builder, previouslyModified, modifiedInThisEvaluation,
-                    toRemove);
+            verdictAndFlips(statement, vi, variable, builder, previouslyModified, previouslyStructurallyModified,
+                    modifiedInThisEvaluation, structurallyModifiedInThisEvaluation, toRemove);
         }
         // §m-directional inheritance, consumption-aware (gate NOVMIDIR): added AFTER the modification
         // decision and the ⊇→~ rewrite collection, so these facts are OUTPUT-ONLY — emitted earlier they
@@ -472,7 +502,9 @@ class WriteLinksAndModification {
                                  Variable variable,
                                  Links.Builder builder,
                                  Set<Variable> previouslyModified,
+                                 Set<Variable> previouslyStructurallyModified,
                                  Map<Variable, Set<MethodInfo>> modifiedInThisEvaluation,
+                                 Map<Variable, Set<MethodInfo>> structurallyModifiedInThisEvaluation,
                                  List<Link> toRemove) {
         // 'modified by THIS statement's evaluation' — directly, or through a link to something modified now.
         // For previouslyModified variables only the direct check runs: the notLinked* probes (and
@@ -490,6 +522,16 @@ class WriteLinksAndModification {
                 variable.isIgnoreModifications()
                 ||
                 !previouslyModified.contains(variable) && !modifiedInEval;
+        // #25: the structural twin, the same decision over the structural view of the evaluation and without the
+        // element link (∋): a variable linked to a modified one only as the container of that element is modified in
+        // its hidden content, not itself. Never false where unmodified is true.
+        boolean structurallyUnmodified = unmodified
+                || !previouslyStructurallyModified.contains(variable)
+                   && !(!structurallyModifiedInThisEvaluation.isEmpty()
+                        && !assignedInThisStatement(statement, vi)
+                        && (structurallyModifiedInThisEvaluation.containsKey(variable)
+                            || !notLinkedToModifiedVirtualModification(variable, structurallyModifiedInThisEvaluation)
+                            || !notLinkedToModified(builder, structurallyModifiedInThisEvaluation, true)));
         builder.removeIf(WriteLinksAndModification::notInLinkedVariables);
 
         if (variable instanceof This) {
@@ -498,6 +540,8 @@ class WriteLinksAndModification {
         }
         Value.Bool newValue = ValueImpl.BoolImpl.from(unmodified);
         TolerantWrite.setAllowControlledOverwrite(vi.analysis(), UNMODIFIED_VARIABLE, newValue, variable);
+        TolerantWrite.setAllowControlledOverwrite(vi.analysis(), STRUCTURALLY_UNMODIFIED_VARIABLE,
+                ValueImpl.BoolImpl.from(structurallyUnmodified), variable);
 
         // The ⊇→~ rewrite runs at the statement where the modification OCCURS. With the persistent graph the
         // rewrite survives into later statements by itself; re-flipping on previouslyModified (the old
@@ -899,6 +943,16 @@ class WriteLinksAndModification {
 
     private boolean notLinkedToModified(Links.Builder builder,
                                         Map<Variable, Set<MethodInfo>> modifiedVariablesAndTheirCause) {
+        return notLinkedToModified(builder, modifiedVariablesAndTheirCause, false);
+    }
+
+    /**
+     * @param structural the structural question (#25): a modified ELEMENT of the primary (∋) does not count, the
+     *                   other natures do -- identity, assignment, a modified field of the primary (≻), shared fields (≈)
+     */
+    private boolean notLinkedToModified(Links.Builder builder,
+                                        Map<Variable, Set<MethodInfo>> modifiedVariablesAndTheirCause,
+                                        boolean structural) {
         for (Link link : builder) {
             Variable toReal = Util.firstRealVariable(link.to());
             Set<MethodInfo> causesOfModification = modifiedVariablesAndTheirCause.get(toReal);
@@ -922,7 +976,7 @@ class WriteLinksAndModification {
                 }
                 if (ln == CONTAINS_AS_FIELD
                     || ln == SHARES_FIELDS // see impl/TestInstanceOf,2
-                    || ln == CONTAINS_AS_MEMBER) {
+                    || ln == CONTAINS_AS_MEMBER && !structural) {
                     return false;
                 }
                 // the following rule is only valid for variables of non-abstract types (those that have no §m)

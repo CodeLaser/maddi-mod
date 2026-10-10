@@ -23,6 +23,7 @@ import io.codelaser.maddi.inspection.api.integration.JavaInspector;
 
 import java.util.*;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /*
 Part of the LinkMethodCall code, objectToReturnValue.
@@ -55,6 +56,7 @@ public record LinkAppliedFunctionalInterface(JavaInspector javaInspector,
             Function<Variable, List<Links>> paramProvider,
             AppliedFunctionalInterfaceVariable applied,
             Set<Variable> extraModified,
+            Set<Variable> extraDeepOnly,
             Variable fromTranslated,
             LinkNature linkNature,
             Variable objectPrimary) {
@@ -69,6 +71,7 @@ public record LinkAppliedFunctionalInterface(JavaInspector javaInspector,
             if (sr == null) return;
             // do the default translation from formal parameter to argument
             extraModified.addAll(sr.extraModified);
+            extraDeepOnly.addAll(sr.extraDeepOnly);
             functionalType = sr.functionalType;
             list = List.of(sr.links);
         } else if (isLinkedToParameter(list)) {
@@ -95,12 +98,14 @@ public record LinkAppliedFunctionalInterface(JavaInspector javaInspector,
                                              && l.linkNature().isAssignedFrom()));
     }
 
-    private record SearchResult(ParameterizedType functionalType, Links links, Set<Variable> extraModified) {
+    private record SearchResult(ParameterizedType functionalType, Links links, Set<Variable> extraModified,
+                                Set<Variable> extraDeepOnly) {
     }
 
     private SearchResult searchAndExpand(List<Links> list) {
         if (variableData == null) return null; // e.g. inside a lambda body without its own variable data
         Set<Variable> extraModified = new HashSet<>();
+        Set<Variable> extraDeepOnly = new HashSet<>();
         int paramIndex = 0;
         for (Links links : list) {
             if (links.primary() == null) continue;
@@ -129,8 +134,18 @@ public record LinkAppliedFunctionalInterface(JavaInspector javaInspector,
                             .map(tm::translateVariableRecursively)
                             .filter(this::acceptForExtra)
                             .forEach(extraModified::add);
+                    // deep-only (#25) when the lambda's own summary says so, and no structural entry translates
+                    // to the same variable
+                    Set<Variable> structural = fi.result().modified().keySet().stream()
+                            .filter(v -> !fi.result().deepOnlyModified().contains(v))
+                            .map(tm::translateVariableRecursively).collect(Collectors.toUnmodifiableSet());
+                    fi.result().deepOnlyModified().stream()
+                            .map(tm::translateVariableRecursively)
+                            .filter(this::acceptForExtra)
+                            .filter(v -> !structural.contains(v))
+                            .forEach(extraDeepOnly::add);
                     Result expanded = fi.result().expandFunctionalInterfaceVariables();
-                    return new SearchResult(fi.parameterizedType(), expanded.links(), extraModified);
+                    return new SearchResult(fi.parameterizedType(), expanded.links(), extraModified, extraDeepOnly);
                 }
 
             }

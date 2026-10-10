@@ -23,6 +23,9 @@ public class Result {
     private final Links links;
     private final LinkedVariables extra;
     private final Map<Variable, Set<MethodInfo>> modified;
+    // the subset of modified whose objects are modified only in their hidden content (#25): a variable that is
+    // marked structurally anywhere in the evaluation leaves this set, so an entry here is deep-only everywhere
+    private final Set<Variable> deepOnlyModified;
     private final List<ExpressionVisitor.WriteMethodCall> writeMethodCalls;
     private final Map<Variable, Set<TypeInfo>> casts;
     private final Set<Variable> erase;
@@ -36,6 +39,7 @@ public class Result {
     public Result(Links links,
                   LinkedVariables extra,
                   Map<Variable, Set<MethodInfo>> modified,
+                  Set<Variable> deepOnlyModified,
                   List<ExpressionVisitor.WriteMethodCall> writeMethodCalls,
                   Map<Variable, Set<TypeInfo>> casts,
                   Set<Variable> erase,
@@ -43,6 +47,7 @@ public class Result {
         this.links = links;
         this.extra = extra;
         this.modified = modified;
+        this.deepOnlyModified = deepOnlyModified;
         this.writeMethodCalls = writeMethodCalls;
         this.casts = casts;
         this.erase = erase;
@@ -50,7 +55,8 @@ public class Result {
     }
 
     public Result(Links links, LinkedVariables extra) {
-        this(links, extra, new HashMap<>(), new ArrayList<>(), new HashMap<>(), new HashSet<>(), new HashSet<>());
+        this(links, extra, new HashMap<>(), new HashSet<>(), new ArrayList<>(), new HashMap<>(), new HashSet<>(),
+                new HashSet<>());
     }
 
     @Override
@@ -59,6 +65,7 @@ public class Result {
                "links=" + links +
                (extra.isEmpty() ? "" : ", extra=" + extra) +
                (modified.isEmpty() ? "" : ", modified=" + modified) +
+               (deepOnlyModified.isEmpty() ? "" : ", deepOnly=" + deepOnlyModified) +
                (writeMethodCalls.isEmpty() ? "" : ", writeMethodCalls=" + writeMethodCalls) +
                (casts.isEmpty() ? "" : ", casts=" + casts) +
                (erase.isEmpty() ? "" : ", erase=" + erase) +
@@ -101,18 +108,42 @@ public class Result {
     public @NotNull Result addExtra(Map<Variable, Links> linkedVariables) {
         if (!linkedVariables.isEmpty()) {
             return new Result(links, extra.merge(new LinkedVariablesImpl(linkedVariables)),
-                    modified, writeMethodCalls, casts, erase,
+                    modified, deepOnlyModified, writeMethodCalls, casts, erase,
                     variablesRepresentingConstants);
         }
         return this;
     }
 
+    /** Structural modifications: the variables' objects themselves are modified. */
     public Result addModified(Set<Variable> variables, MethodInfo methodThatCausesModification) {
+        return addModified(variables, Set.of(), methodThatCausesModification);
+    }
+
+    /**
+     * Modifications, of which those in {@code deepOnly} touch only the hidden content of the variable's object
+     * (#25). A variable already marked structurally stays structural; one marked deep-only here and structurally
+     * later becomes structural.
+     */
+    public Result addModified(Set<Variable> variables, Set<Variable> deepOnly, MethodInfo methodThatCausesModification) {
         for (Variable variable : variables) {
+            boolean wasStructural = this.modified.containsKey(variable) && !this.deepOnlyModified.contains(variable);
             Set<MethodInfo> methodInfos = this.modified.computeIfAbsent(variable, _ -> new HashSet<>());
             if (methodThatCausesModification != null) methodInfos.add(methodThatCausesModification);
+            if (deepOnly.contains(variable)) {
+                if (!wasStructural) this.deepOnlyModified.add(variable);
+            } else {
+                this.deepOnlyModified.remove(variable);
+            }
         }
         return this;
+    }
+
+    /** The deep-only subset of {@code variables}, as this result has them. */
+    public Set<Variable> deepOnlyAmong(Set<Variable> variables) {
+        if (deepOnlyModified.isEmpty()) return Set.of();
+        Set<Variable> result = new HashSet<>(variables);
+        result.retainAll(deepOnlyModified);
+        return result;
     }
 
     public Result add(ExpressionVisitor.WriteMethodCall writeMethodCall) {
@@ -170,12 +201,16 @@ public class Result {
         return modified;
     }
 
+    public Set<Variable> deepOnlyModified() {
+        return deepOnlyModified;
+    }
+
     public Set<LocalVariable> variablesRepresentingConstants() {
         return variablesRepresentingConstants;
     }
 
     public Result with(Links links) {
-        return new Result(links, extra, modified, writeMethodCalls, casts,
+        return new Result(links, extra, modified, deepOnlyModified, writeMethodCalls, casts,
                 erase, variablesRepresentingConstants).setEvaluated(evaluated);
     }
 
@@ -188,13 +223,21 @@ public class Result {
         }
         Result r = new Result(this.links, combinedExtra,
                 new HashMap<>(this.modified),
+                new HashSet<>(this.deepOnlyModified),
                 new ArrayList<>(this.writeMethodCalls),
                 new HashMap<>(this.casts),
                 new HashSet<>(this.erase),
                 new HashSet<>(this.variablesRepresentingConstants));
         r.writeMethodCalls.addAll(other.writeMethodCalls);
-        other.modified.forEach((v, set) ->
-                r.modified.computeIfAbsent(v, _ -> new HashSet<>()).addAll(set));
+        other.modified.forEach((v, set) -> {
+            boolean wasStructural = r.modified.containsKey(v) && !r.deepOnlyModified.contains(v);
+            r.modified.computeIfAbsent(v, _ -> new HashSet<>()).addAll(set);
+            if (other.deepOnlyModified.contains(v)) {
+                if (!wasStructural) r.deepOnlyModified.add(v);
+            } else {
+                r.deepOnlyModified.remove(v);
+            }
+        });
         r.variablesRepresentingConstants.addAll(other.variablesRepresentingConstants);
         other.casts.forEach((v, set) ->
                 r.casts.computeIfAbsent(v, _ -> new HashSet<>()).addAll(set));
@@ -205,7 +248,7 @@ public class Result {
     public Result moveLinksToExtra() {
         if (links.primary() != null) {
             LinkedVariables newExtra = this.extra.merge(new LinkedVariablesImpl(Map.of(links.primary(), links)));
-            return new Result(LinksImpl.EMPTY, newExtra, modified, writeMethodCalls, casts, erase,
+            return new Result(LinksImpl.EMPTY, newExtra, modified, deepOnlyModified, writeMethodCalls, casts, erase,
                     variablesRepresentingConstants).setEvaluated(evaluated);
         }
         return this;
@@ -214,7 +257,7 @@ public class Result {
     public Result copyLinksToExtra() {
         if (links.primary() != null) {
             LinkedVariables newExtra = this.extra.merge(new LinkedVariablesImpl(Map.of(links.primary(), links)));
-            return new Result(links, newExtra, modified, writeMethodCalls, casts, erase,
+            return new Result(links, newExtra, modified, deepOnlyModified, writeMethodCalls, casts, erase,
                     variablesRepresentingConstants).setEvaluated(evaluated);
         }
         return this;

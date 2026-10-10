@@ -236,7 +236,12 @@ public class LinkCodec {
                     l -> l.size() == 1 ? Set.of() : decodeList(context, l.get(1)).stream()
                             .map(ev -> (MethodInfo) decodeInfoOutOfContext(context, ev))
                             .collect(Collectors.toUnmodifiableSet())));
-            return new Result(links, new LinkedVariablesImpl(extra), modified, List.of(), Map.of(), Set.of(), Set.of());
+            // optional 4th element (#25): the deep-only subset of the modified variables; absent in older files
+            Set<Variable> deepOnly = list.size() <= 3 ? new java.util.HashSet<>()
+                    : decodeList(context, list.get(3)).stream().map(ev -> decodeVariable(context, ev))
+                    .filter(modified::containsKey).collect(Collectors.toCollection(java.util.HashSet::new));
+            return new Result(links, new LinkedVariablesImpl(extra), modified, deepOnly, List.of(), Map.of(), Set.of(),
+                    Set.of());
         }
 
         public EncodedValue encodeResult(Context context, Result result) {
@@ -250,7 +255,10 @@ public class LinkCodec {
                             : List.of(encodeVariable(context, e.getKey()),
                             encodeList(context, e.getValue().stream()
                                     .map(mi -> encodeInfoOutOfContext(context, mi)).toList())))).toList());
-            return encodeList(context, List.of(links, extra, modified));
+            if (result.deepOnlyModified().isEmpty()) return encodeList(context, List.of(links, extra, modified));
+            EncodedValue deepOnly = encodeList(context, result.deepOnlyModified().stream().sorted()
+                    .map(v -> encodeVariable(context, v)).toList());
+            return encodeList(context, List.of(links, extra, modified, deepOnly));
         }
 
         /**

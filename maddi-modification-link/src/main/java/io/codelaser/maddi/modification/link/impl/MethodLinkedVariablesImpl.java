@@ -31,6 +31,7 @@ public class MethodLinkedVariablesImpl implements MethodLinkedVariables, Value {
     private final List<Links> ofParameters;
     private final Set<Variable> modified;
     private final Set<Variable> assigned;
+    private final Set<Variable> deepOnlyModified;
 
     public MethodLinkedVariablesImpl(Links ofReturnValue, List<Links> ofParameters, Set<Variable> modified) {
         this(ofReturnValue, ofParameters, modified, Set.of());
@@ -40,6 +41,14 @@ public class MethodLinkedVariablesImpl implements MethodLinkedVariables, Value {
                                      List<Links> ofParameters,
                                      Set<Variable> modified,
                                      Set<Variable> assigned) {
+        this(ofReturnValue, ofParameters, modified, assigned, Set.of());
+    }
+
+    public MethodLinkedVariablesImpl(Links ofReturnValue,
+                                     List<Links> ofParameters,
+                                     Set<Variable> modified,
+                                     Set<Variable> assigned,
+                                     Set<Variable> deepOnlyModified) {
         this.ofParameters = ofParameters;
         this.ofReturnValue = ofReturnValue;
         // canonical, sorted iteration order: callers hand in Set.of/Set.copyOf, whose iteration order is
@@ -50,6 +59,9 @@ public class MethodLinkedVariablesImpl implements MethodLinkedVariables, Value {
                 : java.util.Collections.unmodifiableSortedSet(new java.util.TreeSet<>(modified));
         this.assigned = assigned.isEmpty() ? assigned
                 : java.util.Collections.unmodifiableSortedSet(new java.util.TreeSet<>(assigned));
+        assert modified.containsAll(deepOnlyModified) : "deep-only is a subset of modified";
+        this.deepOnlyModified = deepOnlyModified.isEmpty() ? deepOnlyModified
+                : java.util.Collections.unmodifiableSortedSet(new java.util.TreeSet<>(deepOnlyModified));
     }
 
     @Override
@@ -88,6 +100,13 @@ public class MethodLinkedVariablesImpl implements MethodLinkedVariables, Value {
             assigned.stream().sorted().forEach(v -> aList.add(codec.encodeVariable(context, v)));
             list.add(codec.encodeList(context, aList));
         }
+        if (!deepOnlyModified.isEmpty()) {
+            // trailing "D"-tagged list, as "A": the deep-only subset of the modified variables (#25)
+            List<Codec.EncodedValue> dList = new ArrayList<>();
+            dList.add(codec.encodeString(context, "D"));
+            deepOnlyModified.stream().sorted().forEach(v -> dList.add(codec.encodeVariable(context, v)));
+            list.add(codec.encodeList(context, dList));
+        }
         return codec.encodeList(context, list);
     }
 
@@ -101,17 +120,21 @@ public class MethodLinkedVariablesImpl implements MethodLinkedVariables, Value {
                 .toList();
         Set<Variable> modifiedVariables = new java.util.HashSet<>();
         Set<Variable> assignedVariables = new java.util.HashSet<>();
+        Set<Variable> deepOnlyVariables = new java.util.HashSet<>();
         for (int i = 2; i < list.size(); i++) {
             Codec.EncodedValue e = list.get(i);
             List<Codec.EncodedValue> sub = codec.decodeList(context, e);
             if (!sub.isEmpty() && "A".equals(codec.decodeString(context, sub.getFirst()))) {
                 sub.stream().skip(1).forEach(a -> assignedVariables.add(codec.decodeVariable(context, a)));
+            } else if (!sub.isEmpty() && "D".equals(codec.decodeString(context, sub.getFirst()))) {
+                sub.stream().skip(1).forEach(d -> deepOnlyVariables.add(codec.decodeVariable(context, d)));
             } else {
                 modifiedVariables.add(codec.decodeVariable(context, e));
             }
         }
+        deepOnlyVariables.retainAll(modifiedVariables);
         return new MethodLinkedVariablesImpl(ofRv, ofParams, Set.copyOf(modifiedVariables),
-                Set.copyOf(assignedVariables));
+                Set.copyOf(assignedVariables), Set.copyOf(deepOnlyVariables));
     }
 
 
@@ -171,6 +194,11 @@ public class MethodLinkedVariablesImpl implements MethodLinkedVariables, Value {
     }
 
     @Override
+    public Set<Variable> deepOnlyModified() {
+        return deepOnlyModified;
+    }
+
+    @Override
     public List<Links> ofParameters() {
         return ofParameters;
     }
@@ -191,7 +219,17 @@ public class MethodLinkedVariablesImpl implements MethodLinkedVariables, Value {
                 modified.stream().map(translationMap::translateVariableRecursively)
                         .collect(Collectors.toUnmodifiableSet()),
                 assigned.stream().map(translationMap::translateVariableRecursively)
-                        .collect(Collectors.toUnmodifiableSet()));
+                        .collect(Collectors.toUnmodifiableSet()),
+                translateDeepOnly(translationMap));
+    }
+
+    // two modified variables may translate to the same one; it is deep-only when every one of them is
+    private Set<Variable> translateDeepOnly(TranslationMap translationMap) {
+        if (deepOnlyModified.isEmpty()) return Set.of();
+        Set<Variable> structural = modified.stream().filter(v -> !deepOnlyModified.contains(v))
+                .map(translationMap::translateVariableRecursively).collect(Collectors.toUnmodifiableSet());
+        return deepOnlyModified.stream().map(translationMap::translateVariableRecursively)
+                .filter(v -> !structural.contains(v)).collect(Collectors.toUnmodifiableSet());
     }
 
     @Override
@@ -206,7 +244,7 @@ public class MethodLinkedVariablesImpl implements MethodLinkedVariables, Value {
                 ofReturnValue.isEmpty()
                         ? ofReturnValue
                         : ofReturnValue.removeIfTo(v -> v instanceof MarkerVariable mv && mv.isSomeValue()),
-                ofParameters, modified, assigned);
+                ofParameters, modified, assigned, deepOnlyModified);
     }
 
     @Override
@@ -257,10 +295,11 @@ public class MethodLinkedVariablesImpl implements MethodLinkedVariables, Value {
                && canonicalRendering().equals(o.canonicalRendering());
     }
 
-    // assigned participates in the canonical rendering (toString deliberately omits it): two values
-    // differing only in assigned content must still order totally
+    // assigned and deep-only participate in the canonical rendering (toString deliberately omits them): two
+    // values differing only in that content must still order totally, and a change in it is a change in content
     private String canonicalRendering() {
-        return toString() + "|" + sortedAssignedString();
+        return toString() + "|" + sortedAssignedString() + "|"
+               + deepOnlyModified.stream().map(Object::toString).sorted().collect(Collectors.joining(", "));
     }
 
     private static @NotNull Set<Variable> excludeInternal(Set<Variable> variables) {
@@ -282,6 +321,7 @@ public class MethodLinkedVariablesImpl implements MethodLinkedVariables, Value {
                 (Links) ofReturnValue.rewire(infoMap),
                 ofParameters.stream().map(l -> (Links) l.rewire(infoMap)).toList(),
                 modified.stream().map(v -> v.rewire(infoMap)).collect(Collectors.toUnmodifiableSet()),
-                assigned.stream().map(v -> v.rewire(infoMap)).collect(Collectors.toUnmodifiableSet()));
+                assigned.stream().map(v -> v.rewire(infoMap)).collect(Collectors.toUnmodifiableSet()),
+                deepOnlyModified.stream().map(v -> v.rewire(infoMap)).collect(Collectors.toUnmodifiableSet()));
     }
 }

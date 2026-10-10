@@ -61,7 +61,8 @@ public record LinkMethodCall(JavaInspector javaInspector,
         // E.g. 'new Box<>(x)' -> 'make.t←0:x'; 'new Box<>(box.get())' -> 'makeFromGet.t←0:box.t';
         // 'new Pair<>(a, b)' -> 'makePair.a←0:a, makePair.b←1:b'.
         Set<Variable> extraModified = new HashSet<>();
-        Links newObjectLinks = parametersToObject(methodInfo, object, params, mlv, extraModified);
+        Set<Variable> extraDeepOnly = new HashSet<>();
+        Links newObjectLinks = parametersToObject(methodInfo, object, params, mlv, extraModified, extraDeepOnly);
         if (linkComputerOptions.trackObjectCreations()) {
             // LEAF (option on) — additionally record that the temporary object primary was assigned a fresh object,
             // so later modification analysis can tell freshly-created (unaliased) objects apart.
@@ -73,7 +74,7 @@ public record LinkMethodCall(JavaInspector javaInspector,
                     .add(LinkNatureImpl.IS_ASSIGNED_FROM, oc).build();
             extra.merge(objectPrimary, toObjectCreation, Links::merge);
         }
-        return new Result(newObjectLinks, new LinkedVariablesImpl(extra)).addModified(extraModified, null);
+        return new Result(newObjectLinks, new LinkedVariablesImpl(extra)).addModified(extraModified, extraDeepOnly, null);
     }
 
     private static void copyParamsIntoExtra(List<ParameterInfo> formalParameters,
@@ -95,7 +96,7 @@ public record LinkMethodCall(JavaInspector javaInspector,
         }
     }
 
-    private record LM(Links links, Set<Variable> extraModified) {
+    private record LM(Links links, Set<Variable> extraModified, Set<Variable> extraDeepOnly) {
     }
 
     private List<Result> expandParams(MethodLinkedVariables mlv, boolean externalLibrary, List<Result> paramsIn) {
@@ -141,6 +142,7 @@ public record LinkMethodCall(JavaInspector javaInspector,
         }
         Links concreteReturnValue;
         Set<Variable> extraModified;
+        Set<Variable> extraDeepOnly; // #25: the subset of extraModified modified only in its hidden content
         // What does the RETURN VALUE of this call link to? Three leaves:
         if (FunctionTypes.isSAMOfStandardFunctionalInterface(methodInfo)) {
             assert methodInfo == methodInfo.typeInfo().singleAbstractMethod();
@@ -150,6 +152,7 @@ public record LinkMethodCall(JavaInspector javaInspector,
             // -> run's return decorated with '$_afi' on f. See TestModificationFunctional.
             concreteReturnValue = samOfFunctionalInterface(concreteReturnType, params, objectPrimary, extra);
             extraModified = new HashSet<>();
+            extraDeepOnly = new HashSet<>();
         } else if (!mlv.ofReturnValue().isEmpty()) {
             assert mlv.ofReturnValue().primary() instanceof ReturnVariable;
             // LEAF 2 — the callee summary relates its return value to the object/arguments: any accessor, fluent, or
@@ -159,6 +162,7 @@ public record LinkMethodCall(JavaInspector javaInspector,
             LM lm = objectToReturnValue(methodInfo, concreteReturnType, params, mlv, objectPrimary);
             concreteReturnValue = lm.links;
             extraModified = lm.extraModified;
+            extraDeepOnly = lm.extraDeepOnly;
         } else {
             // LEAF 3 — the callee summary relates its return to nothing. Usually genuinely empty (void mutator such as
             // 'box.clear()'), but also the collector case where the return-HC link was dropped at the generic level and
@@ -167,10 +171,11 @@ public record LinkMethodCall(JavaInspector javaInspector,
             Links collectorLinks = collectorReturnValue(methodInfo, concreteReturnType, objectPrimary);
             concreteReturnValue = collectorLinks != null ? collectorLinks : LinksImpl.EMPTY;
             extraModified = new HashSet<>();
+            extraDeepOnly = new HashSet<>();
         }
         // Independently: how do the ARGUMENTS relate to the OBJECT (or, for a static call, to each other)?
         if (objectPrimary != null) {
-            Links newObjectLinks = parametersToObject(methodInfo, object, params, mlv, extraModified);
+            Links newObjectLinks = parametersToObject(methodInfo, object, params, mlv, extraModified, extraDeepOnly);
             if (newObjectLinks.primary() instanceof This && !newObjectLinks.isEmpty()) {
                 // LEAF 4a — the receiver is the implicit 'this' (an unqualified own-method call): the object-side
                 // links come back rooted at 'this'; regroup them so each real field/variable becomes its own primary.
@@ -187,16 +192,17 @@ public record LinkMethodCall(JavaInspector javaInspector,
             // interface passed as an argument. E.g. 'static <T> void transfer(Box<T> from, Box<T> to){to.set(from.get());}'
             // -> 'from.t*→to*.t' (linksBetweenParameters); a passed Consumer that is invoked -> appliedFunctionalInterfaces.
             linksBetweenParameters(methodInfo, params, mlv, extra);
-            appliedFunctionalInterfaces(methodInfo, params, extraModified, mlv, extra);
+            appliedFunctionalInterfaces(methodInfo, params, extraModified, extraDeepOnly, mlv, extra);
             receiverConsumers(methodInfo, params, mlv, extra);
         }
         return new Result(concreteReturnValue, new LinkedVariablesImpl(extra))
-                .addModified(extraModified, null);
+                .addModified(extraModified, extraDeepOnly, null);
     }
 
     private void appliedFunctionalInterfaces(MethodInfo methodInfo,
                                              List<Result> params,
                                              Set<Variable> extraModified,
+                                             Set<Variable> extraDeepOnly,
                                              MethodLinkedVariables mlv,
                                              Map<Variable, Links> extra) {
         assert mlv.ofParameters().size() == methodInfo.parameters().size();
@@ -213,8 +219,8 @@ public record LinkMethodCall(JavaInspector javaInspector,
                         Function<Variable, List<Links>> paramProvider = v ->
                                 v instanceof ParameterInfo pi && pi.index() < params.size()
                                         ? List.of(params.get(pi.index()).links()) : List.of();
-                        handler.go(builder, paramProvider, applied, extraModified, null, link.linkNature(),
-                                null);
+                        handler.go(builder, paramProvider, applied, extraModified, extraDeepOnly, null,
+                                link.linkNature(), null);
                         extra.merge(links.primary(), builder.build(), Links::merge);
                     }
                 }
@@ -430,6 +436,7 @@ public record LinkMethodCall(JavaInspector javaInspector,
                         : List.of();
         Links.Builder builder = new LinksImpl.Builder(newPrimary);
         Set<Variable> extraModified = new HashSet<>();
+        Set<Variable> extraDeepOnly = new HashSet<>();
         for (Link link : ofReturnValue.linkSet()) {
             if (expandedVarargs != null && varargElementsToReturnValue(tm, link, ofReturnValue.primary(), newPrimary,
                     expandedVarargs, varargElements, builder)) {
@@ -441,16 +448,16 @@ public record LinkMethodCall(JavaInspector javaInspector,
                     // LEAF — the from-side IS the return value itself: use the fresh return primary directly.
                     // E.g. 'read←0:box.t' ('box.get()') — the whole return value links to the object's field.
                     translateHandleFunctional(tm, link, newPrimary, link.linkNature(), builder, samLinks,
-                            objectPrimary, extraModified);
+                            objectPrimary, extraModified, extraDeepOnly);
                 } else {
                     // LEAF — the from-side is a PART of the return value (a field/element of it): translate it.
                     // E.g. a factory 'Box<X> makeFromGet(...)' whose return field links: 'makeFromGet.t←0:box.t'.
                     Variable fromTranslated = tm.translateVariableRecursively(link.from());
                     translateHandleFunctional(tm, link, fromTranslated, link.linkNature(), builder, samLinks,
-                            objectPrimary, extraModified);
+                            objectPrimary, extraModified, extraDeepOnly);
                 }
         }
-        return new LM(builder.build(), extraModified);
+        return new LM(builder.build(), extraModified, extraDeepOnly);
     }
 
     /*
@@ -496,7 +503,8 @@ public record LinkMethodCall(JavaInspector javaInspector,
                                            Links.Builder builder,
                                            Function<Variable, List<Links>> paramProvider,
                                            Variable objectPrimary,
-                                           Set<Variable> extraModified) {
+                                           Set<Variable> extraModified,
+                                           Set<Variable> extraDeepOnly) {
         ParameterizedType parameterizedType = link.to().parameterizedType();
         boolean extraTest;
         // Where does this return-value link point? Three leaves:
@@ -516,7 +524,8 @@ public record LinkMethodCall(JavaInspector javaInspector,
             // LinkAppliedFunctionalInterface. See TestModificationFunctional,4.
             LinkAppliedFunctionalInterface handler = new LinkAppliedFunctionalInterface(javaInspector, runtime,
                     linkComputerOptions, virtualFieldComputer, currentMethod, variableData, stage);
-            handler.go(builder, paramProvider, applied, extraModified, fromTranslated, linkNature, objectPrimary);
+            handler.go(builder, paramProvider, applied, extraModified, extraDeepOnly, fromTranslated, linkNature,
+                    objectPrimary);
             extraTest = true;
         } else {
             // LEAF C — a plain (non-functional) target: no FI lifting needed. E.g. 'box.get()' -> 'rv←box.t'.
@@ -650,7 +659,8 @@ public record LinkMethodCall(JavaInspector javaInspector,
                                               Result object,
                                               List<Result> params,
                                               MethodLinkedVariables mlv,
-                                              Set<Variable> extraModified) {
+                                              Set<Variable> extraModified,
+                                              Set<Variable> extraDeepOnly) {
         Variable objectPrimary = object.links().primary();
         int i = 0;
         Links.Builder builder = new LinksImpl.Builder(objectPrimary);
@@ -694,9 +704,11 @@ public record LinkMethodCall(JavaInspector javaInspector,
                         // the manually-written 'for (x : list) c.accept(x)' -- we conservatively mark both the source
                         // and the consumer modified. (A Predicate/Function argument, e.g. filter/map, returns a value
                         // and reads the elements, so it is NOT treated this way: its SAM has a return value.) See
-                        // TestStreamForEachSpec.
+                        // TestStreamForEachSpec. The source is modified in its ELEMENTS only: a consumer cannot
+                        // reach the collection itself (#25, deep-only).
                         extraModified.add(translatedTo);
                         extraModified.add(objectPrimary);
+                        extraDeepOnly.add(objectPrimary);
                     }
                 }
             }

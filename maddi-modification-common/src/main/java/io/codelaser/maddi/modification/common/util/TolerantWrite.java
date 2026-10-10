@@ -131,8 +131,8 @@ public final class TolerantWrite {
     // element-INTERNAL (statement-level) properties: their changes are invisible to dependents and must not
     // propagate through the worklist (a ParameterInfo context can reach here via UNMODIFIED_VARIABLE)
     private static final java.util.Set<String> INTERNAL_PROPERTIES =
-            java.util.Set.of("unmodifiedVariable", "downcastVariable", "variablesLinkedToObject",
-                    "linkedVariablesArguments");
+            java.util.Set.of("unmodifiedVariable", "structurallyUnmodifiedVariable", "downcastVariable",
+                    "variablesLinkedToObject", "linkedVariablesArguments");
 
     // worklist support: the targets (Info / ParameterInfo contexts) of value-CHANGING writes this iteration.
     // Captures writes that land on an element OTHER than the one currently being processed (the link computer's
@@ -168,7 +168,9 @@ public final class TolerantWrite {
     // properties (see the downgrade branch below); OFF by default pending the verdict A/B
     private static final boolean UNMODOWN = System.getenv("UNMODOWN") != null;
     private static final java.util.Set<String> EVIDENCE_ACCUMULATING = java.util.Set.of(
-            "unmodifiedVariable", "unmodifiedParameter", "unmodifiedField", "nonModifyingMethod");
+            "unmodifiedVariable", "unmodifiedParameter", "unmodifiedField", "nonModifyingMethod",
+            "structurallyUnmodifiedVariable", "structurallyUnmodifiedParameter", "structurallyUnmodifiedField",
+            "structurallyNonModifyingMethod");
 
     // single-writer discipline for the modification reachability cutover (PLAN-modification-reachability
     // §14 P2.3): once the pass has written its verdicts, no other writer may touch the three element-level
@@ -177,7 +179,9 @@ public final class TolerantWrite {
     // start of every analyze() (JVM-wide static; tests run several analyses per JVM).
     private static volatile boolean MODIFICATION_FROZEN;
     private static final java.util.Set<String> MODIFICATION_PROPERTIES = java.util.Set.of(
-            "unmodifiedParameter", "unmodifiedField", "nonModifyingMethod");
+            "unmodifiedParameter", "unmodifiedField", "nonModifyingMethod",
+            // their structural twins (#25), written by the same pass
+            "structurallyUnmodifiedParameter", "structurallyUnmodifiedField", "structurallyNonModifyingMethod");
 
     public static void freezeModificationProperties() {
         MODIFICATION_FROZEN = true;

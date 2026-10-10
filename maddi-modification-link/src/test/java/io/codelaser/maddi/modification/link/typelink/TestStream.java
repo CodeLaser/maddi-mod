@@ -118,8 +118,9 @@ public class TestStream extends CommonTest {
 
         int propertiesChanged = tlc.propertiesChanged();
         // was 16: variablesLinkedToObject writes no longer count as property changes (they land on the freshly
-        // re-materialized body each iteration and kept the iterating analyzer from converging)
-        assertEquals(11, propertiesChanged);
+        // re-materialized body each iteration and kept the iterating analyzer from converging); 11 -> 21 with the
+        // structural twins of the method and parameter verdicts (CodeLaser/maddi-mod#25), written beside them
+        assertEquals(21, propertiesChanged);
         tlc.doMethod(method);
         tlc.doMethod(method1);
         tlc.doMethod(method2);

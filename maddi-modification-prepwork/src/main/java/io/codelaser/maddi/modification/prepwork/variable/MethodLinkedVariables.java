@@ -26,6 +26,16 @@ public interface MethodLinkedVariables extends Value {
         return Set.of();
     }
 
+    /**
+     * The subset of {@link #modified()} whose objects are modified only in their hidden content (an element of the
+     * collection, a value held under a type parameter), never themselves: deep-modified, structurally unmodified
+     * (CodeLaser/maddi-mod#25). A caller translating the summary's modified set marks these deep-only too. A summary
+     * from a contract (the analysis hints) has none: a contracted modification counts as structural.
+     */
+    default Set<Variable> deepOnlyModified() {
+        return Set.of();
+    }
+
     Links ofReturnValue();
 
     List<Links> ofParameters();

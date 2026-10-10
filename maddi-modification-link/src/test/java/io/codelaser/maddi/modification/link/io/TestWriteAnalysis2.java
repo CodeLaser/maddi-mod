@@ -93,8 +93,8 @@ public class TestWriteAnalysis2 extends CommonTest {
              {"name": "Fi(0)", "data":{"finalField":1}},
              {"name": "Fn(1)", "data":{"finalField":1}},
              {"name": "C<init>(0,int)", "data":{"methodLinks":[[],[[["P",["Ta.b.X","C<init>(0,int)","Pn(0)"]],[["P",["Ta.b.X","C<init>(0,int)","Pn(0)"]],"→",["F",["Ta.b.X","Fn(1)"],["variableExpression","5-23:5-26",["T",["Ta.b.X"]]]]]]],["T",["Ta.b.X"]],["A",["F",["Ta.b.X","Fn(1)"],["variableExpression","5-23:5-26",["T",["Ta.b.X"]]]]]]}},
-             {"name": "MgetI(0)", "data":{"getSetField":["Fi(0)",false,false],"methodLinks":[[["R",["Ta.b.X","MgetI(0)"]],[["R",["Ta.b.X","MgetI(0)"]],"←",["F",["Ta.b.X","Fi(0)"]]]],[]],"nonModifyingMethod":1}},
-             {"name": "MgetN(1)", "data":{"getSetField":["Fn(1)",false,false],"methodLinks":[[["R",["Ta.b.X","MgetN(1)"]],[["R",["Ta.b.X","MgetN(1)"]],"←",["F",["Ta.b.X","Fn(1)"]]]],[]],"nonModifyingMethod":1}}]}
+             {"name": "MgetI(0)", "data":{"getSetField":["Fi(0)",false,false],"methodLinks":[[["R",["Ta.b.X","MgetI(0)"]],[["R",["Ta.b.X","MgetI(0)"]],"←",["F",["Ta.b.X","Fi(0)"]]]],[]],"nonModifyingMethod":1,"structurallyNonModifyingMethod":1}},
+             {"name": "MgetN(1)", "data":{"getSetField":["Fn(1)",false,false],"methodLinks":[[["R",["Ta.b.X","MgetN(1)"]],[["R",["Ta.b.X","MgetN(1)"]],"←",["F",["Ta.b.X","Fn(1)"]]]],[]],"nonModifyingMethod":1,"structurallyNonModifyingMethod":1}}]}
             ]
             """;
 
@@ -178,8 +178,8 @@ public class TestWriteAnalysis2 extends CommonTest {
               {"name": "Mi(2)", "data":{"getSetField":["Fi(0)",false,false]}},
               {"name": "Mlist(3)", "data":{"getSetField":["Flist(1)",false,false]}},
               {"name": "Mset(4)", "data":{"getSetField":["Fset(2)",false,false]}}]},
-             {"name": "Mmethod(0)", "data":{"methodLinks":[[],[],["F",["Ta.b.X","SR(0)","Fset(2)"],["variableExpression","10-9:10-9",["P",["Ta.b.X","MsetAdd(1,a.b.X.R)","Pr(0)"]]]],["P",["Ta.b.X","MsetAdd(1,a.b.X.R)","Pr(0)"]]],"nonModifyingMethod":1}},
-             {"name": "MsetAdd(1,a.b.X.R)", "data":{"methodLinks":[[],[[["P",["Ta.b.X","MsetAdd(1,a.b.X.R)","Pr(0)"]],[["F",["Ta.b.X","SR(0)","Fi(0)"],["variableExpression","10-19:10-19",["P",["Ta.b.X","MsetAdd(1,a.b.X.R)","Pr(0)"]]]],"∈",["F",["Tjava.util.Set","V§$s",["Tjava.lang.Integer",1,[]]],["variableExpression","0-0:0-0",["F",["Ta.b.X","SR(0)","Fset(2)"],["variableExpression","10-9:10-9",["P",["Ta.b.X","MsetAdd(1,a.b.X.R)","Pr(0)"]]]]]]]]],["F",["Ta.b.X","SR(0)","Fset(2)"],["variableExpression","10-9:10-9",["P",["Ta.b.X","MsetAdd(1,a.b.X.R)","Pr(0)"]]]],["P",["Ta.b.X","MsetAdd(1,a.b.X.R)","Pr(0)"]]],"nonModifyingMethod":1}}]}
+             {"name": "Mmethod(0)", "data":{"methodLinks":[[],[],["F",["Ta.b.X","SR(0)","Fset(2)"],["variableExpression","10-9:10-9",["P",["Ta.b.X","MsetAdd(1,a.b.X.R)","Pr(0)"]]]],["P",["Ta.b.X","MsetAdd(1,a.b.X.R)","Pr(0)"]]],"nonModifyingMethod":1,"structurallyNonModifyingMethod":1}},
+             {"name": "MsetAdd(1,a.b.X.R)", "data":{"methodLinks":[[],[[["P",["Ta.b.X","MsetAdd(1,a.b.X.R)","Pr(0)"]],[["F",["Ta.b.X","SR(0)","Fi(0)"],["variableExpression","10-19:10-19",["P",["Ta.b.X","MsetAdd(1,a.b.X.R)","Pr(0)"]]]],"∈",["F",["Tjava.util.Set","V§$s",["Tjava.lang.Integer",1,[]]],["variableExpression","0-0:0-0",["F",["Ta.b.X","SR(0)","Fset(2)"],["variableExpression","10-9:10-9",["P",["Ta.b.X","MsetAdd(1,a.b.X.R)","Pr(0)"]]]]]]]]],["F",["Ta.b.X","SR(0)","Fset(2)"],["variableExpression","10-9:10-9",["P",["Ta.b.X","MsetAdd(1,a.b.X.R)","Pr(0)"]]]],["P",["Ta.b.X","MsetAdd(1,a.b.X.R)","Pr(0)"]]],"nonModifyingMethod":1,"structurallyNonModifyingMethod":1}}]}
             ]
             """;
 

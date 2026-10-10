@@ -61,17 +61,23 @@ public class AbstractMethodAnalyzerImpl extends CommonAnalyzerImpl implements Ab
                 // a throw-only placeholder (Util.isThrowOnlyPlaceholder): only MODIFICATION is the union; its body
                 // keeps deciding independence, downcasts and the eventual properties
                 Iterable<MethodInfo> concreteImplementations = implementations.methodInfoSet();
-                for (ParameterInfo pi : methodInfo.parameters()) unmodified(concreteImplementations, pi);
+                for (ParameterInfo pi : methodInfo.parameters()) {
+                    unmodified(concreteImplementations, pi);
+                    structurallyUnmodified(concreteImplementations, pi);
+                }
                 methodNonModifying(concreteImplementations, methodInfo);
+                methodStructurallyNonModifying(concreteImplementations, methodInfo);
             } else {
                 Iterable<MethodInfo> concreteImplementations = implementations.methodInfoSet();
                 for (ParameterInfo pi : methodInfo.parameters()) {
                     unmodified(concreteImplementations, pi);
+                    structurallyUnmodified(concreteImplementations, pi);
                     independent(concreteImplementations, pi);
                     collectDowncast(concreteImplementations, pi);
                     if (EventualCluster.ENABLED) parameterEventuallyUnmodified(concreteImplementations, pi);
                 }
                 methodNonModifying(concreteImplementations, methodInfo);
+                methodStructurallyNonModifying(concreteImplementations, methodInfo);
                 methodIndependent(concreteImplementations, methodInfo);
                 methodEventual(concreteImplementations, methodInfo);
                 methodEventuallyNonModifying(concreteImplementations, methodInfo);
@@ -174,6 +180,44 @@ public class AbstractMethodAnalyzerImpl extends CommonAnalyzerImpl implements Ab
         }
         if (TolerantWrite.setAllowControlledOverwrite(methodInfo.analysis(), NON_MODIFYING_METHOD, fromImplementations, methodInfo)) {
             DECIDE.debug("AM: Decide non-modifying of method {} = {}", methodInfo, fromImplementations);
+        }
+    }
+
+    /**
+     * The structural twin of {@link #methodNonModifying} (CodeLaser/maddi-mod#25): the fold over the implementations'
+     * structural verdicts, each falling back to its deep one. A contract on the deep property decides both: the twin
+     * is never contracted, and falls back to the deep value when absent.
+     */
+    private void methodStructurallyNonModifying(Iterable<MethodInfo> concreteImplementations, MethodInfo methodInfo) {
+        if (contractResolution.resolve(methodInfo, NON_MODIFYING_METHOD).decided()) return;
+        if (methodInfo.analysis().getOrDefault(STRUCTURALLY_NON_MODIFYING_METHOD, FALSE).isTrue()) return;
+        Value.Bool fromImplementations = TRUE;
+        for (MethodInfo implementation : concreteImplementations) {
+            if (!implementation.isStructurallyNonModifying()) {
+                fromImplementations = FALSE;
+                break;
+            }
+        }
+        if (TolerantWrite.setAllowControlledOverwrite(methodInfo.analysis(), STRUCTURALLY_NON_MODIFYING_METHOD,
+                fromImplementations, methodInfo)) {
+            DECIDE.debug("AM: Decide structurally non-modifying of method {} = {}", methodInfo, fromImplementations);
+        }
+    }
+
+    /** The structural twin of {@link #unmodified}, see {@link #methodStructurallyNonModifying}. */
+    private void structurallyUnmodified(Iterable<MethodInfo> concreteImplementations, ParameterInfo pi) {
+        if (contractResolution.resolve(pi, UNMODIFIED_PARAMETER).decided()) return;
+        if (pi.analysis().getOrDefault(STRUCTURALLY_UNMODIFIED_PARAMETER, FALSE).isTrue()) return;
+        Value.Bool fromImplementations = TRUE;
+        for (MethodInfo implementation : concreteImplementations) {
+            if (!implementation.parameters().get(pi.index()).isStructurallyUnmodified()) {
+                fromImplementations = FALSE;
+                break;
+            }
+        }
+        if (TolerantWrite.setAllowControlledOverwrite(pi.analysis(), STRUCTURALLY_UNMODIFIED_PARAMETER,
+                fromImplementations, pi)) {
+            DECIDE.debug("AM: Decide structurally unmodified of param {} = {}", pi, fromImplementations);
         }
     }
 
