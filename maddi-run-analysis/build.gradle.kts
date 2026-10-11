@@ -61,6 +61,8 @@ dependencies {
     // TestJavaToKotlinFernflowerNullability: maddi's translation ratchet, with the NullabilityPass verdicts
     testImplementation(testFixtures("io.codelaser:maddi-run-openjdk:$maddiVersion"))
     testImplementation("io.codelaser:maddi-cst-print-kotlin:$maddiVersion")
+    // TestJavaToCSharpFernflowerFacts: maddi's C# ratchet, with the analysis's facts
+    testImplementation("io.codelaser:maddi-cst-print-csharp:$maddiVersion")
     testImplementation("commons-cli:commons-cli")
     testImplementation("ch.qos.logback:logback-classic")
     testImplementation("com.fasterxml.jackson.core:jackson-databind")
@@ -129,5 +131,15 @@ tasks.withType<Test>().configureEach {
     inputs.files(junitConsole).withPropertyName("junitConsole")
     jvmArgumentProviders.add(CommandLineArgumentProvider {
         listOf("-Dmaddi.test.junitConsoleClasspath=" + junitConsole.asPath)
+    })
+}
+
+// TestJavaToCSharpFernflowerFacts: the judge of the C# is maddi's tools/csharp-check (see maddi-run-openjdk), which
+// JavaToCSharpRatchet builds with `dotnet build` (a .NET 10 SDK on the PATH). Its directory, as a system property.
+val csharpCheck = rootProject.file("../maddi/tools/csharp-check")
+tasks.withType<Test>().configureEach {
+    inputs.dir(csharpCheck).withPropertyName("csharpCheck").optional()
+    jvmArgumentProviders.add(CommandLineArgumentProvider {
+        listOf("-Dmaddi.test.csharpCheck=" + csharpCheck.absolutePath)
     })
 }
