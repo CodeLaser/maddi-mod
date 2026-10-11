@@ -140,7 +140,7 @@ public final class NonNullFacts {
         if (body == null) return;
         exits = new ArrayList<>();
         walking = methodInfo;
-        Out out = block(body, Set.of());
+        Out out = block(body, narrowedThis(methodInfo, body));
         walking = null;
         if (out.completes) exits.add(out.facts);
         if (!exits.isEmpty()) {
@@ -155,6 +155,33 @@ public final class NonNullFacts {
             atExit.put(methodInfo, Set.copyOf(common));
         }
         exits = null;
+    }
+
+    /*
+     The final fields of this that no instance of the method's class can hold null in (NullabilityPass.NarrowedReads,
+     with this's own class as the narrowing type): a null written only by a constructor this class never reaches.
+     timefold BavetAbstractConstraintStream: the source-stream constructor sets 'parent = null', the subclasses all
+     chain to the one that dereferences and stores its argument, and dereference 'parent' (CodeLaser/maddi-mod#27 2).
+     Not in a constructor, which may run before the field is assigned; not for Kotlin's smart casts.
+     */
+    private Set<Variable> narrowedThis(MethodInfo methodInfo, Block body) {
+        if (kotlinSmartCasts || narrowedNonNull == null || methodInfo.isConstructor() || methodInfo.isStatic()) {
+            return Set.of();
+        }
+        TypeInfo type = methodInfo.typeInfo();
+        Set<Variable> set = new HashSet<>();
+        body.visit(e -> {
+            if (e instanceof VariableExpression ve && ve.variable() instanceof FieldReference fr && fr.scopeIsThis()
+                && fr.fieldInfo().isFinal() && !fr.fieldInfo().isStatic() && !set.contains(fr)
+                // this is an instance of the method's class, unless the method is a lambda's (its this is the
+                // enclosing instance): the field must be one of that class
+                && (fr.fieldInfo().owner() == type || type.superTypesExcludingJavaLangObject().contains(fr.fieldInfo().owner()))
+                && narrowedNonNull.test(fr.fieldInfo(), type)) {
+                set.add(fr);
+            }
+            return true;
+        });
+        return set;
     }
 
     /**

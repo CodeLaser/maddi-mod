@@ -3560,4 +3560,102 @@ public class TestNullabilityPass extends CommonTest {
         Statement returned = parsed.findUniqueMethod("skip", 0).methodBody().statements().get(1);
         assertEquals(true, report.useSites().nonNullAt(returned, next), "after 'if (done()) return'");
     }
+
+    // timefold BavetAbstractConstraintStream (CodeLaser/maddi-mod#27 2): the source constructor stores a null parent,
+    // the subclass only chains to the one that dereferences its argument and stores it
+    @DisplayName("narrowed reads: a final field of this, in a subclass that never reaches the constructor storing null")
+    @Test
+    public void narrowedThisField() {
+        NullabilityPass.Report report = run("a.b.BS", """
+                package a.b;
+                class BS {
+                    abstract static class Stream {
+                        protected final Stream parent;
+                        protected final String name;
+                        protected Stream(Stream parent) {
+                            this.name = parent.name + "'";
+                            this.parent = parent;
+                        }
+                        protected Stream() {
+                            this.parent = null;
+                            this.name = "source";
+                        }
+                        String parentName() {
+                            String n = parent.name;
+                            return n;
+                        }
+                    }
+                    static final class Source extends Stream {
+                        Source() { super(); }
+                    }
+                    static final class Child extends Stream {
+                        Child(Stream parent) { super(parent); }
+                        String up() {
+                            String n = parent.name;
+                            return n;
+                        }
+                        Runnable later() {
+                            return () -> System.out.println(parent.name);
+                        }
+                    }
+                    static String make() { return new Child(new Source()).up(); }
+                }
+                """);
+        TypeInfo stream = parsed.subTypes().stream().filter(t -> "Stream".equals(t.simpleName())).findFirst().orElseThrow();
+        TypeInfo child = parsed.subTypes().stream().filter(t -> "Child".equals(t.simpleName())).findFirst().orElseThrow();
+        assertEquals(true, parentKnown(report, child.findUniqueMethod("up", 0)), "Child never stores a null parent");
+        assertEquals(false, parentKnown(report, stream.findUniqueMethod("parentName", 0)), "a Source may be this");
+    }
+
+    // the facts on 'parent' when the method's 'String n = parent.name;' starts
+    private static boolean parentKnown(NullabilityPass.Report report, MethodInfo method) {
+        Statement read = method.methodBody().statements().getFirst();
+        io.codelaser.maddi.cst.api.variable.FieldReference name = (io.codelaser.maddi.cst.api.variable.FieldReference)
+                ((VariableExpression) ((io.codelaser.maddi.cst.api.statement.LocalVariableCreation) read).localVariable()
+                        .assignmentExpression()).variable();
+        return report.useSites().nonNullAt(read, ((VariableExpression) name.scope()).variable());
+    }
+
+    // timefold SolverMetricUtil.extractScore (CodeLaser/maddi-mod#27 1): the loop fills every index or returns, so the
+    // array that leaves the loop has no null element; returning the array itself from the loop does not count
+    @DisplayName("an array filled by a loop that returns early: no null element")
+    @Test
+    public void arrayFillWithEarlyReturn() {
+        NullabilityPass.Report report = run("a.b.EX", """
+                package a.b;
+                import java.util.function.Function;
+                class EX {
+                    interface Def { Object from(Number[] levels); }
+                    static class D implements Def {
+                        public Object from(Number[] levels) { return levels[0].intValue(); }
+                    }
+                    static class P implements Def {
+                        public Object from(Number[] partial) { return partial.length; }
+                    }
+                    static Object extract(String[] labels, Function<String, Number> f, Def def) {
+                        var levels = new Number[labels.length];
+                        for (var i = 0; i < labels.length; i++) {
+                            var n = f.apply(labels[i]);
+                            if (n == null) return null;
+                            levels[i] = n;
+                        }
+                        return def.from(levels);
+                    }
+                    static Number[] handOut(String[] labels, Function<String, Number> f, Def def) {
+                        var partial = new Number[labels.length];
+                        for (var i = 0; i < labels.length; i++) {
+                            var n = f.apply(labels[i]);
+                            if (n == null) return partial;
+                            partial[i] = n;
+                        }
+                        return partial;
+                    }
+                }
+                """);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("Number[]", s.get("a.b.EX.D.from(Number[]):0:levels"), s.toString());
+        assertEquals("Number?[]", s.get("a.b.EX.handOut(String[],java.util.function.Function,a.b.EX.Def)"),
+                s.toString());
+    }
 }

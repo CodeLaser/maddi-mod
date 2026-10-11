@@ -1789,6 +1789,17 @@ public final class NullabilityPass {
         }
     }
 
+    // a face ('x.f.list.§s') on a field of an object reached through another field: the field holding the slot is
+    // not read from this, a local or a parameter
+    private static boolean deepFace(Variable face) {
+        if (!(face instanceof FieldReference virtual) || !(NonNullFacts.unwrap(virtual.scope()) instanceof VariableExpression ve)
+            || !(ve.variable() instanceof FieldReference holder)) return false;
+        Expression base = NonNullFacts.unwrap(holder.scope());
+        return !(base instanceof VariableExpression bv && (bv.variable() instanceof This
+                                                           || bv.variable() instanceof LocalVariable
+                                                           || bv.variable() instanceof ParameterInfo));
+    }
+
     // the analysed method whose body holds this null literal (a lambda's body is the lambda's method)
     private MethodInfo nullOwner(Expression nullConstant) {
         return nullOwners.get(nullConstant);
@@ -1940,6 +1951,14 @@ public final class NullabilityPass {
                     // reaches 'key' (nacos SystemEnvPropertySource, reported by the diagnose session). A slot
                     // (Content, Arg) is written by calls too.
                     boolean slot = from instanceof Content || from instanceof Arg;
+                    // a callee's 'return null' does not become an element of a collection reached through another
+                    // object's fields: 'cfg.selector.solutionDescriptor.genuineEntityDescriptorList.§s ← $_ce3', the
+                    // links' transitive closure through calls, in a method that never writes that list (timefold
+                    // DefaultConstructionHeuristicPhaseFactory.getBuilder, CodeLaser/maddi-mod#27 a). A null this
+                    // method writes is kept, and so are the call-site writes ('list.add(x)', receiverSlots).
+                    if (slot && deepFace(link.from()) && !mi.equals(nullOwner(((LocalVariable) link.to()).assignmentExpression()))) {
+                        continue;
+                    }
                     if (slot || statement == null || fromVar instanceof ReturnVariable
                         || assignsHere(statement, fromVar)) {
                         nullMarker(mi, link.to(), from, "null in " + mi.fullyQualifiedName());
@@ -2855,7 +2874,12 @@ public final class NullabilityPass {
         boolean[] escapes = {false};
         loop.block().visit(e -> {
             if (e instanceof Lambda) return false;
-            if (e instanceof BreakOrContinueStatement || e instanceof ReturnStatement
+            // a return leaves a local array unread unless it hands the array out: 'if (x == null) return null;'
+            // (timefold SolverMetricUtil.extractScore, CodeLaser/maddi-mod#27 1); a field keeps what was filled
+            boolean returnsArray = e instanceof ReturnStatement rs
+                                   && (!(array instanceof LocalVariable) || rs.expression() != null
+                                                                            && mentions(rs.expression(), array));
+            if (e instanceof BreakOrContinueStatement || returnsArray
                 || e instanceof Assignment a && index.equals(a.variableTarget())) escapes[0] = true;
             return !escapes[0];
         });
