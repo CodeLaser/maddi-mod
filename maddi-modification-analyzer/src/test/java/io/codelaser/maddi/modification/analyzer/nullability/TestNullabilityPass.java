@@ -63,7 +63,8 @@ public class TestNullabilityPass extends CommonTest {
             };
             return k(pt.componentType()) + "[]" + own;
         }
-        String base = pt.typeParameter() != null ? pt.typeParameter().simpleName() : pt.typeInfo().simpleName();
+        String base = pt.typeParameter() != null ? pt.typeParameter().simpleName()
+                : pt.typeInfo() != null ? pt.typeInfo().simpleName() : "?"; // 'Class<?>'
         String args = pt.parameters().isEmpty() ? ""
                 : pt.parameters().stream().map(TestNullabilityPass::k).collect(Collectors.joining(", ", "<", ">"));
         String suffix = switch (pt.nullable()) {
@@ -1287,7 +1288,8 @@ public class TestNullabilityPass extends CommonTest {
         }
         // the returns read the shadow, which holds the caller's value and decode's null
         assertEquals("String?", byName.get("a.b.R.incoming(String)"));
-        assertEquals("String?", byName.get("a.b.R.loop(String)"));
+        // the loop's condition dereferences p on every way out: 'return p' returns no null
+        assertEquals("String", byName.get("a.b.R.loop(String)"));
         assertEquals("String", byName.get("a.b.R.constant(String)"));
         assertEquals("String?", byName.get("a.b.R.conditional(String)"));
         Map<String, String> shadows = new java.util.TreeMap<>();
@@ -3379,5 +3381,63 @@ public class TestNullabilityPass extends CommonTest {
                 (io.codelaser.maddi.cst.api.expression.Assignment) write.expression();
         Variable buffer = ((io.codelaser.maddi.cst.api.variable.DependentVariable) a.variableTarget()).arrayVariable();
         return report.useSites().nonNullAt(write, buffer);
+    }
+
+    // timefold SolutionDescriptor.findEntityDescriptorOrFail (the diagnose session): 'var d = find(c); if (d == null)
+    // { throw ...; } return d;' returns no null, though find does
+    @DisplayName("a throw guard before the return: the OrFail wrapper returns no null")
+    @Test
+    public void throwGuardBeforeReturn() {
+        String src = """
+                package a.b;
+                import java.util.HashMap;
+                import java.util.Map;
+                class FD {
+                    private static final String NONE = "none";
+                    private final Map<Class<?>, String> cache = new HashMap<>();
+                    public String findOrFail(Class<?> c) {
+                        var d = find(c);
+                        if (d == null) {
+                            throw new IllegalArgumentException(
+                                    "No descriptor for %s (%s)".formatted(c, c.getSimpleName()));
+                        }
+                        return d;
+                    }
+                    public String find(Class<?> c) {
+                        var cached = cache.get(c);
+                        if (cached == NONE) {
+                            return null;
+                        } else if (cached != null) {
+                            return cached;
+                        }
+                        var created = c.getSimpleName().isEmpty() ? null : c.getSimpleName();
+                        if (created == null) {
+                            cache.put(c, NONE);
+                            return null;
+                        } else {
+                            cache.put(c, created);
+                            return created;
+                        }
+                    }
+                }
+                """;
+        StringBuilder out = new StringBuilder();
+        int[] round = {0};
+        for (String variant : List.of(src, src.replace("var d = find(c);", "String d = find(c);"))) {
+            for (NullabilityPass.Policy policy : List.of(NullabilityPass.Policy.KOTLIN, NullabilityPass.Policy.NULL_MARKED,
+                    NullabilityPass.Policy.CAUTIOUS)) {
+                String name = "FD" + (++round[0]);
+                NullabilityPass.Report report = run("a.b." + name, variant.replace("class FD ", "class " + name + " "),
+                        policy);
+                Map<String, String> s = new java.util.TreeMap<>();
+                report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName().replace(name, "FD"), k(pt)));
+                if (!"String?".equals(s.get("a.b.FD.find(Class)")) || "String?".equals(s.get("a.b.FD.findOrFail(Class)"))) {
+                    out.append(variant.contains("var d") ? "var " : "typed ").append(policy.world()).append(' ')
+                            .append(policy.callResults()).append(": ").append(s.get("a.b.FD.find(Class)")).append(' ')
+                            .append(s.get("a.b.FD.findOrFail(Class)")).append(" | ").append(explain(report)).append('\n');
+                }
+            }
+        }
+        assertEquals("", out.toString());
     }
 }

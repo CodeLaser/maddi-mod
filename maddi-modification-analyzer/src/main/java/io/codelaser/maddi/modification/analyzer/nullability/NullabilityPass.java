@@ -357,6 +357,8 @@ public final class NullabilityPass {
     private final Set<MethodInfo> analysed = new HashSet<>();
     // source declarations annotated non-null (Policy.contracts): null stops there
     private final Set<Object> nonNullContracts = new HashSet<>();
+    // (method, null marker): a return statement guarded the marker's link into the method's return (linksOf)
+    private final Set<List<Object>> guardedReturnMarkers = new HashSet<>();
     // the analysed method a local belongs to (a lambda's local: the method the lambda is in)
     private final Map<Local, MethodInfo> localOwner = new HashMap<>();
     private MethodInfo owner;
@@ -1920,6 +1922,19 @@ public final class NullabilityPass {
             if (from instanceof Arg && link.linkNature().isIdenticalTo()) continue;
             if (link.linkNature().isIdenticalTo() || link.linkNature().isAssignedFrom()) {
                 if (isNullMarker(link.to())) {
+                    // a return whose value is known non-null returns no null, whatever '≡' links it to: in 'var d =
+                    // find(c); if (d == null) throw ...; return d;' the return is linked to find's 'return null'
+                    // through d (timefold SolutionDescriptor.findEntityDescriptorOrFail, the diagnose session). The
+                    // method's own summary repeats the link (no statement): skipped once a return guarded it.
+                    if (fromVar instanceof ReturnVariable) {
+                        List<Object> key = List.of(mi, link.to());
+                        Expression returned = statement == null ? null : assignedValue(statement, fromVar);
+                        if (returned != null && facts.nonNull(returned, facts.before(statement))) {
+                            guardedReturnMarkers.add(key);
+                            continue;
+                        }
+                        if (statement == null && guardedReturnMarkers.contains(key)) continue;
+                    }
                     // a variable becomes null only where it is assigned: '≡' is transitive in the links, so in
                     // 'checked = check(key)' with 'check' returning its argument or null, 'key ≡ return ≡ null'
                     // reaches 'key' (nacos SystemEnvPropertySource, reported by the diagnose session). A slot
