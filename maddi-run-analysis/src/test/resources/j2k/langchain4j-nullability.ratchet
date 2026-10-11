@@ -38,12 +38,18 @@
 # naming and SAM constructors beside an overload taking T: 315 files compiling (47 type errors), 314 to class files.
 # The tests go DOWN 2, knowingly: DefaultRetrievalAugmentor now compiles, and its tests hand builder.executor(null) a
 # setter judged non-null; 1,043 pass with the Kotlin classes, 1,031 translated.
+# 2026-10-11, the nullability side's cdc6fa78 (a cast null or a conditional's null branch through this(...) makes the
+# parameter nullable), 555cb0e8 (a parameter only stored into a nullable field takes null, Kotlin policy) and 01c7c110
+# (that rule skips overriding and overridden methods), with maddi's b46b0ec21 (a cast null follows the parameter's
+# verdict) and 106abb776 (no T : Any where a parameter's type argument feeds T): 316 files compiling (44 type errors),
+# 315 to class files; 1,086 tests pass with the Kotlin classes, 1,077 translated. Both knowing drops above are back:
+# OutputGuardrailResult's SUCCESS initializer and DefaultRetrievalAugmentor's builder.executor(null).
 types	346
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	346
-compilingFiles	315
-bytecodeFiles	314
-testsPassing	1043
+compilingFiles	316
+bytecodeFiles	315
+testsPassing	1086
 testBytecodeFiles	128
-translatedTestsPassing	1031
+translatedTestsPassing	1077
