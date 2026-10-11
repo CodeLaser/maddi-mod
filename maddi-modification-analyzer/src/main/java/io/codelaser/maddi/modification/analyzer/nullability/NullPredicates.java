@@ -71,6 +71,8 @@ public final class NullPredicates {
 
     // per analysed method, per parameter index
     private final Map<MethodInfo, Map<Integer, When>> inferred = new HashMap<>();
+    // per analysed no-argument method of an object, per field of this it tests ('hasNext() { return next != null; }')
+    private final Map<MethodInfo, Map<Variable, When>> fieldTests = new HashMap<>();
 
     /** Infers the analysed predicates among {@code methods}. */
     public static NullPredicates infer(List<MethodInfo> methods) {
@@ -93,7 +95,49 @@ public final class NullPredicates {
             }
             if (!changed) break;
         }
+        // CodeLaser/maddi-mod#27 c, timefold ElementAwareLinkedList: 'if (!hasNext()) throw ...; next.element()' with
+        // 'hasNext() { return next != null; }'. Only a method no override can replace: private, final, or of a final
+        // class; the field's value is tested when the method runs, so a non-final field holds it until the next call
+        for (MethodInfo m : methods) {
+            if (m.methodBody() == null || m.isConstructor() || m.isStatic() || !m.parameters().isEmpty()
+                || !m.returnType().isBooleanOrBoxedBoolean()
+                || !m.access().isPrivate() && !m.isFinal() && !m.typeInfo().isFinal()) continue;
+            for (Variable field : testedFields(m)) {
+                When when = predicates.evaluate(m, field);
+                if (when != null) predicates.fieldTests.computeIfAbsent(m, _ -> new HashMap<>()).put(field, when);
+            }
+        }
         return predicates;
+    }
+
+    /** The fields of this that {@code method}, called on this, tells non-null when its result is {@code result}. */
+    public Set<Variable> fieldsNonNullWhen(MethodInfo method, boolean result) {
+        Map<Variable, When> tests = fieldTests.get(method);
+        if (tests == null) return Set.of();
+        When neverForNull = result ? When.FALSE_IF_NULL : When.TRUE_IF_NULL;
+        Set<Variable> set = new java.util.HashSet<>();
+        tests.forEach((field, when) -> {
+            if (when == neverForNull) set.add(field);
+        });
+        return set;
+    }
+
+    // the fields of this compared with null in the body
+    private static Set<Variable> testedFields(MethodInfo m) {
+        Set<Variable> fields = new java.util.HashSet<>();
+        m.methodBody().visit(e -> {
+            if (e instanceof BinaryOperator bo && (operator(bo, "==") || operator(bo, "!="))) {
+                Expression other = bo.lhs() instanceof NullConstant ? bo.rhs()
+                        : bo.rhs() instanceof NullConstant ? bo.lhs() : null;
+                if (other != null && NonNullFacts.unwrap(other) instanceof VariableExpression ve
+                    && ve.variable() instanceof io.codelaser.maddi.cst.api.variable.FieldReference fr
+                    && fr.scopeIsThis() && !fr.fieldInfo().isStatic()) {
+                    fields.add(ve.variable());
+                }
+            }
+            return true;
+        });
+        return fields;
     }
 
     /** What {@code method} returns when its parameter {@code index} is null; null when unknown. */
@@ -113,7 +157,7 @@ public final class NullPredicates {
     // a path's outcome: it returns this value (or one that is not known), it throws, or it falls through
     private enum Outcome {TRUE, FALSE, UNKNOWN, THROWS, CONTINUES}
 
-    private When evaluate(MethodInfo m, ParameterInfo p) {
+    private When evaluate(MethodInfo m, Variable p) {
         Outcome outcome = block(m.methodBody(), p);
         return switch (outcome) {
             case TRUE -> When.TRUE_IF_NULL;

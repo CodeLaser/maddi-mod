@@ -20,6 +20,7 @@ import io.codelaser.maddi.cst.api.statement.Block;
 import io.codelaser.maddi.cst.api.statement.IfElseStatement;
 import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.cst.api.statement.Statement;
+import io.codelaser.maddi.cst.api.statement.TryStatement;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -3439,5 +3440,124 @@ public class TestNullabilityPass extends CommonTest {
             }
         }
         assertEquals("", out.toString());
+    }
+
+    // timefold ReflectionHelper (the diagnose session, CodeLaser/maddi-mod#27 b): the try body starts with the loop's
+    // 'c != null'; the catch's assignment only matters after it
+    @DisplayName("use sites: a try body starts with the facts at the try, a catch with those its body keeps")
+    @Test
+    public void tryBodyKeepsLoopCondition() {
+        NullabilityPass.Report report = run("a.b.RH", """
+                package a.b;
+                import java.lang.reflect.Field;
+                class RH {
+                    static Field find(Class<?> start, String name) {
+                        Class<?> c = start;
+                        while (c != null) {
+                            try {
+                                return c.getDeclaredField(name);
+                            } catch (NoSuchFieldException e) {
+                                c = c.getSuperclass();
+                            }
+                        }
+                        return null;
+                    }
+                    static String body(String s) {
+                        String t = s;
+                        if (t != null) {
+                            try {
+                                t = null;
+                                return String.valueOf(Integer.parseInt(s));
+                            } catch (NumberFormatException e) {
+                                return t.trim();
+                            }
+                        }
+                        return "";
+                    }
+                }
+                """);
+        TryStatement inLoop = (TryStatement) parsed.findUniqueMethod("find", 2).methodBody().statements().get(1)
+                .block().statements().getFirst();
+        Statement returned = inLoop.block().statements().getFirst();
+        Variable c = ((VariableExpression) ((MethodCall) returned.expression()).object()).variable();
+        assertEquals(true, report.useSites().nonNullAt(returned, c), "the try body: the loop's condition holds");
+        assertEquals(true, report.useSites().nonNullAt(inLoop.catchClauses().getFirst().block().statements().getFirst(), c),
+                "the catch: the body does not assign c");
+        TryStatement assigning = (TryStatement) parsed.findUniqueMethod("body", 1).methodBody().statements().get(1)
+                .block().statements().getFirst();
+        Statement first = assigning.block().statements().getFirst();
+        Variable t = ((io.codelaser.maddi.cst.api.expression.Assignment) first.expression()).variableTarget();
+        assertEquals(true, report.useSites().nonNullAt(first, t), "the body's start");
+        assertEquals(false, report.useSites().nonNullAt(assigning.catchClauses().getFirst().block().statements()
+                .getFirst(), t), "the catch: the body may have assigned t");
+    }
+
+    // timefold DefaultExhaustiveSearchPhaseFactory (CodeLaser/maddi-mod#27 a): 'List.of(find())' throws on a null,
+    // so the list holds none; an ArrayList given the same value does
+    @DisplayName("an immutable collection factory stores no null element")
+    @Test
+    public void immutableFactoryRejectsNull() {
+        NullabilityPass.Report report = run("a.b.IF", """
+                package a.b;
+                import java.util.ArrayList;
+                import java.util.List;
+                class IF {
+                    static String find(int i) { return i > 0 ? "x" : null; }
+                    static List<String> one(int i) { return List.of(find(i)); }
+                    static List<String> two(int i) {
+                        List<String> list = new ArrayList<>();
+                        list.add(find(i));
+                        return list;
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("String?", s.get("a.b.IF.find(int)"), s.toString());
+        assertEquals("List<String>", s.get("a.b.IF.one(int)"), s.toString());
+        assertEquals("List<String?>", s.get("a.b.IF.two(int)"), s.toString());
+    }
+
+    // timefold ElementAwareLinkedList.ElementAwareListIterator (CodeLaser/maddi-mod#27 c): 'if (!hasNext()) throw ...;
+    // next.value' with 'hasNext() { return next != null; }' in a final class
+    @DisplayName("use sites: a no-argument test of a field of this, as a condition")
+    @Test
+    public void fieldTestingPredicate() {
+        NullabilityPass.Report report = run("a.b.IT", """
+                package a.b;
+                final class IT {
+                    static final class Node {
+                        String value = "v";
+                        Node following;
+                    }
+                    private Node next;
+                    IT(Node first) { next = first; }
+                    public boolean hasNext() { return next != null; }
+                    public boolean done() { return next == null; }
+                    public String take() {
+                        if (!hasNext()) throw new IllegalStateException();
+                        String v = next.value;
+                        next = next.following;
+                        return v;
+                    }
+                    public String skip() {
+                        if (done()) return null;
+                        return next.value;
+                    }
+                    public String plain() {
+                        if (next.following == null) return null;
+                        return next.value;
+                    }
+                    void reset() { next = null; }
+                }
+                """);
+        Statement read = parsed.findUniqueMethod("take", 0).methodBody().statements().get(1);
+        io.codelaser.maddi.cst.api.variable.FieldReference value = (io.codelaser.maddi.cst.api.variable.FieldReference)
+                ((VariableExpression) ((io.codelaser.maddi.cst.api.statement.LocalVariableCreation) read).localVariable()
+                        .assignmentExpression()).variable();
+        Variable next = ((VariableExpression) value.scope()).variable();
+        assertEquals(true, report.useSites().nonNullAt(read, next), "after 'if (!hasNext()) throw'");
+        Statement returned = parsed.findUniqueMethod("skip", 0).methodBody().statements().get(1);
+        assertEquals(true, report.useSites().nonNullAt(returned, next), "after 'if (done()) return'");
     }
 }

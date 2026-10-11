@@ -297,6 +297,27 @@ public final class NonNullFacts {
                 effects(ss.expression(), facts);
                 return block(ss.block(), facts);
             }
+            case TryStatement ts -> {
+                // the body runs first, with the facts at the try less what its resources assign; a catch can start
+                // anywhere in the body, the finally anywhere at all. What follows keeps, as for any compound
+                // statement, the facts of variables none of it assigns. timefold ReflectionHelper: 'while (c !=
+                // null) { try { return c.getDeclaredField(n); } catch (...) { c = c.getSuperclass(); } }' lost the
+                // loop's 'c != null' at the body's start, because the catch assigns c.
+                Set<Variable> bodyIn = new HashSet<>(facts);
+                Set<Variable> catchIn = new HashSet<>(facts);
+                List<Statement> started = new ArrayList<>(ts.resources());
+                for (Statement resource : ts.resources()) forget(bodyIn, resource);
+                started.add(ts.block());
+                for (Statement part : started) forget(catchIn, part);
+                Set<Variable> stable = new HashSet<>(facts);
+                forget(stable, statement);
+                block(ts.block(), bodyIn);
+                for (TryStatement.CatchClause cc : ts.catchClauses()) block(cc.block(), new HashSet<>(catchIn));
+                if (ts.finallyBlock() != null && !ts.finallyBlock().isEmpty()) {
+                    block(ts.finallyBlock(), new HashSet<>(stable));
+                }
+                return new Out(stable, true);
+            }
             default -> {
                 // do-while, try, switch, local type declarations, ...: the selector is evaluated first; each
                 // sub-block starts with the facts of variables the statement does not assign; afterwards the same
@@ -336,6 +357,14 @@ public final class NonNullFacts {
         });
         // the condition is evaluated on every way out (but the last evaluation's 'false' is not known here)
         return new Out(facts, true);
+    }
+
+    // the facts that no longer hold once (part of) the statement may have run: what it assigns, a field at a call
+    private void forget(Set<Variable> facts, Statement statement) {
+        Set<Variable> assigned = assignedIn(statement);
+        facts.removeAll(assigned);
+        facts.removeIf(v -> dependsOnAssigned(v, assigned));
+        if (containsCall(statement)) facts.removeIf(NonNullFacts::isNonFinalField);
     }
 
     private static boolean containsCall(Statement statement) {
@@ -750,6 +779,13 @@ public final class NonNullFacts {
     private Set<Variable> predicated(MethodCall mc, NullPredicates.When when) {
         if (predicates == null || kotlinSmartCasts || mc.methodInfo() == null) return Set.of();
         Set<Variable> set = new HashSet<>();
+        // a no-argument test of this class on this ('hasNext()'): the fields it tells non-null
+        if (mc.parameterExpressions().isEmpty() && walking != null
+            && mc.methodInfo().typeInfo().equals(walking.typeInfo())
+            && (mc.object() == null || unwrap(mc.object()) instanceof VariableExpression ve
+                                       && ve.variable() instanceof io.codelaser.maddi.cst.api.variable.This)) {
+            set.addAll(predicates.fieldsNonNullWhen(mc.methodInfo(), when == NullPredicates.When.FALSE_IF_NULL));
+        }
         List<Expression> arguments = mc.parameterExpressions();
         for (int i = 0; i < arguments.size(); i++) {
             if (unwrap(arguments.get(i)) instanceof VariableExpression ve && trackable(ve.variable())

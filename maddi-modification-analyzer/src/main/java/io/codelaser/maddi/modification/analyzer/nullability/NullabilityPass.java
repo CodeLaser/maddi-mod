@@ -3094,6 +3094,12 @@ public final class NullabilityPass {
                 // a parameter the library declares nullable accepts null; that is not storing it as a T
                 if (stateOf(p, PropertyImpl.NULLABILITY_PARAMETER) == NullableState.NULLABLE) continue;
                 Expression argument = arguments.get(a);
+                if (rejectsNull(callee)) {
+                    seedCreated(slot, argument, mi); // the elements of an array stored as one ('new Integer[]{null}')
+                    Object source = readScope == null ? null : argumentNode(readScope.mi(), readScope.scope(), argument);
+                    if (source != null) flows.add(List.of(source, slot)); // its content slots still are the slot's
+                    continue;
+                }
                 if (NonNullFacts.unwrap(argument) instanceof NullConstant) {
                     seed(slot, "null passed to " + callee.fullyQualifiedName() + " in " + where(mi), writer(mi));
                     continue;
@@ -3111,6 +3117,21 @@ public final class NullabilityPass {
                 }
             }
         }
+    }
+
+    /*
+     An immutable collection factory throws on a null element: 'List.of(x)' holds no null, whatever x may be
+     (timefold DefaultExhaustiveSearchPhaseFactory: 'return List.of(solutionDescriptor.getListVariableDescriptor())',
+     whose null is the caller's NullPointerException, not an element). The JDK's 'of', 'copyOf', 'entry' and
+     'ofEntries' on List, Set and Map; guava's Immutable* collections.
+     */
+    private static boolean rejectsNull(MethodInfo callee) {
+        String type = callee.typeInfo().fullyQualifiedName();
+        String name = callee.name();
+        boolean factory = "of".equals(name) || "copyOf".equals(name) || "entry".equals(name) || "ofEntries".equals(name);
+        return factory && callee.isStatic()
+               && ("java.util.List".equals(type) || "java.util.Set".equals(type) || "java.util.Map".equals(type)
+                   || type.startsWith("com.google.common.collect.Immutable"));
     }
 
     private String nullableLibraryCall(Expression e) {
