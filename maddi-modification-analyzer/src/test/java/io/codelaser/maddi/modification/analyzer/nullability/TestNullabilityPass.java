@@ -3102,4 +3102,161 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("String", s.get("a.b.SO.Statement.replace(String,String):1:newValue"), s.toString());
         assertEquals("String", s.get("a.b.SO.Base.name(String):0:name"), s.toString());
     }
+
+    // langchain4j ListeningEmbeddingModel.embed: 'textSegment == null ? List.of() : List.of(textSegment)' puts no null
+    // into the list, so the builder's list is a List<TextSegment> like the context's final field
+    @DisplayName("a library factory's argument known non-null at the call: no null element")
+    @Test
+    public void factoryArgumentUnderCondition() {
+        NullabilityPass.Report report = run("a.b.LF", """
+                package a.b;
+                import java.util.List;
+                class LF {
+                    private final List<String> items;
+                    LF(List<String> items) { this.items = items; }
+                    static LF of(String s) {
+                        List<String> list = s == null ? List.of() : List.of(s);
+                        return new LF(list);
+                    }
+                    static LF none() { return of(null); }
+                    List<String> items() { return items; }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("String?", s.get("a.b.LF.of(String):0:s"), s.toString());
+        assertEquals("List<String>", s.get("a.b.LF.<init>(java.util.List):0:items"), s.toString());
+    }
+
+    // langchain4j DefaultAiServiceStartedEvent: 'Optional.ofNullable(this.systemMessage)' with a nullable field is an
+    // Optional<SystemMessage>, as the interface it implements declares; an Optional never holds null
+    @DisplayName("Optional.ofNullable of a nullable value: the Optional's type argument stays non-null")
+    @Test
+    public void optionalOfNullable() {
+        NullabilityPass.Report report = run("a.b.OE", """
+                package a.b;
+                import java.util.Optional;
+                class OE {
+                    private final String name;
+                    OE(String name) { this.name = name; }
+                    static OE none() { return new OE(null); }
+                    Optional<String> name() { return Optional.ofNullable(name); }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("String?", s.get("a.b.OE.name"), s.toString());
+        assertEquals("Optional<String>", s.get("a.b.OE.name()"), s.toString());
+    }
+
+    // langchain4j EmbeddingModelRequestContext, DefaultContent: 'this.items = copy(ensure(builder.items, "items"))'.
+    // Kotlin infers copy's and ensure's T from the argument, so the field's type is the builder's, element included
+    @DisplayName("Kotlin: a generic method handing its argument's type on ties the type arguments")
+    @Test
+    public void passedThroughGenericMethod() {
+        NullabilityPass.Report report = run("a.b.PT", """
+                package a.b;
+                import java.util.ArrayList;
+                import java.util.Collections;
+                import java.util.List;
+                class PT {
+                    private final List<String> items;
+                    private final List<String> names;
+                    PT(Builder builder) {
+                        this.items = copy(ensure(builder.items, "items"));
+                        this.names = copy(builder.names);
+                    }
+                    static <T> T ensure(T t, String name) {
+                        if (t == null) throw new IllegalArgumentException(name);
+                        return t;
+                    }
+                    static <T> List<T> copy(List<? extends T> list) {
+                        return list == null ? List.of() : Collections.unmodifiableList(list);
+                    }
+                    List<String> items() { return items; }
+                    List<String> names() { return names; }
+                    static class Builder {
+                        List<String> items;
+                        List<String> names;
+                        Builder items(List<String> items) { this.items = items; return this; }
+                        Builder names(List<String> names) { this.names = names; return this; }
+                        PT build() { return new PT(this); }
+                    }
+                    static PT make() {
+                        List<String> list = new ArrayList<>();
+                        list.add(null);
+                        return new Builder().items(list).names(List.of("a")).build();
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("List<String?>?", s.get("a.b.PT.Builder.items"), s.toString());
+        assertEquals("List<String?>", s.get("a.b.PT.items"), s.toString());
+        assertEquals("List<String>", s.get("a.b.PT.names"), s.toString());
+    }
+
+    // langchain4j EmbeddingStoreContentRetriever: 'this(..., (query) -> maxResults, ...)' with a nullable maxResults
+    @DisplayName("Kotlin: a lambda's nullable result makes the functional parameter's result type argument nullable")
+    @Test
+    public void lambdaResultIntoTypeArgument() {
+        NullabilityPass.Report report = run("a.b.LR", """
+                package a.b;
+                import java.util.function.Function;
+                class LR {
+                    private final Function<String, Integer> provider;
+                    LR(Integer max) { this(query -> max); }
+                    private LR(Function<String, Integer> provider) { this.provider = provider; }
+                    static LR none() { return new LR((Integer) null); }
+                    static LR some() { return new LR(3); }
+                    Integer get(String query) { return provider.apply(query); }
+                    static <T> T call(java.util.concurrent.Callable<T> action) throws Exception { return action.call(); }
+                    static String named() throws Exception { return call(() -> "x"); }
+                    static Object none(int i) throws Exception { return call(() -> null); }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("Integer?", s.get("a.b.LR.<init>(Integer):0:max"), s.toString());
+        assertEquals("Function<String, Integer?>", s.get("a.b.LR.<init>(java.util.function.Function):0:provider"),
+                s.toString());
+        assertEquals("Callable<T!>", s.get("a.b.LR.call(java.util.concurrent.Callable):0:action"), s.toString());
+        assertEquals("String", s.get("a.b.LR.named()"), s.toString());
+    }
+
+    // langchain4j OutputGuardrailExecutor.execute overrides GuardrailExecutor's 'R execute(P)', R bounded by
+    // GuardrailResult<R>: Kotlin refuses a nullable override there, so the return is non-null and the null asserted
+    @DisplayName("Kotlin: an override of a bounded type variable's return stays non-null")
+    @Test
+    public void boundedTypeVariableOverrideReturn() {
+        NullabilityPass.Report report = run("a.b.BO", """
+                package a.b;
+                class BO {
+                    interface Result<R extends Result<R>> { boolean ok(); }
+                    static final class Res implements Result<Res> { public boolean ok() { return true; } }
+                    interface Executor<R extends Result<R>> { R execute(int attempts); }
+                    abstract static class Base<R extends Result<R>> implements Executor<R> { }
+                    static class Exec extends Base<Res> {
+                        @Override
+                        public Res execute(int attempts) {
+                            Res result = null;
+                            int attempt = 0;
+                            while (attempt < attempts) {
+                                result = new Res();
+                                if (result.ok()) return result;
+                                attempt++;
+                            }
+                            return result;
+                        }
+                    }
+                    static class Plain {
+                        Res find(int attempts) { return attempts > 0 ? new Res() : null; }
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("Res", s.get("a.b.BO.Exec.execute(int)"), s.toString());
+        assertEquals("Res?", s.get("a.b.BO.Plain.find(int)"), s.toString());
+    }
 }
