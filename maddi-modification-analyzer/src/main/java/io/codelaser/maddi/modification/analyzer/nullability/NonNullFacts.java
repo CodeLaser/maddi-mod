@@ -15,6 +15,7 @@
 package io.codelaser.maddi.modification.analyzer.nullability;
 
 import io.codelaser.maddi.cst.api.expression.*;
+import io.codelaser.maddi.cst.api.info.FieldInfo;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.statement.*;
@@ -46,7 +47,8 @@ import java.util.function.Function;
  * the facts of an earlier same-named local; a loop, a {@code try} and a {@code switch} keep only the facts of
  * variables they do not assign; facts established inside a branch that may continue (not ending in return, throw,
  * break or continue) are joined by intersection. A field of {@code this} is tracked too, but a non-final one only
- * until the next call (which may change it), and not into a lambda body; a lambda body otherwise starts with the
+ * until the next call that may change it (any but an array creation, or a library method not handed {@code this}),
+ * and not into a lambda body; a lambda body otherwise starts with the
  * facts where it is written: it can only capture effectively final variables.
  * <p>
  * Inside a statement the facts follow evaluation order: the right operand of {@code &&} sees the left one true,
@@ -68,6 +70,10 @@ public final class NonNullFacts {
     // per call: the facts once the receiver and all arguments are evaluated, when the callee runs
     private final Map<Expression, Set<Variable>> whenCalled = new IdentityHashMap<>();
     private final Map<MethodInfo, Set<Variable>> atExit = new IdentityHashMap<>();
+    // per method: the fields of this non-null at every normal exit (nonNullAtExit(MethodInfo, FieldInfo))
+    private final Map<MethodInfo, Set<Variable>> fieldsAtExit = new IdentityHashMap<>();
+    // the method being walked
+    private MethodInfo walking;
     // the facts at each normal exit (a return, the end of the body) of the method being walked; null in a lambda
     private List<Set<Variable>> exits;
     private final Function<ParameterInfo, NullableState> parameterContract;
@@ -133,15 +139,32 @@ public final class NonNullFacts {
         Block body = methodInfo.methodBody();
         if (body == null) return;
         exits = new ArrayList<>();
+        walking = methodInfo;
         Out out = block(body, Set.of());
+        walking = null;
         if (out.completes) exits.add(out.facts);
         if (!exits.isEmpty()) {
             Set<Variable> common = new HashSet<>(exits.getFirst());
             exits.forEach(common::retainAll);
+            Set<Variable> fields = new HashSet<>();
+            for (Variable v : common) {
+                if (v instanceof FieldReference fr && fr.scopeIsThis() && !fr.fieldInfo().isStatic()) fields.add(v);
+            }
+            if (!fields.isEmpty()) fieldsAtExit.put(methodInfo, Set.copyOf(fields));
             common.removeAll(assignedIn(body));
             atExit.put(methodInfo, Set.copyOf(common));
         }
         exits = null;
+    }
+
+    /**
+     * Is {@code field} of {@code this} non-null whenever {@code methodInfo} returns normally? Then a call to it on
+     * {@code this} leaves the field non-null ({@code ensureBufferSize(n); buffer[pos++] = b}). Not in
+     * {@link #kotlinSmartCasts()}: Kotlin does not smart-cast a property across a call.
+     */
+    public boolean nonNullAtExit(MethodInfo methodInfo, FieldInfo field) {
+        return fieldsAtExit.getOrDefault(methodInfo, Set.of()).stream()
+                .anyMatch(v -> v instanceof FieldReference fr && fr.fieldInfo().equals(field));
     }
 
     /**
@@ -500,10 +523,77 @@ public final class NonNullFacts {
         // call itself), or one that neither runs on the receiver nor is handed it, unless the receiver is a field
         boolean modifying = call instanceof MethodCall mc ? mc.methodInfo() == null || mc.methodInfo().isModifying()
                 : call instanceof ConstructorCall;
-        facts.removeIf(v -> isNonFinalField(v) || v instanceof DependentVariable
+        boolean keepsThis = !reachesThis(call);
+        facts.removeIf(v -> isNonFinalField(v) && !(keepsThis && v instanceof FieldReference fr && fr.scopeIsThis())
+                            || v instanceof DependentVariable
                             || v instanceof KeyPresence kp && touches(kp.map(), receiver, read, arguments)
                             || v instanceof PureCall pc && modifying
                                && (isNonFinalField(pc.receiver()) || touches(pc.receiver(), receiver, false, arguments)));
+    }
+
+    /*
+     A lazy-initialising helper of this class ('ensureBufferSize(n)', 'ensureOpen()'): the fields of this it leaves
+     non-null on every normal exit are non-null after the call (nacos Base64.encode: 'ensureBufferSize(encodeSize);
+     buffer[pos++] = ...'). Only on this, for a method no override can replace (private, final, or in a final
+     class), of the class being walked, and already walked: callees come first in the analysis order, a recursive
+     call adds nothing.
+     */
+    private void fieldsEnsured(MethodCall mc, Set<Variable> facts) {
+        MethodInfo callee = mc.methodInfo();
+        if (kotlinSmartCasts || callee == null || callee.isStatic() || walking == null
+            || !callee.typeInfo().equals(walking.typeInfo())) return;
+        if (mc.object() != null && !(unwrap(mc.object()) instanceof VariableExpression ve
+                                     && ve.variable() instanceof io.codelaser.maddi.cst.api.variable.This)) return;
+        if (!callee.access().isPrivate() && !callee.isFinal() && !callee.typeInfo().isFinal()) return;
+        facts.addAll(fieldsAtExit.getOrDefault(callee, Set.of()));
+    }
+
+    /*
+     Can the call change a field of this? An array creation runs no code. A library method reaches this only through
+     a reference handed to it: as the receiver, as an argument, or captured by a lambda, a method reference or an
+     anonymous class passed along (a listener stored and called back later is the one way around this, accepted).
+     nacos Base64: 'if (buffer != null) { int len = Math.min(...); System.arraycopy(buffer, ...); }' and
+     'byte[] b = new byte[buffer.length * 2]' kept 'buffer' non-null only until the call. An analysed method may.
+     */
+    private static boolean reachesThis(Expression call) {
+        List<Expression> handed = new ArrayList<>();
+        switch (call) {
+            case ConstructorCall cc -> {
+                if (cc.constructor() == null) return cc.anonymousClass() != null; // 'new byte[n]', '{ a, b }'
+                if (cc.anonymousClass() != null || !library(cc.constructor())) return true;
+                handed.addAll(cc.parameterExpressions());
+            }
+            case MethodCall mc -> {
+                if (mc.methodInfo() == null || !library(mc.methodInfo())) return true;
+                if (mc.object() != null) handed.add(mc.object());
+                handed.addAll(mc.parameterExpressions());
+            }
+            default -> {
+                return true;
+            }
+        }
+        boolean[] found = {false};
+        for (Expression e : handed) {
+            e.visit(x -> {
+                if (found[0]) return false;
+                if (x instanceof Lambda || x instanceof MethodReference
+                    || x instanceof ConstructorCall cc && cc.anonymousClass() != null
+                    || x instanceof VariableExpression ve && ve.variable() instanceof io.codelaser.maddi.cst.api.variable.This) {
+                    found[0] = true;
+                    return false;
+                }
+                // 'this.pos', 'this.items[i]': the value read is handed on, not the object it is read from
+                return !(x instanceof VariableExpression ve
+                         && (ve.variable() instanceof FieldReference || ve.variable() instanceof DependentVariable));
+            });
+        }
+        return found[0];
+    }
+
+    // a method of a library or the JDK: no source of ours, it cannot reach this unless handed it
+    private static boolean library(MethodInfo mi) {
+        var cu = mi.typeInfo().primaryType().compilationUnit();
+        return cu != null && (cu.externalLibrary() || cu.partOfJdk());
     }
 
     private static boolean touches(Variable map, Variable receiver, boolean read, List<Expression> arguments) {
@@ -830,6 +920,7 @@ public final class NonNullFacts {
                         if (present != null) facts.add(present);
                     }
                     presentAtCalleeExit(mc, facts);
+                    fieldsEnsured(mc, facts);
                     return false;
                 }
                 case ConstructorCall cc -> {

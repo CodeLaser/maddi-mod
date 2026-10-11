@@ -14,7 +14,11 @@ import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import io.codelaser.maddi.cst.api.expression.MethodCall;
+import io.codelaser.maddi.cst.api.expression.VariableExpression;
+import io.codelaser.maddi.cst.api.statement.Block;
 import io.codelaser.maddi.cst.api.statement.IfElseStatement;
+import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.cst.api.statement.Statement;
 import java.util.List;
 import java.util.Map;
@@ -3258,5 +3262,122 @@ public class TestNullabilityPass extends CommonTest {
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Res", s.get("a.b.BO.Exec.execute(int)"), s.toString());
         assertEquals("Res?", s.get("a.b.BO.Plain.find(int)"), s.toString());
+    }
+
+    // nacos Base64.readResults / ensureBufferSize (the diagnose session): a guarded field of this stays non-null
+    // across a library call not handed this ('Math.min', 'System.arraycopy') and across an array creation
+    @DisplayName("use sites: a call that cannot reach this keeps the facts on its fields")
+    @Test
+    public void callsThatCannotReachThis() {
+        NullabilityPass.Report report = run("a.b.BB", """
+                package a.b;
+                import java.util.Objects;
+                class BB {
+                    private byte[] buffer;
+                    private int pos;
+                    void copy(byte[] b, int n) {
+                        if (buffer != null) {
+                            int len = Math.min(pos, n);
+                            System.arraycopy(buffer, 0, b, 0, len);
+                        }
+                    }
+                    void grow() {
+                        if (buffer == null) {
+                            buffer = new byte[8];
+                        } else {
+                            byte[] b = new byte[buffer.length * 2];
+                            System.arraycopy(buffer, 0, b, 0, buffer.length);
+                            buffer = b;
+                        }
+                    }
+                    void handed(byte[] b) {
+                        if (buffer != null) {
+                            int h = Objects.hash(this);
+                            System.arraycopy(buffer, 0, b, 0, h);
+                        }
+                    }
+                    void own(byte[] b) {
+                        if (buffer != null) {
+                            reset();
+                            System.arraycopy(buffer, 0, b, 0, 1);
+                        }
+                    }
+                    void reset() { buffer = null; }
+                    void plain(byte[] b) {
+                        if (buffer != null) {
+                            System.arraycopy(buffer, 0, b, 0, 1);
+                        }
+                    }
+                }
+                """);
+        assertEquals(true, bufferKnownAtArraycopy(report, parsed.findUniqueMethod("plain", 1).methodBody()
+                .statements().getFirst().block()), "no call in between");
+        assertEquals(true, bufferKnownAtArraycopy(report, parsed.findUniqueMethod("copy", 2).methodBody()
+                .statements().getFirst().block()), "after Math.min");
+        IfElseStatement grow = (IfElseStatement) parsed.findUniqueMethod("grow", 0).methodBody().statements().getFirst();
+        assertEquals(true, bufferKnownAtArraycopy(report, grow.elseBlock()), "after 'new byte[...]'");
+        assertEquals(false, bufferKnownAtArraycopy(report, parsed.findUniqueMethod("handed", 1).methodBody()
+                .statements().getFirst().block()), "Objects.hash is handed this");
+        assertEquals(false, bufferKnownAtArraycopy(report, parsed.findUniqueMethod("own", 1).methodBody()
+                .statements().getFirst().block()), "an analysed method may change it");
+    }
+
+    // the facts on 'buffer' when the block's 'System.arraycopy(buffer, ...)' starts
+    private static boolean bufferKnownAtArraycopy(NullabilityPass.Report report, Block block) {
+        Statement copy = block.statements().stream()
+                .filter(st -> st.expression() instanceof MethodCall mc && "arraycopy".equals(mc.methodInfo().name()))
+                .findFirst().orElseThrow();
+        MethodCall mc = (MethodCall) copy.expression();
+        Variable buffer = ((VariableExpression) mc.parameterExpressions().getFirst()).variable();
+        return report.useSites().nonNullAt(copy, buffer);
+    }
+
+    // nacos Base64.encode (the diagnose session): 'ensureBufferSize(n); buffer[pos++] = b' after a private helper that
+    // leaves the field non-null on every normal exit
+    @DisplayName("use sites: a field a private helper leaves non-null is non-null after the call")
+    @Test
+    public void fieldNonNullAtExit() {
+        NullabilityPass.Report report = run("a.b.EB", """
+                package a.b;
+                class EB {
+                    private byte[] buffer;
+                    private int pos;
+                    private void ensure(int size) {
+                        if (buffer == null || buffer.length < pos + size) {
+                            if (buffer == null) {
+                                buffer = new byte[8];
+                            } else {
+                                byte[] b = new byte[buffer.length * 2];
+                                System.arraycopy(buffer, 0, b, 0, buffer.length);
+                                buffer = b;
+                            }
+                        }
+                    }
+                    void encode(byte v) {
+                        ensure(1);
+                        buffer[pos++] = v;
+                    }
+                    void grow(int size) { if (buffer == null) buffer = new byte[size]; }
+                    void open(byte v) {
+                        grow(1);
+                        buffer[pos++] = v;
+                    }
+                    void reset() { buffer = null; }
+                }
+                """);
+        FieldInfo buffer = parsed.getFieldByName("buffer", true);
+        assertEquals(true, report.useSites().nonNullAtExit(parsed.findUniqueMethod("ensure", 1), buffer));
+        assertEquals(false, report.useSites().nonNullAtExit(parsed.findUniqueMethod("reset", 0), buffer));
+        assertEquals(true, bufferKnownAtWrite(report, parsed.findUniqueMethod("encode", 1)), "after ensure(1)");
+        assertEquals(false, bufferKnownAtWrite(report, parsed.findUniqueMethod("open", 1)), "grow is overridable");
+    }
+
+    // the facts on 'buffer' when the method's 'buffer[pos++] = v' starts
+    private static boolean bufferKnownAtWrite(NullabilityPass.Report report, MethodInfo method) {
+        Statement write = method.methodBody().statements().getLast();
+        io.codelaser.maddi.cst.api.expression.Assignment a =
+                (io.codelaser.maddi.cst.api.expression.Assignment) write.expression();
+        Variable buffer = ((io.codelaser.maddi.cst.api.variable.DependentVariable) a.variableTarget()).arrayVariable();
+        return report.useSites().nonNullAt(write, buffer);
     }
 }
