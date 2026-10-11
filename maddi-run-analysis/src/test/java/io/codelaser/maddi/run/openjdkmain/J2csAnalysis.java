@@ -4,6 +4,7 @@ import io.codelaser.maddi.analysis.api.PrepOutcome;
 import io.codelaser.maddi.analysis.api.PrepRequest;
 import io.codelaser.maddi.callgraph.ComputeAnalysisOrder;
 import io.codelaser.maddi.cst.api.info.Info;
+import io.codelaser.maddi.cst.print.csharp.CSharpFacts;
 import io.codelaser.maddi.cst.print.csharp.CSharpProgram;
 import io.codelaser.maddi.inspection.api.integration.JavaInspector;
 import io.codelaser.maddi.modification.analyzer.IteratingAnalyzer;
@@ -20,7 +21,8 @@ import java.util.Set;
  * prep, call-graph order, MODREACH, nullability), then the NullabilityPass under {@code NULL_MARKED}, whose verdicts
  * it writes on the declarations. The printer's default facts ({@code CSharpFacts.STORED}) read those, and the
  * modification analysis's {@code UNMODIFIED_PARAMETER}: unmodified collection parameters become read-only, nullable
- * declarations {@code T?}.
+ * declarations {@code T?}. Under {@code NULL_MARKED} every other declaration is not null: the facts say the
+ * analysis covered the program ({@code STORED_NULL_MARKED}), and the judge enables C#'s nullable reference types.
  */
 final class J2csAnalysis {
 
@@ -49,6 +51,6 @@ final class J2csAnalysis {
                         .build());
         analyzer.analyze(order, prep.callGraph().graph());
         new NullabilityPass(NullabilityPass.Policy.NULL_MARKED).go(order);
-        return CSharpProgram.Policy.DEFAULT;
+        return CSharpProgram.Policy.DEFAULT.withFacts(CSharpFacts.STORED_NULL_MARKED);
     }
 }
