@@ -3069,4 +3069,37 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("String", s.get("a.b.RA.Builder.name(String):0:name"), s.toString());
         assertEquals("String", s.get("a.b.RA.Builder.label(String):0:label"), s.toString());
     }
+
+    // fernflower Statement.replaceExprent / SwitchStatement: the rule does not split an override from its overridden
+    // method, in either direction
+    @DisplayName("a parameter only stored into a nullable field: not in an override hierarchy")
+    @Test
+    public void storedOnlyIntoNullableFieldOverride() {
+        NullabilityPass.Report report = run("a.b.SO", """
+                package a.b;
+                class SO {
+                    static class Statement {
+                        void replace(String oldValue, String newValue) { throw new UnsupportedOperationException(); }
+                    }
+                    static class Switch extends Statement {
+                        private String value;
+                        @Override void replace(String oldValue, String newValue) { this.value = newValue; }
+                        String value() { return value; }
+                    }
+                    static class Base {
+                        private String name;
+                        void name(String name) { this.name = name; }
+                        String name() { return name; }
+                    }
+                    static class Derived extends Base {
+                        @Override void name(String name) { super.name(name.trim()); }
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("String", s.get("a.b.SO.Switch.replace(String,String):1:newValue"), s.toString());
+        assertEquals("String", s.get("a.b.SO.Statement.replace(String,String):1:newValue"), s.toString());
+        assertEquals("String", s.get("a.b.SO.Base.name(String):0:name"), s.toString());
+    }
 }
