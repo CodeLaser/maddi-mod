@@ -105,6 +105,13 @@ public class SourceContractMaterializer {
         if (methodInfo.isAbstract()) {
             materializeContracted(methodInfo, INDEPENDENT_METHOD);
             materializeContracted(methodInfo, NON_MODIFYING_METHOD);
+            // @Modified(hc=true) (#25): the structural twin is a pure contract on a bodiless declaration -- the
+            // deep arm above reads the @Modified, this writes the "hidden content only" refinement beside it, on
+            // the method and on each parameter. Absent, readers fall back to the deep value.
+            materializeTrueBool(methodInfo, io.codelaser.maddi.cst.impl.analysis.PropertyImpl.STRUCTURALLY_NON_MODIFYING_METHOD);
+            for (io.codelaser.maddi.cst.api.info.ParameterInfo pi : methodInfo.parameters()) {
+                materializeTrueBool(pi, io.codelaser.maddi.cst.impl.analysis.PropertyImpl.STRUCTURALLY_UNMODIFIED_PARAMETER);
+            }
         }
         // @StaticSideEffects is the global-escape twin of @IgnoreModifications: a pure contract on the safe
         // surface (e.g. System.setOut in an AAPI declaration) whose global effect the analyzer cannot see. On a

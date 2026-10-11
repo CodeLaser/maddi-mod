@@ -96,6 +96,7 @@ class AnnotationToProperty {
         Value.Bool fluent = null;
         Value.Bool identity = null;
         Value.Bool unmodified = null;
+        Value.Bool structurallyUnmodified = null; // @Modified(hc=true): modified in the hidden content only (#25)
         Value.Bool ignoreModifications = null;
         Value.Bool staticSideEffects = null;
         Value.Bool isFinal = null;
@@ -204,6 +205,7 @@ class AnnotationToProperty {
                 }
             } else if (Modified.class.getCanonicalName().equals(fqn)) {
                 unmodified = ValueImpl.BoolImpl.from(isAbsent);
+                if (!isAbsent && ae.extractBoolean("hc")) structurallyUnmodified = TRUE;
                 String value = ae.extractString("value", "");
                 if (!value.isBlank()) {
                     FieldInfo fieldInfo = info.typeInfo().getFieldByName(value, false);
@@ -323,6 +325,7 @@ class AnnotationToProperty {
             if (container != null) map.put(PropertyImpl.CONTAINER_METHOD, container);
             if (nullability != null) map.put(PropertyImpl.NULLABILITY_METHOD, nullability);
             if (unmodified != null) map.put(PropertyImpl.NON_MODIFYING_METHOD, unmodified);
+            if (structurallyUnmodified != null) map.put(PropertyImpl.STRUCTURALLY_NON_MODIFYING_METHOD, structurallyUnmodified);
             if (allowInterrupt != null) map.put(PropertyImpl.METHOD_ALLOWS_INTERRUPTS, allowInterrupt);
             if (ignoreModifications != null) map.put(PropertyImpl.IGNORE_MODIFICATION_METHOD, ignoreModifications);
             if (staticSideEffects != null) map.put(PropertyImpl.STATIC_SIDE_EFFECTS_METHOD, staticSideEffects);
@@ -345,6 +348,7 @@ class AnnotationToProperty {
             if (container != null) map.put(PropertyImpl.CONTAINER_FIELD, container);
             if (nullability != null) map.put(PropertyImpl.NULLABILITY_FIELD, nullability);
             if (unmodified != null) map.put(PropertyImpl.UNMODIFIED_FIELD, unmodified);
+            if (structurallyUnmodified != null) map.put(PropertyImpl.STRUCTURALLY_UNMODIFIED_FIELD, structurallyUnmodified);
             if (isFinal != null) map.put(PropertyImpl.FINAL_FIELD, isFinal);
             if (ignoreModifications != null) map.put(PropertyImpl.IGNORE_MODIFICATIONS_FIELD, ignoreModifications);
             if (finalAfter != null && !finalAfter.isBlank()) {
@@ -359,6 +363,7 @@ class AnnotationToProperty {
             if (container != null) map.put(PropertyImpl.CONTAINER_PARAMETER, container);
             if (nullability != null) map.put(PropertyImpl.NULLABILITY_PARAMETER, nullability);
             if (unmodified != null) map.put(PropertyImpl.UNMODIFIED_PARAMETER, unmodified);
+            if (structurallyUnmodified != null) map.put(PropertyImpl.STRUCTURALLY_UNMODIFIED_PARAMETER, structurallyUnmodified);
             if (ignoreModifications != null) map.put(PropertyImpl.IGNORE_MODIFICATIONS_PARAMETER, ignoreModifications);
             if (eventual != null) map.put(PropertyImpl.EVENTUAL_PARAMETER, eventual);
             if (notModifiedAfter != null && !notModifiedAfter.isBlank()) {

@@ -164,6 +164,7 @@ public class DecoratorImpl implements Qualification.Decorator {
         Element info = translationMap == null ? infoIn : translationMap.getOrDefault(infoIn, infoIn);
         Property propertyUnmodified = null;
         Property propertyModifiedAnnotated = null;
+        boolean modifiedHcOnly = false; // @Modified(hc=true): the structural twin is TRUE where the deep verdict is modified (#25)
         Value.Immutable immutable = null;
         Property propertyImmutable = null;
         Value.Independent independent = null;
@@ -209,7 +210,10 @@ public class DecoratorImpl implements Qualification.Decorator {
                 propertyImmutable = IMMUTABLE_METHOD;
                 propertyUnmodified = !methodInfo.isConstructor() && analysis.getOrDefault(NON_MODIFYING_METHOD, FALSE).isTrue()
                         ? NON_MODIFYING_METHOD : null;
-                if (explicit && !methodInfo.isConstructor() && propertyUnmodified == null) {
+                modifiedHcOnly = propertyUnmodified == null && !methodInfo.isConstructor() && analysis.getOrDefault(
+                        io.codelaser.maddi.cst.impl.analysis.PropertyImpl.STRUCTURALLY_NON_MODIFYING_METHOD, FALSE).isTrue();
+                // a "hidden content only" modification is a positive verdict, printed like @NotModified is
+                if ((explicit || modifiedHcOnly) && !methodInfo.isConstructor() && propertyUnmodified == null) {
                     propertyModifiedAnnotated = NON_MODIFYING_METHOD;
                 }
                 propertyIdentity = methodInfo.isIdentity() ? IDENTITY_METHOD : null;
@@ -247,9 +251,11 @@ public class DecoratorImpl implements Qualification.Decorator {
                 boolean isUnmodified = analysis.getOrDefault(UNMODIFIED_PARAMETER, FALSE).isTrue();
                 propertyUnmodified = !pi.parameterizedType().isPrimitiveStringClass()
                                      && isUnmodified ? UNMODIFIED_PARAMETER : null;
+                modifiedHcOnly = !isUnmodified && analysis.getOrDefault(
+                        io.codelaser.maddi.cst.impl.analysis.PropertyImpl.STRUCTURALLY_UNMODIFIED_PARAMETER, FALSE).isTrue();
                 propertyModifiedAnnotated = !pi.parameterizedType().isPrimitiveStringClass()
                                             && !isUnmodified
-                                            && (explicit || isAnnotated(pi, UNMODIFIED_PARAMETER))
+                                            && (explicit || modifiedHcOnly || isAnnotated(pi, UNMODIFIED_PARAMETER))
                         ? UNMODIFIED_PARAMETER : null;
                 immutable = immutable(analysis.getOrDefault(IMMUTABLE_PARAMETER, MUTABLE), pi.parameterizedType());
                 propertyImmutable = IMMUTABLE_PARAMETER;
@@ -391,7 +397,11 @@ public class DecoratorImpl implements Qualification.Decorator {
         }
         if (propertyModifiedAnnotated != null) {
             importsNeeded.add(Modified.class);
-            list.add(new AnnotationProperty(modifiedAnnotation, propertyModifiedAnnotated));
+            AnnotationExpression modified = modifiedHcOnly
+                    ? runtime.newAnnotationExpressionBuilder().setTypeInfo(modifiedTi)
+                    .addKeyValuePair("hc", runtime.constantTrue()).build()
+                    : modifiedAnnotation;
+            list.add(new AnnotationProperty(modified, propertyModifiedAnnotated));
         }
         if (explicit && nullabilityType != null
             && !(nullabilityType.isPrimitiveExcludingVoid() && nullabilityType.arrays() == 0)) {
@@ -453,8 +463,9 @@ public class DecoratorImpl implements Qualification.Decorator {
         }
         if (downcast != null) {
             importsNeeded.add(Modified.class);
-            AnnotationExpression.Builder modified = runtime.newAnnotationExpressionBuilder().setTypeInfo(modifiedTi)
-                    .addKeyValuePair("downcast", runtime.constantTrue());
+            AnnotationExpression.Builder modified = runtime.newAnnotationExpressionBuilder().setTypeInfo(modifiedTi);
+            if (modifiedHcOnly) modified.addKeyValuePair("hc", runtime.constantTrue());
+            modified.addKeyValuePair("downcast", runtime.constantTrue());
             if (downcastValue != null) {
                 // task #42: name the cast targets — actionable for the caller (an argument that is
                 // none of these types is not modified by this method)
