@@ -69,7 +69,7 @@ public class TestKotlinCollectionReadsVsJava {
             "FilterIsInstanceArr", "SeqPlus", "OrEmptyCall", "Decode", "StringBytes",
             "RangeContains", "MatchValues", "KClassName", "FileExt", "DequeFirst", "DelegateRead", "SumInt", "SumLong",
             "JavaClass",
-            "MapIndexed", "MaxBy", "ZipArr", "FilterValues", "ToMapPairs", "ArrTakeWhile", "ArrIsEmpty", "CharsString", "SeqFlatMapIterable", "SeqWithIndex", "IndexedVal", "MatchDestructured", "ProgressionFirst", "LazyMode", "FileWrite", "PathWrite", "ToRegexOpt", "SeqBuilder", "MapIndex", "OnEach", "ArrAsList", "ArrBinarySearch", "FirstNotNull", "FindLast", "SumOfSel", "MinOfSel", "ArrOrEmpty", "Control");
+            "MapIndexed", "MaxBy", "ZipArr", "FilterValues", "ToMapPairs", "ArrTakeWhile", "ArrIsEmpty", "CharsString", "SeqFlatMapIterable", "SeqWithIndex", "IndexedVal", "MatchDestructured", "ProgressionFirst", "LazyMode", "FileWrite", "PathWrite", "ToRegexOpt", "SeqBuilder", "MapIndex", "OnEach", "ArrAsList", "ArrBinarySearch", "FirstNotNull", "FindLast", "SumOfSel", "MinOfSel", "ArrOrEmpty", "MinDouble", "MinFloat", "MaxComparable", "Control");
 
     private static final String KOTLIN = """
             package a
@@ -152,6 +152,9 @@ public class TestKotlinCollectionReadsVsJava {
             class SumOfSel(private val s: List<String>) { fun f(): Int = s.sumOf { it.length } }
             class MinOfSel(private val s: List<String>) { fun f(): Int = s.minOf { it.length } }
             class ArrOrEmpty(private val s: Array<String>?) { fun f(): Array<String> = s.orEmpty() }
+            class MinDouble(private val s: List<Double>) { fun f(): Double = s.min() }
+            class MinFloat(private val s: List<Float>) { fun f(): Float = s.min() }
+            class MaxComparable(private val s: List<String>) { fun f(): String = s.max() }
             class Control(private val s: MutableList<String>) { fun f() { s.clear() } }
             """;
 
@@ -228,6 +231,9 @@ public class TestKotlinCollectionReadsVsJava {
         // so ACC_SYNTHETIC like filterIsInstance: no method the hints parser can see, so the front end lowers it
         // (ArrOrEmpty), as it lowers the @InlineOnly loops to contracted chains (FirstNotNull, FindLast, SumOfSel,
         // MinOfSel; InlineOnlyLoopTest). All five were false before the lowering.
+        // MinDouble, MinFloat and MaxComparable call the three same-erasure `minOrThrow`/`maxOrThrow` overloads on the
+        // field itself (MinOfSel hands minOrThrow a fresh list, so it never needed them). They need the hints parser's
+        // full-signature match and the shadow's `$Tag` names (TestAnalysisHintsParserOverloads).
         // ⚠ Every negative control in these notes was measured with the stdlib on the class path ONLY; the setup has since
         // been made the one a build tool hands over (see above), and the rows still agree with Java under it.
         // SeqBuilder needs the right overload too (ResolvedOverloadTest: `yieldAll(list)` bound the draining Iterator one).
@@ -311,6 +317,9 @@ public class TestKotlinCollectionReadsVsJava {
                 a.SumOfSel true
                 a.MinOfSel true
                 a.ArrOrEmpty true
+                a.MinDouble true
+                a.MinFloat true
+                a.MaxComparable true
                 a.Control false""", verdicts);
     }
 

@@ -54,7 +54,7 @@ public class CompileAnalysisHints {
     // libs/support is deliberately absent, and has been: its OrgE2immuSupport.json is a generated file that
     // nothing regenerates and nothing loads (it is not in LoadAnalysisResults.ANALYZED_RESULTS either). The
     // pre-rename file name is the giveaway.
-    static final List<String> LIBRARIES = List.of("jdk", "libs/test", "libs/log", "libs/kotlin");
+    static final List<String> LIBRARIES = List.of("jdk", "libs/test", "libs/log", "libs/kotlin", "libs/assertj");
     /**
      * Compiled like {@link #LIBRARIES}, but NOT packed into {@code libs.jar} and NOT in
      * {@code LoadAnalysisResults.ANALYZED_RESULTS}: campaign hints for third-party libraries (the analysis-hints
@@ -69,6 +69,7 @@ public class CompileAnalysisHints {
     /** {@link #RESULTS_BASE} as a path; the directory the committed results live in. */
     static final Path RESULTS_BASE_DIR = Path.of(RESULTS_BASE);
     static final String KOTLIN_LIBRARY = "libs/kotlin";
+    static final String ASSERTJ_LIBRARY = "libs/assertj";
     static final String JDK_LIBRARY = "jdk";
     /**
      * The JDK feature release the committed {@code jdk/} results (and so {@code openjdk.jar}) were generated on.
@@ -160,6 +161,11 @@ public class CompileAnalysisHints {
                 // a temporary directory without the jdk must see the same defaults as the committed build.
                 compile(new AnalysisHintsCompiler(kotlinJavaInspectorFactory(), null, jdkPreload), library,
                         resultsBase);
+            } else if (ASSERTJ_LIBRARY.equals(library)) {
+                // as for kotlin: the jar must be LOADABLE, through a factory of its own, so that no other library's
+                // class path changes (CodeLaser/maddi#116)
+                compile(new AnalysisHintsCompiler(libraryJavaInspectorFactory("org.assertj.core.api.",
+                        org.assertj.core.api.Assertions.class), null, jdkPreload), library, resultsBase);
             } else {
                 compile(JDK_LIBRARY.equals(library) ? compiler : compilerWithJdk, library, resultsBase);
             }
@@ -195,7 +201,7 @@ public class CompileAnalysisHints {
      * A factory whose class path is java.base + maddi-annotation + kotlin-stdlib: enough to load
      * {@code kotlin.Lazy} and to resolve the annotations the shadow puts on it, and nothing else.
      */
-    private static JavaInspectorFactory kotlinJavaInspectorFactory() {
+    static JavaInspectorFactory kotlinJavaInspectorFactory() {
         SourceSet javaBase = SourceSetImpl.javaBase();
         // sourceSetOf, never a hand-rolled Builder: ClassSymbolScanner.ensureSourceSet attributes a loaded
         // 'jar:file:...!/...' class file by the JAR'S FILE NAME looked up among the source-set names, and

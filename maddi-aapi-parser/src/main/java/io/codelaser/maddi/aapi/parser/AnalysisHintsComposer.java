@@ -72,6 +72,14 @@ public class NameOfPackageWithoutDots {
 
 - Only public methods, types and fields will be shown.
 
+- A shadow METHOD may carry a suffix after a '$' that is not its first character: `getClass$` and `minOrThrow$Double`
+  stand for the target's `getClass` and `minOrThrow` (AnalysisHintsParser.findTargetMethod). The bare '$' is for a
+  member Java will not let a shadow redeclare (Object's final methods, written here); a tag tells apart overloads
+  that share their erasure, which Java rejects as a name clash (Kotlin's @JvmName("minOrThrow") on the Double, Float
+  and Comparable `min()`). A suffixed method is matched on its full signature -- type arguments, type-parameter
+  bounds and return type -- so it must be written as the class file has it. A name that STARTS with '$' (vavr's
+  `$`, `$Cons`) is the library's own name.
+
  */
 public class AnalysisHintsComposer {
     private static final Logger LOGGER = LoggerFactory.getLogger(AnalysisHintsComposer.class);

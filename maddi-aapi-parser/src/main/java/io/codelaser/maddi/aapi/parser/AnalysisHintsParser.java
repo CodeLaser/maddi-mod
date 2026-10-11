@@ -208,9 +208,8 @@ public class AnalysisHintsParser implements AnnotationProvider {
             }
         }
         // TODO: for now, we don't accept/recognize annotations on method, constructor type parameters
-        // TODO 202606: skipping invariants ($ in the name)
         for (MethodInfo sourceMethod : sourceType.methods()) {
-            if (!sourceMethod.isSynthetic() && !sourceMethod.name().contains("$")) {
+            if (!sourceMethod.isSynthetic() && !isCompanion(sourceMethod.name())) {
                 MethodInfo targetMethod = findTargetMethod(targetType, sourceMethod);
                 if (targetMethod != null) {
                     annotations += sourceMethod.annotations().size();
@@ -263,32 +262,110 @@ public class AnalysisHintsParser implements AnnotationProvider {
 
     private MethodInfo findTargetConstructor(TypeInfo targetType, MethodInfo sourceMethod) {
         int n = sourceMethod.parameters().size();
+        List<MethodInfo> candidates = new ArrayList<>();
         for (MethodInfo candidate : targetType.constructors()) {
             if (candidate.parameters().size() == n && sameParameterTypes(candidate, sourceMethod)) {
-                return candidate;
+                candidates.add(candidate);
             }
         }
+        return choose(candidates, sourceMethod, false, targetType);
+    }
+
+    /*
+    A target method is found by name, number of parameters, and the ERASED parameter types. Two kinds of overload
+    share all three: Kotlin's @JvmName-renamed functions that differ only by a type argument and the return type
+    (`double minOrThrow(Iterable<Double>)`, `float minOrThrow(Iterable<Float>)`, `<T extends Comparable<? super T>>
+    T minOrThrow(Iterable<? extends T>)`), and bridge-like pairs in class files. Java cannot declare such overloads
+    in one shadow (a name clash), so a shadow method may carry a TAG: `minOrThrow$Double` stands for `minOrThrow`.
+    A tagged method, or one whose erasure matches more than one target, is matched on its full signature: the type
+    arguments of each parameter and the return type. When that does not single out one target, the contract is not
+    transferred and a warning says so -- before 2026-10, the first erasure match took it, and which one that was
+    depended on the class file's member order.
+    */
+    private MethodInfo findTargetMethod(TypeInfo targetType, MethodInfo sourceMethod) {
+        int n = sourceMethod.parameters().size();
+        String sourceMethodName = sourceMethod.name();
+        int dollar = sourceMethodName.indexOf('$');
+        boolean tagged = dollar > 0;
+        String targetName = tagged ? sourceMethodName.substring(0, dollar) : sourceMethodName;
+        List<MethodInfo> candidates = new ArrayList<>();
+        for (MethodInfo candidate : targetType.methods()) {
+            if (candidate.parameters().size() == n
+                && candidate.name().equals(targetName)
+                && sameParameterTypes(candidate, sourceMethod)) {
+                candidates.add(candidate);
+            }
+        }
+        // cannot find the method: we'll NOT be looking at a supertype, since we cannot add a copy
+        return choose(candidates, sourceMethod, tagged, targetType);
+    }
+
+    /*
+    e2immu's companion methods (`equals$Value`, `size$Invariant`, `add$Modification$Size`, ...) describe their main
+    method and stand for no target method; they are still skipped (the example hints in this module's tests keep
+    two). Any other tag is a disambiguation, see findTargetMethod.
+    */
+    private static final Set<String> COMPANION_KINDS = Set.of("Value", "Invariant", "Modification", "Precondition",
+            "Postcondition", "Transfer", "Erase", "Clear", "Size");
+
+    private static boolean isCompanion(String methodName) {
+        int dollar = methodName.indexOf('$');
+        if (dollar <= 0 || dollar == methodName.length() - 1) return false;
+        String tag = methodName.substring(dollar + 1);
+        int next = tag.indexOf('$');
+        return COMPANION_KINDS.contains(next < 0 ? tag : tag.substring(0, next));
+    }
+
+    private MethodInfo choose(List<MethodInfo> candidates, MethodInfo sourceMethod, boolean tagged,
+                              TypeInfo targetType) {
+        if (candidates.isEmpty()) return null;
+        if (candidates.size() == 1 && !tagged) return candidates.getFirst();
+        List<MethodInfo> exact = candidates.stream().filter(c -> sameSignature(c, sourceMethod)).toList();
+        if (exact.size() == 1) return exact.getFirst();
+        // the warning is counted by the caller, which sees null
+        LOGGER.warn("Method '{}' matches {} of the {} overload(s) in '{}' with the same erasure on its full signature;"
+                    + " write the shadow's type arguments and return type as the class file has them",
+                sourceMethod, exact.size(), candidates.size(), targetType);
         return null;
     }
 
-    private MethodInfo findTargetMethod(TypeInfo targetType, MethodInfo sourceMethod) {
-        int n = sourceMethod.parameters().size();
-        String sourceMethodName = trimDollar(sourceMethod.name());
-        for (MethodInfo candidate : targetType.methods()) {
-            if (candidate.parameters().size() == n
-                && candidate.name().equals(sourceMethodName)
-                && sameParameterTypes(candidate, sourceMethod)) {
-                return candidate;
-            }
+    private boolean sameSignature(MethodInfo candidate, MethodInfo sourceMethod) {
+        if (!candidate.isConstructor()
+            && !sameFullType(candidate.returnType(), sourceMethod.returnType())) return false;
+        Iterator<ParameterInfo> it = candidate.parameters().iterator();
+        for (ParameterInfo pi : sourceMethod.parameters()) {
+            if (!sameFullType(pi.parameterizedType(), it.next().parameterizedType())) return false;
         }
-        return null; // cannot find the method, we'll NOT be looking at a supertype, since we cannot add a copy
+        return true;
     }
 
-    private String trimDollar(String name) {
-        if (name.endsWith("$")) {
-            return name.substring(0, name.length() - 1);
+    // sameType, recursively over type arguments and wildcards. Two type parameters match whatever their owner and
+    // name, when their bounds erase to the same types: Guava's ImmutableSortedSet declares both
+    // `<E extends Comparable<? super E>> of(E)` and a deprecated `<E> of(E)`, and Eclipse Collections'
+    // MutableStack both `<R extends Collection<T>> pop(int, R)` and `<R extends MutableStack<T>> pop(int, R)`.
+    private boolean sameFullType(ParameterizedType pt1, ParameterizedType pt2) {
+        if (pt1.arrays() != pt2.arrays()) return false;
+        if (pt1.typeInfo() != pt2.typeInfo()) return false;
+        if ((pt1.typeParameter() == null) != (pt2.typeParameter() == null)) return false;
+        if (pt1.typeParameter() != null && !sameErasedBounds(pt1.typeParameter(), pt2.typeParameter())) return false;
+        if (!sameWildcard(pt1.wildcard(), pt2.wildcard())) return false;
+        if (pt1.parameters().size() != pt2.parameters().size()) return false;
+        for (int i = 0; i < pt1.parameters().size(); i++) {
+            if (!sameFullType(pt1.parameters().get(i), pt2.parameters().get(i))) return false;
         }
-        return name;
+        return true;
+    }
+
+    private static boolean sameErasedBounds(TypeParameter tp1, TypeParameter tp2) {
+        List<TypeInfo> b1 = tp1.typeBounds().stream().map(ParameterizedType::bestTypeInfo).toList();
+        List<TypeInfo> b2 = tp2.typeBounds().stream().map(ParameterizedType::bestTypeInfo).toList();
+        return b1.equals(b2);
+    }
+
+    private static boolean sameWildcard(io.codelaser.maddi.cst.api.type.Wildcard w1,
+                                        io.codelaser.maddi.cst.api.type.Wildcard w2) {
+        if (w1 == null || w2 == null) return w1 == w2;
+        return w1.isUnbound() == w2.isUnbound() && w1.isExtends() == w2.isExtends() && w1.isSuper() == w2.isSuper();
     }
 
     private FieldInfo findTargetField(TypeInfo targetType, FieldInfo sourceField) {

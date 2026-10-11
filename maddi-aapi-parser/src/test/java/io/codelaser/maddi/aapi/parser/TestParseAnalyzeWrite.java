@@ -105,7 +105,9 @@ public class TestParseAnalyzeWrite extends CommonTest {
         long sideLoadedUnits = types.stream().filter(t -> t.packageName().endsWith(".libs.eclipsecollections")
                                                         || t.packageName().endsWith(".libs.guava")).count();
         LOGGER.info("Side-loaded hint units parsed on the shared factory: {}", sideLoadedUnits);
-        assertEquals(33 + kotlinUnits, types.size() - sideLoadedUnits); // 28 + JavaMath + JavaTimeFormat + OrgE2immuSupport + JavaLangRef + JavaUtilJar
+        // + OrgAssertjCoreApi (libs/assertj, 2026-10-11): it names AssertJ types in full and imports none, so, like
+        // the Kotlin units that import nothing from kotlin.*, it survives whatever the shared factory carries
+        assertEquals(34 + kotlinUnits, types.size() - sideLoadedUnits); // 28 + JavaMath + JavaTimeFormat + OrgE2immuSupport + JavaLangRef + JavaUtilJar + OrgAssertjCoreApi
         for (TypeInfo typeInfo : types) {
             if ("JavaLang".equals(typeInfo.fullyQualifiedName())) {
                 TypeInfo charSeq = typeInfo.findSubType("CharSequence$");
