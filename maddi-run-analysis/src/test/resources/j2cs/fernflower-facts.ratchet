@@ -1,0 +1,14 @@
+# TestJavaToCSharpFernflowerFacts: fernflower printed as C# with the modification analysis's and the NullabilityPass's
+# (NULL_MARKED) facts, judged by Roslyn (see maddi-run-openjdk's JavaToCSharpRatchet). Lower is better for
+# printerCrashes, syntaxErrors and unmappedJdkUses, higher for syntaxCleanFiles and compilingFiles; `types` must not
+# move. Write a better value here in the commit that earns it.
+#
+# 2026-10-11, first record, with maddi 50ecbe6a0 (read-only parameters where every caller's argument converts):
+# 98 read-only collection parameters (81 IReadOnlyList) and nullable declarations as T?, with the same 182 compiling
+# files and the same 38 errors as maddi's fernflower.ratchet without the analysis.
+types	199
+printerCrashes	0
+syntaxErrors	0
+syntaxCleanFiles	199
+compilingFiles	182
+unmappedJdkUses	15
