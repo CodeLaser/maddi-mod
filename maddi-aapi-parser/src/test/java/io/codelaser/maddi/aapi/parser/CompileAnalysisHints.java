@@ -54,7 +54,8 @@ public class CompileAnalysisHints {
     // libs/support is deliberately absent, and has been: its OrgE2immuSupport.json is a generated file that
     // nothing regenerates and nothing loads (it is not in LoadAnalysisResults.ANALYZED_RESULTS either). The
     // pre-rename file name is the giveaway.
-    static final List<String> LIBRARIES = List.of("jdk", "libs/test", "libs/log", "libs/kotlin", "libs/assertj");
+    static final List<String> LIBRARIES = List.of("jdk", "libs/test", "libs/log", "libs/kotlin", "libs/assertj",
+            "libs/guava");
     /**
      * Compiled like {@link #LIBRARIES}, but NOT packed into {@code libs.jar} and NOT in
      * {@code LoadAnalysisResults.ANALYZED_RESULTS}: campaign hints for third-party libraries (the analysis-hints
@@ -62,7 +63,8 @@ public class CompileAnalysisHints {
      * .../analyzedPackageFiles/libs/vavr}. {@code libs.jar} goes to every maddi user; a library moves there only on
      * evidence of universal value. Each has a report next to its hints ({@code libs/vavr/VAVR.md}).
      */
-    static final List<String> SIDE_LOADED_LIBRARIES = List.of("libs/vavr", "libs/eclipsecollections", "libs/guava");
+    // libs/guava was one until 2026-10-12: every corpus in test-oss but one uses it (GUAVA.md)
+    static final List<String> SIDE_LOADED_LIBRARIES = List.of("libs/vavr", "libs/eclipsecollections");
     static final String VAVR_LIBRARY = "libs/vavr";
     static final String ECLIPSE_COLLECTIONS_LIBRARY = "libs/eclipsecollections";
     static final String GUAVA_LIBRARY = "libs/guava";
@@ -166,6 +168,13 @@ public class CompileAnalysisHints {
                 // class path changes (CodeLaser/maddi#116)
                 compile(new AnalysisHintsCompiler(libraryJavaInspectorFactory("org.assertj.core.api.",
                         org.assertj.core.api.Assertions.class), null, jdkPreload), library, resultsBase);
+            } else if (GUAVA_LIBRARY.equals(library)) {
+                // the same; failureaccess too: guava's class files reference InternalFutureFailureAccess, a stub
+                // would eat the util.concurrent verdicts the collect hints' signatures reach
+                compile(new AnalysisHintsCompiler(libraryJavaInspectorFactory("com.google.common.",
+                        com.google.common.collect.ImmutableList.class,
+                        com.google.common.util.concurrent.internal.InternalFutureFailureAccess.class), null, jdkPreload),
+                        library, resultsBase);
             } else {
                 compile(JDK_LIBRARY.equals(library) ? compiler : compilerWithJdk, library, resultsBase);
             }
@@ -184,13 +193,6 @@ public class CompileAnalysisHints {
                 compile(new AnalysisHintsCompiler(libraryJavaInspectorFactory("org.eclipse.collections.",
                         org.eclipse.collections.api.RichIterable.class,
                         org.eclipse.collections.impl.factory.Lists.class), null, jdkPreload), library, resultsBase);
-            } else if (GUAVA_LIBRARY.equals(library)) {
-                // failureaccess too: guava's class files reference InternalFutureFailureAccess, a stub would eat
-                // the util.concurrent verdicts the collect hints' signatures reach
-                compile(new AnalysisHintsCompiler(libraryJavaInspectorFactory("com.google.common.",
-                        com.google.common.collect.ImmutableList.class,
-                        com.google.common.util.concurrent.internal.InternalFutureFailureAccess.class), null, jdkPreload),
-                        library, resultsBase);
             } else {
                 throw new UnsupportedOperationException("No inspector factory for side-loaded " + library);
             }

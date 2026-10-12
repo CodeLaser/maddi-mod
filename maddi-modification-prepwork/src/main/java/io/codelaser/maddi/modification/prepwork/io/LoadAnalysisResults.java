@@ -37,6 +37,8 @@ import java.util.List;
 import java.util.Objects;
 import java.util.jar.JarEntry;
 import java.util.jar.JarInputStream;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
@@ -62,7 +64,8 @@ public class LoadAnalysisResults {
     // Keep in step with CompileAnalysisHints.LIBRARIES, which generates these directories: a library compiled
     // but not listed here is a file nobody reads (libs/support is exactly that).
     public static final List<String> ANALYZED_RESULTS = List.of(ANALYZED_RESULTS_JDK, ANALYZED_RESULTS_LIBS + "/test",
-            ANALYZED_RESULTS_LIBS + "/log", ANALYZED_RESULTS_LIBS + "/kotlin", ANALYZED_RESULTS_LIBS + "/assertj");
+            ANALYZED_RESULTS_LIBS + "/log", ANALYZED_RESULTS_LIBS + "/kotlin", ANALYZED_RESULTS_LIBS + "/assertj",
+            ANALYZED_RESULTS_LIBS + "/guava");
     private static final Logger LOGGER = LoggerFactory.getLogger(LoadAnalysisResults.class);
     private final SourceSet sourceSetOfRequest; // for loading types
     private final Runtime runtime;
@@ -216,6 +219,11 @@ public class LoadAnalysisResults {
      *                                        before the marker existed, and is read as version 0.
      */
     public int go(Codec codec, String content) {
+        int absent = countIfNoPrimaryTypeOnClasspath(codec, content);
+        if (absent > 0) {
+            skippedPrimaryTypes += absent;
+            return 0;
+        }
         JSONParser parser = new JSONParser(content);
         parser.Root();
         Node root = parser.rootNode();
@@ -238,6 +246,33 @@ public class LoadAnalysisResults {
             else ++skippedPrimaryTypes;
         }
         return countPrimaryTypes;
+    }
+
+    // a primary type's entry, as WriteAnalysisResults lays it out: at the start of a line, at indent 0
+    private static final Pattern PRIMARY_TYPE = Pattern.compile("^\\{\"name\": \"T([^\"]+)\"", Pattern.MULTILINE);
+
+    /*
+     A file whose primary types are all absent from the classpath loads nothing: processSub skips each of them. Its
+     JSON need not be parsed to find that out. This matters for a library's results that most projects do not use
+     (libs/assertj's single file is close to 1 MB): the primary types' names are read from the text, and when not one
+     of them resolves, the file is skipped whole. Returns the number of primary types so skipped; 0 when at least
+     one resolves, or when the text does not have the writer's layout (then the parser decides, as before).
+     */
+    private static int countIfNoPrimaryTypeOnClasspath(Codec codec, String content) {
+        Matcher m = PRIMARY_TYPE.matcher(content);
+        int count = 0;
+        while (m.find()) {
+            Info info;
+            try {
+                info = codec.decodeInfoInContext(new CodecImpl.ContextImpl(), 'T', m.group(1));
+            } catch (Codec.DecoderException de) {
+                return 0;
+            }
+            if (info != null) return 0;
+            ++count;
+        }
+        if (count > 0) LOGGER.debug("Skipping a results file of {} primary types, none on the classpath", count);
+        return count;
     }
 
     // the format marker, the first element of a file written since CodeLaser/maddi-mod#3: {"format": "...", "version": n}

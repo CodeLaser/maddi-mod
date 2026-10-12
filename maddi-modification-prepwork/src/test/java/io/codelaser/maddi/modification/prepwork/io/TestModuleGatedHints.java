@@ -1,5 +1,6 @@
 package io.codelaser.maddi.modification.prepwork.io;
 
+import io.codelaser.maddi.cst.api.analysis.Codec;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.inspection.api.integration.JavaInspector;
 import io.codelaser.maddi.inspection.api.resource.InputConfiguration;
@@ -50,5 +51,32 @@ public class TestModuleGatedHints {
                 "java.util.List must be loaded (hints applied)");
         assertFalse(typesLoaded.stream().anyMatch(t -> t.packageName().startsWith("javax.swing")),
                 "no swing type should have been loaded (module absent from classpath)");
+    }
+
+    private static String results(String... primaryTypes) {
+        StringBuilder sb = new StringBuilder("[\n{\"format\": \"" + WriteAnalysisResults.FORMAT_NAME
+                                             + "\", \"version\": " + WriteAnalysisResults.FORMAT_VERSION + "}");
+        for (String fqn : primaryTypes) {
+            sb.append(",\n\n{\"name\": \"T").append(fqn).append("\", \"data\":{\"annotatedApi\":1}}");
+        }
+        return sb.append("\n]\n").toString();
+    }
+
+    // a file of which no primary type is on the classpath is skipped before its JSON is parsed (libs/assertj, ~1 MB,
+    // in a project without AssertJ); one with at least one present type loads as before
+    @Test
+    public void fileWithoutTypesOnClasspathNotParsed() throws Exception {
+        JavaInspector ji = inspectorWithoutDesktop();
+        LoadAnalysisResults lar = new LoadAnalysisResults(ji.runtime(), SourceSetImpl.testProtocolSourceSet());
+        Codec codec = new PrepWorkCodec(ji.runtime(), SourceSetImpl.testProtocolSourceSet()).codec();
+
+        // invalid JSON after the entries: the parser would throw, so a 0 here means it never ran
+        String absent = results("org.assertj.core.api.Assertions", "org.assertj.core.api.ListAssert")
+                        + "{ not json";
+        assertEquals(0, lar.go(codec, absent));
+        assertEquals(2, lar.skippedPrimaryTypes());
+
+        assertEquals(1, lar.go(codec, results("org.assertj.core.api.Assertions", "java.util.List")));
+        assertEquals(3, lar.skippedPrimaryTypes());
     }
 }
