@@ -1386,7 +1386,14 @@ public class TestNullabilityPass extends CommonTest {
                 """, NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY.withoutContracts().withWorld(NullabilityPass.World.CLOSED));
         System.out.println(explain(report));
         Map<String, Boolean> present = new java.util.TreeMap<>();
-        parsed.recursiveSubTypeStream().flatMap(t -> t.methodStream()).forEach(m -> {
+        List<MethodInfo> methods = new java.util.ArrayList<>(parsed.methods());
+        parsed.findUniqueMethod("iterator", 0).methodBody().visit(e -> {
+            if (e instanceof io.codelaser.maddi.cst.api.expression.ConstructorCall cc && cc.anonymousClass() != null) {
+                methods.addAll(cc.anonymousClass().methods());
+            }
+            return true;
+        });
+        methods.forEach(m -> {
             if (m.methodBody() == null) return;
             m.methodBody().visit(e -> {
                 if (e instanceof MethodCall mc && mc.methodInfo() != null && "get".equals(mc.methodInfo().name())) {
