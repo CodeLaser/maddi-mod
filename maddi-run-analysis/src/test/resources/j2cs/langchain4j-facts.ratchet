@@ -1,0 +1,15 @@
+# TestJavaToCSharpLangchain4jFacts: langchain4j-core printed as C# with the modification analysis's and the
+# NullabilityPass's facts (Policy.KOTLIN), judged by Roslyn (see maddi-run-openjdk's JavaToCSharpRatchet). Lower is
+# better for printerCrashes, syntaxErrors, unmappedJdkUses and nullableWarnings, higher for syntaxCleanFiles and
+# compilingFiles; `types` must not move. Write a better value here in the commit that earns it.
+#
+# 2026-10-12, first record, with maddi 369d81117: the same 271 compiling files, 154 unmapped JDK uses and 232 errors as
+# maddi's langchain4j.ratchet without the analysis. 100 nullable warnings (250 before that maddi commit, whose
+# EnsureNotNull<T>(T? o) took 69 of 75 CS8601 and 72 of 85 CS8618 of the validation idiom this = EnsureNotNull(x, "x")).
+types	346
+printerCrashes	0
+syntaxErrors	0
+syntaxCleanFiles	346
+compilingFiles	271
+unmappedJdkUses	154
+nullableWarnings	100
