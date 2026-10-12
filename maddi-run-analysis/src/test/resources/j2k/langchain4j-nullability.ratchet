@@ -51,12 +51,17 @@
 # TextSegmentTransformer's null array into varargs (a Kotlin vararg is never null), Metadata's null key (a verdict on
 # the key's type argument), and BatchItemResult's two null-rejecting tests (a record whose constructor takes null
 # where the component does not; the printer's, next).
+# 2026-10-12, maddi's 180f7286b: read-only types for private collection fields and closed methods' results
+# (maddi-mod#25; three declarations on langchain4j-core), and a vararg parameter passed into an invariant array
+# parameter cast: 327 files compiling (22 type errors), 326 to class files; 1,103 tests pass with the Kotlin
+# classes, 1,102 translated. ChatMemory now compiles, and its two tests that pass a null array into varargs fail,
+# knowingly, as DocumentSplitter's and TextSegmentTransformer's do (a Kotlin vararg is never null).
 types	346
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	346
-compilingFiles	326
-bytecodeFiles	325
-testsPassing	1105
+compilingFiles	327
+bytecodeFiles	326
+testsPassing	1103
 testBytecodeFiles	131
 translatedTestsPassing	1102
