@@ -99,9 +99,10 @@ public class TestArrayInitializer extends CommonTest {
         // no 'add[1]→add[0]' (nor its §m companion): 'add[0] ← item' holds for the array returned by the
         // else-if, 'add[1] ← item' for the one returned by the else; no returned array has both. Linked into
         // one graph, the two branches combined into that relation (LinkComputerImpl.linkAlternatives).
+        // and no §m companions at all since 2026-10-12: java.io.File is @Immutable in the JDK hints (like Path), so
+        // an element has no mutable content to share
         assertEquals("""
-                [-, -] --> add←0:list,add←$_v,add[0]←1:item,add[0].§m≡1:item.§m,add[0]←this.base,add[1]←1:item,\
-                add[0].§m≡this.base.§m,add[1].§m≡1:item.§m\
+                [-, -] --> add←0:list,add←$_v,add[0]←1:item,add[0]←this.base,add[1]←1:item\
                 """, mlv.toString());
     }
 }
