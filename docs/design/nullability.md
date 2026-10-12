@@ -1198,3 +1198,56 @@ the 15 compilation units that fail to inspect left out, gates off versus on): `t
 from reached to unreached; nothing else of the sites #22 names changes. `TestNullabilityPass.keyedMaps` and
 `narrowedReads` pin the shapes, including those that must stay nullable (a key not known, a map that escapes, a
 subclass that stores null, an overriding getter, a non-final field, the tested variable reassigned).
+
+### 2026-10-12 — the link engine hands over provenance: direct links, and null as a terminal
+
+The engine computes an alias and containment relation: symmetric, transitive, path-insensitive, which is what
+modification and type equivalence want. Nullability needs value provenance: which literal, call or variable flows
+into which position, at which statement. The pass rebuilt that from the closure's output with a growing set of
+guesses at one bit the engine had internally and dropped on the way out: whether a link was inserted by a statement
+or composed by the closure. Two engine extensions, both inert for modification (branch `ws/maddi-null-links`):
+
+- **`Link.derived()`.** A link of the statement's own evaluation (an assignment, a call's summary applied at the
+  call site, an element or field access) is direct; a product of the closure or of the shared-variable
+  reconstruction is derived. `Graph` keeps a registry of the edges `LinkGraph.compute` inserts, keyed on the
+  nature's rank, and `WriteLinksAndModification` sets the bit at emission as it recovers `mediated()`. Three
+  shapes the pass needs are direct although the engine never inserts them as such: a composition across a
+  switch expression's intermediate (`r ← $__rv` + `$__rv ← s`, the block arm's statements cannot be reduced into
+  the outer statement); what a vertex carried between two survivors when it goes (a block local out of scope,
+  a reassigned variable: the engine materializes those orphaned compositions as direct facts too); and the
+  field-level mirrors of a direct edge (`r ← out` gives `r.§$s ⊆ out.§$s`, in the expansion and in the group
+  reconstruction). In-run provenance only: not encoded, a decoded link reads as direct.
+- **The null constant as a terminal** (under `Options.nullConstantReturns`). A null marker composes only as what a
+  variable is assigned from (`y ← x` + `x ← $_ce` = `y ← $_ce`, which the summary must export: a local carrying a
+  null to the return). Not as a member: `∋` is written for a read as for a write, so `map.§$s ∋ ret` + `ret ← $_ce`
+  had made null an element of the map the value was READ from (`Maps.safeGet`). A container takes a null only on
+  a direct link, from a literal argument; a null carried by a variable is the pass's to follow from the call site.
+  Gate `NULLCOMPOSE` restores. `TestNullFlowProbe` test 8 pins both.
+
+**The pass** reads direct links only, except a null marker's, which the reconstruction of an assignment group
+can hide behind a hop through a local's face (`return b.get()` on a `Box<String> b = new Box<>(null)` has no
+`read ← b.t`), and which the marker rules decide per statement anyway. Gate `NODIRECT` restores. Found on the way:
+
+- A return's marker is decided by the first statement carrying it (the graph is persistent, every later
+  statement repeats the link): `var v = pick(); if (v != null) return v; ...; return other();` had the second
+  return re-attach `pick`'s null (timefold `ValueRangeState.getReachableValues`).
+- An array result of an analysed method ties its elements whatever the component's type arguments (`Node<K, V>[]
+  createTable(int n) { return new Node[n]; }`), unless the component is the callee's own type variable. Guava's
+  `HashBiMap.hashTableVToK` and `RegularImmutableMap.table` had their nullable elements only through closure
+  artefacts (`hashTableVToK ≡ hashTableKToV`, `table`'s elements from `entries`'), which the direct reading removed.
+- The oracle prints the cause chains of chosen declarations whatever the outcome (`ORACLE_EXPLAIN=<substring>,…`),
+  for such an A/B; an agreement has no row.
+
+Measured against 592220fc (the gates `NODIRECT=1 NULLCOMPOSE=1` reproduce its guava numbers exactly):
+
+| corpus | change |
+|---|---|
+| guava, every policy | unsafe unchanged; NULL_MARKED noise 1,725 → 1,711, agree +13 |
+| langchain4j (KOTLIN) | 10 nullable verdicts gone, none added: all `Optional.ofNullable(x).orElseGet(…)`, which the closure had tied to `x` through the Optional's hidden content |
+| timefold (diagnose policy) | 141 nullable verdicts gone (closure-only chains: `Dataset.label`, `SortingEntitySelector.sorter`, the `getDownstreamIndexer` family, `DefaultSolverManager.problemIdToSolverJobMap`, …), 15 added: real nulls the closure had hidden (`createMergedResult` returns `createMergeSingleton`'s null, the cloner's `cloneCollectionsElementIfNeeded`), the recursive array fills of `ListVariableExhaustiveSearchDecider`, and `ValueRangeManager.getReachableValues` (a marker the engine's summary carries through a guarded return; open) |
+
+Tests: `TestNullabilityPass` 84 (`orElseGetIsDirect` fails without the bit; `directLinksTimefoldShapes`,
+`directLinksGuavaShapes`, `switchExpressionArms` pin the shapes above), the link suite 484, prepwork 263.
+
+Not done, the pass's heuristics the bit makes redundant (`deepFace`, the observation counting of `linkEdge`,
+`argumentGuard`'s reach test): each to be retired on its own measurement.

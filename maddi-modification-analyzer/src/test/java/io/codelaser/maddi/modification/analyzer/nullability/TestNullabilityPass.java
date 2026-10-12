@@ -3686,4 +3686,126 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("String", byName.get("a.b.JN.from(String)"));
     }
 
+    @DisplayName("direct links: Optional.ofNullable(x).orElseGet(s) is non-null whatever x is (langchain4j StreamingToSynchronousChatExecutor)")
+    @Test
+    public void orElseGetIsDirect() {
+        // the closure had tied the result to x through the Optional's hidden content ('orElseGet ← this.§$' after
+        // 'ofNullable.§$ ← 0:t'); the pass reads the statements' own links only (Link.derived), and no statement
+        // assigns the result from x
+        NullabilityPass.Report report = run("a.b.OG", """
+                package a.b;
+                import java.util.Optional;
+                import java.util.concurrent.atomic.AtomicReference;
+                class OG {
+                    private final AtomicReference<String> response = new AtomicReference<>();
+                    private final String successfulResult;
+                    OG(String s) { this.successfulResult = s; }
+                    void onComplete(String r) { response.set(r); }
+                    String getResponse() { return response.get(); }
+                    String execute() { return Optional.ofNullable(getResponse()).orElseGet(() -> "x"); }
+                    String result() { return Optional.ofNullable(successfulResult).orElseGet(() -> "y"); }
+                    static void test() { new OG(null).onComplete(null); }
+                }
+                """);
+        System.out.println(explain(report));
+        Map<String, String> byName = report.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+        assertEquals("String?", byName.get("a.b.OG.getResponse()"));
+        assertEquals("String", byName.get("a.b.OG.execute()"));
+        assertEquals("String?", byName.get("a.b.OG.successfulResult"));
+        assertEquals("String", byName.get("a.b.OG.result()"));
+    }
+
+    @DisplayName("direct links: the timefold shapes whose verdict moved (createMergedResult, getReachableValues, cloneCollection)")
+    @Test
+    public void directLinksTimefoldShapes() {
+        NullabilityPass.Report report = run("a.b.RG", """
+                package a.b;
+                import java.util.*;
+                class RG {
+                    String pick(boolean b) { return b ? "p" : null; }
+                    String reachable(boolean b, boolean c) {
+                        var v = pick(b);
+                        if (v != null) return v;
+                        if (c) { var s = "s"; return s; }
+                        throw new IllegalStateException();
+                    }
+                    String manager(boolean b) { return reachable(b, true); }
+                    String reachable2(boolean b, boolean c) { var v = pick(b); if (v != null) return v; var s = other(c); return s; }
+                    String other(boolean c) { if (c) return "s"; throw new IllegalStateException(); }
+                    static RG singleton(List<String> list) {
+                        RG n = null;
+                        for (String s : list) { if (n == null) { n = new RG(); } }
+                        return n;
+                    }
+                    static RG merged(List<String> list) { RG m = singleton(list); use(m, list); return m; }
+                    static void use(RG m, List<String> l) { l.add(String.valueOf(m)); }
+                    <E> Collection<E> cloneAll(Collection<E> in) {
+                        var out = new ArrayList<E>();
+                        for (var e : in) { var c = cloneIf(e); out.add(c); }
+                        return out;
+                    }
+                    <E> E cloneIf(E e) { if (e instanceof String) return null; return e; }
+                }
+                """, NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY.withoutContracts().withWorld(NullabilityPass.World.CLOSED));
+        System.out.println(explain(report));
+        Map<String, String> byName = report.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+        assertEquals("String?", byName.get("a.b.RG.pick(boolean)"));
+        assertEquals("String", byName.get("a.b.RG.reachable(boolean,boolean)"), "the null is checked away");
+        assertEquals("String", byName.get("a.b.RG.manager(boolean)"), "ValueRangeManager.getReachableValues");
+        assertEquals("String", byName.get("a.b.RG.reachable2(boolean,boolean)"), "a later return repeats the guarded marker");
+        assertEquals("RG?", byName.get("a.b.RG.singleton(java.util.List)"), "an empty list");
+        assertEquals("RG?", byName.get("a.b.RG.merged(java.util.List)"), "createMergedResult really returns it (use does not dereference it)");
+        assertEquals("Collection<E?>", byName.get("a.b.RG.cloneAll(java.util.Collection)"), "cloneIf's null is added");
+    }
+
+    @DisplayName("direct links: the guava shapes whose verdict moved (HashBiMap.hashTableVToK, RegularImmutableMap.table, removeExactly)")
+    @Test
+    public void directLinksGuavaShapes() {
+        NullabilityPass.Report report = run("a.b.HB", """
+                package a.b;
+                import java.util.Arrays;
+                import java.util.concurrent.ConcurrentHashMap;
+                class HB {
+                    static final class Node { Node nextInVToKBucket; Node(Node n) { nextInVToKBucket = n; } }
+                    private Node[] hashTableVToK;
+                    HB(int size) { this.hashTableVToK = createTable(size); }
+                    private Node[] createTable(int length) { return new Node[length]; }
+                    void delete(Node node, int valueBucket) { hashTableVToK[valueBucket] = node.nextInVToKBucket; }
+                    void insert(Node node, int valueBucket) {
+                        node.nextInVToKBucket = hashTableVToK[valueBucket];
+                        hashTableVToK[valueBucket] = node;
+                    }
+                    void clear() { Arrays.fill(hashTableVToK, null); }
+                    static final class Entry<K, V> { final K k; Entry(K k) { this.k = k; } }
+                    static final class RIM<K, V> { final Entry<K, V>[] table; RIM(Entry<K, V>[] table) { this.table = table; } }
+                    static <K, V> Entry<K, V>[] createEntryArray(int size) { return (Entry<K, V>[]) new Entry<?, ?>[size]; }
+                    static <K, V> RIM<K, V> fromEntries(K[] keys) {
+                        Entry<K, V>[] table = createEntryArray(keys.length * 2);
+                        for (int i = 0; i < keys.length; i++) {
+                            Entry<K, V> head = table[i];
+                            table[i] = new Entry<>(keys[i]);
+                        }
+                        return new RIM<>(table);
+                    }
+                    private final ConcurrentHashMap<Object, Integer> countMap = new ConcurrentHashMap<>();
+                    boolean removeExactly(Object element, int occurrences) {
+                        if (occurrences == 0) return true;
+                        Integer c = countMap.get(element);
+                        if (c == null) return false;
+                        countMap.remove(element, c);
+                        return true;
+                    }
+                    boolean test() { return removeExactly("a", 0) && removeExactly("c", 1); }
+                }
+                """);
+        System.out.println(explain(report));
+        Map<String, String> byName = report.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+        assertEquals("Node?[]", byName.get("a.b.HB.hashTableVToK"), "created with null elements, and node.nextInVToKBucket");
+        assertEquals("Entry<K!, V!>?[]", byName.get("a.b.HB.RIM.table"), "created with null elements by a generic factory");
+        assertEquals("Object", byName.get("a.b.HB.removeExactly(Object,int):0:element"));
+    }
+
 }

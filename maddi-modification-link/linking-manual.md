@@ -68,6 +68,11 @@ parse (openjdk or maddi parser) → CST
     Not populated across `this(...)`/`super(...)` (ECIs are not evaluated). On the wire it is a trailing
     `["A", …]` entry in the `methodLinks` encoding, present only when non-empty (old files decode as empty).
 - **`Links` / `Link` / `LinkNature`** — a `Link` is `(from, linkNature, to)`; `Links` is a set with a `primary()`.
+  Two provenance bits, set at emission (`WriteLinksAndModification`) from registries the `Graph` keeps:
+  `mediated()` (produced through a cast or pattern binding) and `derived()` (a product of the closure or the
+  shared-variable reconstruction, as opposed to a link the statement's own evaluation inserted; the nullability
+  pass reads the direct ones and composes them itself). Neither is encoded. Under `Options.nullConstantReturns`
+  a null constant composes only as `x ← $_ce` (`LinkComputerImpl`, `nullOnlyAssigned`).
 - **Variable kinds you will meet** (important for reading link output):
   - `ParameterInfo` (`0:box`, `1:x` — the index prefix), `FieldReference` (`box.t`, `this.myBox`), `This`,
     `DependentVariable` (array access `arr[0]`, `boxes[0]`), `ReturnVariable`.

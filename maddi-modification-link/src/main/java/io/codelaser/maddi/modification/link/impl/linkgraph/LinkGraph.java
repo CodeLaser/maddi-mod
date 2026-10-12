@@ -101,7 +101,7 @@ public class LinkGraph {
                 .filter(e -> e.getValue().primary() != null)
                 .sorted(Map.Entry.comparingByKey(Variable::compareTo))
                 .forEach(e -> e.getValue().translate(replaceConstants).forEach(link -> {
-                    graph.simpleAddToGraph(link.from(), link.linkNature(), link.to(), statementIndex,
+                    graph.addStatementLink(link.from(), link.linkNature(), link.to(), statementIndex,
                             link.mediated());
                 }));
 

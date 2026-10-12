@@ -6,6 +6,7 @@ import io.codelaser.maddi.modification.link.impl.graph.Fact;
 import io.codelaser.maddi.modification.link.impl.graph.IncrementalFixpointEngine;
 import io.codelaser.maddi.modification.link.impl.graph.LabeledGraph;
 import io.codelaser.maddi.modification.prepwork.variable.ReturnVariable;
+import io.codelaser.maddi.modification.link.impl.localvar.IntermediateVariable;
 import io.codelaser.maddi.modification.link.impl.localvar.MarkerVariable;
 import io.codelaser.maddi.modification.link.impl.localvar.SharedVariable;
 import io.codelaser.maddi.modification.link.impl.translate.VariableTranslationMap;
@@ -68,7 +69,8 @@ public class Graph {
                         Set<Variable> verticesWithReturnPrimary,
                         Set<Variable> freshObjectReturns,
                         Map<Variable, Set<Variable>> patternBindings,
-                        Set<Set<Variable>> mediatedPairs) {
+                        Set<Set<Variable>> mediatedPairs,
+                        Map<List<Object>, LinkNature> directEdges) {
         public State copy() {
             return copyWith(sharedVariables.copy());
         }
@@ -81,14 +83,14 @@ public class Graph {
             patternBindings.forEach((k, v) -> bindings.put(k, new HashSet<>(v)));
             return new State(engine.copy(), virtualModificationIdenticals.copy(), sharedVariablesCopy, byScopePart, new LinkedHashSet<>(verticesWithRepInScope),
                     new LinkedHashSet<>(verticesWithReturnPrimary), new HashSet<>(freshObjectReturns), bindings,
-                    new HashSet<>(mediatedPairs));
+                    new HashSet<>(mediatedPairs), new HashMap<>(directEdges));
         }
     }
 
     /** An independent copy of the current state. */
     public State snapshot() {
         return new State(engine, virtualModificationIdenticals, null, verticesByScopePart, verticesWithRepInScope,
-                verticesWithReturnPrimary, freshObjectReturns, patternBindings, mediatedPairs)
+                verticesWithReturnPrimary, freshObjectReturns, patternBindings, mediatedPairs, directEdges)
                 .copyWith(sharedVariables.snapshot());
     }
 
@@ -99,7 +101,7 @@ public class Graph {
     public State detach() {
         return new State(engine, virtualModificationIdenticals, sharedVariables.detach(), verticesByScopePart,
                 verticesWithRepInScope, verticesWithReturnPrimary, freshObjectReturns, patternBindings,
-                mediatedPairs);
+                mediatedPairs, directEdges);
     }
 
     /** Install a state; it is owned by this graph from now on (pass a copy to keep using it). */
@@ -114,6 +116,7 @@ public class Graph {
         freshObjectReturns = state.freshObjectReturns();
         patternBindings = state.patternBindings();
         mediatedPairs = state.mediatedPairs();
+        directEdges = state.directEdges();
         clearRepExpansionCache();
         touchedVariables.clear();
         dirtyEverything = true;
@@ -150,6 +153,7 @@ public class Graph {
             other.patternBindings().forEach((k, v) -> patternBindings.computeIfAbsent(k, _ -> new HashSet<>())
                     .addAll(v));
             mediatedPairs.addAll(other.mediatedPairs());
+            directEdges.putAll(other.directEdges());
         }
         sharedVariables.restore(plan.joined());
         clearRepExpansionCache();
@@ -468,6 +472,73 @@ public class Graph {
         return !a.equals(b) && mediatedPairs.contains(Set.of(a, b));
     }
 
+    // the edges a statement's own evaluation inserted (LinkGraph.compute), in both orientations, keyed on the
+    // nature's rank: the ☷ pass-variant of ≡ is the same edge. Consulted at extraction, as mediatedPairs is, to
+    // set Link.derived() on what the closure and the shared-variable reconstruction emit: a fact that was never
+    // inserted is a composition. A cleared (reassigned) or removed variable's edges go with it, as its mediation
+    // does; the fork/join of a statement unites the alternatives' edges, as it unites their facts.
+    // An intermediate ('$__rvN', the value of a switch expression whose block arms are statements of their own, so
+    // the reduction within one statement cannot remove it) is a carrier of the statement: the composition
+    // across it ('r ← $__rv' + '$__rv ← s' = 'r ← s') is what the reduction would have inserted, and is direct.
+    private Map<List<Object>, LinkNature> directEdges = new HashMap<>();
+
+    private static List<Object> directKey(Variable from, LinkNature linkNature, Variable to) {
+        return List.of(from, linkNature.rank(), to);
+    }
+
+    public void markDirect(Variable from, LinkNature linkNature, Variable to) {
+        if (from.equals(to) || directEdges.containsKey(directKey(from, linkNature, to))) return;
+        directEdges.put(directKey(from, linkNature, to), linkNature);
+        directEdges.put(directKey(to, linkNature.reverse(), from), linkNature.reverse());
+        if (to instanceof IntermediateVariable) composeDirect(from, linkNature, to);
+        if (from instanceof IntermediateVariable) composeDirect(to, linkNature.reverse(), from);
+    }
+
+    // every direct edge leaving the intermediate 'via' continues the edge 'from -ln-> via'
+    private void composeDirect(Variable from, LinkNature linkNature, Variable via) {
+        List<Map.Entry<List<Object>, LinkNature>> onward = directEdges.entrySet().stream()
+                .filter(e -> via.equals(e.getKey().getFirst())).toList();
+        for (Map.Entry<List<Object>, LinkNature> e : onward) {
+            Variable target = (Variable) e.getKey().get(2);
+            LinkNature combined = linkNature.combine(e.getValue());
+            if (combined != null && combined.valid() && engine.isValid(combined) && !target.equals(from)) {
+                markDirect(from, combined, target);
+            }
+        }
+    }
+
+    public boolean isDirect(Variable from, LinkNature linkNature, Variable to) {
+        return directEdges.containsKey(directKey(from, linkNature, to));
+    }
+
+    /*
+     What a vertex about to go carried between two survivors stays direct, as the engine materializes the
+     compositions it orphans (IncrementalFixpointEngine.materializeWitnessOrphans): 'r ← s' when the block local
+     's' of 'r = switch (k) { case 1 -> { String s = null; yield s; } ... }' goes out of scope, and 'y ← a' from
+     'y = x' when 'x = a' is overwritten.
+     */
+    private void forgetDirect(Set<Variable> gone) {
+        for (Variable g : gone) {
+            List<Map.Entry<List<Object>, LinkNature>> into = directEdges.entrySet().stream()
+                    .filter(e -> g.equals(e.getKey().get(2)) && !gone.contains((Variable) e.getKey().getFirst()))
+                    .toList();
+            List<Map.Entry<List<Object>, LinkNature>> outOf = directEdges.entrySet().stream()
+                    .filter(e -> g.equals(e.getKey().getFirst()) && !gone.contains((Variable) e.getKey().get(2)))
+                    .toList();
+            for (Map.Entry<List<Object>, LinkNature> in : into) {
+                for (Map.Entry<List<Object>, LinkNature> out : outOf) {
+                    Variable a = (Variable) in.getKey().getFirst();
+                    Variable b = (Variable) out.getKey().get(2);
+                    if (a.equals(b)) continue;
+                    LinkNature combined = in.getValue().combine(out.getValue());
+                    if (combined != null && combined.valid() && engine.isValid(combined)) markDirect(a, combined, b);
+                }
+            }
+        }
+        directEdges.keySet().removeIf(key -> gone.contains((Variable) key.get(0))
+                                             || gone.contains((Variable) key.get(2)));
+    }
+
     public void markFreshObjectReturn(Variable returnVariable) {
         freshObjectReturns.add(returnVariable);
         touchVariable(returnVariable);
@@ -590,6 +661,7 @@ public class Graph {
             // target.§is for 'return target'; setI.i ← this.i for a fluent setter) never arise. The group's field
             // vertices live re-keyed on the rep; project each onto both endpoints of the intra-group link.
             Variable from = link.from(), to = link.to();
+            boolean direct = isDirect(from, link.linkNature(), to);
             Variable repFrom = sharedVariables.translateForward(from);
             if (!Gate.isSet("NOMIRROR")
                 && repFrom instanceof SharedVariable && repFrom.equals(sharedVariables.translateForward(to))) {
@@ -601,7 +673,10 @@ public class Graph {
                         // representable as a Link; skip (same policy as vmiDirectionalFacts)
                         if (LinksImpl.LinkImpl.doNotStackMOnTopOfVirtualField(fromSub)
                             && LinksImpl.LinkImpl.doNotStackMOnTopOfVirtualField(toSub)) {
-                            // a field-level mirror of a mediated whole-object link inherits the provenance
+                            // a field-level mirror of a mediated whole-object link inherits the provenance; of a
+                            // statement's own link, its directness ('return out' gives 'ret.§$s ⊆ out.§$s', the
+                            // content copied, see Link.derived())
+                            if (direct) markDirect(fromSub, link.linkNature(), toSub);
                             result.add(new LinksImpl.LinkImpl(fromSub, link.linkNature(), toSub, link.mediated()));
                         }
                     }
@@ -615,6 +690,7 @@ public class Graph {
                         Variable rehomed = rehome(m, to, from);
                         if (LinksImpl.LinkImpl.doNotStackMOnTopOfVirtualField(rehomed)
                             && LinksImpl.LinkImpl.doNotStackMOnTopOfVirtualField(m)) {
+                            if (direct) markDirect(rehomed, link.linkNature(), m);
                             result.add(new LinksImpl.LinkImpl(rehomed, link.linkNature(), m, link.mediated()));
                         }
                     });
@@ -680,6 +756,7 @@ public class Graph {
             if (remove) touchAll(pair); // the surviving partner's emissions change too
             return remove;
         });
+        forgetDirect(set);
     }
 
     // diagnostic: NOSV=1 in the environment disables the shared-variable collapse (assignments stay first-class
@@ -916,6 +993,13 @@ public class Graph {
         return simpleAddToGraph(from, linkNature, to, statementIndex, false);
     }
 
+    // a link of the statement's own evaluation (LinkGraph.compute): recorded as direct, see Link.derived()
+    boolean addStatementLink(Variable from, LinkNature linkNature, Variable to, String statementIndex,
+                             boolean mediated) {
+        if (engine.isValid(linkNature) && !from.equals(to)) markDirect(from, linkNature, to);
+        return simpleAddToGraph(from, linkNature, to, statementIndex, mediated);
+    }
+
     boolean simpleAddToGraph(Variable from, LinkNature linkNature, Variable to, String statementIndex,
                              boolean mediated) {
         if (mediated) markMediated(from, to);
@@ -973,6 +1057,7 @@ public class Graph {
             if (remove) touchAll(pair);
             return remove;
         });
+        forgetDirect(toRemove);
     }
 
     public Set<Variable> replaceReturnAffected(Variable from, Variable to,

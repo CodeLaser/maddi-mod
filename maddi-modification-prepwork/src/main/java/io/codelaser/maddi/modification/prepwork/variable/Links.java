@@ -69,6 +69,11 @@ public interface Links extends Iterable<Link>, Value {
             return add(from, linkNature, to);
         }
 
+        /** mediated and derived provenance (see {@link Link#mediated()}, {@link Link#derived()}) */
+        default Builder add(Variable from, LinkNature linkNature, Variable to, boolean mediated, boolean derived) {
+            return add(from, linkNature, to, mediated);
+        }
+
         boolean contains(Variable from, LinkNature reverse, Variable to);
 
         void prepend(LinkNature linkNature, Variable to);
