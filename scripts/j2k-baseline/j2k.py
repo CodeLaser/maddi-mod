@@ -143,11 +143,54 @@ class Mcp:
         return text
 
 
+def convert_with_mcp(a, idea_sh, env, project, out, j2k_log, java_files, build_txt):
+    srv_log = out / "mcp-server.log"
+    srv = subprocess.Popen([idea_sh, "mcpServer", f"--project={project}", f"--port={PORT}",
+                            "--invocation-mode=direct", f"--allowed-tools={','.join(TOOLS)}"],
+                           env=env, stdout=open(srv_log, "w"), stderr=subprocess.STDOUT)
+    try:
+        for i in range(600):
+            if "MCP Server started" in srv_log.read_text(errors="replace"):
+                break
+            if srv.poll() is not None:
+                raise SystemExit(f"MCP server died; see {srv_log}")
+            time.sleep(1)
+        else:
+            raise SystemExit("MCP server never came up in 600s")
+        mcp = Mcp(PORT, project)
+        mcp.connect()
+        tools = mcp.tools()
+        if "convert_java_to_kotlin" not in tools:
+            raise SystemExit(f"convert_java_to_kotlin absent (IDE {build_txt}); tools: {tools}")
+        with open(j2k_log, "a") as lf:
+            lf.write("\n=== get_project_modules\n" + mcp.call("get_project_modules", {}, 300) + "\n")
+        batches = [java_files] if a.batch <= 0 else [java_files[i:i + a.batch]
+                                                      for i in range(0, len(java_files), a.batch)]
+        t1 = time.time()
+        for n, batch in enumerate(batches, 1):
+            log(f"convert batch {n}/{len(batches)}: {len(batch)} files")
+            text = mcp.call("convert_java_to_kotlin", {"file_paths": batch}, 6 * 3600)
+            with open(j2k_log, "a") as lf:
+                lf.write(f"\n=== convert batch {n}\n{text}\n")
+        log(f"converted in {time.time() - t1:.0f}s")
+    finally:
+        srv.terminate()
+        try:
+            srv.wait(60)
+        except subprocess.TimeoutExpired:
+            srv.kill()
+
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--module", required=True)
     ap.add_argument("--out", required=True)
-    ap.add_argument("--idea-build", default="263.6800.24")
+    ap.add_argument("--idea-build", default="2026.2.3",
+                    help="a release version (2026.2.3) or a build number (263.6800.24): download.jetbrains.com/idea/idea-<it>.tar.gz")
+    ap.add_argument("--plugin", default=None,
+                    help="maddi-dist's maddi-intellij-j2k plugin zip: convert through the action's code path (`idea.sh "
+                         "maddi-j2k`) instead of the MCP tool, whose 2026.3 post-processing fails on the EDT")
     ap.add_argument("--work", default=None)
     ap.add_argument("--batch", type=int, default=0, help="files per convert call; 0 = all in one call")
     ap.add_argument("--xmx", default="8g")
@@ -199,6 +242,10 @@ def main():
         f"-Dproject.jdk={jdk}", "-Dproject.jdk.name=corpus-jdk",
     ]) + "\n")
     env = dict(os.environ, IDEA_VM_OPTIONS=str(vmoptions))
+    if a.plugin:
+        plugins = work / "ide" / "plugins"
+        plugins.mkdir(parents=True, exist_ok=True)
+        shutil.unpack_archive(str(Path(a.plugin).resolve()), str(plugins))
     idea_sh = str(idea / "bin" / "idea.sh")
     j2k_log = out / "j2k.log"
 
@@ -211,41 +258,21 @@ def main():
     if rc != 0:
         raise SystemExit(f"warmup failed; see {j2k_log}")
 
-    srv_log = out / "mcp-server.log"
-    srv = subprocess.Popen([idea_sh, "mcpServer", f"--project={project}", f"--port={PORT}",
-                            "--invocation-mode=direct", f"--allowed-tools={','.join(TOOLS)}"],
-                           env=env, stdout=open(srv_log, "w"), stderr=subprocess.STDOUT)
-    try:
-        for i in range(600):
-            if "MCP Server started" in srv_log.read_text(errors="replace"):
-                break
-            if srv.poll() is not None:
-                raise SystemExit(f"MCP server died; see {srv_log}")
-            time.sleep(1)
-        else:
-            raise SystemExit("MCP server never came up in 600s")
-        mcp = Mcp(PORT, project)
-        mcp.connect()
-        tools = mcp.tools()
-        if "convert_java_to_kotlin" not in tools:
-            raise SystemExit(f"convert_java_to_kotlin absent (IDE {build_txt}); tools: {tools}")
-        with open(j2k_log, "a") as lf:
-            lf.write("\n=== get_project_modules\n" + mcp.call("get_project_modules", {}, 300) + "\n")
-        batches = [java_files] if a.batch <= 0 else [java_files[i:i + a.batch]
-                                                      for i in range(0, len(java_files), a.batch)]
+    if a.plugin:
+        batches = [java_files]
         t1 = time.time()
-        for n, batch in enumerate(batches, 1):
-            log(f"convert batch {n}/{len(batches)}: {len(batch)} files")
-            text = mcp.call("convert_java_to_kotlin", {"file_paths": batch}, 6 * 3600)
-            with open(j2k_log, "a") as lf:
-                lf.write(f"\n=== convert batch {n}\n{text}\n")
-        log(f"converted in {time.time() - t1:.0f}s")
-    finally:
-        srv.terminate()
-        try:
-            srv.wait(60)
-        except subprocess.TimeoutExpired:
-            srv.kill()
+        log("maddi-j2k: the action's code path")
+        with open(j2k_log, "a") as lf:
+            lf.write("\n=== maddi-j2k\n")
+            lf.flush()
+            rc = subprocess.run([idea_sh, "maddi-j2k", str(project), str(main_root.relative_to(project))], env=env,
+                                stdout=lf, stderr=subprocess.STDOUT).returncode
+        log(f"maddi-j2k rc={rc} after {time.time() - t1:.0f}s")
+        if rc != 0:
+            raise SystemExit(f"maddi-j2k failed; see {j2k_log}")
+    else:
+        convert_with_mcp(a, idea_sh, env, project, out, j2k_log, java_files, build_txt)
+        batches = [None] * (1 if a.batch <= 0 else -(-len(java_files) // a.batch))
 
     left = sorted(p.relative_to(main_root).as_posix() for p in main_root.rglob("*.java"))
     kt = sorted(main_root.rglob("*.kt"))
@@ -273,6 +300,7 @@ def main():
         f"kotlin files produced: {len(kt)}",
         f"java files left unconverted: {len(left)}",
         f"batches: {len(batches)}",
+        f"path: {'maddi-j2k plugin (the action)' if a.plugin else 'MCP convert_java_to_kotlin'}",
         f"seconds: {time.time() - t0:.0f}",
     ] + [f"  left: {f}" for f in left]) + "\n")
     log(f"done: {len(kt)} .kt, {len(left)} .java left; {out}")
