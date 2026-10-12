@@ -512,6 +512,87 @@ public final class NullabilityPass {
         return new NarrowedReads(Map.copyOf(nullClasses), Map.copyOf(getters));
     }
 
+    /*
+     CodeLaser/maddi-mod#30 3: a final field of this, read in method m, is non-null when no class whose instances may
+     hold null in it can run m. A class S does not run m when S, or a class between S and m's class, overrides m (and
+     no analysed code calls m through 'super'), or, for a method that is not public, when no analysed call of m, nor
+     of a method m overrides, has a receiver whose static type S is a subtype of. timefold MixedVariableExhaustiveSearchDecider stores a null
+     moveRepository, overrides every lifecycle method that reads it, and is never the receiver of the protected
+     expandNode the other deciders call on this. Implies the narrowing by m's own class (NonNullFacts.narrowedThis).
+     */
+    private boolean narrowedInMethod(FieldInfo fi, MethodInfo m) {
+        Set<TypeInfo> classes = narrowed.nullClasses().get(fi);
+        if (classes == null) return false;
+        TypeInfo owner = m.typeInfo();
+        for (TypeInfo s : classes) {
+            if (isSubtype(s, owner) && mayRunOn(m, s)) return false;
+        }
+        return true;
+    }
+
+    private boolean mayRunOn(MethodInfo m, TypeInfo s) {
+        CallIndex index = callIndex();
+        if (!index.superCalled().contains(m) && overriddenBetween(m, s)) return false;
+        // a public method may be called where the pass does not look: by reflection, a serializer reading getters
+        // (timefold SolverWorkerEvent.getModel() on a FailedSolutionEvent, which no analysed call reaches). An
+        // override still holds there: the reflective call dispatches to it.
+        if (m.access().isPublic()) return true;
+        List<TypeInfo> receivers = new ArrayList<>(index.receivers().getOrDefault(m, List.of()));
+        for (MethodInfo overridden : m.overrides()) {
+            receivers.addAll(index.receivers().getOrDefault(overridden, List.of()));
+        }
+        // no analysed call: the method is reached from outside (a framework, reflection), on any instance
+        if (receivers.isEmpty()) return true;
+        for (TypeInfo r : receivers) {
+            if (r == null || r.isJavaLangObject() || isSubtype(s, r)) return true;
+        }
+        return false;
+    }
+
+    // s, or one of its parents below m's class, declares a method overriding m
+    private static boolean overriddenBetween(MethodInfo m, TypeInfo s) {
+        for (TypeInfo t = s; t != null && t != m.typeInfo(); t = parentOf(t)) {
+            if (t.methodStream().anyMatch(x -> x.overrides().contains(m))) return true;
+        }
+        return false;
+    }
+
+    /*
+     Per method called in the analysed code, the static types of the receivers of its calls; null for a receiver
+     without a type, and for a method reference (any instance may be its receiver). The methods called through
+     'super', which run on the caller's instance whatever overrides them.
+     */
+    private record CallIndex(Map<MethodInfo, List<TypeInfo>> receivers, Set<MethodInfo> superCalled) {
+    }
+
+    private CallIndex callIndex;
+
+    private CallIndex callIndex() {
+        if (callIndex != null) return callIndex;
+        Map<MethodInfo, List<TypeInfo>> receivers = new HashMap<>();
+        Set<MethodInfo> superCalled = new HashSet<>();
+        for (MethodInfo mi : analysed) {
+            Block body = mi.methodBody();
+            if (body == null) continue;
+            body.visit(e -> {
+                if (e instanceof MethodCall mc && mc.methodInfo() != null && !mc.methodInfo().isStatic()) {
+                    Expression object = mc.object();
+                    if (object instanceof VariableExpression ve
+                        && ve.variable() instanceof io.codelaser.maddi.cst.api.variable.This t && t.writeSuper()) {
+                        superCalled.add(mc.methodInfo());
+                    }
+                    ParameterizedType type = object == null ? null : object.parameterizedType();
+                    receivers.computeIfAbsent(mc.methodInfo(), _ -> new ArrayList<>())
+                            .add(type == null ? null : type.typeInfo());
+                } else if (e instanceof MethodReference mr && mr.methodInfo() != null) {
+                    receivers.computeIfAbsent(mr.methodInfo(), _ -> new ArrayList<>()).add(null);
+                }
+                return true;
+            });
+        }
+        return callIndex = new CallIndex(receivers, superCalled);
+    }
+
     // may an instance whose runtime class is x hold null in the final field fi, through any of x's constructors?
     private boolean classMayHoldNull(TypeInfo x, FieldInfo fi) {
         List<MethodInfo> constructors = x.constructors();
@@ -675,7 +756,8 @@ public final class NullabilityPass {
         narrowedReads = narrowed.isEmpty() ? null : narrowed::nonNull;
         facts = new NonNullFacts(this::parameterContract, this::returnContract)
                 .withPredicates(predicates)
-                .withNarrowedReads(narrowedReads);
+                .withNarrowedReads(narrowedReads)
+                .withNarrowedInMethod(narrowedReads == null ? null : this::narrowedInMethod);
         if (policy.contracts()) {
             for (FieldInfo fi : fields) contract(fi, fi);
             for (MethodInfo mi : methods) {
@@ -781,6 +863,7 @@ public final class NullabilityPass {
         NonNullFacts useSites = new NonNullFacts(this::parameterContract, this::returnContract)
                 .withPredicates(predicates)
                 .withNarrowedReads(narrowedReads)
+                .withNarrowedInMethod(narrowedReads == null ? null : this::narrowedInMethod)
                 .withNotNullable(e -> notNullable(e, nonNullCallResults));
         methods.forEach(useSites::walk);
         return new Report(verdicts, locals, cause, seedOrigin, useSites, smartCasts, Set.copyOf(asserted),

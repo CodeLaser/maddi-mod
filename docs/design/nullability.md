@@ -1251,3 +1251,32 @@ Tests: `TestNullabilityPass` 84 (`orElseGetIsDirect` fails without the bit; `dir
 
 Not done, the pass's heuristics the bit makes redundant (`deepFace`, the observation counting of `linkEdge`,
 `argumentGuard`'s reach test): each to be retired on its own measurement.
+
+### 2026-10-12 — a final field of this, by the methods a class can run (CodeLaser/maddi-mod#30)
+
+The diagnose session reported three clusters of one family on timefold (85 `nullDereference` results, measured
+on 592220fc). On devel cb89662e the first two are already answered by the narrowing of #27 2: in
+`BavetBiGroupBiConstraintStream.buildNode` (and `BiGroupBiEnumeratingStream`) the facts at `parent.getTupleSource()`
+contain `this.parent`, at the statement and at the call. `narrowedThisFieldThreeLevels` pins the shape: three
+levels, an abstract middle class with both constructors, a grandparent constructor taking `parent.getSemantics()`.
+
+The third, `AbstractExhaustiveSearchDecider.moveRepository`, needs a new rule. A final field of this, read in method
+m, is non-null when no class whose instances may hold null in it can run m. A class S does not run m
+
+- when S, or a class between S and m's class, overrides m, and no analysed code calls m through `super`
+  (`MixedVariableExhaustiveSearchDecider` overrides every lifecycle method that reads the field);
+- for a method that is not public, when no analysed call of m, nor of a method m overrides, has a receiver
+  whose static type S is a subtype of (the protected `expandNode` the other deciders call on this). A public
+  method is left out: a serializer reading getters calls it where the pass does not look. Without that
+  restriction, timefold's `SolverWorkerEvent.getModel()` became non-null, while `FailedSolutionEvent` stores a
+  null model and no analysed call reaches its getter.
+
+On timefold the rule does not fire. Timefold's own tests construct the Basic and List deciders with a null
+`moveRepository` (`DefaultExhaustiveSearchPhaseTest.restoreWorkingSolutionFor*Variable`), so every decider class
+may hold null, and the reads are rightly unknown in a world that includes the tests. Narrowing that discounts
+the nulls tests write is a separate decision, which the diagnostics would need (they count a test-written null
+as the test's business).
+
+Measured against devel cb89662e: guava oracle identical, langchain4j and timefold (diagnose policy) verdicts
+identical. `narrowedThisFieldByMethod` pins the rule, with its two conservative cases: a `super` call into the
+overridden method, a public method.

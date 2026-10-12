@@ -83,6 +83,7 @@ public final class NonNullFacts {
     private NullPredicates predicates;
     // is the member (a getter, a field) non-null on every instance of the type? (Narrowing, CodeLaser/maddi-mod#22 gap 3)
     private java.util.function.BiPredicate<Object, TypeInfo> narrowedNonNull;
+    private java.util.function.BiPredicate<FieldInfo, MethodInfo> narrowedInMethod;
     // the pass's verdict on a value, once its closure is known: no null of the analysis reaches it (gap 7); null
     // while the pass builds its graph
     private java.util.function.Predicate<Expression> notNullable;
@@ -115,6 +116,15 @@ public final class NonNullFacts {
      */
     public NonNullFacts withNarrowedReads(java.util.function.BiPredicate<Object, TypeInfo> nonNull) {
         this.narrowedNonNull = nonNull;
+        return this;
+    }
+
+    /**
+     * A final field of {@code this} that no instance able to run the method holds null in:
+     * {@code nonNull.test(field, method)} (CodeLaser/maddi-mod#30 3). Not in {@link #kotlinSmartCasts()}.
+     */
+    public NonNullFacts withNarrowedInMethod(java.util.function.BiPredicate<FieldInfo, MethodInfo> nonNull) {
+        this.narrowedInMethod = nonNull;
         return this;
     }
 
@@ -176,7 +186,8 @@ public final class NonNullFacts {
                 // this is an instance of the method's class, unless the method is a lambda's (its this is the
                 // enclosing instance): the field must be one of that class
                 && (fr.fieldInfo().owner() == type || type.superTypesExcludingJavaLangObject().contains(fr.fieldInfo().owner()))
-                && narrowedNonNull.test(fr.fieldInfo(), type)) {
+                && (narrowedNonNull.test(fr.fieldInfo(), type)
+                    || narrowedInMethod != null && narrowedInMethod.test(fr.fieldInfo(), methodInfo))) {
                 set.add(fr);
             }
             return true;

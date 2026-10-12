@@ -3607,6 +3607,149 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals(false, parentKnown(report, stream.findUniqueMethod("parentName", 0)), "a Source may be this");
     }
 
+    // timefold BavetBiGroupBiConstraintStream.buildNode (CodeLaser/maddi-mod#30 1): the narrowedThisField shape three
+    // levels deep, with an abstract middle class that has both constructors, the root's parent-taking constructor
+    // delegating to a grandparent with a dereference of its argument, and generic types throughout
+    @DisplayName("narrowed reads: this's final field through an abstract middle class with both constructors (timefold Bavet)")
+    @Test
+    public void narrowedThisFieldThreeLevels() {
+        NullabilityPass.Report report = run("a.b.BV", """
+                package a.b;
+                class BV {
+                    enum Semantics { STANDARD, LEGACY }
+                    abstract static class Grand<S> {
+                        protected final Semantics semantics;
+                        protected Grand(Semantics semantics) { this.semantics = semantics; }
+                        Semantics getSemantics() { return semantics; }
+                    }
+                    abstract static class Root<S> extends Grand<S> {
+                        protected final Root<S> parent;
+                        protected final String factory;
+                        protected Root(String factory, Root<S> parent) {
+                            super(parent.getSemantics());
+                            this.factory = factory;
+                            this.parent = parent;
+                        }
+                        protected Root(String factory, Semantics semantics) {
+                            super(semantics);
+                            this.factory = factory;
+                            this.parent = null;
+                        }
+                        Object getTupleSource() {
+                            if (parent == null) throw new IllegalStateException("no parent");
+                            return parent.getTupleSource();
+                        }
+                        abstract Object buildNode();
+                    }
+                    abstract static class AbstractBi<S, A, B> extends Root<S> {
+                        protected AbstractBi(String factory, Root<S> parent) { super(factory, parent); }
+                        protected AbstractBi(String factory, Semantics semantics) { super(factory, semantics); }
+                    }
+                    static final class ForEach<S, A, B> extends AbstractBi<S, A, B> {
+                        ForEach(String factory, Semantics semantics) { super(factory, semantics); }
+                        @Override Object getTupleSource() { return this; }
+                        @Override Object buildNode() { return "source"; }
+                    }
+                    static final class Group<S, A, B, X, Y> extends AbstractBi<S, X, Y> {
+                        private final String nodeConstructor;
+                        Group(String factory, AbstractBi<S, A, B> parent, String nodeConstructor) {
+                            super(factory, parent);
+                            this.nodeConstructor = nodeConstructor;
+                        }
+                        @Override Object buildNode() {
+                            Object n = parent.getTupleSource();
+                            return n;
+                        }
+                    }
+                    static Object make() {
+                        var source = new ForEach<String, Integer, Integer>("f", Semantics.STANDARD);
+                        return new Group<String, Integer, Integer, Long, Long>("f", source, "c").buildNode();
+                    }
+                }
+                """);
+        System.out.println(explain(report));
+        TypeInfo group = parsed.subTypes().stream().filter(t -> "Group".equals(t.simpleName())).findFirst().orElseThrow();
+        MethodInfo buildNode = group.findUniqueMethod("buildNode", 0);
+        Statement read = buildNode.methodBody().statements().getFirst();
+        io.codelaser.maddi.cst.api.variable.Variable parent = ((io.codelaser.maddi.cst.api.statement.LocalVariableCreation) read)
+                .localVariable().assignmentExpression() instanceof io.codelaser.maddi.cst.api.expression.MethodCall mc
+                && mc.object() instanceof VariableExpression ve ? ve.variable() : null;
+        assertEquals(true, report.useSites().nonNullAt(read, parent), "Group never stores a null parent");
+    }
+
+    // timefold AbstractExhaustiveSearchDecider.moveRepository (CodeLaser/maddi-mod#30 3): Mixed stores null, overrides
+    // every lifecycle method that reads the field, and never receives the protected expand the others call on this
+    @DisplayName("narrowed reads: this's final field in a method no null-storing class can run (timefold exhaustive search)")
+    @Test
+    public void narrowedThisFieldByMethod() {
+        NullabilityPass.Report report = run("a.b.ED", """
+                package a.b;
+                import java.util.List;
+                class ED {
+                    interface Listener { void started(); }
+                    abstract static class Decider implements Listener {
+                        private final List<String> moves;
+                        Decider(List<String> moves) { this.moves = moves; }
+                        public void started() {
+                            int n = moves.size();
+                            System.out.println(n);
+                        }
+                        protected void expand(int depth) {
+                            int n = moves.size();
+                            System.out.println(n + depth);
+                        }
+                        public void done() {
+                            int n = moves.size();
+                            System.out.println(n);
+                        }
+                        public void report() {
+                            int n = moves.size();
+                            System.out.println(n);
+                        }
+                        public abstract void expand();
+                    }
+                    static final class Basic extends Decider {
+                        Basic(List<String> moves) { super(moves); }
+                        @Override public void expand() { expand(1); }
+                    }
+                    static final class Plain extends Decider {
+                        Plain(List<String> moves) { super(moves); }
+                        @Override public void expand() { expand(2); }
+                        @Override public void done() { super.done(); }
+                    }
+                    static final class Mixed extends Decider {
+                        private final Decider current;
+                        Mixed(Decider current) { super(null); this.current = current; }
+                        @Override public void started() { current.started(); }
+                        @Override public void expand() { current.expand(); }
+                        @Override public void done() { current.done(); }
+                    }
+                    static void run(Listener l, Decider d) { l.started(); d.expand(); d.done(); }
+                    static void make() {
+                        var b = new Basic(List.of("m"));
+                        run(b, b);
+                        b.report();
+                        var m = new Mixed(new Plain(List.of("p")));
+                        run(m, m);
+                    }
+                }
+                """);
+        TypeInfo decider = parsed.subTypes().stream().filter(t -> "Decider".equals(t.simpleName())).findFirst().orElseThrow();
+        assertEquals(true, movesKnown(report, decider.findUniqueMethod("started", 0)), "Mixed overrides started");
+        assertEquals(true, movesKnown(report, decider.findUniqueMethod("expand", 1)), "called on this by Basic and Plain only");
+        assertEquals(false, movesKnown(report, decider.findUniqueMethod("done", 0)),
+                "a super call to done: not excluded by Mixed's override (conservative)");
+        assertEquals(false, movesKnown(report, decider.findUniqueMethod("report", 0)),
+                "public: reflection may call it on a Mixed, although only a Basic receives it here");
+    }
+
+    private static boolean movesKnown(NullabilityPass.Report report, MethodInfo method) {
+        Statement read = method.methodBody().statements().getFirst();
+        io.codelaser.maddi.cst.api.expression.Expression size = ((io.codelaser.maddi.cst.api.statement.LocalVariableCreation) read).localVariable().assignmentExpression();
+        Variable moves = ((VariableExpression) ((MethodCall) size).object()).variable();
+        return report.useSites().nonNullAt(read, moves);
+    }
+
     // the facts on 'parent' when the method's 'String n = parent.name;' starts
     private static boolean parentKnown(NullabilityPass.Report report, MethodInfo method) {
         Statement read = method.methodBody().statements().getFirst();
