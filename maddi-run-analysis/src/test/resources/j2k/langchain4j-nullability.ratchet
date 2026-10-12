@@ -56,12 +56,18 @@
 # parameter cast: 327 files compiling (22 type errors), 326 to class files; 1,103 tests pass with the Kotlin
 # classes, 1,102 translated. ChatMemory now compiles, and its two tests that pass a null array into varargs fail,
 # knowingly, as DocumentSplitter's and TextSegmentTransformer's do (a Kotlin vararg is never null).
+# 2026-10-12, devel with ea36768d, 592220fc, d337a477, e6988a5a, 7f181169 (verdicts) and maddi's 98f4f1667 and
+# 379f4089a (the printer: an unchecked cast into an unbounded type variable instead of `!!`, the target's states
+# beside a star, Java's Annotation as Kotlin's, a cast keeping its own type variables, an element out of a star
+# nullable): 339 files compiling (9 type errors), 339 to class files; 1,106 tests pass with the Kotlin classes, 131
+# test files compile, 1,106 translated tests pass. BatchItemResult's success(null) test passes; failure(null) still
+# fails knowingly (BatchError is no type variable: the record's component is non-null, its constructor takes null).
 types	346
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	346
-compilingFiles	327
-bytecodeFiles	326
-testsPassing	1103
+compilingFiles	339
+bytecodeFiles	339
+testsPassing	1106
 testBytecodeFiles	131
-translatedTestsPassing	1102
+translatedTestsPassing	1106
