@@ -66,6 +66,11 @@
 # type, an annotation's Class element as .java, SAM constructors with the target's type arguments, no `!!` into a
 # library result's member such as Optional.ofNullable(d).orElse(…)): 344 files compiling (2 type errors, maddi-mod#38),
 # 344 to class files, 134 test files compile; 1,106 tests pass with the Kotlin classes, 1,106 translated.
+# 2026-10-12, maddi's 57e0cbf24 and ba1d2dd3f (a final field is a val without a primary constructor too; a local
+# assigned once on each path is a val): 135 test files compile. val against var in the main sources: 850/401 before,
+# 964/287 after. The type errors read 8, not 2: a final val left unassigned where a delegating constructor's
+# arguments do not type-check (EmbeddingStoreContentRetriever, maddi-mod#38's lambda) cascades into one
+# "property must be initialized" per field, in a file that did not compile before either.
 types	346
 printerCrashes	0
 syntaxErrors	0
@@ -73,5 +78,5 @@ syntaxCleanFiles	346
 compilingFiles	344
 bytecodeFiles	344
 testsPassing	1106
-testBytecodeFiles	134
+testBytecodeFiles	135
 translatedTestsPassing	1106
