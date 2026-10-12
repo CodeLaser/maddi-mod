@@ -295,7 +295,17 @@ public class TestShadowCloneBench extends CommonTest {
         // FileFilter/FilenameFilter parameter passed to listFiles and to a recursive call of its own method
         // (listAllFiles, delTree, findFiles, ...): the fixpoint's frozen "modified" is the recursion's pessimism, as
         // it was before; the pass no longer seeds it from listFiles, so the disagreement became visible.
-        org.junit.jupiter.api.Assertions.assertEquals(271, totalRev,
+        // ⭐ Re-baselined 2026-10-12 for maddi 596b3e03d (hints from the library-call census: java.io.File @Immutable,
+        // exception causes, Files' option varargs, OutputStream.write's bytes @NotModified). Divergences 701 -> 62
+        // {nonModifyingMethod 7 -> 1, unmodifiedField 20 -> 12, unmodifiedParameter 674 -> 49} {propagated 683 -> 44,
+        // seed 18 unchanged}: all 639 that closed were the PASS seeding a File from a wrong hint -- "non-analyzed
+        // @Modified parameter" of FileInputStream(File), new File(File,String), ... -- where the fixpoint already said
+        // unmodified. No new divergence. Reverse 271 -> 272 (9 closed, 10 new): the closed ones are file-deleting
+        // helpers (cleanTempFiles, createFiles, dispose(), ...) whose fixpoint verdict became unmodified now that
+        // File.delete() modifies the file system and not the object; the new ones are the fixpoint's own
+        // pessimism, no longer echoed by the pass: recursion over File parameters (compare, deleteDirectory,
+        // scanDir, deleteFile) and chainExceptionCause's oldt, stored into a modified exception by initCause.
+        org.junit.jupiter.api.Assertions.assertEquals(272, totalRev,
                 "reverse divergences are expected since design A (110695ece) retired the "
                 + "walkable-summary seed channel; re-baseline deliberately, and reclassify");
         // Re-baselined 2026-09-22 for the RECEIVER-DISCLAIMER rule (@IgnoreModifications on a parameter now
@@ -310,9 +320,9 @@ public class TestShadowCloneBench extends CommonTest {
         // mirror was found in the first place.
         // Both fixes above apply together, measured on this corpus with both present.
         org.junit.jupiter.api.Assertions.assertEquals(
-                Map.of("nonModifyingMethod", 7, "unmodifiedField", 20, "unmodifiedParameter", 674),
+                Map.of("nonModifyingMethod", 1, "unmodifiedField", 12, "unmodifiedParameter", 49),
                 byProperty);
-        org.junit.jupiter.api.Assertions.assertEquals(Map.of("propagated", 683, "seed", 18), byClass);
+        org.junit.jupiter.api.Assertions.assertEquals(Map.of("propagated", 44, "seed", 18), byClass);
     }
 
     private volatile int totalMethods, totalSeeds, totalEdges, totalMissingArgLinks, totalUnprojectedReceivers;
