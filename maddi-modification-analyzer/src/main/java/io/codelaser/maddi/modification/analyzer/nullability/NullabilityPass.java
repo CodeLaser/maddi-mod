@@ -2055,7 +2055,17 @@ public final class NullabilityPass {
             // is still read from the closure: the reconstruction of an assignment group does not spell the hop
             // through a local's face ('return b.get()' on a 'Box<String> b = new Box<>(null)' has no 'read ← b.t'),
             // and the marker rules below decide per statement anyway.
-            if (link.derived() && !DERIVED_LINKS && !isNullMarker(link.to())) continue;
+            if (link.derived() && !DERIVED_LINKS && !isNullMarker(link.to()) && !updaterLink(statement, link)) continue;
+            if (updaterLink(statement, link) && !link.from().equals(v)
+                && link.linkNature().isIdenticalToOrAssignedFromTo()) {
+                // 'child.parent → node', stored with child: a face of v that the updater assigns to the loop variable
+                Object source = node(mi, scope, link.from());
+                Object loopVariable = node(mi, scope, link.to());
+                if (source != null && loopVariable instanceof Local) {
+                    linkEdge(source, loopVariable, link.from(), link.to(), statement);
+                }
+                continue;
+            }
             // links about a face of v ('this.f.g') are not about v; an element of v ('r[1] <- null', an initializer)
             // is v's Content, its hidden content ('l.§$s', 'm.§$$s[-2]', 'b.t') a type argument's slot
             Object from;
@@ -2184,8 +2194,21 @@ public final class NullabilityPass {
             return;
         }
         Expression value = assignedValue(statement, recipientVar);
-        Guard guard = value == null ? argumentGuard(statement, sourceVar, recipientVar)
-                : guard(value, sourceVar, facts.before(statement));
+        Guard guard;
+        if (value == null && statement instanceof io.codelaser.maddi.cst.api.statement.ForStatement fs) {
+            // 'for (ClassNode c = child; c != null; c = c.parent)': the loop assigns its variable in its init clause
+            // and in its updaters, statements of their own that the walk does not visit. fernflower
+            // NestedClassProcessor.insertLocalVars printed 'classNode = classNode.parent!!' once the pass read direct
+            // links only (23f8bf65): the closure's composed null had covered it.
+            List<Expression> values = forAssignedValues(fs, recipientVar);
+            value = values.isEmpty() ? null : values.getFirst();
+            guard = Guard.ABSENT;
+            for (Expression v : values) guard = combine(guard, guard(v, sourceVar, facts.before(statement)));
+            if (values.isEmpty()) guard = argumentGuard(statement, sourceVar, recipientVar);
+        } else {
+            guard = value == null ? argumentGuard(statement, sourceVar, recipientVar)
+                    : guard(value, sourceVar, facts.before(statement));
+        }
         if (guard == Guard.GUARDED) count[0]++;
         else if (guard == Guard.UNGUARDED) count[1]++;
         else if (guard == Guard.OPAQUE) count[2]++; // a value (or part) not seen through
@@ -2232,6 +2255,45 @@ public final class NullabilityPass {
         return guard[0];
     }
 
+    /*
+     A for loop's updater 'node = node.parent' reaches the links only through the loop's reconstruction, as the derived
+     'child.parent → node' (the loop variable's first value is child): the engine emits no direct link for it. Read
+     it as the updater's own assignment. fernflower NestedClassProcessor.insertLocalVars printed 'classNode =
+     classNode.parent!!' once the pass read direct links only, and the null-constant composition no longer put the
+     parent's null on the loop variable itself (23f8bf65).
+     */
+    private static boolean updaterLink(Statement statement, Link link) {
+        if (!(statement instanceof io.codelaser.maddi.cst.api.statement.ForStatement fs)) return false;
+        for (Expression updater : fs.updaters()) {
+            if (NonNullFacts.unwrap(updater) instanceof Assignment a && a.assignmentOperator() == null
+                && (a.variableTarget().equals(link.to()) || a.variableTarget().equals(link.from()))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // the values a for loop's init clause and updaters assign to 'recipient'
+    private static List<Expression> forAssignedValues(io.codelaser.maddi.cst.api.statement.ForStatement fs,
+                                                      Variable recipient) {
+        List<Expression> values = new ArrayList<>();
+        for (Element init : fs.initializers()) {
+            if (init instanceof LocalVariableCreation lvc) {
+                lvc.localVariableStream().filter(lv -> lv.equals(recipient))
+                        .map(LocalVariable::assignmentExpression).filter(java.util.Objects::nonNull).forEach(values::add);
+            } else if (init instanceof Assignment a && recipient.equals(a.variableTarget()) && a.assignmentOperator() == null) {
+                values.add(a.value());
+            }
+        }
+        for (Expression updater : fs.updaters()) {
+            if (NonNullFacts.unwrap(updater) instanceof Assignment a && recipient.equals(a.variableTarget())
+                && a.assignmentOperator() == null) {
+                values.add(a.value());
+            }
+        }
+        return values;
+    }
+
     // the value 'recipient' gets in this statement: 'recipient = v;', 'T recipient = v;', 'return v;'; else null
     private static Expression assignedValue(Statement statement, Variable recipient) {
         return switch (statement) {
@@ -2258,7 +2320,9 @@ public final class NullabilityPass {
         Expression e = NonNullFacts.unwrap(value);
         switch (e) {
             case VariableExpression ve -> {
-                if (ve.variable().equals(source)) return known.contains(source) ? Guard.GUARDED : Guard.UNGUARDED;
+                if (sameVariable(ve.variable(), source)) {
+                    return known.contains(source) ? Guard.GUARDED : Guard.UNGUARDED;
+                }
                 return ve.variable() instanceof io.codelaser.maddi.cst.api.variable.FieldReference fr
                        && !fr.scopeIsRecursivelyThis() ? Guard.OPAQUE : Guard.ABSENT;
             }
@@ -2292,10 +2356,23 @@ public final class NullabilityPass {
     private static boolean mentions(Expression e, Variable v) {
         boolean[] found = {false};
         e.visit(x -> {
-            if (x instanceof VariableExpression ve && ve.variable().equals(v)) found[0] = true;
+            if (x instanceof VariableExpression ve && sameVariable(ve.variable(), v)) found[0] = true;
             return !found[0];
         });
         return found[0];
+    }
+
+    /*
+     The variable a link names against the one an expression reads. An element is named by the link engine with its
+     own index ('arr[1]' for the 'arr[i]' of 'val = arr[i]' in a loop), so an element of the same array counts as the
+     same variable whatever the index: the pass keeps one Content per array anyway. Without it the direct link
+     'val ← arr[1]' was never observed in its statement, and the element's null did not reach 'val' (fernflower
+     SFormsFastMapDirect.removeAllFields, 'val val = arr!![i]!!', after 23f8bf65 dropped the derived 'val ∈ arr').
+     */
+    private static boolean sameVariable(Variable read, Variable linked) {
+        if (read.equals(linked)) return true;
+        return read instanceof DependentVariable r && linked instanceof DependentVariable l
+               && sameVariable(r.arrayVariable(), l.arrayVariable());
     }
 
     private static Guard combine(Guard g1, Guard g2) {

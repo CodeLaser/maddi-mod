@@ -786,6 +786,68 @@ public class TestNullabilityPass extends CommonTest {
     }
 
     @Language("java")
+    private static final String SUB_ARRAYS = """
+            package a.b;
+            class F {
+                static class Set2 { }
+                private int size;
+                private final Set2[][] elements = new Set2[3][];
+                F() { for (int i = 0; i < 3; i++) elements[i] = new Set2[0]; }
+                void ensure(int index, int n) { Set2[] grown = new Set2[n]; elements[index] = grown; }
+                void put(int index, int key, Set2 value) { elements[index][key] = value; }
+                void removeAllFields() {
+                    Set2[] arr = elements[2];
+                    for (int i = arr.length - 1; i >= 0; i--) {
+                        Set2 val = arr[i];
+                        if (val != null) { arr[i] = null; size--; }
+                    }
+                }
+                Set2 first(int index) {
+                    Set2[] arr = elements[index];
+                    Set2 one = arr[0];
+                    return one;
+                }
+            }
+            """;
+
+    @DisplayName("an element of a field's sub-array, read through a local copy of the sub-array: nullable when the "
+                 + "method nulls it, or an array allocated elsewhere has holes (fernflower SFormsFastMapDirect, 23f8bf65)")
+    @Test
+    public void subArrayElements() {
+        NullabilityPass.Report report = run("a.b.F", SUB_ARRAYS);
+        System.out.println(explain(report));
+        String locals = locals(report);
+        System.out.println(locals);
+        assertTrue(locals.contains("removeAllFields.val: Set2?"), locals);
+        assertTrue(locals.contains("first.one: Set2?"), locals);
+    }
+
+    // fernflower NestedClassProcessor.insertLocalVars: 'classNode = classNode.parent!!' after 23f8bf65
+    @DisplayName("a for loop's updater assigns its variable the parent field's default null")
+    @Test
+    public void forLoopUpdater() {
+        NullabilityPass.Report report = run("a.b.FL", """
+                package a.b;
+                class FL {
+                    static class Node {
+                        public Node parent;
+                        String name;
+                    }
+                    static void link(Node child, Node parent) { child.parent = parent; }
+                    static int depth(Node child) {
+                        int d = 0;
+                        for (Node node = child; node != null; node = node.parent) { d++; }
+                        return d;
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        System.out.println(explain(report));
+        String locals = locals(report);
+        System.out.println(locals);
+        assertTrue(locals.contains("depth.node: Node?"), locals);
+    }
+
+    @Language("java")
     private static final String GENERICS = """
             package a.b;
             import java.util.*;
