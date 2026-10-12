@@ -92,6 +92,61 @@ def configure_kotlin_maven(pom: Path, version: str):
     pom.write_text(text)
 
 
+def build_and_test(project: Path, out: Path, env: dict) -> list:
+    """Compile the converted module and run its (Java) tests against the Kotlin classes, the way maddi's ratchets
+    count 'tests passing with the Kotlin classes'. Offline: the corpus's dependencies are in ~/.m2 already."""
+    t0 = time.time()
+    build_log = out / "build.log"
+    gradle = (project / "build.gradle.kts").exists()
+    log("gradlew test" if gradle else "mvn -o test")
+    with open(build_log, "w") as lf:
+        rc = subprocess.run(["./gradlew", "--no-daemon", "--continue", "test"], cwd=project, stdout=lf,
+                            stderr=subprocess.STDOUT, env=env).returncode if gradle else \
+             subprocess.run(["mvn", "-o", "-B", "test", "-Dmaven.test.failure.ignore=true", "-Denforcer.skip=true",
+                             "-Dspotless.check.skip=true", "-Dcheckstyle.skip=true", "-Drat.skip=true",
+                             "-Djacoco.skip=true", "-Dmaven.javadoc.skip=true"],
+                            cwd=project, stdout=lf, stderr=subprocess.STDOUT,
+                            env=dict(env, JAVA_HOME=env.get("JAVA_HOME", ""))).returncode
+    text = build_log.read_text(errors="replace")
+    # kotlin-maven-plugin prints '[ERROR] /path/X.kt: (line, col) message' (older: '[ERROR] e: file:///path/X.kt:...')
+    kotlin_errors = re.findall(r"\[ERROR\] (?:e: file://)?(/\S+?\.kt):", text)
+    if gradle:
+        kotlin_errors = re.findall(r"^e: file://(/\S+?\.kt):", text, re.M)
+    java_errors = re.findall(r"\[ERROR\] (/\S+?\.java):\[", text) + re.findall(r"^(/\S+?\.java):\d+: error:", text, re.M)
+    tests = failures = errors = skipped = 0
+    reports = project / ("build/test-results/test" if gradle else "target/surefire-reports")
+    if reports.is_dir():
+        shutil.copytree(reports, out / "surefire", dirs_exist_ok=True)
+        for x in reports.glob("TEST-*.xml"):
+            head = x.read_text(errors="replace")[:2000]
+            m = re.search(r'tests="(\d+)"[^>]*?errors="(\d+)"[^>]*?skipped="(\d+)"[^>]*?failures="(\d+)"', head) \
+                or None
+            if m:
+                tests += int(m[1]); errors += int(m[2]); skipped += int(m[3]); failures += int(m[4])
+            else:
+                t = re.search(r'tests="(\d+)"', head); f = re.search(r'failures="(\d+)"', head)
+                e = re.search(r'errors="(\d+)"', head); k = re.search(r'skipped="(\d+)"', head)
+                tests += int(t[1]) if t else 0; failures += int(f[1]) if f else 0
+                errors += int(e[1]) if e else 0; skipped += int(k[1]) if k else 0
+    passed = tests - failures - errors - skipped
+    log(f"build rc={rc} in {time.time() - t0:.0f}s: {len(kotlin_errors)} Kotlin errors in {len(set(kotlin_errors))} "
+        f"files, {len(java_errors)} Java errors; tests {tests}, passed {passed}")
+    return [f"build: {'gradlew' if gradle else 'mvn'} rc={rc}",
+            f"build: Kotlin compile errors {len(kotlin_errors)} in {len(set(kotlin_errors))} files",
+            f"build: Java (test) compile errors {len(java_errors)} in {len(set(java_errors))} files",
+            f"build: tests run {tests}, passed {passed}, failed {failures}, errors {errors}, skipped {skipped}"]
+
+
+def configure_kotlin_gradle(build: Path, version: str, main_root: str, jvm_target: str):
+    """'Configure Kotlin in Project' for a Gradle (Kotlin DSL) build: the Kotlin JVM plugin, the main source root
+    compiled by Kotlin too, and Kotlin's JVM target equal to Java's."""
+    text = build.read_text()
+    text = re.sub(r"plugins\s*\{", lambda m: m.group(0) + f'\n  kotlin("jvm") version "{version}"', text, count=1)
+    text += (f"\n\nkotlin {{\n  compilerOptions {{ jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_{jvm_target}) }}\n"
+             f"  sourceSets {{ main {{ kotlin.srcDirs(\"{main_root}\") }} }}\n}}\n")
+    build.write_text(text)
+
+
 def git(repo: Path, *args) -> str:
     return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True).stdout.strip()
 
@@ -143,74 +198,7 @@ class Mcp:
         return text
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--module", required=True)
-    ap.add_argument("--out", required=True)
-    ap.add_argument("--idea-build", default="263.6800.24")
-    ap.add_argument("--work", default=None)
-    ap.add_argument("--batch", type=int, default=0, help="files per convert call; 0 = all in one call")
-    ap.add_argument("--xmx", default="8g")
-    ap.add_argument("--kotlin", default="2.1.21", help="Kotlin version configured in the copy (langchain4j's own)")
-    ap.add_argument("--jdk", default=None, help="the project JDK; default $JAVA_HOME, else the java on PATH")
-    a = ap.parse_args()
-
-    module = Path(a.module).expanduser().resolve()
-    checkout = Path(git(module, "rev-parse", "--show-toplevel"))
-    rel = module.relative_to(checkout)
-    out = Path(a.out).resolve()
-    work = Path(a.work).resolve() if a.work else out.parent / (out.name + ".work")
-    shutil.rmtree(out, ignore_errors=True)
-    shutil.rmtree(work, ignore_errors=True)
-    out.mkdir(parents=True)
-    work.mkdir(parents=True)
-
-    jdk = a.jdk or os.environ.get("JAVA_HOME") or str(Path(shutil.which("java")).resolve().parent.parent)
-    if not (Path(jdk) / "bin" / "java").exists():
-        raise SystemExit(f"no JDK at {jdk}")
-    jdk_version = subprocess.run([str(Path(jdk) / "bin" / "java"), "-version"], capture_output=True,
-                                 text=True).stderr.splitlines()[0]
-    idea = ensure_idea(a.idea_build)
-    build_txt = (idea / "build.txt").read_text().strip()
-    log(f"IDE {build_txt}; corpus {checkout.name} @ {git(checkout, 'rev-parse', 'HEAD')}")
-
-    # a copy of the checkout without .git and build output: J2K writes into it
-    copy = work / checkout.name
-    shutil.copytree(checkout, copy, ignore=shutil.ignore_patterns(".git", "target", "build", ".gradle", ".idea"))
-    project = copy / rel
-    if (project / "pom.xml").exists():
-        configure_kotlin_maven(project / "pom.xml", a.kotlin)
-        log(f"configured Kotlin {a.kotlin} in {rel}/pom.xml")
-    else:
-        raise SystemExit("only Maven modules can be configured for Kotlin so far")
-    main_root = project / "src" / "main" / "java"
-    test_root = project / "src" / "test" / "java"
-    java_files = sorted(p.relative_to(project).as_posix() for p in main_root.rglob("*.java"))
-    if not java_files:
-        raise SystemExit(f"no main sources under {main_root}")
-    log(f"{len(java_files)} main source files")
-
-    vmoptions = work / "idea.vmoptions"
-    vmoptions.write_text("\n".join([
-        f"-Xmx{a.xmx}", "-Djava.awt.headless=true",
-        f"-Didea.config.path={work}/ide/config", f"-Didea.system.path={work}/ide/system",
-        f"-Didea.plugins.path={work}/ide/plugins", f"-Didea.log.path={work}/ide/log",
-        # without a project JDK J2K resolves no java.* type: `Object?`, no MutableList (warmup's JdkWarmupProjectActivity)
-        f"-Dproject.jdk={jdk}", "-Dproject.jdk.name=corpus-jdk",
-    ]) + "\n")
-    env = dict(os.environ, IDEA_VM_OPTIONS=str(vmoptions))
-    idea_sh = str(idea / "bin" / "idea.sh")
-    j2k_log = out / "j2k.log"
-
-    t0 = time.time()
-    log("warmup (project import and indexing)")
-    with open(j2k_log, "w") as lf:
-        rc = subprocess.run([idea_sh, "warmup", f"--project-dir={project}"], env=env, stdout=lf,
-                            stderr=subprocess.STDOUT).returncode
-    log(f"warmup rc={rc} after {time.time() - t0:.0f}s")
-    if rc != 0:
-        raise SystemExit(f"warmup failed; see {j2k_log}")
-
+def convert_with_mcp(a, idea_sh, env, project, out, j2k_log, java_files, build_txt):
     srv_log = out / "mcp-server.log"
     srv = subprocess.Popen([idea_sh, "mcpServer", f"--project={project}", f"--port={PORT}",
                             "--invocation-mode=direct", f"--allowed-tools={','.join(TOOLS)}"],
@@ -247,6 +235,109 @@ def main():
         except subprocess.TimeoutExpired:
             srv.kill()
 
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--module", required=True)
+    ap.add_argument("--out", required=True)
+    ap.add_argument("--idea-build", default="2026.2.3",
+                    help="a release version (2026.2.3) or a build number (263.6800.24): download.jetbrains.com/idea/idea-<it>.tar.gz")
+    ap.add_argument("--plugin", default=None,
+                    help="maddi-dist's maddi-intellij-j2k plugin zip: convert through the action's code path (`idea.sh "
+                         "maddi-j2k`) instead of the MCP tool, whose 2026.3 post-processing fails on the EDT")
+    ap.add_argument("--work", default=None)
+    ap.add_argument("--batch", type=int, default=0, help="files per convert call; 0 = all in one call")
+    ap.add_argument("--xmx", default="8g")
+    ap.add_argument("--kotlin", default="2.1.21", help="Kotlin version configured in the copy (langchain4j's own)")
+    ap.add_argument("--build", action="store_true",
+                    help="then 'mvn -o test' on the converted copy: compile errors, and the original Java tests run "
+                         "against the Kotlin classes (build.log, surefire/, the provenance's build lines)")
+    ap.add_argument("--source-root", default="src/main/java", help="the main sources, relative to the module")
+    ap.add_argument("--test-root", default="src/test/java", help="the test sources, relative to the module")
+    ap.add_argument("--jvm-target", default="21", help="Gradle builds: Kotlin's JVM target (Java's)")
+    ap.add_argument("--jdk", default=None, help="the project JDK; default $JAVA_HOME, else the java on PATH")
+    a = ap.parse_args()
+
+    module = Path(a.module).expanduser().resolve()
+    checkout = Path(git(module, "rev-parse", "--show-toplevel"))
+    rel = module.relative_to(checkout)
+    out = Path(a.out).resolve()
+    work = Path(a.work).resolve() if a.work else out.parent / (out.name + ".work")
+    shutil.rmtree(out, ignore_errors=True)
+    shutil.rmtree(work, ignore_errors=True)
+    out.mkdir(parents=True)
+    work.mkdir(parents=True)
+
+    jdk = a.jdk or os.environ.get("JAVA_HOME") or str(Path(shutil.which("java")).resolve().parent.parent)
+    if not (Path(jdk) / "bin" / "java").exists():
+        raise SystemExit(f"no JDK at {jdk}")
+    jdk_version = subprocess.run([str(Path(jdk) / "bin" / "java"), "-version"], capture_output=True,
+                                 text=True).stderr.splitlines()[0]
+    idea = ensure_idea(a.idea_build)
+    build_txt = (idea / "build.txt").read_text().strip()
+    log(f"IDE {build_txt}; corpus {checkout.name} @ {git(checkout, 'rev-parse', 'HEAD')}")
+
+    # a copy of the checkout without .git and build output: J2K writes into it
+    copy = work / checkout.name
+    shutil.copytree(checkout, copy, ignore=shutil.ignore_patterns(".git", "target", "build", ".gradle", ".idea"))
+    project = copy / rel
+    if (project / "pom.xml").exists():
+        configure_kotlin_maven(project / "pom.xml", a.kotlin)
+        log(f"configured Kotlin {a.kotlin} in {rel}/pom.xml")
+    elif (project / "build.gradle.kts").exists():
+        configure_kotlin_gradle(project / "build.gradle.kts", a.kotlin, a.source_root, a.jvm_target)
+        log(f"configured Kotlin {a.kotlin} in {rel}/build.gradle.kts")
+    else:
+        raise SystemExit("only Maven modules and Gradle Kotlin-DSL builds can be configured for Kotlin so far")
+    main_root = project / a.source_root
+    test_root = project / a.test_root
+    java_files = sorted(p.relative_to(project).as_posix() for p in main_root.rglob("*.java"))
+    if not java_files:
+        raise SystemExit(f"no main sources under {main_root}")
+    log(f"{len(java_files)} main source files")
+
+    vmoptions = work / "idea.vmoptions"
+    vmoptions.write_text("\n".join([
+        f"-Xmx{a.xmx}", "-Djava.awt.headless=true",
+        f"-Didea.config.path={work}/ide/config", f"-Didea.system.path={work}/ide/system",
+        f"-Didea.plugins.path={work}/ide/plugins", f"-Didea.log.path={work}/ide/log",
+        # without a project JDK J2K resolves no java.* type: `Object?`, no MutableList (warmup's JdkWarmupProjectActivity)
+        f"-Dproject.jdk={jdk}", "-Dproject.jdk.name=corpus-jdk",
+    ]) + "\n")
+    env = dict(os.environ, IDEA_VM_OPTIONS=str(vmoptions))
+    if a.plugin:
+        plugins = work / "ide" / "plugins"
+        plugins.mkdir(parents=True, exist_ok=True)
+        shutil.unpack_archive(str(Path(a.plugin).resolve()), str(plugins))
+    idea_sh = str(idea / "bin" / "idea.sh")
+    j2k_log = out / "j2k.log"
+
+    t0 = time.time()
+    log("warmup (project import and indexing)")
+    with open(j2k_log, "w") as lf:
+        rc = subprocess.run([idea_sh, "warmup", f"--project-dir={project}"], env=env, stdout=lf,
+                            stderr=subprocess.STDOUT).returncode
+    log(f"warmup rc={rc} after {time.time() - t0:.0f}s")
+    if rc != 0:
+        raise SystemExit(f"warmup failed; see {j2k_log}")
+
+    if a.plugin:
+        batches = [java_files]
+        t1 = time.time()
+        log("maddi-j2k: the action's code path")
+        with open(j2k_log, "a") as lf:
+            lf.write("\n=== maddi-j2k\n")
+            lf.flush()
+            rc = subprocess.run([idea_sh, "maddi-j2k", str(project), str(main_root.relative_to(project))], env=env,
+                                stdout=lf, stderr=subprocess.STDOUT).returncode
+        log(f"maddi-j2k rc={rc} after {time.time() - t1:.0f}s")
+        if rc != 0:
+            raise SystemExit(f"maddi-j2k failed; see {j2k_log}")
+    else:
+        convert_with_mcp(a, idea_sh, env, project, out, j2k_log, java_files, build_txt)
+        batches = [None] * (1 if a.batch <= 0 else -(-len(java_files) // a.batch))
+
     left = sorted(p.relative_to(main_root).as_posix() for p in main_root.rglob("*.java"))
     kt = sorted(main_root.rglob("*.kt"))
     idea_log = work / "ide" / "log" / "idea.log"
@@ -261,18 +352,20 @@ def main():
     shutil.copytree(main_root, out / "src", ignore=shutil.ignore_patterns("*.java"))
     if test_root.is_dir():
         shutil.copytree(test_root, out / "test")
-    (out / "provenance.txt").write_text("\n".join([
+    build_lines = build_and_test(project, out, env) if a.build else []
+    (out / "provenance.txt").write_text("\n".join(build_lines + [
         f"ide: {build_txt}",
         f"jdk: {jdk} ({jdk_version})",
         f"kotlin configured: {a.kotlin}",
         f"sanity: 'Object' kept as a Kotlin type {unresolved} times (should be ~0: Any)",
-        f"sanity: J2K post-processor exceptions {post_errors} (one aborts the remaining post-processing; see idea.log)",
-        f"sanity: 'public' modifiers {public} (J2K's post-processing removes them; thousands = it did not run)",
+        f"sanity: J2K post-processor exceptions {post_errors} (logged once per kind; see idea.log)",
+        f"sanity: 'public' modifiers {public} (K2 J2K keeps them: 2026.2 has no redundant-modifier step)",
         f"corpus: {checkout.name} {git(checkout, 'rev-parse', 'HEAD')} {rel}",
         f"main java files: {len(java_files)}",
         f"kotlin files produced: {len(kt)}",
         f"java files left unconverted: {len(left)}",
         f"batches: {len(batches)}",
+        f"path: {'maddi-j2k plugin (the action)' if a.plugin else 'MCP convert_java_to_kotlin'}",
         f"seconds: {time.time() - t0:.0f}",
     ] + [f"  left: {f}" for f in left]) + "\n")
     log(f"done: {len(kt)} .kt, {len(left)} .java left; {out}")

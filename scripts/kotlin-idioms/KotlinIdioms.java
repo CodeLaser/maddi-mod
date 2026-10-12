@@ -37,7 +37,8 @@ import java.util.stream.Stream;
  how a translator names or lays out its code.
 
  Usage: run.sh [--files] <label>=<dir> ... ; every .kt file under each directory is counted. Output: one tab-separated
- row per label, the raw count and the count per 1,000 non-blank lines; --files adds one row per file.
+ row per label, the raw count and the count per 1,000 lines of code (lines holding a token other than a comment or
+ KDoc); --files adds one row per file.
  */
 public class KotlinIdioms {
 
@@ -138,10 +139,24 @@ public class KotlinIdioms {
         System.out.println(sb);
     }
 
+    // lines holding code: a comment or KDoc is not code, so a translator that keeps Javadoc is not diluted by it
+    static long codeLines(KtFile file, String text) {
+        // mask every comment (KDoc is a PsiComment too), then count the lines with a non-blank character left
+        char[] chars = text.toCharArray();
+        for (var comment : org.jetbrains.kotlin.com.intellij.psi.util.PsiTreeUtil.findChildrenOfType(file,
+                org.jetbrains.kotlin.com.intellij.psi.PsiComment.class)) {
+            var range = comment.getTextRange();
+            for (int k = range.getStartOffset(); k < range.getEndOffset(); k++) {
+                if (chars[k] != '\n') chars[k] = ' ';
+            }
+        }
+        return new String(chars).lines().filter(l -> !l.isBlank()).count();
+    }
+
     static Counts count(KtFile file, String text) {
         Counts c = new Counts();
         c.inc("files");
-        c.map.put("lines", text.lines().filter(l -> !l.isBlank()).count());
+        c.map.put("lines", codeLines(file, text));
         file.accept(new KtTreeVisitorVoid() {
             @Override
             public void visitErrorElement(PsiErrorElement element) {
