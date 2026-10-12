@@ -55,7 +55,7 @@ public class CompileAnalysisHints {
     // nothing regenerates and nothing loads (it is not in LoadAnalysisResults.ANALYZED_RESULTS either). The
     // pre-rename file name is the giveaway.
     static final List<String> LIBRARIES = List.of("jdk", "libs/test", "libs/log", "libs/kotlin", "libs/assertj",
-            "libs/guava");
+            "libs/guava", "libs/hamcrest", "libs/junitparams");
     /**
      * Compiled like {@link #LIBRARIES}, but NOT packed into {@code libs.jar} and NOT in
      * {@code LoadAnalysisResults.ANALYZED_RESULTS}: campaign hints for third-party libraries (the analysis-hints
@@ -68,6 +68,8 @@ public class CompileAnalysisHints {
     static final String VAVR_LIBRARY = "libs/vavr";
     static final String ECLIPSE_COLLECTIONS_LIBRARY = "libs/eclipsecollections";
     static final String GUAVA_LIBRARY = "libs/guava";
+    static final String HAMCREST_LIBRARY = "libs/hamcrest";
+    static final String JUNIT_PARAMS_LIBRARY = "libs/junitparams";
     /** {@link #RESULTS_BASE} as a path; the directory the committed results live in. */
     static final Path RESULTS_BASE_DIR = Path.of(RESULTS_BASE);
     static final String KOTLIN_LIBRARY = "libs/kotlin";
@@ -133,9 +135,9 @@ public class CompileAnalysisHints {
 
     /** As {@link #compileAll(Path)}; {@code includeJdk} false leaves the {@code jdk} library out (see {@link #JDK_RELEASE_FILE}). */
     public static void compileAll(Path resultsBase, boolean includeJdk) throws IOException {
-        // the archive covers java.desktop (swing/awt) and java.net.http, which the lean default omits
+        // the archive covers java.desktop (swing/awt), java.net.http and java.logging, which the lean default omits
         AnalysisHintsCompiler compiler = new AnalysisHintsCompiler(
-                javaInspectorFactory("java.desktop", "java.net.http"));
+                javaInspectorFactory("java.desktop", "java.net.http", "java.logging"));
         // Every library but the jdk itself is compiled with the committed jdk results preloaded (CodeLaser/maddi-mod#7): the
         // defaults the compiler writes for an UNCONTRACTED member of a shadowed type -- stamped defaultsAnalyzer,
         // never recomputed at run time -- otherwise see String, CharSequence and the collections as mutable, and a
@@ -144,7 +146,7 @@ public class CompileAnalysisHints {
         // path until 2026-10-09.
         List<String> jdkPreload = List.of(RESULTS_BASE_DIR.resolve(JDK_LIBRARY).toString());
         AnalysisHintsCompiler compilerWithJdk = new AnalysisHintsCompiler(
-                javaInspectorFactory("java.desktop", "java.net.http"), null, jdkPreload);
+                javaInspectorFactory("java.desktop", "java.net.http", "java.logging"), null, jdkPreload);
         for (String library : LIBRARIES) {
             if (!includeJdk && JDK_LIBRARY.equals(library)) continue;
             if (KOTLIN_LIBRARY.equals(library)) {
@@ -175,6 +177,14 @@ public class CompileAnalysisHints {
                         com.google.common.collect.ImmutableList.class,
                         com.google.common.util.concurrent.internal.InternalFutureFailureAccess.class), null, jdkPreload),
                         library, resultsBase);
+            } else if (HAMCREST_LIBRARY.equals(library)) {
+                // as for AssertJ: the jar through a factory of its own (the library-call census, 2026-10-12)
+                compile(new AnalysisHintsCompiler(libraryJavaInspectorFactory("org.hamcrest.",
+                        org.hamcrest.Matchers.class), null, jdkPreload), library, resultsBase);
+            } else if (JUNIT_PARAMS_LIBRARY.equals(library)) {
+                // junit-jupiter-params is not on the shared factory, which carries junit-jupiter-api only
+                compile(new AnalysisHintsCompiler(libraryJavaInspectorFactory("org.junit.jupiter.params.",
+                        org.junit.jupiter.params.provider.Arguments.class), null, jdkPreload), library, resultsBase);
             } else {
                 compile(JDK_LIBRARY.equals(library) ? compiler : compilerWithJdk, library, resultsBase);
             }

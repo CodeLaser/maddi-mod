@@ -65,6 +65,9 @@ dependencies {
     testImplementation("com.google.guava:guava:33.6.0-jre")
     // and for the AssertJ hints (libs/assertj, in libs.jar), through their own inspector factory only
     testImplementation("org.assertj:assertj-core:3.27.7")
+    // and for the hamcrest and JUnit parameterized-test hints (libs/hamcrest, libs/junitparams, in libs.jar)
+    testImplementation("org.hamcrest:hamcrest:2.2")
+    testImplementation("org.junit.jupiter:junit-jupiter-params:6.0.3")
 
     testRuntimeOnly("info.picocli:picocli:4.7.7")
     testRuntimeOnly("org.junit.jupiter:junit-jupiter:5.9.2")

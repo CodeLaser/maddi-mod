@@ -32,6 +32,28 @@ import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 public class TestJavaIo extends CommonTest {
+
+    // read-only arguments the library-call census (TestLibraryCallCensus, 2026-10-12) found read as modified
+    @Test
+    public void testReadOnlyArgumentsFromTheCensus() {
+        TypeInfo file = compiledTypesManager().typeIfLoaded(File.class);
+        assertTrue(file.isAtLeastImmutableHC(), "File is immutable like java.nio.file.Path");
+        assertFalse(member(File.class, "java.io.File.<init>(java.io.File,String)").parameters().getFirst().isModified());
+        assertFalse(member(FileInputStream.class, "java.io.FileInputStream.<init>(java.io.File)").parameters().getFirst().isModified());
+
+        MethodInfo write = member(OutputStream.class, "java.io.OutputStream.write(byte[])");
+        assertTrue(write.isModifying());
+        assertFalse(write.parameters().getFirst().isModified());
+
+        assertFalse(member(IOException.class, "java.io.IOException.<init>(Throwable)").parameters().getFirst().isModified());
+        assertFalse(member(RuntimeException.class, "java.lang.RuntimeException.<init>(String,Throwable)").parameters().get(1).isModified());
+    }
+
+    private static MethodInfo member(Class<?> clazz, String fqn) {
+        TypeInfo typeInfo = compiledTypesManager().typeIfLoaded(clazz);
+        return typeInfo.constructorAndMethodStream().filter(m -> fqn.equals(m.fullyQualifiedName())).findFirst()
+                .orElseThrow(() -> new AssertionError("no " + fqn));
+    }
     @Test
     public void testSerializable() {
         TypeInfo typeInfo = compiledTypesManager().typeIfLoaded(Serializable.class);

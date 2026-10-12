@@ -96,7 +96,7 @@ public class CommonTest {
         // the AAPI archive covers all JDK modules, including java.desktop (swing/awt) and java.net.http, so this
         // compiler needs them on the classpath (the lean default only carries java.base)
         JavaInspectorFactory javaInspectorFactory = io.codelaser.maddi.modification.common.CommonTest
-                .javaInspectorFactory("java.desktop", "java.net.http");
+                .javaInspectorFactory("java.desktop", "java.net.http", "java.logging");
         return new AnalysisHintsParser(javaInspectorFactory);
     }
 
