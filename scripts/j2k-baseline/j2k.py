@@ -95,11 +95,14 @@ def configure_kotlin_maven(pom: Path, version: str):
 def build_and_test(project: Path, out: Path, env: dict) -> list:
     """Compile the converted module and run its (Java) tests against the Kotlin classes, the way maddi's ratchets
     count 'tests passing with the Kotlin classes'. Offline: the corpus's dependencies are in ~/.m2 already."""
-    log("mvn -o test")
     t0 = time.time()
     build_log = out / "build.log"
+    gradle = (project / "build.gradle.kts").exists()
+    log("gradlew test" if gradle else "mvn -o test")
     with open(build_log, "w") as lf:
-        rc = subprocess.run(["mvn", "-o", "-B", "test", "-Dmaven.test.failure.ignore=true", "-Denforcer.skip=true",
+        rc = subprocess.run(["./gradlew", "--no-daemon", "--continue", "test"], cwd=project, stdout=lf,
+                            stderr=subprocess.STDOUT, env=env).returncode if gradle else \
+             subprocess.run(["mvn", "-o", "-B", "test", "-Dmaven.test.failure.ignore=true", "-Denforcer.skip=true",
                              "-Dspotless.check.skip=true", "-Dcheckstyle.skip=true", "-Drat.skip=true",
                              "-Djacoco.skip=true", "-Dmaven.javadoc.skip=true"],
                             cwd=project, stdout=lf, stderr=subprocess.STDOUT,
@@ -107,9 +110,11 @@ def build_and_test(project: Path, out: Path, env: dict) -> list:
     text = build_log.read_text(errors="replace")
     # kotlin-maven-plugin prints '[ERROR] /path/X.kt: (line, col) message' (older: '[ERROR] e: file:///path/X.kt:...')
     kotlin_errors = re.findall(r"\[ERROR\] (?:e: file://)?(/\S+?\.kt):", text)
-    java_errors = re.findall(r"\[ERROR\] (/\S+?\.java):\[", text)
+    if gradle:
+        kotlin_errors = re.findall(r"^e: file://(/\S+?\.kt):", text, re.M)
+    java_errors = re.findall(r"\[ERROR\] (/\S+?\.java):\[", text) + re.findall(r"^(/\S+?\.java):\d+: error:", text, re.M)
     tests = failures = errors = skipped = 0
-    reports = project / "target" / "surefire-reports"
+    reports = project / ("build/test-results/test" if gradle else "target/surefire-reports")
     if reports.is_dir():
         shutil.copytree(reports, out / "surefire", dirs_exist_ok=True)
         for x in reports.glob("TEST-*.xml"):
@@ -124,12 +129,22 @@ def build_and_test(project: Path, out: Path, env: dict) -> list:
                 tests += int(t[1]) if t else 0; failures += int(f[1]) if f else 0
                 errors += int(e[1]) if e else 0; skipped += int(k[1]) if k else 0
     passed = tests - failures - errors - skipped
-    log(f"mvn rc={rc} in {time.time() - t0:.0f}s: {len(kotlin_errors)} Kotlin errors in {len(set(kotlin_errors))} "
+    log(f"build rc={rc} in {time.time() - t0:.0f}s: {len(kotlin_errors)} Kotlin errors in {len(set(kotlin_errors))} "
         f"files, {len(java_errors)} Java errors; tests {tests}, passed {passed}")
-    return [f"build: mvn rc={rc}",
+    return [f"build: {'gradlew' if gradle else 'mvn'} rc={rc}",
             f"build: Kotlin compile errors {len(kotlin_errors)} in {len(set(kotlin_errors))} files",
             f"build: Java (test) compile errors {len(java_errors)} in {len(set(java_errors))} files",
             f"build: tests run {tests}, passed {passed}, failed {failures}, errors {errors}, skipped {skipped}"]
+
+
+def configure_kotlin_gradle(build: Path, version: str, main_root: str, jvm_target: str):
+    """'Configure Kotlin in Project' for a Gradle (Kotlin DSL) build: the Kotlin JVM plugin, the main source root
+    compiled by Kotlin too, and Kotlin's JVM target equal to Java's."""
+    text = build.read_text()
+    text = re.sub(r"plugins\s*\{", lambda m: m.group(0) + f'\n  kotlin("jvm") version "{version}"', text, count=1)
+    text += (f"\n\nkotlin {{\n  compilerOptions {{ jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_{jvm_target}) }}\n"
+             f"  sourceSets {{ main {{ kotlin.srcDirs(\"{main_root}\") }} }}\n}}\n")
+    build.write_text(text)
 
 
 def git(repo: Path, *args) -> str:
@@ -238,6 +253,9 @@ def main():
     ap.add_argument("--build", action="store_true",
                     help="then 'mvn -o test' on the converted copy: compile errors, and the original Java tests run "
                          "against the Kotlin classes (build.log, surefire/, the provenance's build lines)")
+    ap.add_argument("--source-root", default="src/main/java", help="the main sources, relative to the module")
+    ap.add_argument("--test-root", default="src/test/java", help="the test sources, relative to the module")
+    ap.add_argument("--jvm-target", default="21", help="Gradle builds: Kotlin's JVM target (Java's)")
     ap.add_argument("--jdk", default=None, help="the project JDK; default $JAVA_HOME, else the java on PATH")
     a = ap.parse_args()
 
@@ -267,10 +285,13 @@ def main():
     if (project / "pom.xml").exists():
         configure_kotlin_maven(project / "pom.xml", a.kotlin)
         log(f"configured Kotlin {a.kotlin} in {rel}/pom.xml")
+    elif (project / "build.gradle.kts").exists():
+        configure_kotlin_gradle(project / "build.gradle.kts", a.kotlin, a.source_root, a.jvm_target)
+        log(f"configured Kotlin {a.kotlin} in {rel}/build.gradle.kts")
     else:
-        raise SystemExit("only Maven modules can be configured for Kotlin so far")
-    main_root = project / "src" / "main" / "java"
-    test_root = project / "src" / "test" / "java"
+        raise SystemExit("only Maven modules and Gradle Kotlin-DSL builds can be configured for Kotlin so far")
+    main_root = project / a.source_root
+    test_root = project / a.test_root
     java_files = sorted(p.relative_to(project).as_posix() for p in main_root.rglob("*.java"))
     if not java_files:
         raise SystemExit(f"no main sources under {main_root}")
