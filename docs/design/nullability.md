@@ -1296,3 +1296,31 @@ as the test's business).
 Measured against devel cb89662e: guava oracle identical, langchain4j and timefold (diagnose policy) verdicts
 identical. `narrowedThisFieldByMethod` pins the rule, with its two conservative cases: a `super` call into the
 overridden method, a public method.
+
+### 2026-10-12 — keys a navigable map hands out (CodeLaser/maddi-mod#29 C); dispatch (A) not taken
+
+**C.** A key that a navigable map returns is one of its keys: `k = map.higherKey(x)`, `lowerKey`, `ceilingKey`,
+`floorKey`, `firstKey`, `lastKey`, also under `map.isEmpty() ? null : map.firstKey()`. Afterwards `map.get(k)` is
+not the absent key's null (`KeyPresence`). When there is no such key, `k` is null instead, and `TreeMap.get(null)`
+throws rather than answering null. A comparator that accepts null is the exception, and it is not looked at. A
+loop over `navigableKeySet()` or `descendingKeySet()` counts like one over `keySet()`, and the navigation methods
+count as reads of the map. A presence fact whose key or map is a non-final field is now forgotten at a call that
+may assign that field, the rule other non-final fields already follow; before, nothing forgot it. Gate
+`NONAVKEYS` turns both off. On timefold, `TreeMultiSet.MultiSetIterator.next` and
+`ConsecutiveSetTree.addFirstItem` now know their key present, and `BreakImpl.nextSequence` with its three
+upstream declarations is no longer nullable. `TestNullabilityPass.keyPresenceNavigated`.
+
+**A, not taken.** Through an interface or overridden method, a call would pass a parameter through where any
+analysed implementation does, so `properties.getInteger(KEY, 5)` on nacos' `NacosClientProperties` would get
+the gap-9 answer. This is sound only when the analysed implementations are all of them, so in a closed world. On
+timefold no call result changed, and langchain4j didn't change either. Together with C, one run had 8 more nullable
+verdicts on timefold, the `AbstractScoreDirector.close()` type-argument smear reaching `RandomSubListSelector` and
+its factories (see below: not reproducible). The diagnostics run in the open world, where it never acts. With no
+gain to show, it is left out. (B), one implementation's own null, stays: the receiver's declared type is the
+interface.
+
+Measured against devel 1156ac1c: guava oracle identical, langchain4j verdicts identical, timefold (diagnose
+policy) 4 nullable verdicts gone, the same in every run. `TestNullabilityPass` 88. On the side, timefold's verdicts
+are not reproducible with C: in two of four runs of the same code the smear above reaches the 8 `RandomSubListSelector`
+declarations, in the other two it does not; four runs without C agreed exactly. Not traced (CodeLaser/maddi-mod#33).
+The A-and-C run above was one of those runs, so A's share in the 8 is not established either.

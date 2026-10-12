@@ -1422,37 +1422,13 @@ public final class NullabilityPass {
                                        java.util.function.Predicate<Object> isReached,
                                        Map<MethodInfo, Boolean> intrinsicMemo) {
         if (GAP9_OFF || !argumentsSeen.contains(call)) return true;
-        Set<ParameterInfo> through = dispatchedPassThrough(callee);
+        Set<ParameterInfo> through = passThrough(callee);
         if (through.isEmpty()) return true;
         if (intrinsicMemo.computeIfAbsent(callee, m -> reachedWithout(m, through, reached))) return true;
-        Set<Integer> indices = new HashSet<>();
-        for (ParameterInfo pi : through) indices.add(pi.index());
-        for (int index : indices) {
-            if (isReached.test(new SiteArg(call, index))) return true;
+        for (ParameterInfo pi : through) {
+            if (isReached.test(new SiteArg(call, pi.index()))) return true;
         }
         return false;
-    }
-
-    /*
-     CodeLaser/maddi-mod#29 A: a call of an abstract or overridden method runs one of its analysed implementations
-     (closed world), so its parameters are passed through where any of theirs is: 'properties.getInteger(KEY, 5)' on
-     the interface NacosClientProperties is SearchableProperties' 'search(key).orElse(defaultValue)', whose other
-     caller 'getInteger(key)' passes null into the implementation's parameter, never into the interface's. Every
-     implementation's own null (one returning null by itself) still makes the call's result nullable.
-     */
-    // gate NODISPATCH: a call's pass-through parameters are the callee's own only (#29 A off)
-    private static final boolean DISPATCH_OFF = System.getenv("NODISPATCH") != null;
-
-    private Set<ParameterInfo> dispatchedPassThrough(MethodInfo callee) {
-        List<MethodInfo> overriding = !DISPATCH_OFF && policy.world() == World.CLOSED
-                ? implementations.getOrDefault(callee, List.of()) : List.of();
-        if (overriding.isEmpty()) return passThrough(callee);
-        Set<ParameterInfo> through = new HashSet<>(passThrough(callee));
-        for (MethodInfo implementation : overriding) {
-            if (implementation.parameters().size() != callee.parameters().size()) continue;
-            through.addAll(passThrough(implementation));
-        }
-        return through;
     }
 
     /*
