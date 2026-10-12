@@ -105,7 +105,8 @@ def build_and_test(project: Path, out: Path, env: dict) -> list:
                             cwd=project, stdout=lf, stderr=subprocess.STDOUT,
                             env=dict(env, JAVA_HOME=env.get("JAVA_HOME", ""))).returncode
     text = build_log.read_text(errors="replace")
-    kotlin_errors = re.findall(r"\[ERROR\] e: file://(\S+?\.kt):", text)
+    # kotlin-maven-plugin prints '[ERROR] /path/X.kt: (line, col) message' (older: '[ERROR] e: file:///path/X.kt:...')
+    kotlin_errors = re.findall(r"\[ERROR\] (?:e: file://)?(/\S+?\.kt):", text)
     java_errors = re.findall(r"\[ERROR\] (/\S+?\.java):\[", text)
     tests = failures = errors = skipped = 0
     reports = project / "target" / "surefire-reports"
