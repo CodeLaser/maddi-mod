@@ -23,10 +23,16 @@
 # 2026-10-12, the declarations' verdicts from the pass's report (the pass does not store them itself: write() is the
 # caller's), `!` at returns, array element writes and non-null field assignments, (T?) casts of values that may be
 # null: CS8603 116 -> 10, CS8625 187 -> 3, 518 -> 128 nullable warnings.
+#
+# 2026-10-12, `!` on the operand of an unboxing cast that may be null (maddi 4c6cc3551): CS8629 49 -> 2, CS8605
+# 13 -> 0, 128 -> 68 nullable warnings. Still 182 files compile.
+#
+# 2026-10-12, no ? on unmapped library types (maddi 369d81117): ClasspathScanner's 8 extra errors gone, 38 errors as
+# maddi's fernflower.ratchet; T? for nullable type-parameter parameters: 68 -> 62 nullable warnings.
 types	199
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	199
 compilingFiles	182
 unmappedJdkUses	15
-nullableWarnings	128
+nullableWarnings	62
