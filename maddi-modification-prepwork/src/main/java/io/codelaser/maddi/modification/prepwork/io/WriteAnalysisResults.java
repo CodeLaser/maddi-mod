@@ -271,9 +271,11 @@ public class WriteAnalysisResults {
             p++;
         }
         Stream<Codec.EncodedPropertyValue> stream = methodInfo.analysis().propertyValueStream()
-                .filter(pv -> !pv.value().isDefault())
+                .filter(pv -> !pv.value().isDefault() || writeFalseExplicitly(methodInfo, pv))
                 .filter(pv -> NEVER_SERIALISED.test(pv.property()) && propertyPredicate.test(pv.property()))
-                .map(pv -> encodeOrSkip(codec, context, pv))
+                .map(pv -> writeFalseExplicitly(methodInfo, pv)
+                        ? new Codec.EncodedPropertyValue(pv.property().key(), codec.encodeInt(context, 0))
+                        : encodeOrSkip(codec, context, pv))
                 .filter(Objects::nonNull); // some properties will (temporarily) not be streamed
         return codec.encode(context, methodInfo, "" + index, stream, subs);
     }

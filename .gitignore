@@ -1,5 +1,3 @@
-MODULE.bazel.lock
-bazel-*
 .run
 **/.DS_Store
 **/build/
@@ -16,8 +14,6 @@ bazel-*
 # IntelliJ Platform Gradle Plugin runIde sandbox
 .intellijPlatform/
 
-# per-machine bazel config (JAVA_HOME pin etc.)
-user.bazelrc
 
 # machine-specific, non-deterministic generated input config (written to build/ by TestJavacTimefoldSolverCore)
 maddi-run-openjdk/src/test/resources/inputConfiguration/timefold-solver.json
