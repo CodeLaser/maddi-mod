@@ -18,10 +18,16 @@
 # IComparable on a Comparable<Score_>'s companion, T of a Class<T> from the wildcard's bound: 837 -> 868 compiling
 # files, 3623 -> 3333 errors. 1379 -> 1380 unmapped JDK uses (NewInstance<ThreadFactory> names the unmapped type).
 # 571 -> 579 nullable warnings: CS8602 27 -> 35 on calls that were CS0411 before (stepScope.GetScore().Raw).
+#
+# 2026-10-12, maddi 21d657e1e (diamond targets, delegate variance, public bases of public types, the type itself in its
+# own equals, abstract redeclarations against every ancestor, method group type arguments, inner Slot::new, raw
+# constructor references, overrides without constraints): 868 -> 1013 compiling files, 3333 -> 2863 errors, 1380 ->
+# 1386 unmapped JDK uses (lambda parameter casts name types already unmapped). 579 -> 601 nullable warnings: CS8603 and
+# CS8714 in Joiners and ConstraintCollectors, whose errors went from 134 to 98, so the compiler now reaches them.
 types	1583
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	1583
-compilingFiles	868
-unmappedJdkUses	1380
-nullableWarnings	579
+compilingFiles	1013
+unmappedJdkUses	1386
+nullableWarnings	601
