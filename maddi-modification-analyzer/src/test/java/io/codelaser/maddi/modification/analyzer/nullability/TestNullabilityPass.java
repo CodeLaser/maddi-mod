@@ -822,6 +822,31 @@ public class TestNullabilityPass extends CommonTest {
         assertTrue(locals.contains("first.one: Set2?"), locals);
     }
 
+    // fernflower NestedClassProcessor.insertLocalVars: 'classNode = classNode.parent!!' after 23f8bf65
+    @DisplayName("a for loop's updater assigns its variable the parent field's default null")
+    @Test
+    public void forLoopUpdater() {
+        NullabilityPass.Report report = run("a.b.FL", """
+                package a.b;
+                class FL {
+                    static class Node {
+                        public Node parent;
+                        String name;
+                    }
+                    static void link(Node child, Node parent) { child.parent = parent; }
+                    static int depth(Node child) {
+                        int d = 0;
+                        for (Node node = child; node != null; node = node.parent) { d++; }
+                        return d;
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        System.out.println(explain(report));
+        String locals = locals(report);
+        System.out.println(locals);
+        assertTrue(locals.contains("depth.node: Node?"), locals);
+    }
+
     @Language("java")
     private static final String GENERICS = """
             package a.b;
