@@ -72,6 +72,18 @@ public class CommonTest {
     public static @NonNull JavaInspector javaInspectorWithExtras(SourceSet primarySourceSet,
                                                                  List<SourceSet> extraSourceSets,
                                                                  List<String> extraJdkModules) throws IOException {
+        return javaInspectorWithExtras(primarySourceSet, extraSourceSets, extraJdkModules, List.of());
+    }
+
+    /**
+     * As {@link #javaInspectorWithExtras(SourceSet, List, List)}, with library jars on the class path as well (each a
+     * {@code SourceSetImpl.sourceSetOf(SomeClass.class)}): for the one test that needs a library the lean class path
+     * lacks (Mockito, for its hints), without widening it for every other test.
+     */
+    public static @NonNull JavaInspector javaInspectorWithExtras(SourceSet primarySourceSet,
+                                                                 List<SourceSet> extraSourceSets,
+                                                                 List<String> extraJdkModules,
+                                                                 List<SourceSet> extraClassPathParts) throws IOException {
         SourceSet javaBase = SourceSetImpl.javaBase();
         // Two source sets since the 0.9.1 split: sourceSetOf() resolves the ARTIFACT containing the
         // class. The annotations now live in maddi-annotation while Either/SetOnce stay in
@@ -114,6 +126,7 @@ public class CommonTest {
         for (String jdkModule : extraJdkModules) {
             classPathParts.add(SourceSetImpl.jdkModule(jdkModule));
         }
+        classPathParts.addAll(extraClassPathParts);
         InputConfigurationImpl.Builder builder = new InputConfigurationImpl.Builder()
                 .addSourceSets(primarySourceSet)
                 .addClassPathParts(classPathParts.toArray(new SourceSet[0]));

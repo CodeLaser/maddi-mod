@@ -56,6 +56,11 @@ public abstract class CommonTest {
         return List.of();
     }
 
+    // library jars a subclass needs on the class path, each a SourceSetImpl.sourceSetOf(SomeClass.class)
+    protected List<SourceSet> extraClassPathParts() {
+        return List.of();
+    }
+
     @BeforeAll
     public static void beforeAll() {
         ((Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME)).setLevel(Level.INFO);
@@ -84,7 +89,7 @@ public abstract class CommonTest {
         if (extraSourceSetNames.isEmpty()) {
             // lean default classpath, plus any JDK modules the test declared via jmods (e.g. "jmod:java.desktop")
             ji = io.codelaser.maddi.modification.common.CommonTest
-                    .javaInspectorWithExtras(testProtocol, List.of(), jdkModules);
+                    .javaInspectorWithExtras(testProtocol, List.of(), jdkModules, extraClassPathParts());
         } else {
             // clone-bench style test: register one source set per directory (JDK types resolve via the global
             // input configuration; the per-directory sets keep identically-named types apart) and add the
