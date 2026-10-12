@@ -92,6 +92,45 @@ def configure_kotlin_maven(pom: Path, version: str):
     pom.write_text(text)
 
 
+def build_and_test(project: Path, out: Path, env: dict) -> list:
+    """Compile the converted module and run its (Java) tests against the Kotlin classes, the way maddi's ratchets
+    count 'tests passing with the Kotlin classes'. Offline: the corpus's dependencies are in ~/.m2 already."""
+    log("mvn -o test")
+    t0 = time.time()
+    build_log = out / "build.log"
+    with open(build_log, "w") as lf:
+        rc = subprocess.run(["mvn", "-o", "-B", "test", "-Dmaven.test.failure.ignore=true", "-Denforcer.skip=true",
+                             "-Dspotless.check.skip=true", "-Dcheckstyle.skip=true", "-Drat.skip=true",
+                             "-Djacoco.skip=true", "-Dmaven.javadoc.skip=true"],
+                            cwd=project, stdout=lf, stderr=subprocess.STDOUT,
+                            env=dict(env, JAVA_HOME=env.get("JAVA_HOME", ""))).returncode
+    text = build_log.read_text(errors="replace")
+    kotlin_errors = re.findall(r"\[ERROR\] e: file://(\S+?\.kt):", text)
+    java_errors = re.findall(r"\[ERROR\] (/\S+?\.java):\[", text)
+    tests = failures = errors = skipped = 0
+    reports = project / "target" / "surefire-reports"
+    if reports.is_dir():
+        shutil.copytree(reports, out / "surefire", dirs_exist_ok=True)
+        for x in reports.glob("TEST-*.xml"):
+            head = x.read_text(errors="replace")[:2000]
+            m = re.search(r'tests="(\d+)"[^>]*?errors="(\d+)"[^>]*?skipped="(\d+)"[^>]*?failures="(\d+)"', head) \
+                or None
+            if m:
+                tests += int(m[1]); errors += int(m[2]); skipped += int(m[3]); failures += int(m[4])
+            else:
+                t = re.search(r'tests="(\d+)"', head); f = re.search(r'failures="(\d+)"', head)
+                e = re.search(r'errors="(\d+)"', head); k = re.search(r'skipped="(\d+)"', head)
+                tests += int(t[1]) if t else 0; failures += int(f[1]) if f else 0
+                errors += int(e[1]) if e else 0; skipped += int(k[1]) if k else 0
+    passed = tests - failures - errors - skipped
+    log(f"mvn rc={rc} in {time.time() - t0:.0f}s: {len(kotlin_errors)} Kotlin errors in {len(set(kotlin_errors))} "
+        f"files, {len(java_errors)} Java errors; tests {tests}, passed {passed}")
+    return [f"build: mvn rc={rc}",
+            f"build: Kotlin compile errors {len(kotlin_errors)} in {len(set(kotlin_errors))} files",
+            f"build: Java (test) compile errors {len(java_errors)} in {len(set(java_errors))} files",
+            f"build: tests run {tests}, passed {passed}, failed {failures}, errors {errors}, skipped {skipped}"]
+
+
 def git(repo: Path, *args) -> str:
     return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True).stdout.strip()
 
@@ -195,6 +234,9 @@ def main():
     ap.add_argument("--batch", type=int, default=0, help="files per convert call; 0 = all in one call")
     ap.add_argument("--xmx", default="8g")
     ap.add_argument("--kotlin", default="2.1.21", help="Kotlin version configured in the copy (langchain4j's own)")
+    ap.add_argument("--build", action="store_true",
+                    help="then 'mvn -o test' on the converted copy: compile errors, and the original Java tests run "
+                         "against the Kotlin classes (build.log, surefire/, the provenance's build lines)")
     ap.add_argument("--jdk", default=None, help="the project JDK; default $JAVA_HOME, else the java on PATH")
     a = ap.parse_args()
 
@@ -288,7 +330,8 @@ def main():
     shutil.copytree(main_root, out / "src", ignore=shutil.ignore_patterns("*.java"))
     if test_root.is_dir():
         shutil.copytree(test_root, out / "test")
-    (out / "provenance.txt").write_text("\n".join([
+    build_lines = build_and_test(project, out, env) if a.build else []
+    (out / "provenance.txt").write_text("\n".join(build_lines + [
         f"ide: {build_txt}",
         f"jdk: {jdk} ({jdk_version})",
         f"kotlin configured: {a.kotlin}",
