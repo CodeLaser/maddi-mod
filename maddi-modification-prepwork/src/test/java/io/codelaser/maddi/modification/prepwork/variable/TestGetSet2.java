@@ -18,11 +18,13 @@ import io.codelaser.maddi.modification.common.getset.ApplyGetSetTranslation;
 import io.codelaser.maddi.modification.prepwork.CommonTest;
 import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
 import io.codelaser.maddi.cst.api.analysis.Value;
+import io.codelaser.maddi.cst.api.expression.BinaryOperator;
 import io.codelaser.maddi.cst.api.expression.Expression;
 import io.codelaser.maddi.cst.api.expression.MethodCall;
 import io.codelaser.maddi.cst.api.info.FieldInfo;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.statement.LocalVariableCreation;
 import io.codelaser.maddi.cst.api.variable.DependentVariable;
 import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
@@ -171,5 +173,50 @@ public class TestGetSet2 extends CommonTest {
         Expression e1 = method.methodBody().statements().get(1).expression();
         assertEquals("x.list.add(\"x\".repeat(x.k))",
                 e1.translate(new ApplyGetSetTranslation(runtime)).toString());
+    }
+
+    @Language("java")
+    public static final String INPUT3 = """
+            package a.b;
+            import java.util.ArrayList;
+            class X {
+                static class Coll<E, K> extends ArrayList<E> {
+                    private ArrayList<K> lstKeys = new ArrayList<>();
+                    public K getKey(int index) { return lstKeys.get(index); }
+                }
+                static class Sub extends Coll<String, Integer> { }
+                private final Coll<String, Integer> coll = new Coll<>();
+                private final Sub sub = new Sub();
+                private int pointer;
+                int relative(int offset) {
+                    Integer abs = coll.getKey(pointer) + offset;
+                    return abs;
+                }
+                int relativeSub(int offset) {
+                    Integer abs = sub.getKey(pointer) + offset;
+                    return abs;
+                }
+            }
+            """;
+
+    @DisplayName("indexed getter of a type parameter: the element type is substituted through the object's type (maddi#120)")
+    @Test
+    public void test3() {
+        TypeInfo X = javaInspector.parse("a.b.X", INPUT3);
+        new PrepAnalyzer(runtime).doPrimaryType(X);
+        for (String name : new String[]{"relative", "relativeSub"}) {
+            MethodInfo method = X.findUniqueMethod(name, 1);
+            LocalVariableCreation lvc = (LocalVariableCreation) method.methodBody().statements().getFirst();
+            BinaryOperator init = (BinaryOperator) lvc.localVariable().assignmentExpression();
+            MethodCall getKey = (MethodCall) init.lhs();
+            assertEquals("java.lang.Integer", getKey.concreteReturnType().typeInfo().fullyQualifiedName());
+
+            Variable resolved = runtime.getterVariable(getKey);
+            assertInstanceOf(DependentVariable.class, resolved);
+            assertEquals("java.lang.Integer", resolved.parameterizedType().typeInfo().fullyQualifiedName(), name);
+            Expression sum = runtime.sum(runtime.newVariableExpression(resolved),
+                    runtime.newVariableExpression(method.parameters().getFirst()));
+            assertNotNull(sum);
+        }
     }
 }
