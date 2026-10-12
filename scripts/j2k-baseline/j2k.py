@@ -16,6 +16,7 @@ Linux only (the far machines of `lab run`). Python 3.9+, standard library only.
 """
 import argparse
 import json
+import re
 import os
 import platform
 import shutil
@@ -116,6 +117,7 @@ def main():
     ap.add_argument("--work", default=None)
     ap.add_argument("--batch", type=int, default=0, help="files per convert call; 0 = all in one call")
     ap.add_argument("--xmx", default="8g")
+    ap.add_argument("--jdk", default=None, help="the project JDK; default $JAVA_HOME, else the java on PATH")
     a = ap.parse_args()
 
     module = Path(a.module).expanduser().resolve()
@@ -128,6 +130,11 @@ def main():
     out.mkdir(parents=True)
     work.mkdir(parents=True)
 
+    jdk = a.jdk or os.environ.get("JAVA_HOME") or str(Path(shutil.which("java")).resolve().parent.parent)
+    if not (Path(jdk) / "bin" / "java").exists():
+        raise SystemExit(f"no JDK at {jdk}")
+    jdk_version = subprocess.run([str(Path(jdk) / "bin" / "java"), "-version"], capture_output=True,
+                                 text=True).stderr.splitlines()[0]
     idea = ensure_idea(a.idea_build)
     build_txt = (idea / "build.txt").read_text().strip()
     log(f"IDE {build_txt}; corpus {checkout.name} @ {git(checkout, 'rev-parse', 'HEAD')}")
@@ -148,6 +155,8 @@ def main():
         f"-Xmx{a.xmx}", "-Djava.awt.headless=true",
         f"-Didea.config.path={work}/ide/config", f"-Didea.system.path={work}/ide/system",
         f"-Didea.plugins.path={work}/ide/plugins", f"-Didea.log.path={work}/ide/log",
+        # without a project JDK J2K resolves no java.* type: `Object?`, no MutableList (warmup's JdkWarmupProjectActivity)
+        f"-Dproject.jdk={jdk}", "-Dproject.jdk.name=corpus-jdk",
     ]) + "\n")
     env = dict(os.environ, IDEA_VM_OPTIONS=str(vmoptions))
     idea_sh = str(idea / "bin" / "idea.sh")
@@ -200,11 +209,15 @@ def main():
 
     left = sorted(p.relative_to(main_root).as_posix() for p in main_root.rglob("*.java"))
     kt = sorted(main_root.rglob("*.kt"))
+    # a JDK J2K could not resolve shows as java.lang.Object kept as a type
+    unresolved = sum(len(re.findall(r"\bObject\b\??[>,)\s]", p.read_text(errors="replace"))) for p in kt)
     shutil.copytree(main_root, out / "src", ignore=shutil.ignore_patterns("*.java"))
     if test_root.is_dir():
         shutil.copytree(test_root, out / "test")
     (out / "provenance.txt").write_text("\n".join([
         f"ide: {build_txt}",
+        f"jdk: {jdk} ({jdk_version})",
+        f"sanity: 'Object' kept as a Kotlin type {unresolved} times (should be ~0: Any)",
         f"corpus: {checkout.name} {git(checkout, 'rev-parse', 'HEAD')} {rel}",
         f"main java files: {len(java_files)}",
         f"kotlin files produced: {len(kt)}",
