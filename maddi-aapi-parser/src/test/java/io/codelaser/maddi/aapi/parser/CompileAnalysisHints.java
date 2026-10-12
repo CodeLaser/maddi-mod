@@ -182,9 +182,13 @@ public class CompileAnalysisHints {
                 compile(new AnalysisHintsCompiler(libraryJavaInspectorFactory("org.hamcrest.",
                         org.hamcrest.Matchers.class), null, jdkPreload), library, resultsBase);
             } else if (JUNIT_PARAMS_LIBRARY.equals(library)) {
-                // junit-jupiter-params is not on the shared factory, which carries junit-jupiter-api only
+                // junit-jupiter-params is not on the shared factory, which carries junit-jupiter-api only; the api and
+                // platform-commons jars too, which its class files reference (otherwise JUnitException and
+                // ParameterResolutionException are stubbed)
                 compile(new AnalysisHintsCompiler(libraryJavaInspectorFactory("org.junit.jupiter.params.",
-                        org.junit.jupiter.params.provider.Arguments.class), null, jdkPreload), library, resultsBase);
+                        org.junit.jupiter.params.provider.Arguments.class,
+                        org.junit.jupiter.api.extension.ParameterResolutionException.class,
+                        org.junit.platform.commons.JUnitException.class), null, jdkPreload), library, resultsBase);
             } else {
                 compile(JDK_LIBRARY.equals(library) ? compiler : compilerWithJdk, library, resultsBase);
             }
