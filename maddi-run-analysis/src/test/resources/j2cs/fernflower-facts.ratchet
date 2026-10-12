@@ -29,10 +29,14 @@
 #
 # 2026-10-12, no ? on unmapped library types (maddi 369d81117): ClasspathScanner's 8 extra errors gone, 38 errors as
 # maddi's fernflower.ratchet; T? for nullable type-parameter parameters: 68 -> 62 nullable warnings.
+#
+# 2026-10-12, nullable library results (object.ToString(), node[k], reflection), ? on class type parameters, (T?) null,
+# = null! where C# cannot see the assignment (maddi 3a4a1daf9): 62 -> 42 nullable warnings, CS8602 15 -> 12, CS8604 7 ->
+# 5, CS8603 10 -> 1, CS8618 5 -> 0, 2 new CS8766 (E? on an interface's type parameter, E in its implementation).
 types	199
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	199
 compilingFiles	182
 unmappedJdkUses	15
-nullableWarnings	62
+nullableWarnings	42
