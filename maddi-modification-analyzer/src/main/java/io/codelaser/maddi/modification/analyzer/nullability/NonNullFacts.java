@@ -329,6 +329,12 @@ public final class NonNullFacts {
                 effects(eas.expression(), facts);
                 return new Out(facts, true);
             }
+            case io.codelaser.maddi.cst.api.statement.ExplicitConstructorInvocation eci -> {
+                // 'super(parent.getRetrievalSemantics())' dereferences parent before the body runs (timefold
+                // BavetAbstractConstraintStream: its parameter is non-null whenever the constructor completes)
+                for (Expression argument : eci.parameterExpressions()) effects(argument, facts);
+                return new Out(facts, true);
+            }
             case Block b -> {
                 return block(b, facts);
             }

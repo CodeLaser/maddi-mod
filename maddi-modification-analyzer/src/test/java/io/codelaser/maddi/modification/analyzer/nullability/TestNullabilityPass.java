@@ -3749,12 +3749,16 @@ public class TestNullabilityPass extends CommonTest {
                 package a.b;
                 public class OW {
                     public enum Semantics { A }
-                    public abstract static class Root {
-                        protected final Root parent;
+                    public abstract static class Grand {
                         protected final Semantics semantics;
-                        protected Root(Root parent) { this.semantics = parent.semantics; this.parent = parent; }
-                        protected Root(Root parent, Semantics s) { this.semantics = s; this.parent = parent; }
-                        protected Root(Semantics s) { this.semantics = s; this.parent = null; }
+                        protected Grand(Semantics semantics) { this.semantics = semantics; }
+                    }
+                    public abstract static class Root extends Grand {
+                        protected final Root parent;
+                        // timefold BavetAbstractConstraintStream: the dereference is in the explicit super(...) call
+                        protected Root(Root parent) { super(parent.semantics); this.parent = parent; }
+                        protected Root(Root parent, Semantics s) { super(s); this.parent = parent; }
+                        protected Root(Semantics s) { super(s); this.parent = null; }
                     }
                     public static final class Source extends Root { public Source() { super(Semantics.A); } }
                     public static final class Group extends Root {
