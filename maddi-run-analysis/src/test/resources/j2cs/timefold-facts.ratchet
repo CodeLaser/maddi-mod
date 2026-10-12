@@ -13,10 +13,15 @@
 # explicit type arguments, enum switches, JDK mappings, …): 0 syntax errors, 611 -> 837 compiling files, 8769 -> 3623
 # errors, 2087 -> 1379 unmapped JDK uses. 504 -> 571 nullable warnings: no regression, the code that binds now, which
 # the errors hid, has its own (the first record's "many hidden behind the errors").
+#
+# 2026-10-12, maddi e15baf22f: a self-bounded type parameter only a result mentions printed erased, record companions,
+# IComparable on a Comparable<Score_>'s companion, T of a Class<T> from the wildcard's bound: 837 -> 868 compiling
+# files, 3623 -> 3333 errors. 1379 -> 1380 unmapped JDK uses (NewInstance<ThreadFactory> names the unmapped type).
+# 571 -> 579 nullable warnings: CS8602 27 -> 35 on calls that were CS0411 before (stepScope.GetScore().Raw).
 types	1583
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	1583
-compilingFiles	837
-unmappedJdkUses	1379
-nullableWarnings	571
+compilingFiles	868
+unmappedJdkUses	1380
+nullableWarnings	579

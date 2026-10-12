@@ -33,10 +33,14 @@
 # 2026-10-12, nullable library results (object.ToString(), node[k], reflection), ? on class type parameters, (T?) null,
 # = null! where C# cannot see the assignment (maddi 3a4a1daf9): 62 -> 42 nullable warnings, CS8602 15 -> 12, CS8604 7 ->
 # 5, CS8603 10 -> 1, CS8618 5 -> 0, 2 new CS8766 (E? on an interface's type parameter, E in its implementation).
+#
+# 2026-10-12, the merged nullability work (maddi-mod c74b6641/6472d988, maddi 7dbf49efe), not the printer: 42 -> 43
+# nullable warnings, a CS8601 in VarProcessor where a map value's ! went away; maddi 3855fc420, before the printer's
+# next commits, already has it.
 types	199
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	199
 compilingFiles	182
 unmappedJdkUses	15
-nullableWarnings	42
+nullableWarnings	43
