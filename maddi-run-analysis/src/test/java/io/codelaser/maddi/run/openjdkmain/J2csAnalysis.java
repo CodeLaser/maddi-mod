@@ -53,19 +53,23 @@ final class J2csAnalysis {
             return STORED.unmodified(parameter);
         }
 
+        /** The pass's verdict, as the Kotlin ratchet reads it; what is stored for what the pass has none of. */
         @Override
         public NullableState nullable(FieldInfo field) {
-            return STORED.nullable(field);
+            ParameterizedType verdict = report.verdicts().get(field);
+            return verdict != null ? verdict.nullable() : STORED.nullable(field);
         }
 
         @Override
         public NullableState nullable(ParameterInfo parameter) {
-            return STORED.nullable(parameter);
+            ParameterizedType verdict = report.verdicts().get(parameter);
+            return verdict != null ? verdict.nullable() : STORED.nullable(parameter);
         }
 
         @Override
         public NullableState nullable(MethodInfo method) {
-            return STORED.nullable(method);
+            ParameterizedType verdict = report.verdicts().get(method);
+            return verdict != null ? verdict.nullable() : STORED.nullable(method);
         }
 
         /** As the Kotlin ratchet: a verdict that is no decision (a degraded method's local) counts as nullable. */

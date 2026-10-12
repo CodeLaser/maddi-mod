@@ -19,10 +19,14 @@
 #
 # 2026-10-12, `!` at an argument that may be null for a parameter that is not nullable, a collection's element or key
 # always (maddi CSharpNullability.intoParameter): CS8604 254 -> 15, CS8625 212 -> 187, 875 -> 518 nullable warnings.
+#
+# 2026-10-12, the declarations' verdicts from the pass's report (the pass does not store them itself: write() is the
+# caller's), `!` at returns, array element writes and non-null field assignments, (T?) casts of values that may be
+# null: CS8603 116 -> 10, CS8625 187 -> 3, 518 -> 128 nullable warnings.
 types	199
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	199
 compilingFiles	182
 unmappedJdkUses	15
-nullableWarnings	518
+nullableWarnings	128
