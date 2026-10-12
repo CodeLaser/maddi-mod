@@ -3658,4 +3658,32 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("Number?[]", s.get("a.b.EX.handOut(String[],java.util.function.Function,a.b.EX.Def)"),
                 s.toString());
     }
+    @DisplayName("JUnit: a parameterized test's null source passes null to its parameters (langchain4j DocumentTest)")
+    @Test
+    public void junitNullSource() {
+        NullabilityPass.Report report = run("a.b.JN", """
+                package a.b;
+                class JN {
+                    @interface NullSource {}
+                    @interface ValueSource { String[] strings(); }
+                    static String from(String text) { return ensureNotBlank(text, "text"); }
+                    static String ensureNotBlank(String s, String name) {
+                        if (s == null || s.isBlank()) throw new IllegalArgumentException(name + " cannot be null or blank");
+                        return s;
+                    }
+                    @NullSource @ValueSource(strings = {"", " "})
+                    void fails(String text, int n) { from(text); }
+                    void ok() { from("x"); }
+                }
+                """);
+        System.out.println(explain(report));
+        Map<String, String> byName = report.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+        assertEquals("String?", byName.get("a.b.JN.fails(String,int):0:text"), "JUnit's null");
+        assertEquals("String?", byName.get("a.b.JN.from(String):0:text"));
+        assertEquals("String?", byName.get("a.b.JN.ensureNotBlank(String,String):0:s"));
+        assertEquals("String", byName.get("a.b.JN.ensureNotBlank(String,String)"), "non-null after the throw guard");
+        assertEquals("String", byName.get("a.b.JN.from(String)"));
+    }
+
 }
