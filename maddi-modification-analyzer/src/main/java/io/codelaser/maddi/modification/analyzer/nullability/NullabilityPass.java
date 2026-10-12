@@ -481,6 +481,8 @@ public final class NullabilityPass {
 
     // gate NONARROWING: no read is narrowed by the receiver's runtime type (A/B)
     private static final boolean NARROWING_OFF = System.getenv("NONARROWING") != null;
+    // gate NOOPENNARROWING: the narrowing in the closed world only, as before CodeLaser/maddi-mod#30's open-world part
+    private static final boolean OPEN_NARROWING_OFF = System.getenv("NOOPENNARROWING") != null;
 
     /**
      * Per final instance field, the concrete classes whose instances may hold null in it; per getter, its field.
@@ -512,12 +514,19 @@ public final class NullabilityPass {
 
     /*
      Computed at the end of a round, from what null reached in it, for the next round's use-site facts: sound because a
-     round's reachability over-approximates the next one's (edges only drop). Closed world only: an open world has
-     classes the pass does not see. A field is a candidate when it is final, of an instance, and its class has an
-     analysed proper subclass (without one the narrowing tells nothing the field's own verdict does not).
+     round's reachability over-approximates the next one's (edges only drop). A field is a candidate when it is final,
+     of an instance, and its class has an analysed proper subclass (without one the narrowing tells nothing the field's
+     own verdict does not).
+     In an open world (the diagnostics' policy, CodeLaser/maddi-mod#30) a final field is still assigned only by its
+     class's constructors, which the pass sees; outside code reaches them in two ways, both accounted for. It calls a
+     constructor visible outside with what it likes: those parameters are in 'external', which classMayHoldNull reads.
+     And it extends a class visible outside: an unseen subclass runs the constructors of a known class, so an
+     extensible abstract class stands for its unseen subclasses, a concrete one already does. A final class has no
+     unseen subclass at all.
      */
     private NarrowedReads narrowedReads() {
-        if (NARROWING_OFF || policy.world() != World.CLOSED) return NarrowedReads.NONE;
+        boolean open = policy.world() != World.CLOSED;
+        if (NARROWING_OFF || open && OPEN_NARROWING_OFF) return NarrowedReads.NONE;
         Set<TypeInfo> classes = new LinkedHashSet<>();
         for (MethodInfo mi : analysed) classes.add(mi.typeInfo());
         for (FieldInfo fi : analysedFields) classes.add(fi.owner());
@@ -528,7 +537,8 @@ public final class NullabilityPass {
             if (owner.typeNature().isRecord() || owner.isInterface()) continue;
             List<TypeInfo> concrete = classes.stream()
                     .filter(x -> x == owner || isSubtype(x, owner))
-                    .filter(x -> !x.isInterface() && (!x.isAbstract() || x.isAnonymous())).toList();
+                    .filter(x -> !x.isInterface() && (!x.isAbstract() || x.isAnonymous()
+                                                      || open && extensible(x) && visibleOutside(x))).toList();
             if (classes.stream().noneMatch(x -> x != owner && isSubtype(x, owner))) continue;
             // a final field is assigned exactly once: by its initializer or along every constructor chain; one of the
             // two must be visible here (an instance initializer block is not looked at)
@@ -580,6 +590,8 @@ public final class NullabilityPass {
         // (timefold SolverWorkerEvent.getModel() on a FailedSolutionEvent, which no analysed call reaches). An
         // override still holds there: the reflective call dispatches to it.
         if (m.access().isPublic()) return true;
+        // in an open world an unseen subclass calls what it can see: a protected method too
+        if (policy.world() != World.CLOSED && visibleOutside(m)) return true;
         List<TypeInfo> receivers = new ArrayList<>(index.receivers().getOrDefault(m, List.of()));
         for (MethodInfo overridden : m.overrides()) {
             receivers.addAll(index.receivers().getOrDefault(overridden, List.of()));
@@ -670,13 +682,25 @@ public final class NullabilityPass {
      constructor it delegates to ('this(...)', 'super(...)', or the implicit 'super()') makes of the arguments, given
      what k's own parameters may be (env).
      */
-    private boolean constructsNull(MethodInfo k, Map<ParameterInfo, Boolean> env, FieldInfo fi, int depth) {
+    private boolean constructsNull(MethodInfo k, Map<ParameterInfo, Boolean> given, FieldInfo fi, int depth) {
         if (depth > 32) return true;
+        // a constructor that dereferences a parameter on every path completes only when it is non-null: the object it
+        // builds never holds that null, whoever passes it ('Root(Root parent) { semantics = parent.semantics; ... }',
+        // outside callers in an open world included)
+        Map<ParameterInfo, Boolean> env = given;
+        if (given.containsValue(true)) {
+            Map<ParameterInfo, Boolean> checked = new HashMap<>(given);
+            for (ParameterInfo pi : k.parameters()) {
+                if (Boolean.TRUE.equals(checked.get(pi)) && facts.nonNullAtExit(k, pi)) checked.put(pi, false);
+            }
+            env = checked;
+        }
+        Map<ParameterInfo, Boolean> known = env;
         TypeInfo owner = fi.owner();
         Block body = k.methodBody();
         if (body == null) return k.typeInfo() == owner || isSubtype(k.typeInfo(), owner);
         boolean mayBeNull = k.typeInfo() == owner
-                            && assignmentsOf(k, fi).anyMatch(value -> mayBeNull(value, env));
+                            && assignmentsOf(k, fi).anyMatch(value -> mayBeNull(value, known));
         Statement first = body.isEmpty() ? null : body.statements().getFirst();
         if (first instanceof ExplicitConstructorInvocation eci) {
             MethodInfo target = eci.methodInfo();
