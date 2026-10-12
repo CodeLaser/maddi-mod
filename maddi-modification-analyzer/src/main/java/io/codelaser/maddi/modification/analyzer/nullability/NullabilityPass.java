@@ -2258,7 +2258,9 @@ public final class NullabilityPass {
         Expression e = NonNullFacts.unwrap(value);
         switch (e) {
             case VariableExpression ve -> {
-                if (ve.variable().equals(source)) return known.contains(source) ? Guard.GUARDED : Guard.UNGUARDED;
+                if (sameVariable(ve.variable(), source)) {
+                    return known.contains(source) ? Guard.GUARDED : Guard.UNGUARDED;
+                }
                 return ve.variable() instanceof io.codelaser.maddi.cst.api.variable.FieldReference fr
                        && !fr.scopeIsRecursivelyThis() ? Guard.OPAQUE : Guard.ABSENT;
             }
@@ -2292,10 +2294,23 @@ public final class NullabilityPass {
     private static boolean mentions(Expression e, Variable v) {
         boolean[] found = {false};
         e.visit(x -> {
-            if (x instanceof VariableExpression ve && ve.variable().equals(v)) found[0] = true;
+            if (x instanceof VariableExpression ve && sameVariable(ve.variable(), v)) found[0] = true;
             return !found[0];
         });
         return found[0];
+    }
+
+    /*
+     The variable a link names against the one an expression reads. An element is named by the link engine with its
+     own index ('arr[1]' for the 'arr[i]' of 'val = arr[i]' in a loop), so an element of the same array counts as the
+     same variable whatever the index: the pass keeps one Content per array anyway. Without it the direct link
+     'val ← arr[1]' was never observed in its statement, and the element's null did not reach 'val' (fernflower
+     SFormsFastMapDirect.removeAllFields, 'val val = arr!![i]!!', after 23f8bf65 dropped the derived 'val ∈ arr').
+     */
+    private static boolean sameVariable(Variable read, Variable linked) {
+        if (read.equals(linked)) return true;
+        return read instanceof DependentVariable r && linked instanceof DependentVariable l
+               && sameVariable(r.arrayVariable(), l.arrayVariable());
     }
 
     private static Guard combine(Guard g1, Guard g2) {
