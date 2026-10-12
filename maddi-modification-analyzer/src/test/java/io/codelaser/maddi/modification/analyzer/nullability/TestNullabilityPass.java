@@ -1343,6 +1343,62 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("String", byName.get("a.b.K.removed(java.util.Map,String)"));
     }
 
+    // CodeLaser/maddi-mod#29 C (timefold TreeMultiSet): a key the navigable map hands out is one of its keys
+    @DisplayName("key presence: a key from the map's own navigation methods (higherKey, firstKey, navigableKeySet)")
+    @Test
+    public void keyPresenceNavigated() {
+        NullabilityPass.Report report = run("a.b.KN", """
+                package a.b;
+                import java.util.*;
+                class KN {
+                    private final TreeMap<String, Integer> backing = new TreeMap<>();
+                    void add(String k) { backing.merge(k, 1, Integer::sum); }
+                    int first() {
+                        String k = backing.isEmpty() ? null : backing.firstKey();
+                        return k != null ? backing.get(k) : 0;
+                    }
+                    int next(String current) {
+                        String k = backing.higherKey(current);
+                        if (k == null) throw new NoSuchElementException();
+                        return backing.get(k) - 1;
+                    }
+                    int other(TreeMap<String, Integer> elsewhere, String current) {
+                        String k = elsewhere.higherKey(current);
+                        if (k == null) throw new NoSuchElementException();
+                        return backing.get(k) - 1;
+                    }
+                    int view() { int s = 0; for (String k : backing.descendingKeySet()) s += backing.get(k); return s; }
+                    Iterator<String> iterator() {
+                        return new Iterator<>() {
+                            String currentKey = backing.isEmpty() ? null : backing.firstKey();
+                            int remaining = currentKey != null ? backing.get(currentKey) : 0;
+                            public boolean hasNext() { return remaining > 0 || backing.higherKey(currentKey) != null; }
+                            public String next() {
+                                if (remaining > 0) { remaining--; return currentKey; }
+                                currentKey = backing.higherKey(currentKey);
+                                if (currentKey == null) throw new NoSuchElementException();
+                                remaining = backing.get(currentKey) - 1;
+                                return currentKey;
+                            }
+                        };
+                    }
+                }
+                """, NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY.withoutContracts().withWorld(NullabilityPass.World.CLOSED));
+        System.out.println(explain(report));
+        Map<String, Boolean> present = new java.util.TreeMap<>();
+        parsed.recursiveSubTypeStream().flatMap(t -> t.methodStream()).forEach(m -> {
+            if (m.methodBody() == null) return;
+            m.methodBody().visit(e -> {
+                if (e instanceof MethodCall mc && mc.methodInfo() != null && "get".equals(mc.methodInfo().name())) {
+                    present.merge((m.typeInfo().isAnonymous() ? "anonymous." : "") + m.name(),
+                            report.useSites().keyPresentWhenCalled(mc), Boolean::logicalAnd);
+                }
+                return true;
+            });
+        });
+        assertEquals("{anonymous.next=true, first=true, next=true, other=false, view=true}", present.toString());
+    }
+
     @DisplayName("a null returned by a method that may return its argument does not flow back into the argument")
     @Test
     public void identityReturn() {
@@ -2717,6 +2773,55 @@ public class TestNullabilityPass extends CommonTest {
                 calls("timeout", "getInteger").getFirst().methodInfo()));
         assertFalse(report.callResultNonNull(calls("getInteger", "getInteger").getFirst()),
                 "getInteger(key, null) passes the null");
+    }
+
+    // CodeLaser/maddi-mod#29 A (nacos NacosClientProperties): the same shape through an interface whose analysed
+    // implementations are all the implementations (closed world); one implementation's own null still counts
+    @DisplayName("gap 9 through dispatch: a call of an interface method passing a non-null default is non-null")
+    @Test
+    public void returnThroughParameterPerCallDispatched() {
+        NullabilityPass.Report report = run("a.b.G9I", """
+                package a.b;
+                import java.util.HashMap;
+                import java.util.Map;
+                import java.util.Optional;
+                class G9I {
+                    interface Props {
+                        Integer getInteger(String key);
+                        Integer getInteger(String key, Integer defaultValue);
+                    }
+                    static class Searchable implements Props {
+                        private final Map<String, Object> map = new HashMap<>();
+                        <T> Optional<T> search(String key, Class<T> type) { return Optional.ofNullable(type.cast(map.get(key))); }
+                        @Override public Integer getInteger(String key) { return getInteger(key, null); }
+                        @Override public Integer getInteger(String key, Integer defaultValue) {
+                            return search(key, Integer.class).orElse(defaultValue);
+                        }
+                    }
+                    interface Accessor { String name(String prefix); }
+                    static class Real implements Accessor { public String name(String prefix) { return prefix + "x"; } }
+                    static class Dummy implements Accessor { public String name(String prefix) { return null; } }
+                    private final Props properties = new Searchable();
+                    int timeout() {
+                        Integer n = properties.getInteger("timeout", 5);
+                        return n.intValue();
+                    }
+                    int retries() {
+                        Integer r = properties.getInteger("retries", null);
+                        return r == null ? 0 : r;
+                    }
+                    int named(Accessor a) {
+                        String n = a.name("p");
+                        return n == null ? 0 : n.length();
+                    }
+                    static void make() { new G9I().named(new Real()); new G9I().named(new Dummy()); }
+                }
+                """, NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY.withoutContracts().withWorld(NullabilityPass.World.CLOSED));
+        System.out.println(explain(report));
+        assertTrue(report.callResultNonNull(calls("timeout", "getInteger").getFirst()), report.explain(
+                calls("timeout", "getInteger").getFirst().methodInfo()));
+        assertFalse(report.callResultNonNull(calls("retries", "getInteger").getFirst()), "this call passes the null");
+        assertFalse(report.callResultNonNull(calls("named", "name").getFirst()), "Dummy returns null by itself");
     }
 
     @DisplayName("gap 9, Kotlin: a return assigned a call passing a non-null default is non-null")
