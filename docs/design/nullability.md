@@ -1198,3 +1198,19 @@ the 15 compilation units that fail to inspect left out, gates off versus on): `t
 from reached to unreached; nothing else of the sites #22 names changes. `TestNullabilityPass.keyedMaps` and
 `narrowedReads` pin the shapes, including those that must stay nullable (a key not known, a map that escapes, a
 subclass that stores null, an overriding getter, a non-final field, the tested variable reassigned).
+
+### 2026-10-12 — JUnit's null sources (the preconditions decision, option 1)
+
+A `@ParameterizedTest` with `@NullSource` or `@NullAndEmptySource` receives null from JUnit, a caller the
+analysis does not see. langchain4j's `DocumentTest.constructor_should_fail_on_empty_text` hands it to
+`Document.from(text)`, whose `ensureNotBlank(text)` must throw the `IllegalArgumentException` the test asserts;
+translated as `from(text: String)`, Kotlin's entry check threw first. The pass now seeds every reference-typed
+parameter of such a method ("JUnit null source of …"). Decision (Bart, 2026-10-12): this first; whether a parameter
+rejected by a non-NPE check is nullable for the Kotlin translation is CodeLaser/maddi-mod#28.
+
+Guava unchanged under every policy. langchain4j: 40 nullable verdicts added, none gone, all JUnit's nulls where they
+really flow: `Document.from` and `DefaultDocument` `text`; `EmbeddingStore.remove(String)`'s `id` from
+`EmbeddingStoreWithRemovalIT.should_fail_to_remove_by_id`; `UriUtilsTest`'s and `ValidationUtilsTest`'s boxed
+parameters; and `MetadataTest.should_fail_to_create_from_map_when_key_is_null`'s null key, which makes the key
+slot of `Metadata.validate(Map)`, `from(Map)` and, by invariance, the stored map nullable (the printer's "Metadata's
+null key" item: the K type argument). `TestNullabilityPass.junitNullSource`.

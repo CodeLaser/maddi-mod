@@ -1800,6 +1800,13 @@ public final class NullabilityPass {
                                                            || bv.variable() instanceof ParameterInfo));
     }
 
+    // '@NullSource' / '@NullAndEmptySource' (org.junit.jupiter.params.provider) on a parameterized test
+    private static boolean junitNullSource(MethodInfo mi) {
+        return mi.annotations().stream().anyMatch(a -> a.typeInfo() != null
+                && (a.typeInfo().simpleName().equals("NullSource")
+                    || a.typeInfo().simpleName().equals("NullAndEmptySource")));
+    }
+
     // the analysed method whose body holds this null literal (a lambda's body is the lambda's method)
     private MethodInfo nullOwner(Expression nullConstant) {
         return nullOwners.get(nullConstant);
@@ -1861,6 +1868,17 @@ public final class NullabilityPass {
                 } else if (policy.libraryCallbacks()) {
                     String unhinted = libraryUnhintedParameter(mi, pi.index());
                     if (unhinted != null) seed(pi, "overrides " + unhinted + ", which does not declare it non-null");
+                }
+            }
+            // JUnit injects null into every parameter of a parameterized test with a null source, a caller the
+            // analysis does not see: langchain4j's DocumentTest.constructor_should_fail_on_empty_text hands it to
+            // Document.from(text), whose ensureNotBlank(text) must throw the IllegalArgumentException the test
+            // expects, not Kotlin's entry check
+            if (junitNullSource(mi)) {
+                for (ParameterInfo pi : mi.parameters()) {
+                    ParameterizedType type = pi.parameterizedType();
+                    if (type.isPrimitiveExcludingVoid() && type.arrays() == 0) continue;
+                    seed(pi, "JUnit null source of " + mi.fullyQualifiedName());
                 }
             }
         }
