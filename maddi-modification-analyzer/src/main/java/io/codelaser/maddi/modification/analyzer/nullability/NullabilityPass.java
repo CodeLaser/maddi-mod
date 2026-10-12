@@ -1440,8 +1440,11 @@ public final class NullabilityPass {
      caller 'getInteger(key)' passes null into the implementation's parameter, never into the interface's. Every
      implementation's own null (one returning null by itself) still makes the call's result nullable.
      */
+    // gate NODISPATCH: a call's pass-through parameters are the callee's own only (#29 A off)
+    private static final boolean DISPATCH_OFF = System.getenv("NODISPATCH") != null;
+
     private Set<ParameterInfo> dispatchedPassThrough(MethodInfo callee) {
-        List<MethodInfo> overriding = policy.world() == World.CLOSED
+        List<MethodInfo> overriding = !DISPATCH_OFF && policy.world() == World.CLOSED
                 ? implementations.getOrDefault(callee, List.of()) : List.of();
         if (overriding.isEmpty()) return passThrough(callee);
         Set<ParameterInfo> through = new HashSet<>(passThrough(callee));

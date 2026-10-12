@@ -474,6 +474,8 @@ public final class NonNullFacts {
      TreeMultiSet). When there is none it is null instead, and 'map.get(null)' throws on a TreeMap rather than
      answering the absent key's null; a comparator that accepts null is the exception, and not looked at.
      */
+    // gate NONAVKEYS: no key presence from navigation, nor forgetting it at a call through a non-final field (#29 C off)
+    private static final boolean NAV_KEYS_OFF = System.getenv("NONAVKEYS") != null;
     private static final Set<String> MAP_KEYS = Set.of("firstKey", "lastKey", "higherKey", "lowerKey", "ceilingKey",
             "floorKey");
     private static final Set<String> KEY_VIEWS = Set.of("keySet", "navigableKeySet", "descendingKeySet");
@@ -568,7 +570,7 @@ public final class NonNullFacts {
 
     // 'k = map.higherKey(x)', 'k = map.isEmpty() ? null : map.firstKey()': k is present in map (MAP_KEYS)
     private void navigatedKey(Variable key, Expression value, Set<Variable> facts) {
-        if (kotlinSmartCasts || key == null) return;
+        if (kotlinSmartCasts || key == null || NAV_KEYS_OFF) return;
         Expression v = unwrap(value);
         if (v instanceof InlineConditional ic) {
             if (unwrap(ic.ifTrue()) instanceof NullConstant) v = unwrap(ic.ifFalse());
@@ -626,8 +628,8 @@ public final class NonNullFacts {
         facts.removeIf(v -> isNonFinalField(v) && !(keepsThis && v instanceof FieldReference fr && fr.scopeIsThis())
                             || v instanceof DependentVariable
                             || v instanceof KeyPresence kp && (touches(kp.map(), receiver, read, arguments)
-                                                               || changesAtCall(kp.key(), keepsThis)
-                                                               || changesAtCall(kp.map(), keepsThis))
+                                                               || !NAV_KEYS_OFF && (changesAtCall(kp.key(), keepsThis)
+                                                                                    || changesAtCall(kp.map(), keepsThis)))
                             || v instanceof PureCall pc && modifying
                                && (isNonFinalField(pc.receiver()) || touches(pc.receiver(), receiver, false, arguments)));
     }
