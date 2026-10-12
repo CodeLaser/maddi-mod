@@ -62,12 +62,16 @@
 # nullable): 339 files compiling (9 type errors), 339 to class files; 1,106 tests pass with the Kotlin classes, 131
 # test files compile, 1,106 translated tests pass. BatchItemResult's success(null) test passes; failure(null) still
 # fails knowingly (BatchError is no type variable: the record's component is non-null, its constructor takes null).
+# 2026-10-12, maddi's d5608a929 and e270e0f04 (the printer: a nullable argument that ties an overload cast to its
+# type, an annotation's Class element as .java, SAM constructors with the target's type arguments, no `!!` into a
+# library result's member such as Optional.ofNullable(d).orElse(…)): 344 files compiling (2 type errors, maddi-mod#38),
+# 344 to class files, 134 test files compile; 1,106 tests pass with the Kotlin classes, 1,106 translated.
 types	346
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	346
-compilingFiles	339
-bytecodeFiles	339
+compilingFiles	344
+bytecodeFiles	344
 testsPassing	1106
-testBytecodeFiles	131
+testBytecodeFiles	134
 translatedTestsPassing	1106
