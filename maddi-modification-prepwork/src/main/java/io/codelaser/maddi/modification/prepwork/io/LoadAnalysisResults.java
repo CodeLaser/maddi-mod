@@ -65,7 +65,8 @@ public class LoadAnalysisResults {
     // but not listed here is a file nobody reads (libs/support is exactly that).
     public static final List<String> ANALYZED_RESULTS = List.of(ANALYZED_RESULTS_JDK, ANALYZED_RESULTS_LIBS + "/test",
             ANALYZED_RESULTS_LIBS + "/log", ANALYZED_RESULTS_LIBS + "/kotlin", ANALYZED_RESULTS_LIBS + "/assertj",
-            ANALYZED_RESULTS_LIBS + "/guava", ANALYZED_RESULTS_LIBS + "/hamcrest", ANALYZED_RESULTS_LIBS + "/junitparams");
+            ANALYZED_RESULTS_LIBS + "/guava", ANALYZED_RESULTS_LIBS + "/hamcrest", ANALYZED_RESULTS_LIBS + "/junitparams",
+            ANALYZED_RESULTS_LIBS + "/mockito");
     private static final Logger LOGGER = LoggerFactory.getLogger(LoadAnalysisResults.class);
     private final SourceSet sourceSetOfRequest; // for loading types
     private final Runtime runtime;

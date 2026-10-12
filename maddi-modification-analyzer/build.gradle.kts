@@ -43,6 +43,8 @@ dependencies {
     testImplementation("io.codelaser:maddi-inspection-parser:$maddiVersion")
     testImplementation("io.codelaser:maddi-inspection-integration:$maddiVersion")
     testImplementation("io.codelaser:maddi-inspection-resource:$maddiVersion")
+    // TestMockitoVerify: Mockito on the class path of that one test (CommonTest.extraClassPathParts), for its hints
+    testImplementation("org.mockito:mockito-core:5.23.0")
     testImplementation("io.codelaser:maddi-java-bytecode:$maddiVersion")
     testImplementation("io.codelaser:maddi-java-parser:$maddiVersion")
 

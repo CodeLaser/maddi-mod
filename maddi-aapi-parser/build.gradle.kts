@@ -68,6 +68,7 @@ dependencies {
     // and for the hamcrest and JUnit parameterized-test hints (libs/hamcrest, libs/junitparams, in libs.jar)
     testImplementation("org.hamcrest:hamcrest:2.2")
     testImplementation("org.junit.jupiter:junit-jupiter-params:6.0.3")
+    testImplementation("org.mockito:mockito-core:5.23.0") // libs/mockito
 
     testRuntimeOnly("info.picocli:picocli:4.7.7")
     testRuntimeOnly("org.junit.jupiter:junit-jupiter:5.9.2")
