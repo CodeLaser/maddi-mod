@@ -289,7 +289,13 @@ public class TestShadowCloneBench extends CommonTest {
         // is closed and is a formatting shape: ArrayList_AddAt.TestCase's fields handed to a message format by
         // $5.apply, and printAscii(String, Object[]):1:args; reverse byteArrayToHex(byte[]) (String.format of an
         // element), print(double[][]) and print(double[],int,int) (printf, five clones) and TpchResultComparator.main.
-        org.junit.jupiter.api.Assertions.assertEquals(262, totalRev,
+        // ⭐ Re-baselined 2026-10-12 for maddi-mod 4448c786 (a library's own function types ignore modifications:
+        // File.listFiles(FileFilter), File.list(FilenameFilter), ...). A/B against the previous results with gate
+        // LIBFNCUSTOM: divergences unchanged (701, same lists), reverse 262 -> 271. All nine new ones are one shape, a
+        // FileFilter/FilenameFilter parameter passed to listFiles and to a recursive call of its own method
+        // (listAllFiles, delTree, findFiles, ...): the fixpoint's frozen "modified" is the recursion's pessimism, as
+        // it was before; the pass no longer seeds it from listFiles, so the disagreement became visible.
+        org.junit.jupiter.api.Assertions.assertEquals(271, totalRev,
                 "reverse divergences are expected since design A (110695ece) retired the "
                 + "walkable-summary seed channel; re-baseline deliberately, and reclassify");
         // Re-baselined 2026-09-22 for the RECEIVER-DISCLAIMER rule (@IgnoreModifications on a parameter now
