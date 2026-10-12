@@ -60,7 +60,7 @@ public class TestLangchain4jCollections {
         JavaToKotlinRatchet.Corpus corpus = JavaToKotlinRatchet.parse("langchain4j");
         JavaInspector javaInspector = corpus.javaInspector();
         AnalysisEngineImpl engine = new AnalysisEngineImpl();
-        // what a default run loads (the JDK, and libs.jar's test, log, Kotlin and AssertJ results); LC_JDK_ONLY=1 for
+        // what a default run loads (the JDK, and libs.jar's test, log, Kotlin, AssertJ and Guava results); LC_JDK_ONLY=1 for
         // the JDK alone, this test's setup before 2026-10-11. The tests' `assertThat(list)` made fields modified
         // until AssertJ had hints (CodeLaser/maddi#116).
         List<String> hints = System.getenv("LC_JDK_ONLY") != null ? List.of(JDK_HINTS)
