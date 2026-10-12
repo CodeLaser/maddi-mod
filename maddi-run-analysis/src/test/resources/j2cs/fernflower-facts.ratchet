@@ -16,10 +16,13 @@
 # parameters and locals, unless the use-site facts know them non-null; asserted locals' initializers), with the pass
 # under Policy.KOTLIN (call results make variables nullable, locals asserted at their declaration): CS8602 1150 -> 13,
 # 2029 -> 875 nullable warnings. Still 182 files compile.
+#
+# 2026-10-12, `!` at an argument that may be null for a parameter that is not nullable, a collection's element or key
+# always (maddi CSharpNullability.intoParameter): CS8604 254 -> 15, CS8625 212 -> 187, 875 -> 518 nullable warnings.
 types	199
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	199
 compilingFiles	182
 unmappedJdkUses	15
-nullableWarnings	875
+nullableWarnings	518
