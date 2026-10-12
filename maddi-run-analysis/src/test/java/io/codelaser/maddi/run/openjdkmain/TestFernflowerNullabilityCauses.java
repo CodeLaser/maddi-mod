@@ -58,7 +58,12 @@ public class TestFernflowerNullabilityCauses {
                         .setNullability(true)
                         .build());
         analyzer.analyze(order, prep.callGraph().graph());
-        NullabilityPass.Report report = new NullabilityPass(NullabilityPass.Policy.KOTLIN).go(order);
+        // NULLABILITY_POLICY=diagnose: the diagnostics' policy (flow only, no contracts, closed world); else Kotlin's
+        NullabilityPass.Policy policy = "diagnose".equals(System.getenv("NULLABILITY_POLICY"))
+                ? NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY.withoutContracts()
+                        .withWorld(NullabilityPass.World.CLOSED)
+                : NullabilityPass.Policy.KOTLIN;
+        NullabilityPass.Report report = new NullabilityPass(policy).go(order);
         List<String> lines = new java.util.ArrayList<>();
         report.verdicts().forEach((info, pt) -> {
             String n = info.fullyQualifiedName();

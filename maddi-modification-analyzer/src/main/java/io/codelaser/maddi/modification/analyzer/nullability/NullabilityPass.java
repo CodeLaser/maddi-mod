@@ -357,6 +357,8 @@ public final class NullabilityPass {
     private final Set<MethodInfo> analysed = new HashSet<>();
     // source declarations annotated non-null (Policy.contracts): null stops there
     private final Set<Object> nonNullContracts = new HashSet<>();
+    // (method, null marker): a return statement guarded the marker's link into the method's return (linksOf)
+    private final Set<List<Object>> guardedReturnMarkers = new HashSet<>();
     // the analysed method a local belongs to (a lambda's local: the method the lambda is in)
     private final Map<Local, MethodInfo> localOwner = new HashMap<>();
     private MethodInfo owner;
@@ -682,6 +684,11 @@ public final class NullabilityPass {
                 if (!mi.isConstructor() && !mi.returnType().isVoid()) elementContract(mi.returnType(), mi);
             }
         }
+        if (policy.callResults()) {
+            for (MethodInfo mi : methods) {
+                if (boundedTypeVariableOverride(mi)) nonNullContracts.add(mi);
+            }
+        }
         for (MethodInfo mi : methods) {
             owner = mi;
             buildForMethod(mi);
@@ -841,6 +848,26 @@ public final class NullabilityPass {
                 info.analysis().setAllowControlledOverwrite(property, ValueImpl.NullabilityImpl.of(pt));
             }
         });
+    }
+
+    /*
+     Kotlin: an override of a method returning a class type variable with an explicit bound ('R execute(P)' in
+     'GuardrailExecutor<..., R extends GuardrailResult<R>, ...>') returns the type argument its class passes for R,
+     which the bound keeps non-null: Kotlin refuses 'execute(...): OutputGuardrailResult?' as an override of 'R'
+     (langchain4j OutputGuardrailExecutor, whose 'return result' after the retry loop is reached only by the
+     'result = null' declaration, the loop running at least once). Its return is non-null; a null value is asserted.
+     */
+    private static boolean boundedTypeVariableOverride(MethodInfo mi) {
+        if (mi.isConstructor() || mi.returnType().isVoid() || mi.returnType().typeParameter() != null) return false;
+        for (MethodInfo overridden : mi.overrides()) {
+            ParameterizedType rt = overridden.returnType();
+            if (isClassTypeVariable(rt) && !rt.typeParameter().typeBounds().isEmpty()
+                && rt.typeParameter().typeBounds().stream().noneMatch(b -> b.typeInfo() != null
+                        && "java.lang.Object".equals(b.typeInfo().fullyQualifiedName()))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // a source declaration's null annotation, under Policy.contracts: nullable seeds, non-null stops null
@@ -1195,6 +1222,19 @@ public final class NullabilityPass {
         return reached;
     }
 
+    /*
+     The value an Optional holds is never null: 'Optional.ofNullable(x)' is empty for a null x, 'Optional.of(null)'
+     throws. So its type argument stays non-null, as the interfaces declare it (langchain4j
+     DefaultAiServiceStartedEvent.systemMessage(): 'Optional.ofNullable(this.systemMessage)' of a @Nullable field
+     is an Optional<SystemMessage>, and Kotlin refused the override returning Optional<SystemMessage?>).
+     */
+    private boolean optionalValue(Object node) {
+        if (!(node instanceof Arg arg) || arg.index() != 0) return false;
+        ParameterizedType type = typeOf(arg.of());
+        return type != null && type.arrays() == 0 && type.typeInfo() != null
+               && "java.util.Optional".equals(type.typeInfo().fullyQualifiedName());
+    }
+
     private static boolean isSlot(Object node) {
         return node instanceof Arg || node instanceof Content || node instanceof Keyed;
     }
@@ -1214,12 +1254,14 @@ public final class NullabilityPass {
         // a seed on a non-null contract is the caller's error (an M5 finding), not a source of null
         Set<Object> reached = new LinkedHashSet<>(seeds);
         reached.removeAll(nonNullContracts);
+        reached.removeIf(this::optionalValue);
         Deque<Object> queue = new ArrayDeque<>(reached);
         while (true) {
             while (!queue.isEmpty()) {
                 Object n = queue.removeFirst();
                 for (Object s : successors.getOrDefault(n, Set.of())) {
                     if (strict != null && isSlot(s) && !isSlot(n) && !strict.contains(n) && !isVarargElements(s)) continue;
+                    if (optionalValue(s)) continue;
                     if (!nonNullContracts.contains(s) && reached.add(s)) {
                         cause.put(s, n);
                         queue.addLast(s);
@@ -1747,6 +1789,17 @@ public final class NullabilityPass {
         }
     }
 
+    // a face ('x.f.list.§s') on a field of an object reached through another field: the field holding the slot is
+    // not read from this, a local or a parameter
+    private static boolean deepFace(Variable face) {
+        if (!(face instanceof FieldReference virtual) || !(NonNullFacts.unwrap(virtual.scope()) instanceof VariableExpression ve)
+            || !(ve.variable() instanceof FieldReference holder)) return false;
+        Expression base = NonNullFacts.unwrap(holder.scope());
+        return !(base instanceof VariableExpression bv && (bv.variable() instanceof This
+                                                           || bv.variable() instanceof LocalVariable
+                                                           || bv.variable() instanceof ParameterInfo));
+    }
+
     // the analysed method whose body holds this null literal (a lambda's body is the lambda's method)
     private MethodInfo nullOwner(Expression nullConstant) {
         return nullOwners.get(nullConstant);
@@ -1880,11 +1933,32 @@ public final class NullabilityPass {
             if (from instanceof Arg && link.linkNature().isIdenticalTo()) continue;
             if (link.linkNature().isIdenticalTo() || link.linkNature().isAssignedFrom()) {
                 if (isNullMarker(link.to())) {
+                    // a return whose value is known non-null returns no null, whatever '≡' links it to: in 'var d =
+                    // find(c); if (d == null) throw ...; return d;' the return is linked to find's 'return null'
+                    // through d (timefold SolutionDescriptor.findEntityDescriptorOrFail, the diagnose session). The
+                    // method's own summary repeats the link (no statement): skipped once a return guarded it.
+                    if (fromVar instanceof ReturnVariable) {
+                        List<Object> key = List.of(mi, link.to());
+                        Expression returned = statement == null ? null : assignedValue(statement, fromVar);
+                        if (returned != null && facts.nonNull(returned, facts.before(statement))) {
+                            guardedReturnMarkers.add(key);
+                            continue;
+                        }
+                        if (statement == null && guardedReturnMarkers.contains(key)) continue;
+                    }
                     // a variable becomes null only where it is assigned: '≡' is transitive in the links, so in
                     // 'checked = check(key)' with 'check' returning its argument or null, 'key ≡ return ≡ null'
                     // reaches 'key' (nacos SystemEnvPropertySource, reported by the diagnose session). A slot
                     // (Content, Arg) is written by calls too.
                     boolean slot = from instanceof Content || from instanceof Arg;
+                    // a callee's 'return null' does not become an element of a collection reached through another
+                    // object's fields: 'cfg.selector.solutionDescriptor.genuineEntityDescriptorList.§s ← $_ce3', the
+                    // links' transitive closure through calls, in a method that never writes that list (timefold
+                    // DefaultConstructionHeuristicPhaseFactory.getBuilder, CodeLaser/maddi-mod#27 a). A null this
+                    // method writes is kept, and so are the call-site writes ('list.add(x)', receiverSlots).
+                    if (slot && deepFace(link.from()) && !mi.equals(nullOwner(((LocalVariable) link.to()).assignmentExpression()))) {
+                        continue;
+                    }
                     if (slot || statement == null || fromVar instanceof ReturnVariable
                         || assignsHere(statement, fromVar)) {
                         nullMarker(mi, link.to(), from, "null in " + mi.fullyQualifiedName());
@@ -2800,7 +2874,12 @@ public final class NullabilityPass {
         boolean[] escapes = {false};
         loop.block().visit(e -> {
             if (e instanceof Lambda) return false;
-            if (e instanceof BreakOrContinueStatement || e instanceof ReturnStatement
+            // a return leaves a local array unread unless it hands the array out: 'if (x == null) return null;'
+            // (timefold SolverMetricUtil.extractScore, CodeLaser/maddi-mod#27 1); a field keeps what was filled
+            boolean returnsArray = e instanceof ReturnStatement rs
+                                   && (!(array instanceof LocalVariable) || rs.expression() != null
+                                                                            && mentions(rs.expression(), array));
+            if (e instanceof BreakOrContinueStatement || returnsArray
                 || e instanceof Assignment a && index.equals(a.variableTarget())) escapes[0] = true;
             return !escapes[0];
         });
@@ -2898,6 +2977,12 @@ public final class NullabilityPass {
         if (target == null || !(unwrapped instanceof MethodCall mc) || mc.methodInfo() == null) return;
         MethodInfo callee = mc.methodInfo();
         if (readScope != null) factorySlots(target, value, readScope.mi());
+        if (policy.callResults() && readScope != null) {
+            for (Expression source : passedThrough(mc)) {
+                Object node = argumentNode(readScope.mi(), readScope.scope(), source);
+                if (node != null) flows.add(List.of(node, target)); // Kotlin infers one type: content slots tied
+            }
+        }
         if (analysed.contains(callee) && !callee.isConstructor() && !callee.returnType().isVoid()) {
             // the same object: its content slots are one (coupleContent); not where the callee's type arguments are
             // type variables, which each call instantiates anew
@@ -2951,6 +3036,56 @@ public final class NullabilityPass {
     }
 
     /*
+     Kotlin: a generic method that hands an argument's type on ('<T> T ensureNotNull(T, String)', '<T> List<T>
+     copy(List<? extends T>)', '<T> T getOrDefault(T, T)') gives its result the argument's type, type arguments
+     included: Kotlin infers the method's type variable from the argument, and generic types are invariant. Those
+     arguments (through nested such calls) are the values whose content slots the target's must equal (langchain4j
+     EmbeddingModelRequestContext: 'textSegments = copy(ensureNotNull(builder.textSegments, ...))' is a
+     List<TextSegment?> where the builder's is; DefaultContent: 'metadata = copy(metadata)').
+     */
+    private static List<Expression> passedThrough(MethodCall mc) {
+        MethodInfo callee = mc.methodInfo();
+        if (callee == null) return List.of();
+        ParameterizedType rt = callee.returnType();
+        List<ParameterInfo> parameters = callee.parameters();
+        List<Expression> arguments = mc.parameterExpressions();
+        List<Expression> out = new ArrayList<>();
+        for (int i = 0; i < parameters.size() && i < arguments.size(); i++) {
+            if (parameters.get(i).isVarArgs()) break;
+            if (!sameInstantiation(rt, parameters.get(i).parameterizedType())) continue;
+            Expression argument = arguments.get(i);
+            List<Expression> nested = NonNullFacts.unwrap(argument) instanceof MethodCall inner
+                    ? passedThrough(inner) : List.of();
+            if (nested.isEmpty()) out.add(argument);
+            else out.addAll(nested);
+        }
+        return out;
+    }
+
+    // is the return type the parameter's, in the method's own type variables: 'T' and 'T', 'List<T>' and
+    // 'List<? extends T>', 'Map<K, V>' and 'Map<K, V>'
+    private static boolean sameInstantiation(ParameterizedType returnType, ParameterizedType parameterType) {
+        if (returnType.arrays() > 0 || parameterType.arrays() > 0) return false;
+        if (isMethodTypeVariable(returnType)) {
+            return returnType.typeParameter().equals(parameterType.typeParameter()) && parameterType.wildcard() == null;
+        }
+        if (returnType.parameters().isEmpty() || returnType.typeInfo() == null
+            || !returnType.typeInfo().equals(parameterType.typeInfo())
+            || returnType.parameters().size() != parameterType.parameters().size()) {
+            return false;
+        }
+        for (int i = 0; i < returnType.parameters().size(); i++) {
+            ParameterizedType r = returnType.parameters().get(i);
+            ParameterizedType a = parameterType.parameters().get(i);
+            if (!isMethodTypeVariable(r) || r.arrays() > 0 || a.arrays() > 0
+                || !r.typeParameter().equals(a.typeParameter())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /*
      A library factory: the return type's argument j is a method type variable T ('Map.of(K, V, ...)' returns
      Map<K, V>, 'List.of(E...)', 'Arrays.asList(T...)', 'Optional.of(T)'). Each argument passed for a T (or as an
      element of a 'T...') is a value of the result's slot j, which is the target's ('Map<Integer, Integer[]> m =
@@ -2983,6 +3118,12 @@ public final class NullabilityPass {
                 // a parameter the library declares nullable accepts null; that is not storing it as a T
                 if (stateOf(p, PropertyImpl.NULLABILITY_PARAMETER) == NullableState.NULLABLE) continue;
                 Expression argument = arguments.get(a);
+                if (rejectsNull(callee)) {
+                    seedCreated(slot, argument, mi); // the elements of an array stored as one ('new Integer[]{null}')
+                    Object source = readScope == null ? null : argumentNode(readScope.mi(), readScope.scope(), argument);
+                    if (source != null) flows.add(List.of(source, slot)); // its content slots still are the slot's
+                    continue;
+                }
                 if (NonNullFacts.unwrap(argument) instanceof NullConstant) {
                     seed(slot, "null passed to " + callee.fullyQualifiedName() + " in " + where(mi), writer(mi));
                     continue;
@@ -2990,11 +3131,31 @@ public final class NullabilityPass {
                 seedCreated(slot, argument, mi);
                 Object source = readScope == null ? null : argumentNode(readScope.mi(), readScope.scope(), argument);
                 if (source != null) {
-                    addEdge(source, slot);
+                    // M4: a variable known non-null at the call carries no null into the slot ('textSegment == null
+                    // ? List.of() : List.of(textSegment)', langchain4j ListeningEmbeddingModel.embed)
+                    if (!(NonNullFacts.unwrap(argument) instanceof VariableExpression ve
+                          && facts.nonNullAt(mc, ve.variable()))) {
+                        addEdge(source, slot);
+                    }
                     flows.add(List.of(source, slot)); // the same object: its content slots are the slot's
                 }
             }
         }
+    }
+
+    /*
+     An immutable collection factory throws on a null element: 'List.of(x)' holds no null, whatever x may be
+     (timefold DefaultExhaustiveSearchPhaseFactory: 'return List.of(solutionDescriptor.getListVariableDescriptor())',
+     whose null is the caller's NullPointerException, not an element). The JDK's 'of', 'copyOf', 'entry' and
+     'ofEntries' on List, Set and Map; guava's Immutable* collections.
+     */
+    private static boolean rejectsNull(MethodInfo callee) {
+        String type = callee.typeInfo().fullyQualifiedName();
+        String name = callee.name();
+        boolean factory = "of".equals(name) || "copyOf".equals(name) || "entry".equals(name) || "ofEntries".equals(name);
+        return factory && callee.isStatic()
+               && ("java.util.List".equals(type) || "java.util.Set".equals(type) || "java.util.Map".equals(type)
+                   || type.startsWith("com.google.common.collect.Immutable"));
     }
 
     private String nullableLibraryCall(Expression e) {
@@ -3550,6 +3711,28 @@ public final class NullabilityPass {
         sourcesOf(mi, scope, primary, links, site);
     }
 
+    /*
+     Kotlin: what a lambda returns is a value of the type argument its interface method returns, in the parameter it
+     is passed to: '(query) -> maxResults' for a 'Function<Query, Integer>' makes it a 'Function<Query, Int?>' when
+     maxResults may be null (langchain4j EmbeddingStoreContentRetriever, whose lambda returned an Int? where the
+     constructor declared Int).
+     */
+    private void lambdaResult(Lambda lambda, Object pi) {
+        MethodInfo body = lambda.methodInfo();
+        if (body == null || !(pi instanceof ParameterInfo parameter) || !analysed.contains(parameter.methodInfo())) {
+            return;
+        }
+        ParameterizedType formal = parameter.parameterizedType();
+        if (formal.arrays() > 0 || formal.typeInfo() == null || formal.parameters().isEmpty()) return;
+        MethodInfo sam = formal.typeInfo().singleAbstractMethod();
+        if (sam == null || !isClassTypeVariable(sam.returnType())) return;
+        int j = formal.typeInfo().typeParameters().indexOf(sam.returnType().typeParameter());
+        // not into a type variable ('<T> T withRetry(Callable<T> action)'): each call instantiates it anew
+        if (j >= 0 && j < formal.parameters().size() && formal.parameters().get(j).typeParameter() == null) {
+            addEdge(body, new Arg(parameter, j));
+        }
+    }
+
     // pi: the parameter, or the Content of a varargs parameter
     private void argument(MethodInfo mi, Scope scope, Statement statement, Expression call,
                           LinkComputer.ListOfLinks list, List<Expression> arguments, int i, Object pi) {
@@ -3568,6 +3751,7 @@ public final class NullabilityPass {
         }
         seedCreated(pi, arguments.get(i), mi);
         Expression unwrappedArgument = NonNullFacts.unwrap(arguments.get(i));
+        if (policy.callResults() && unwrappedArgument instanceof Lambda lambda) lambdaResult(lambda, pi);
         // 'getUniqueNext(graph, new HashSet<>(mapNext.values()))': a library copy constructor as the argument copies
         // its argument's content into the parameter's slots (fernflower FinallyProcessor)
         if (unwrappedArgument instanceof ConstructorCall copy && copy.constructor() != null

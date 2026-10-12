@@ -14,8 +14,13 @@ import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import io.codelaser.maddi.cst.api.expression.MethodCall;
+import io.codelaser.maddi.cst.api.expression.VariableExpression;
+import io.codelaser.maddi.cst.api.statement.Block;
 import io.codelaser.maddi.cst.api.statement.IfElseStatement;
+import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.cst.api.statement.Statement;
+import io.codelaser.maddi.cst.api.statement.TryStatement;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -59,7 +64,8 @@ public class TestNullabilityPass extends CommonTest {
             };
             return k(pt.componentType()) + "[]" + own;
         }
-        String base = pt.typeParameter() != null ? pt.typeParameter().simpleName() : pt.typeInfo().simpleName();
+        String base = pt.typeParameter() != null ? pt.typeParameter().simpleName()
+                : pt.typeInfo() != null ? pt.typeInfo().simpleName() : "?"; // 'Class<?>'
         String args = pt.parameters().isEmpty() ? ""
                 : pt.parameters().stream().map(TestNullabilityPass::k).collect(Collectors.joining(", ", "<", ">"));
         String suffix = switch (pt.nullable()) {
@@ -1283,7 +1289,8 @@ public class TestNullabilityPass extends CommonTest {
         }
         // the returns read the shadow, which holds the caller's value and decode's null
         assertEquals("String?", byName.get("a.b.R.incoming(String)"));
-        assertEquals("String?", byName.get("a.b.R.loop(String)"));
+        // the loop's condition dereferences p on every way out: 'return p' returns no null
+        assertEquals("String", byName.get("a.b.R.loop(String)"));
         assertEquals("String", byName.get("a.b.R.constant(String)"));
         assertEquals("String?", byName.get("a.b.R.conditional(String)"));
         Map<String, String> shadows = new java.util.TreeMap<>();
@@ -3101,5 +3108,554 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("String", s.get("a.b.SO.Switch.replace(String,String):1:newValue"), s.toString());
         assertEquals("String", s.get("a.b.SO.Statement.replace(String,String):1:newValue"), s.toString());
         assertEquals("String", s.get("a.b.SO.Base.name(String):0:name"), s.toString());
+    }
+
+    // langchain4j ListeningEmbeddingModel.embed: 'textSegment == null ? List.of() : List.of(textSegment)' puts no null
+    // into the list, so the builder's list is a List<TextSegment> like the context's final field
+    @DisplayName("a library factory's argument known non-null at the call: no null element")
+    @Test
+    public void factoryArgumentUnderCondition() {
+        NullabilityPass.Report report = run("a.b.LF", """
+                package a.b;
+                import java.util.List;
+                class LF {
+                    private final List<String> items;
+                    LF(List<String> items) { this.items = items; }
+                    static LF of(String s) {
+                        List<String> list = s == null ? List.of() : List.of(s);
+                        return new LF(list);
+                    }
+                    static LF none() { return of(null); }
+                    List<String> items() { return items; }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("String?", s.get("a.b.LF.of(String):0:s"), s.toString());
+        assertEquals("List<String>", s.get("a.b.LF.<init>(java.util.List):0:items"), s.toString());
+    }
+
+    // langchain4j DefaultAiServiceStartedEvent: 'Optional.ofNullable(this.systemMessage)' with a nullable field is an
+    // Optional<SystemMessage>, as the interface it implements declares; an Optional never holds null
+    @DisplayName("Optional.ofNullable of a nullable value: the Optional's type argument stays non-null")
+    @Test
+    public void optionalOfNullable() {
+        NullabilityPass.Report report = run("a.b.OE", """
+                package a.b;
+                import java.util.Optional;
+                class OE {
+                    private final String name;
+                    OE(String name) { this.name = name; }
+                    static OE none() { return new OE(null); }
+                    Optional<String> name() { return Optional.ofNullable(name); }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("String?", s.get("a.b.OE.name"), s.toString());
+        assertEquals("Optional<String>", s.get("a.b.OE.name()"), s.toString());
+    }
+
+    // langchain4j EmbeddingModelRequestContext, DefaultContent: 'this.items = copy(ensure(builder.items, "items"))'.
+    // Kotlin infers copy's and ensure's T from the argument, so the field's type is the builder's, element included
+    @DisplayName("Kotlin: a generic method handing its argument's type on ties the type arguments")
+    @Test
+    public void passedThroughGenericMethod() {
+        NullabilityPass.Report report = run("a.b.PT", """
+                package a.b;
+                import java.util.ArrayList;
+                import java.util.Collections;
+                import java.util.List;
+                class PT {
+                    private final List<String> items;
+                    private final List<String> names;
+                    PT(Builder builder) {
+                        this.items = copy(ensure(builder.items, "items"));
+                        this.names = copy(builder.names);
+                    }
+                    static <T> T ensure(T t, String name) {
+                        if (t == null) throw new IllegalArgumentException(name);
+                        return t;
+                    }
+                    static <T> List<T> copy(List<? extends T> list) {
+                        return list == null ? List.of() : Collections.unmodifiableList(list);
+                    }
+                    List<String> items() { return items; }
+                    List<String> names() { return names; }
+                    static class Builder {
+                        List<String> items;
+                        List<String> names;
+                        Builder items(List<String> items) { this.items = items; return this; }
+                        Builder names(List<String> names) { this.names = names; return this; }
+                        PT build() { return new PT(this); }
+                    }
+                    static PT make() {
+                        List<String> list = new ArrayList<>();
+                        list.add(null);
+                        return new Builder().items(list).names(List.of("a")).build();
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("List<String?>?", s.get("a.b.PT.Builder.items"), s.toString());
+        assertEquals("List<String?>", s.get("a.b.PT.items"), s.toString());
+        assertEquals("List<String>", s.get("a.b.PT.names"), s.toString());
+    }
+
+    // langchain4j EmbeddingStoreContentRetriever: 'this(..., (query) -> maxResults, ...)' with a nullable maxResults
+    @DisplayName("Kotlin: a lambda's nullable result makes the functional parameter's result type argument nullable")
+    @Test
+    public void lambdaResultIntoTypeArgument() {
+        NullabilityPass.Report report = run("a.b.LR", """
+                package a.b;
+                import java.util.function.Function;
+                class LR {
+                    private final Function<String, Integer> provider;
+                    LR(Integer max) { this(query -> max); }
+                    private LR(Function<String, Integer> provider) { this.provider = provider; }
+                    static LR none() { return new LR((Integer) null); }
+                    static LR some() { return new LR(3); }
+                    Integer get(String query) { return provider.apply(query); }
+                    static <T> T call(java.util.concurrent.Callable<T> action) throws Exception { return action.call(); }
+                    static String named() throws Exception { return call(() -> "x"); }
+                    static Object none(int i) throws Exception { return call(() -> null); }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("Integer?", s.get("a.b.LR.<init>(Integer):0:max"), s.toString());
+        assertEquals("Function<String, Integer?>", s.get("a.b.LR.<init>(java.util.function.Function):0:provider"),
+                s.toString());
+        assertEquals("Callable<T!>", s.get("a.b.LR.call(java.util.concurrent.Callable):0:action"), s.toString());
+        assertEquals("String", s.get("a.b.LR.named()"), s.toString());
+    }
+
+    // langchain4j OutputGuardrailExecutor.execute overrides GuardrailExecutor's 'R execute(P)', R bounded by
+    // GuardrailResult<R>: Kotlin refuses a nullable override there, so the return is non-null and the null asserted
+    @DisplayName("Kotlin: an override of a bounded type variable's return stays non-null")
+    @Test
+    public void boundedTypeVariableOverrideReturn() {
+        NullabilityPass.Report report = run("a.b.BO", """
+                package a.b;
+                class BO {
+                    interface Result<R extends Result<R>> { boolean ok(); }
+                    static final class Res implements Result<Res> { public boolean ok() { return true; } }
+                    interface Executor<R extends Result<R>> { R execute(int attempts); }
+                    abstract static class Base<R extends Result<R>> implements Executor<R> { }
+                    static class Exec extends Base<Res> {
+                        @Override
+                        public Res execute(int attempts) {
+                            Res result = null;
+                            int attempt = 0;
+                            while (attempt < attempts) {
+                                result = new Res();
+                                if (result.ok()) return result;
+                                attempt++;
+                            }
+                            return result;
+                        }
+                    }
+                    static class Plain {
+                        Res find(int attempts) { return attempts > 0 ? new Res() : null; }
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("Res", s.get("a.b.BO.Exec.execute(int)"), s.toString());
+        assertEquals("Res?", s.get("a.b.BO.Plain.find(int)"), s.toString());
+    }
+
+    // nacos Base64.readResults / ensureBufferSize (the diagnose session): a guarded field of this stays non-null
+    // across a library call not handed this ('Math.min', 'System.arraycopy') and across an array creation
+    @DisplayName("use sites: a call that cannot reach this keeps the facts on its fields")
+    @Test
+    public void callsThatCannotReachThis() {
+        NullabilityPass.Report report = run("a.b.BB", """
+                package a.b;
+                import java.util.Objects;
+                class BB {
+                    private byte[] buffer;
+                    private int pos;
+                    void copy(byte[] b, int n) {
+                        if (buffer != null) {
+                            int len = Math.min(pos, n);
+                            System.arraycopy(buffer, 0, b, 0, len);
+                        }
+                    }
+                    void grow() {
+                        if (buffer == null) {
+                            buffer = new byte[8];
+                        } else {
+                            byte[] b = new byte[buffer.length * 2];
+                            System.arraycopy(buffer, 0, b, 0, buffer.length);
+                            buffer = b;
+                        }
+                    }
+                    void handed(byte[] b) {
+                        if (buffer != null) {
+                            int h = Objects.hash(this);
+                            System.arraycopy(buffer, 0, b, 0, h);
+                        }
+                    }
+                    void own(byte[] b) {
+                        if (buffer != null) {
+                            reset();
+                            System.arraycopy(buffer, 0, b, 0, 1);
+                        }
+                    }
+                    void reset() { buffer = null; }
+                    void plain(byte[] b) {
+                        if (buffer != null) {
+                            System.arraycopy(buffer, 0, b, 0, 1);
+                        }
+                    }
+                }
+                """);
+        assertEquals(true, bufferKnownAtArraycopy(report, parsed.findUniqueMethod("plain", 1).methodBody()
+                .statements().getFirst().block()), "no call in between");
+        assertEquals(true, bufferKnownAtArraycopy(report, parsed.findUniqueMethod("copy", 2).methodBody()
+                .statements().getFirst().block()), "after Math.min");
+        IfElseStatement grow = (IfElseStatement) parsed.findUniqueMethod("grow", 0).methodBody().statements().getFirst();
+        assertEquals(true, bufferKnownAtArraycopy(report, grow.elseBlock()), "after 'new byte[...]'");
+        assertEquals(false, bufferKnownAtArraycopy(report, parsed.findUniqueMethod("handed", 1).methodBody()
+                .statements().getFirst().block()), "Objects.hash is handed this");
+        assertEquals(false, bufferKnownAtArraycopy(report, parsed.findUniqueMethod("own", 1).methodBody()
+                .statements().getFirst().block()), "an analysed method may change it");
+    }
+
+    // the facts on 'buffer' when the block's 'System.arraycopy(buffer, ...)' starts
+    private static boolean bufferKnownAtArraycopy(NullabilityPass.Report report, Block block) {
+        Statement copy = block.statements().stream()
+                .filter(st -> st.expression() instanceof MethodCall mc && "arraycopy".equals(mc.methodInfo().name()))
+                .findFirst().orElseThrow();
+        MethodCall mc = (MethodCall) copy.expression();
+        Variable buffer = ((VariableExpression) mc.parameterExpressions().getFirst()).variable();
+        return report.useSites().nonNullAt(copy, buffer);
+    }
+
+    // nacos Base64.encode (the diagnose session): 'ensureBufferSize(n); buffer[pos++] = b' after a private helper that
+    // leaves the field non-null on every normal exit
+    @DisplayName("use sites: a field a private helper leaves non-null is non-null after the call")
+    @Test
+    public void fieldNonNullAtExit() {
+        NullabilityPass.Report report = run("a.b.EB", """
+                package a.b;
+                class EB {
+                    private byte[] buffer;
+                    private int pos;
+                    private void ensure(int size) {
+                        if (buffer == null || buffer.length < pos + size) {
+                            if (buffer == null) {
+                                buffer = new byte[8];
+                            } else {
+                                byte[] b = new byte[buffer.length * 2];
+                                System.arraycopy(buffer, 0, b, 0, buffer.length);
+                                buffer = b;
+                            }
+                        }
+                    }
+                    void encode(byte v) {
+                        ensure(1);
+                        buffer[pos++] = v;
+                    }
+                    void grow(int size) { if (buffer == null) buffer = new byte[size]; }
+                    void open(byte v) {
+                        grow(1);
+                        buffer[pos++] = v;
+                    }
+                    void reset() { buffer = null; }
+                }
+                """);
+        FieldInfo buffer = parsed.getFieldByName("buffer", true);
+        assertEquals(true, report.useSites().nonNullAtExit(parsed.findUniqueMethod("ensure", 1), buffer));
+        assertEquals(false, report.useSites().nonNullAtExit(parsed.findUniqueMethod("reset", 0), buffer));
+        assertEquals(true, bufferKnownAtWrite(report, parsed.findUniqueMethod("encode", 1)), "after ensure(1)");
+        assertEquals(false, bufferKnownAtWrite(report, parsed.findUniqueMethod("open", 1)), "grow is overridable");
+    }
+
+    // the facts on 'buffer' when the method's 'buffer[pos++] = v' starts
+    private static boolean bufferKnownAtWrite(NullabilityPass.Report report, MethodInfo method) {
+        Statement write = method.methodBody().statements().getLast();
+        io.codelaser.maddi.cst.api.expression.Assignment a =
+                (io.codelaser.maddi.cst.api.expression.Assignment) write.expression();
+        Variable buffer = ((io.codelaser.maddi.cst.api.variable.DependentVariable) a.variableTarget()).arrayVariable();
+        return report.useSites().nonNullAt(write, buffer);
+    }
+
+    // timefold SolutionDescriptor.findEntityDescriptorOrFail (the diagnose session): 'var d = find(c); if (d == null)
+    // { throw ...; } return d;' returns no null, though find does
+    @DisplayName("a throw guard before the return: the OrFail wrapper returns no null")
+    @Test
+    public void throwGuardBeforeReturn() {
+        String src = """
+                package a.b;
+                import java.util.HashMap;
+                import java.util.Map;
+                class FD {
+                    private static final String NONE = "none";
+                    private final Map<Class<?>, String> cache = new HashMap<>();
+                    public String findOrFail(Class<?> c) {
+                        var d = find(c);
+                        if (d == null) {
+                            throw new IllegalArgumentException(
+                                    "No descriptor for %s (%s)".formatted(c, c.getSimpleName()));
+                        }
+                        return d;
+                    }
+                    public String find(Class<?> c) {
+                        var cached = cache.get(c);
+                        if (cached == NONE) {
+                            return null;
+                        } else if (cached != null) {
+                            return cached;
+                        }
+                        var created = c.getSimpleName().isEmpty() ? null : c.getSimpleName();
+                        if (created == null) {
+                            cache.put(c, NONE);
+                            return null;
+                        } else {
+                            cache.put(c, created);
+                            return created;
+                        }
+                    }
+                }
+                """;
+        StringBuilder out = new StringBuilder();
+        int[] round = {0};
+        for (String variant : List.of(src, src.replace("var d = find(c);", "String d = find(c);"))) {
+            for (NullabilityPass.Policy policy : List.of(NullabilityPass.Policy.KOTLIN, NullabilityPass.Policy.NULL_MARKED,
+                    NullabilityPass.Policy.CAUTIOUS)) {
+                String name = "FD" + (++round[0]);
+                NullabilityPass.Report report = run("a.b." + name, variant.replace("class FD ", "class " + name + " "),
+                        policy);
+                Map<String, String> s = new java.util.TreeMap<>();
+                report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName().replace(name, "FD"), k(pt)));
+                if (!"String?".equals(s.get("a.b.FD.find(Class)")) || "String?".equals(s.get("a.b.FD.findOrFail(Class)"))) {
+                    out.append(variant.contains("var d") ? "var " : "typed ").append(policy.world()).append(' ')
+                            .append(policy.callResults()).append(": ").append(s.get("a.b.FD.find(Class)")).append(' ')
+                            .append(s.get("a.b.FD.findOrFail(Class)")).append(" | ").append(explain(report)).append('\n');
+                }
+            }
+        }
+        assertEquals("", out.toString());
+    }
+
+    // timefold ReflectionHelper (the diagnose session, CodeLaser/maddi-mod#27 b): the try body starts with the loop's
+    // 'c != null'; the catch's assignment only matters after it
+    @DisplayName("use sites: a try body starts with the facts at the try, a catch with those its body keeps")
+    @Test
+    public void tryBodyKeepsLoopCondition() {
+        NullabilityPass.Report report = run("a.b.RH", """
+                package a.b;
+                import java.lang.reflect.Field;
+                class RH {
+                    static Field find(Class<?> start, String name) {
+                        Class<?> c = start;
+                        while (c != null) {
+                            try {
+                                return c.getDeclaredField(name);
+                            } catch (NoSuchFieldException e) {
+                                c = c.getSuperclass();
+                            }
+                        }
+                        return null;
+                    }
+                    static String body(String s) {
+                        String t = s;
+                        if (t != null) {
+                            try {
+                                t = null;
+                                return String.valueOf(Integer.parseInt(s));
+                            } catch (NumberFormatException e) {
+                                return t.trim();
+                            }
+                        }
+                        return "";
+                    }
+                }
+                """);
+        TryStatement inLoop = (TryStatement) parsed.findUniqueMethod("find", 2).methodBody().statements().get(1)
+                .block().statements().getFirst();
+        Statement returned = inLoop.block().statements().getFirst();
+        Variable c = ((VariableExpression) ((MethodCall) returned.expression()).object()).variable();
+        assertEquals(true, report.useSites().nonNullAt(returned, c), "the try body: the loop's condition holds");
+        assertEquals(true, report.useSites().nonNullAt(inLoop.catchClauses().getFirst().block().statements().getFirst(), c),
+                "the catch: the body does not assign c");
+        TryStatement assigning = (TryStatement) parsed.findUniqueMethod("body", 1).methodBody().statements().get(1)
+                .block().statements().getFirst();
+        Statement first = assigning.block().statements().getFirst();
+        Variable t = ((io.codelaser.maddi.cst.api.expression.Assignment) first.expression()).variableTarget();
+        assertEquals(true, report.useSites().nonNullAt(first, t), "the body's start");
+        assertEquals(false, report.useSites().nonNullAt(assigning.catchClauses().getFirst().block().statements()
+                .getFirst(), t), "the catch: the body may have assigned t");
+    }
+
+    // timefold DefaultExhaustiveSearchPhaseFactory (CodeLaser/maddi-mod#27 a): 'List.of(find())' throws on a null,
+    // so the list holds none; an ArrayList given the same value does
+    @DisplayName("an immutable collection factory stores no null element")
+    @Test
+    public void immutableFactoryRejectsNull() {
+        NullabilityPass.Report report = run("a.b.IF", """
+                package a.b;
+                import java.util.ArrayList;
+                import java.util.List;
+                class IF {
+                    static String find(int i) { return i > 0 ? "x" : null; }
+                    static List<String> one(int i) { return List.of(find(i)); }
+                    static List<String> two(int i) {
+                        List<String> list = new ArrayList<>();
+                        list.add(find(i));
+                        return list;
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("String?", s.get("a.b.IF.find(int)"), s.toString());
+        assertEquals("List<String>", s.get("a.b.IF.one(int)"), s.toString());
+        assertEquals("List<String?>", s.get("a.b.IF.two(int)"), s.toString());
+    }
+
+    // timefold ElementAwareLinkedList.ElementAwareListIterator (CodeLaser/maddi-mod#27 c): 'if (!hasNext()) throw ...;
+    // next.value' with 'hasNext() { return next != null; }' in a final class
+    @DisplayName("use sites: a no-argument test of a field of this, as a condition")
+    @Test
+    public void fieldTestingPredicate() {
+        NullabilityPass.Report report = run("a.b.IT", """
+                package a.b;
+                final class IT {
+                    static final class Node {
+                        String value = "v";
+                        Node following;
+                    }
+                    private Node next;
+                    IT(Node first) { next = first; }
+                    public boolean hasNext() { return next != null; }
+                    public boolean done() { return next == null; }
+                    public String take() {
+                        if (!hasNext()) throw new IllegalStateException();
+                        String v = next.value;
+                        next = next.following;
+                        return v;
+                    }
+                    public String skip() {
+                        if (done()) return null;
+                        return next.value;
+                    }
+                    public String plain() {
+                        if (next.following == null) return null;
+                        return next.value;
+                    }
+                    void reset() { next = null; }
+                }
+                """);
+        Statement read = parsed.findUniqueMethod("take", 0).methodBody().statements().get(1);
+        io.codelaser.maddi.cst.api.variable.FieldReference value = (io.codelaser.maddi.cst.api.variable.FieldReference)
+                ((VariableExpression) ((io.codelaser.maddi.cst.api.statement.LocalVariableCreation) read).localVariable()
+                        .assignmentExpression()).variable();
+        Variable next = ((VariableExpression) value.scope()).variable();
+        assertEquals(true, report.useSites().nonNullAt(read, next), "after 'if (!hasNext()) throw'");
+        Statement returned = parsed.findUniqueMethod("skip", 0).methodBody().statements().get(1);
+        assertEquals(true, report.useSites().nonNullAt(returned, next), "after 'if (done()) return'");
+    }
+
+    // timefold BavetAbstractConstraintStream (CodeLaser/maddi-mod#27 2): the source constructor stores a null parent,
+    // the subclass only chains to the one that dereferences its argument and stores it
+    @DisplayName("narrowed reads: a final field of this, in a subclass that never reaches the constructor storing null")
+    @Test
+    public void narrowedThisField() {
+        NullabilityPass.Report report = run("a.b.BS", """
+                package a.b;
+                class BS {
+                    abstract static class Stream {
+                        protected final Stream parent;
+                        protected final String name;
+                        protected Stream(Stream parent) {
+                            this.name = parent.name + "'";
+                            this.parent = parent;
+                        }
+                        protected Stream() {
+                            this.parent = null;
+                            this.name = "source";
+                        }
+                        String parentName() {
+                            String n = parent.name;
+                            return n;
+                        }
+                    }
+                    static final class Source extends Stream {
+                        Source() { super(); }
+                    }
+                    static final class Child extends Stream {
+                        Child(Stream parent) { super(parent); }
+                        String up() {
+                            String n = parent.name;
+                            return n;
+                        }
+                        Runnable later() {
+                            return () -> System.out.println(parent.name);
+                        }
+                    }
+                    static String make() { return new Child(new Source()).up(); }
+                }
+                """);
+        TypeInfo stream = parsed.subTypes().stream().filter(t -> "Stream".equals(t.simpleName())).findFirst().orElseThrow();
+        TypeInfo child = parsed.subTypes().stream().filter(t -> "Child".equals(t.simpleName())).findFirst().orElseThrow();
+        assertEquals(true, parentKnown(report, child.findUniqueMethod("up", 0)), "Child never stores a null parent");
+        assertEquals(false, parentKnown(report, stream.findUniqueMethod("parentName", 0)), "a Source may be this");
+    }
+
+    // the facts on 'parent' when the method's 'String n = parent.name;' starts
+    private static boolean parentKnown(NullabilityPass.Report report, MethodInfo method) {
+        Statement read = method.methodBody().statements().getFirst();
+        io.codelaser.maddi.cst.api.variable.FieldReference name = (io.codelaser.maddi.cst.api.variable.FieldReference)
+                ((VariableExpression) ((io.codelaser.maddi.cst.api.statement.LocalVariableCreation) read).localVariable()
+                        .assignmentExpression()).variable();
+        return report.useSites().nonNullAt(read, ((VariableExpression) name.scope()).variable());
+    }
+
+    // timefold SolverMetricUtil.extractScore (CodeLaser/maddi-mod#27 1): the loop fills every index or returns, so the
+    // array that leaves the loop has no null element; returning the array itself from the loop does not count
+    @DisplayName("an array filled by a loop that returns early: no null element")
+    @Test
+    public void arrayFillWithEarlyReturn() {
+        NullabilityPass.Report report = run("a.b.EX", """
+                package a.b;
+                import java.util.function.Function;
+                class EX {
+                    interface Def { Object from(Number[] levels); }
+                    static class D implements Def {
+                        public Object from(Number[] levels) { return levels[0].intValue(); }
+                    }
+                    static class P implements Def {
+                        public Object from(Number[] partial) { return partial.length; }
+                    }
+                    static Object extract(String[] labels, Function<String, Number> f, Def def) {
+                        var levels = new Number[labels.length];
+                        for (var i = 0; i < labels.length; i++) {
+                            var n = f.apply(labels[i]);
+                            if (n == null) return null;
+                            levels[i] = n;
+                        }
+                        return def.from(levels);
+                    }
+                    static Number[] handOut(String[] labels, Function<String, Number> f, Def def) {
+                        var partial = new Number[labels.length];
+                        for (var i = 0; i < labels.length; i++) {
+                            var n = f.apply(labels[i]);
+                            if (n == null) return partial;
+                            partial[i] = n;
+                        }
+                        return partial;
+                    }
+                }
+                """);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("Number[]", s.get("a.b.EX.D.from(Number[]):0:levels"), s.toString());
+        assertEquals("Number?[]", s.get("a.b.EX.handOut(String[],java.util.function.Function,a.b.EX.Def)"),
+                s.toString());
     }
 }
