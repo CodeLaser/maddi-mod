@@ -17,6 +17,7 @@ package io.codelaser.maddi.modification.prepwork.io;
 import io.codelaser.maddi.cst.api.analysis.Codec;
 import io.codelaser.maddi.cst.api.element.SourceSet;
 import io.codelaser.maddi.cst.api.info.Info;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.runtime.Runtime;
 import io.codelaser.maddi.cst.io.CodecImpl;
 import io.codelaser.maddi.inspection.api.integration.JavaInspector;
@@ -220,7 +221,7 @@ public class LoadAnalysisResults {
      *                                        before the marker existed, and is read as version 0.
      */
     public int go(Codec codec, String content) {
-        int absent = countIfNoPrimaryTypeOnClasspath(codec, content);
+        int absent = countIfNoPrimaryTypeOnClasspath(runtime, codec, content);
         if (absent > 0) {
             skippedPrimaryTypes += absent;
             return 0;
@@ -259,7 +260,7 @@ public class LoadAnalysisResults {
      of them resolves, the file is skipped whole. Returns the number of primary types so skipped; 0 when at least
      one resolves, or when the text does not have the writer's layout (then the parser decides, as before).
      */
-    private static int countIfNoPrimaryTypeOnClasspath(Codec codec, String content) {
+    private static int countIfNoPrimaryTypeOnClasspath(Runtime runtime, Codec codec, String content) {
         Matcher m = PRIMARY_TYPE.matcher(content);
         int count = 0;
         while (m.find()) {
@@ -269,7 +270,8 @@ public class LoadAnalysisResults {
             } catch (Codec.DecoderException de) {
                 return 0;
             }
-            if (info != null) return 0;
+            // a copy loaded from a source set the request does not reach still takes the results (maddi-mod#37)
+            if (info != null || !runtime.loadedCopies(m.group(1)).isEmpty()) return 0;
             ++count;
         }
         if (count > 0) LOGGER.debug("Skipping a results file of {} primary types, none on the classpath", count);
@@ -331,16 +333,47 @@ public class LoadAnalysisResults {
         return skippedUnresolvableHints;
     }
 
-    // returns false if the primary type's hints are skipped whole (its module is not on the classpath)
+    // number of copies beyond the first of a library type that took results: a library loaded in two versions (#37)
+    private int decoratedExtraCopies;
+
+    public int decoratedExtraCopies() {
+        return decoratedExtraCopies;
+    }
+
+    /*
+     Returns false if the primary type's hints are skipped whole (its module is not on the classpath).
+     A library a project carries in two versions is loaded twice, one TypeInfo per jar, and the codec resolves the
+     name to ONE of them, the copy nearest to sourceSetOfRequest. The code calling the other copy then saw the
+     shallow defaults: on timefold-solver, whose test modules use Mockito 5.21.0 and 5.23.0, not one of 3,998
+     Mockito calls reached a hinted member (CodeLaser/maddi-mod#37). So the entry is applied to every loaded copy.
+     A member a version lacks is skipped with a warning, as for any other version mismatch. A copy loaded only after
+     this load (lazily, during prep) is still missed: that needs results attached at load time.
+     */
     private boolean processPrimaryType(Codec codec, JSONObject jo) {
-        Codec.Context context = new CodecImpl.ContextImpl();
-        return processSub(codec, context, jo, true);
+        List<TypeInfo> copies = runtime.loadedCopies(primaryTypeName(jo));
+        if (copies.size() < 2) {
+            return processSub(codec, new CodecImpl.ContextImpl(), jo, true, null);
+        }
+        boolean any = false;
+        for (TypeInfo copy : copies) {
+            any |= processSub(codec, new CodecImpl.ContextImpl(), jo, true, copy);
+        }
+        decoratedExtraCopies += copies.size() - 1;
+        return any;
+    }
+
+    // the fully qualified name of a primary type's entry, without its 'T'; "" when the entry is not shaped as expected
+    // (processSub then reports it)
+    private static String primaryTypeName(JSONObject jo) {
+        if (jo.size() < 2 || !(jo.get(1) instanceof KeyValuePair kv) || kv.size() < 3) return "";
+        String name = CodecImpl.unquote(kv.get(2).getSource());
+        return name.length() > 1 && name.charAt(0) == 'T' ? name.substring(1) : "";
     }
 
     // Applies the hints for one element and recurses into its children. Returns false only for a primary type
     // (topLevel) whose own type is not on the classpath, so the caller counts it as skipped; a nested element that
     // cannot be applied is dropped in place (see the class note on tolerance) without failing its siblings.
-    private boolean processSub(Codec codec, Codec.Context context, JSONObject jo, boolean topLevel) {
+    private boolean processSub(Codec codec, Codec.Context context, JSONObject jo, boolean topLevel, TypeInfo copy) {
         String where = topLevel ? "a primary type's element" : "the element of a member of " + context.currentType();
         KeyValuePair nameKv = pair(jo, 1, "name", where);
         String fullyQualifiedWithType = CodecImpl.unquote(nameKv.get(2).getSource());
@@ -359,7 +392,8 @@ public class LoadAnalysisResults {
 
         Info info;
         try {
-            info = codec.decodeInfoInContext(context, type, name);
+            // the copy, when processPrimaryType chose one: the codec would resolve the name to the nearest only
+            info = copy != null ? copy : codec.decodeInfoInContext(context, type, name);
         } catch (Codec.DecoderException de) {
             // The element itself names something this reader cannot resolve against the loaded types (chiefly a
             // synthetic @GetSet interface field written by the in-flux immutability analyzer). Drop its hint and
@@ -387,7 +421,7 @@ public class LoadAnalysisResults {
                 }
                 String subKey = subs.get(0).getSource();
                 if ("\"sub\"".equals(subKey) && subs.get(2) instanceof JSONObject sub) {
-                    processSub(codec, context, sub, false);
+                    processSub(codec, context, sub, false, null);
                 } else if ("\"subs\"".equals(subKey) && subs.get(2) instanceof Array array) {
                     for (int i = 1; i < array.size(); i += 2) {
                         if (!(array.get(i) instanceof JSONObject sub)) {
@@ -395,7 +429,7 @@ public class LoadAnalysisResults {
                                                                      + fullyQualifiedWithType + ", found "
                                                                      + array.get(i).getClass().getSimpleName());
                         }
-                        processSub(codec, context, sub, false);
+                        processSub(codec, context, sub, false, null);
                     }
                 } else {
                     throw new AnalysisResultsFormatException("expected \"sub\" (an object) or \"subs\" (an array) as "
