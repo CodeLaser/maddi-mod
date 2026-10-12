@@ -10,10 +10,13 @@
 # 2026-10-12, nullable library results (object.ToString(), node[k], reflection), ? on class type parameters, (T?) null,
 # = null! where C# cannot see the assignment (maddi 3a4a1daf9): 100 -> 54 nullable warnings, CS8602 16 -> 7, CS8603 16
 # -> 6, CS8618 13 -> 4, CS8622 6 -> 0, CS8600 8 -> 2.
+#
+# 2026-10-12, maddi's printer for timefold (maddi 94fd25386: companions of self-bounded types, inner classes,
+# explicit type arguments, …): 271 -> 284 compiling files, 54 -> 53 nullable warnings.
 types	346
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	346
-compilingFiles	271
+compilingFiles	284
 unmappedJdkUses	154
-nullableWarnings	54
+nullableWarnings	53
