@@ -33,6 +33,6 @@ public class TestJavaToKotlinFernflowerNullability {
     public void test() throws Exception {
         JavaToKotlinRatchet.Corpus corpus = JavaToKotlinRatchet.parse("fernflower");
         new JavaToKotlinRatchet("fernflower-nullability", Path.of("src/test/resources/j2k/fernflower-nullability.ratchet"))
-                .run(corpus, J2kNullability.options(corpus));
+                .run(corpus, CorpusNullability.kotlinOptions(corpus));
     }
 }

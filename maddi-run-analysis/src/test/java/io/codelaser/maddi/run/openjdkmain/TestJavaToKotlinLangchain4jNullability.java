@@ -10,7 +10,7 @@ import java.nio.file.Path;
 
 /**
  * ⛔ THE RATCHET FOR JAVA → KOTLIN TRANSLATION WITH NULLABILITY, a second corpus: langchain4j-core printed as Kotlin
- * with the verdicts of the NullabilityPass (see {@link J2kNullability}), measured by maddi's JavaToKotlinRatchet: the
+ * with the verdicts of the NullabilityPass (see {@link CorpusNullability}), measured by maddi's JavaToKotlinRatchet: the
  * type checker, the class files, langchain4j-core's own tests, and those tests translated.
  * <p>
  * Why langchain4j-core: an API of builders and value objects, whose collections are mostly read and rarely changed.
@@ -31,6 +31,6 @@ public class TestJavaToKotlinLangchain4jNullability {
     public void test() throws Exception {
         JavaToKotlinRatchet.Corpus corpus = JavaToKotlinRatchet.parse("langchain4j");
         new JavaToKotlinRatchet("langchain4j-nullability", Path.of("src/test/resources/j2k/langchain4j-nullability.ratchet"))
-                .run(corpus, J2kNullability.options(corpus));
+                .run(corpus, CorpusNullability.kotlinOptions(corpus));
     }
 }

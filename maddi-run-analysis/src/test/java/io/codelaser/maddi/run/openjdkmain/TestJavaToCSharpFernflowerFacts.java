@@ -10,7 +10,7 @@ import org.slf4j.LoggerFactory;
 import java.nio.file.Path;
 
 /**
- * Fernflower printed as C# with the analysis's facts ({@link J2csAnalysis}): read-only collection parameters and
+ * Fernflower printed as C# with the analysis's facts ({@link CorpusNullability}): read-only collection parameters and
  * nullable types. maddi's {@code TestJavaToCSharpFernflower} measures the same without an analysis; this one has its
  * own ratchet, {@code src/test/resources/j2cs/fernflower-facts.ratchet}, and report,
  * {@code build/j2cs/fernflower-facts/report.txt}.
@@ -29,6 +29,6 @@ public class TestJavaToCSharpFernflowerFacts {
     public void test() throws Exception {
         JavaToKotlinRatchet.Corpus corpus = JavaToKotlinRatchet.parse("fernflower");
         new JavaToCSharpRatchet("fernflower-facts", Path.of("src/test/resources/j2cs/fernflower-facts.ratchet"),
-                J2csAnalysis.analyse(corpus)).run(corpus);
+                CorpusNullability.csharpPolicy(corpus)).run(corpus);
     }
 }
