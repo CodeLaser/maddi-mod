@@ -58,11 +58,14 @@ public class TestFernflowerNullabilityCauses {
                         .setNullability(true)
                         .build());
         analyzer.analyze(order, prep.callGraph().graph());
-        // NULLABILITY_POLICY=diagnose: the diagnostics' policy (flow only, no contracts, closed world); else Kotlin's
+        // NULLABILITY_POLICY=diagnose: the diagnostics' policy (flow only, no contracts, closed world); else Kotlin's.
+        // NULLABILITY_WORLD=open: the open world (timefold's diagnostics); NULLABILITY_TEST_NULLS=off: withoutTestNulls
         NullabilityPass.Policy policy = "diagnose".equals(System.getenv("NULLABILITY_POLICY"))
                 ? NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY.withoutContracts()
                         .withWorld(NullabilityPass.World.CLOSED)
                 : NullabilityPass.Policy.KOTLIN;
+        if ("open".equals(System.getenv("NULLABILITY_WORLD"))) policy = policy.withWorld(NullabilityPass.World.OPEN);
+        if ("off".equals(System.getenv("NULLABILITY_TEST_NULLS"))) policy = policy.withoutTestNulls();
         NullabilityPass.Report report = new NullabilityPass(policy).go(order);
         List<String> lines = new java.util.ArrayList<>();
         report.verdicts().forEach((info, pt) -> {

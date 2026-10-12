@@ -159,13 +159,13 @@ public final class NullabilityPass {
      */
     public record Policy(NullableState unreached, boolean nullTests, boolean contracts, World world,
                          boolean assertContentWrites, boolean callResults, boolean assertAtDeclaration,
-                         boolean libraryCallbacks) {
+                         boolean libraryCallbacks, boolean testNulls) {
         public static final Policy NULL_MARKED = new Policy(NullableState.NONNULL, true, true, World.CLOSED, false,
-                false, false, false);
+                false, false, false, true);
         public static final Policy NULL_MARKED_FLOW_ONLY = new Policy(NullableState.NONNULL, false, true,
-                World.CLOSED, false, false, false, false);
+                World.CLOSED, false, false, false, false, true);
         public static final Policy CAUTIOUS = new Policy(NullableState.UNSPECIFIED, true, true, World.CLOSED, false,
-                false, false, false);
+                false, false, false, true);
         /**
          * {@link #NULL_MARKED} for the Java→Kotlin translation: content writes are asserted, and a variable assigned an
          * analysed method's nullable result is nullable (Kotlin will not compile it otherwise), and a parameter of an
@@ -173,21 +173,31 @@ public final class NullabilityPass {
          * with what it likes; Kotlin checks a non-null parameter on entry).
          */
         public static final Policy KOTLIN = new Policy(NullableState.NONNULL, true, true, World.CLOSED, true, true,
-                true, true);
+                true, true, true);
 
         public Policy withoutContracts() {
             return new Policy(unreached, nullTests, false, world, assertContentWrites, callResults, assertAtDeclaration,
-                    libraryCallbacks);
+                    libraryCallbacks, testNulls);
         }
 
         public Policy withWorld(World world) {
             return new Policy(unreached, nullTests, contracts, world, assertContentWrites, callResults, assertAtDeclaration,
-                    libraryCallbacks);
+                    libraryCallbacks, testNulls);
+        }
+
+        /**
+         * Nulls that only test code writes do not count for production code (CodeLaser/maddi-mod#30 3, the
+         * diagnostics): a null a test passes to a production method or constructor, or stores into a production
+         * object, reaches nothing outside the test sources. Nulls inside the tests still count there.
+         */
+        public Policy withoutTestNulls() {
+            return new Policy(unreached, nullTests, contracts, world, assertContentWrites, callResults, assertAtDeclaration,
+                    libraryCallbacks, false);
         }
 
         public Policy withAssertContentWrites(boolean assertContentWrites) {
             return new Policy(unreached, nullTests, contracts, world, assertContentWrites, callResults, assertAtDeclaration,
-                    libraryCallbacks);
+                    libraryCallbacks, testNulls);
         }
     }
 
@@ -1323,6 +1333,7 @@ public final class NullabilityPass {
 
     private void addEdge(Object from, Object to) {
         if (from == null || to == null || from.equals(to)) return;
+        if (!policy.testNulls() && testCode(from) && !testCode(to)) return;
         flows.add(List.of(from, to));
         successors.computeIfAbsent(from, _ -> new LinkedHashSet<>()).add(to);
     }
@@ -1351,6 +1362,26 @@ public final class NullabilityPass {
             seedOrigin.putIfAbsent(node, origin);
             seedWriters.computeIfAbsent(node, _ -> new ArrayList<>()).add(writer);
         }
+    }
+
+    /*
+     Policy.withoutTestNulls: whether a node of the graph belongs to test code, by the source set of the type that
+     declares it. A node without a type (a library's, the null markers' own) is not test code.
+     */
+    private static boolean testCode(Object node) {
+        if (node instanceof Content c) return testCode(c.of());
+        if (node instanceof Arg a) return testCode(a.of());
+        TypeInfo type = switch (node) {
+            case TypeInfo t -> t;
+            case ParameterInfo pi -> pi.methodInfo().typeInfo();
+            case MethodInfo mi -> mi.typeInfo();
+            case FieldInfo fi -> fi.owner();
+            case Local l -> l.methodInfo() == null ? null : l.methodInfo().typeInfo();
+            case null, default -> null;
+        };
+        if (type == null) return false;
+        var cu = type.primaryType().compilationUnit();
+        return cu != null && cu.sourceSet() != null && cu.sourceSet().test();
     }
 
     private static TypeInfo writer(MethodInfo mi) {
@@ -1935,6 +1966,8 @@ public final class NullabilityPass {
      callee, 'return relay <- return find <- null in find'), not a null written here.
      */
     private void nullMarker(MethodInfo mi, Variable marker, Object target, String origin) {
+        // Policy.withoutTestNulls: a test's null literal written into a production node ('new Decider(null)')
+        if (!policy.testNulls() && testCode(mi.typeInfo()) && !testCode(target)) return;
         MethodInfo owner = nullOwner(((LocalVariable) marker).assignmentExpression());
         if (owner != null && !owner.equals(mi) && analysed.contains(owner) && !owner.returnType().isVoid()) {
             addEdge(owner, target);
