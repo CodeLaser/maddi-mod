@@ -20,6 +20,7 @@ import io.codelaser.maddi.modification.prepwork.io.WriteAnalysisResults;
 import io.codelaser.maddi.cst.api.analysis.Message;
 import io.codelaser.maddi.cst.api.element.Element;
 import io.codelaser.maddi.cst.api.info.Info;
+import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.runtime.Runtime;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
@@ -110,7 +111,19 @@ public class AnalysisHintsCompiler {
 
         Set<TypeInfo> writeOut = new HashSet<>(analysisHintsParser.types());
         if (compilerVisitor != null) compilerVisitor.writeAnalysis(writeOut);
-        WriteAnalysisResults wa = new WriteAnalysisResults(runtime, writeOut::contains);
+        // The shallow analyzer decides every parameter, but stores a FALSE it reached by default (no annotation: a
+        // mutable type in a non-container) only when annotated, so `@Modified` and silence ended up alike: absent,
+        // which readers take for "undecided" (maddi#64). State it, and have the writer write it.
+        rs.dataMap().forEach((element, data) -> {
+            if (element instanceof ParameterInfo pi && writeOut.contains(pi.methodInfo().typeInfo())
+                && data.originMap().containsKey(PropertyImpl.UNMODIFIED_PARAMETER)
+                && !pi.analysis().haveAnalyzedValueFor(PropertyImpl.UNMODIFIED_PARAMETER)) {
+                pi.analysis().set(PropertyImpl.UNMODIFIED_PARAMETER, ValueImpl.BoolImpl.FALSE);
+            }
+        });
+        // a hint states every parameter: an unmodified FALSE is written, not left out as "undecided" (maddi#64)
+        WriteAnalysisResults wa = new WriteAnalysisResults(runtime, writeOut::contains)
+                .setExplicitFalse(Set.of(PropertyImpl.UNMODIFIED_PARAMETER));
         Trie<TypeInfo> trie = new Trie<>();
         for (TypeInfo ti : analysisHintsParser.types()) {
             if (ti.isPrimaryType()) {

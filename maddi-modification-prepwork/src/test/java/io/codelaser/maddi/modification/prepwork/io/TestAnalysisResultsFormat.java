@@ -105,4 +105,51 @@ public class TestAnalysisResultsFormat extends CommonTest {
         assertEquals(0, loader.goDirTolerant(codec, dir.toFile()));
         assertThrows(AnalysisResultsFormatException.class, () -> loader.goDir(codec, dir.toFile()));
     }
+
+    // CodeLaser/maddi#64: a FALSE is the default and left out, unless the writer is told to state it (the hints
+    // compiler does, for UNMODIFIED_PARAMETER); then it reads back as a decided FALSE, not as absent
+    @Language("java")
+    private static final String INPUT_PARAM = """
+            package a.b;
+            class X {
+                void m(java.util.List<String> list, java.util.Set<String> set) { list.clear(); }
+            }
+            """;
+
+    private String writeParams(boolean explicitFalse) throws IOException {
+        javaInspector.invalidateAllSources();
+        TypeInfo X = javaInspector.parse(ABX, INPUT_PARAM);
+        var m = X.findUniqueMethod("m", 2);
+        m.parameters().get(0).analysis().set(PropertyImpl.UNMODIFIED_PARAMETER, ValueImpl.BoolImpl.FALSE);
+        m.parameters().get(1).analysis().set(PropertyImpl.UNMODIFIED_PARAMETER, ValueImpl.BoolImpl.TRUE);
+        sourceSet = X.compilationUnit().sourceSet();
+        codec = new PrepWorkCodec(runtime, sourceSet).codec();
+        Trie<TypeInfo> trie = new Trie<>();
+        trie.add(new String[]{"a", "b"}, X);
+        File dir = new File("build/analysis-results-format-false");
+        WriteAnalysisResults wa = new WriteAnalysisResults(runtime);
+        if (explicitFalse) wa.setExplicitFalse(java.util.Set.of(PropertyImpl.UNMODIFIED_PARAMETER));
+        wa.write(dir, trie, codec);
+        return Files.readString(new File(dir, "AB.json").toPath());
+    }
+
+    @Test
+    public void explicitFalse() throws IOException {
+        String plain = writeParams(false);
+        assertFalse(plain.contains("\"unmodifiedParameter\":0"), plain);
+        assertTrue(plain.contains("\"unmodifiedParameter\":1"), plain);
+
+        String stated = writeParams(true);
+        assertTrue(stated.contains("\"unmodifiedParameter\":0"), stated);
+        assertTrue(stated.contains("\"unmodifiedParameter\":1"), stated);
+
+        javaInspector.invalidateAllSources();
+        TypeInfo X = javaInspector.parse(ABX, INPUT_PARAM);
+        assertEquals(1, new LoadAnalysisResults(runtime, sourceSet).go(codec, stated));
+        var m = X.findUniqueMethod("m", 2);
+        assertSame(ValueImpl.BoolImpl.FALSE, m.parameters().get(0).analysis()
+                .getOrNull(PropertyImpl.UNMODIFIED_PARAMETER, ValueImpl.BoolImpl.class));
+        assertSame(ValueImpl.BoolImpl.TRUE, m.parameters().get(1).analysis()
+                .getOrNull(PropertyImpl.UNMODIFIED_PARAMETER, ValueImpl.BoolImpl.class));
+    }
 }
