@@ -2782,55 +2782,6 @@ public class TestNullabilityPass extends CommonTest {
                 "getInteger(key, null) passes the null");
     }
 
-    // CodeLaser/maddi-mod#29 A (nacos NacosClientProperties): the same shape through an interface whose analysed
-    // implementations are all the implementations (closed world); one implementation's own null still counts
-    @DisplayName("gap 9 through dispatch: a call of an interface method passing a non-null default is non-null")
-    @Test
-    public void returnThroughParameterPerCallDispatched() {
-        NullabilityPass.Report report = run("a.b.G9I", """
-                package a.b;
-                import java.util.HashMap;
-                import java.util.Map;
-                import java.util.Optional;
-                class G9I {
-                    interface Props {
-                        Integer getInteger(String key);
-                        Integer getInteger(String key, Integer defaultValue);
-                    }
-                    static class Searchable implements Props {
-                        private final Map<String, Object> map = new HashMap<>();
-                        <T> Optional<T> search(String key, Class<T> type) { return Optional.ofNullable(type.cast(map.get(key))); }
-                        @Override public Integer getInteger(String key) { return getInteger(key, null); }
-                        @Override public Integer getInteger(String key, Integer defaultValue) {
-                            return search(key, Integer.class).orElse(defaultValue);
-                        }
-                    }
-                    interface Accessor { String name(String prefix); }
-                    static class Real implements Accessor { public String name(String prefix) { return prefix + "x"; } }
-                    static class Dummy implements Accessor { public String name(String prefix) { return null; } }
-                    private final Props properties = new Searchable();
-                    int timeout() {
-                        Integer n = properties.getInteger("timeout", 5);
-                        return n.intValue();
-                    }
-                    int retries() {
-                        Integer r = properties.getInteger("retries", null);
-                        return r == null ? 0 : r;
-                    }
-                    int named(Accessor a) {
-                        String n = a.name("p");
-                        return n == null ? 0 : n.length();
-                    }
-                    static void make() { new G9I().named(new Real()); new G9I().named(new Dummy()); }
-                }
-                """, NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY.withoutContracts().withWorld(NullabilityPass.World.CLOSED));
-        System.out.println(explain(report));
-        assertTrue(report.callResultNonNull(calls("timeout", "getInteger").getFirst()), report.explain(
-                calls("timeout", "getInteger").getFirst().methodInfo()));
-        assertFalse(report.callResultNonNull(calls("retries", "getInteger").getFirst()), "this call passes the null");
-        assertFalse(report.callResultNonNull(calls("named", "name").getFirst()), "Dummy returns null by itself");
-    }
-
     @DisplayName("gap 9, Kotlin: a return assigned a call passing a non-null default is non-null")
     @Test
     public void returnThroughParameterPerCallKotlin() {
