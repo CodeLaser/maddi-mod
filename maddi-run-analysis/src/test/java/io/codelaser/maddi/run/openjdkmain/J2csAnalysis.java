@@ -109,11 +109,21 @@ final class J2csAnalysis {
 
     /** Analyses the parsed corpus; the policy whose facts read what the analysis stored. */
     static CSharpProgram.Policy analyse(JavaToKotlinRatchet.Corpus corpus) throws java.io.IOException {
+        return analyse(corpus, corpus.summary().parseResult().primaryTypes());
+    }
+
+    /**
+     * Analyses {@code types} of the parsed corpus: a large reactor's translated source set (timefold's core/main),
+     * not the 65 it parses.
+     */
+    static CSharpProgram.Policy analyse(JavaToKotlinRatchet.Corpus corpus,
+                                        java.util.Collection<io.codelaser.maddi.cst.api.info.TypeInfo> types)
+            throws java.io.IOException {
         JavaInspector javaInspector = corpus.javaInspector();
         AnalysisEngineImpl engine = new AnalysisEngineImpl();
         engine.resultsLoader(javaInspector.runtime(), javaInspector.mainSources()).load(List.of(JDK_HINTS));
         var parseResult = corpus.summary().parseResult();
-        PrepOutcome prep = engine.prep(new PrepRequest(javaInspector.runtime(), Set.copyOf(parseResult.primaryTypes()),
+        PrepOutcome prep = engine.prep(new PrepRequest(javaInspector.runtime(), Set.copyOf(types),
                 parseResult.sourceSetToModuleInfoMap().values(), _ -> false, true, true));
         List<Info> order = new ComputeAnalysisOrder().go(prep.callGraph().graph(), true);
         IteratingAnalyzer analyzer = new IteratingAnalyzerImpl(javaInspector,

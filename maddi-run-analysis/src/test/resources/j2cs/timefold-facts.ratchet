@@ -1,0 +1,17 @@
+# TestJavaToCSharpTimefoldFacts: timefold-solver's core/main printed as C# with the modification analysis's and the
+# NullabilityPass's facts (Policy.KOTLIN), judged by Roslyn (see maddi-run-openjdk's JavaToCSharpRatchet). Lower is
+# better for printerCrashes, syntaxErrors, unmappedJdkUses and nullableWarnings, higher for syntaxCleanFiles and
+# compilingFiles; `types` must not move. Write a better value here in the commit that earns it.
+#
+# 2026-10-12, first record, with maddi 3a4a1daf9: the printer is not ready for this corpus yet, nullability is not
+# its bottleneck. 611 of 1583 files compile; 8769 errors, most of them generics: 2175 CS0311 (a type argument that
+# does not satisfy a constraint, the F-bounded Score_ : IScore<Score_>), 1079 CS0411 (type inference); 2087 unmapped
+# JDK uses (RandomGenerator, ToLongFunction, NavigableMap, SequencedMap, ...). 21 syntax errors: ConstraintCollectors
+# (8 lines) and an `int` where an expression is expected (5). 504 nullable warnings, many hidden behind the errors.
+types	1583
+printerCrashes	0
+syntaxErrors	21
+syntaxCleanFiles	1579
+compilingFiles	611
+unmappedJdkUses	2087
+nullableWarnings	504
