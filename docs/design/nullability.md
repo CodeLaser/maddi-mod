@@ -898,7 +898,7 @@ Guava (all four policies) unchanged.
   `Collection<BasicBlock>`).
   - **The printer's half** (maddi 9942ae3d0): it asserts at the declaration instead
     (`val block = blocks.getWithKey(j)!!`, reported as ASSERT_AT_DECLARATION) when
-    `NullabilityVerdicts.assertedAtDeclaration` says so.
+    `NullabilityFacts.assertedAtDeclaration` says so.
   - **The pass's half: which locals.** A local qualifies when it has an initializer other than `null`, is never
     assigned again in the rest of its block, and some later statement of that block dereferences it unconditionally.
     "Unconditionally" means a call on it, a field, an element or `.length`, outside `?:` branches, the right side of

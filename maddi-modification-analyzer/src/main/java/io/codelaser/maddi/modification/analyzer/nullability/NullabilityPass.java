@@ -61,6 +61,7 @@ import io.codelaser.maddi.cst.api.variable.LocalVariable;
 import io.codelaser.maddi.cst.api.variable.This;
 import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.cst.impl.analysis.NullAnnotations;
+import io.codelaser.maddi.cst.impl.analysis.NullabilityFacts;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 import io.codelaser.maddi.modification.link.LinkComputer;
@@ -221,11 +222,53 @@ public final class NullabilityPass {
      *                   {@code !!} where Kotlin will see the variable as non-null
      * @param nonNullCallResults calls to an analysed method whose return null reaches, where it reaches only through
      *                   parameters whose arguments at that call cannot be null (by identity; see {@link #callResultNonNull})
+     * @implNote the report is the {@link NullabilityFacts} a printer of a null-checked language asks for: the
+     * declaration verdicts, the locals, the assertions at a declaration, the use-site facts, as smart casts only, and
+     * the call results. A printer with hints for the library's declarations composes it with
+     * {@link NullabilityFacts#STORED} ({@link NullabilityFacts#orElse}).
      */
     public record Report(Map<Info, ParameterizedType> verdicts, Map<Local, ParameterizedType> locals,
                          Map<Object, Object> cause, Map<Object, String> seedOrigin, NonNullFacts useSites,
                          NonNullFacts smartCasts, Set<Local> asserted, Set<Local> unobserved,
-                         Set<Expression> nonNullCallResults) {
+                         Set<Expression> nonNullCallResults) implements NullabilityFacts {
+
+        @Override
+        public ParameterizedType field(FieldInfo fieldInfo) {
+            return verdicts.get(fieldInfo);
+        }
+
+        @Override
+        public ParameterizedType parameter(ParameterInfo parameterInfo) {
+            return verdicts.get(parameterInfo);
+        }
+
+        @Override
+        public ParameterizedType returnType(MethodInfo methodInfo) {
+            return verdicts.get(methodInfo);
+        }
+
+        @Override
+        public ParameterizedType reassignedParameter(ParameterInfo parameterInfo) {
+            return reassigned(parameterInfo);
+        }
+
+        /** The smart casts only: {@link #useSites} also counts requireNonNull and contracts, which the target does not. */
+        @Override
+        public boolean nonNullAt(Statement statement, Variable variable) {
+            return smartCasts.nonNullAt(statement, variable);
+        }
+
+        /** The same at a call: also what the enclosing condition establishes, and final fields of this. */
+        @Override
+        public boolean nonNullAt(Expression expression, Variable variable) {
+            return smartCasts.nonNullAt(expression, variable);
+        }
+
+        /** The pass analysed the program: a declaration without a nullable verdict is not null. */
+        @Override
+        public boolean nullabilityAnalysed() {
+            return true;
+        }
 
         /**
          * CodeLaser/maddi-mod#22 gap 9: the callee's return is nullable (its verdict), but not the result of THIS call,

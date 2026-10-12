@@ -10,7 +10,7 @@ import org.slf4j.LoggerFactory;
 import java.nio.file.Path;
 
 /**
- * timefold-solver's core printed as C# with the analysis's facts ({@link J2csAnalysis}), the third corpus beside
+ * timefold-solver's core printed as C# with the analysis's facts ({@link CorpusNullability}), the third corpus beside
  * {@link TestJavaToCSharpFernflowerFacts} and {@link TestJavaToCSharpLangchain4jFacts}: a large constraint solver,
  * generics-heavy, with streams and functional interfaces throughout. The reactor parses whole (65 source sets); the
  * analysis and the translation take core/main, the module everything else depends on. Its own ratchet,
@@ -36,6 +36,6 @@ public class TestJavaToCSharpTimefoldFacts {
     public void test() throws Exception {
         JavaToKotlinRatchet.Corpus corpus = JavaToKotlinRatchet.parse("timefold-solver");
         new JavaToCSharpRatchet("timefold-facts", Path.of("src/test/resources/j2cs/timefold-facts.ratchet"),
-                J2csAnalysis.analyse(corpus, corpus.types())).run(corpus);
+                CorpusNullability.csharpPolicy(corpus, corpus.types())).run(corpus);
     }
 }
