@@ -4,6 +4,7 @@ import io.codelaser.maddi.modification.common.defaults.ShallowMethodAnalyzer;
 import io.codelaser.maddi.modification.common.util.TolerantWrite;
 import io.codelaser.maddi.modification.link.LinkComputer;
 import io.codelaser.maddi.modification.link.impl.graph.DegradedAnalysisException;
+import io.codelaser.maddi.modification.link.impl.graph.Fact;
 import io.codelaser.maddi.modification.link.impl.graph.IncrementalFixpointEngine;
 import io.codelaser.maddi.modification.link.impl.linkgraph.FollowGraph;
 import io.codelaser.maddi.modification.link.impl.linkgraph.Graph;
@@ -487,6 +488,7 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
 
             // see Options.objectGraphLinks: the coarse ∩/≤/≥ web is not consumed by linking's applications and
             // is quadratic on deep structures; PRODUCTION excludes those labels from the closure entirely
+            boolean nullTerminal = options.nullConstantReturns() && !Gate.isSet("NULLCOMPOSE");
             java.util.function.Predicate<LinkNature> valid = options.objectGraphLinks()
                     ? LinkNature::valid
                     : ln -> ln.valid() && ln != LinkNatureImpl.OBJECT_GRAPH_OVERLAPS
@@ -514,7 +516,16 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                     // composed to 'bucket.zero ≡ bucket.one' -- four slots of a bucket "identical" because each
                     // was once assigned null (EC's UnifiedSet.removeFromChain: 64,586 such composites, 26M work;
                     // TestRemoveChainWork). Two variables assigned from the same constant share no object.
+                    // Under Options.nullConstantReturns a NULL constant is an endpoint of a composition only as
+                    // what a variable is assigned from ('y ← x' + 'x ← $_ce' = 'y ← $_ce': a local carrying a
+                    // null to the return, which the summary must export). Not of a membership: '∋' is written
+                    // for a read as for a write, so 'map.§$s ∋ ret' + 'ret ← $_ce' made null an element of the map
+                    // the value was READ from (guava Maps.safeGet, 238 noise). A container takes a null only on a
+                    // direct link, from a literal argument; a null carried by a variable is the nullability
+                    // pass's to follow, as it follows every write into a slot from the call site. Modification
+                    // never reads a null-marker fact. Gate NULLCOMPOSE restores.
                     (fact, middle) -> !(middle instanceof MarkerVariable mv && mv.isConstant())
+                            && (!nullTerminal || nullOnlyAssigned(fact))
                             && (Util.notOwnFieldPath(fact.source(), fact.target())
                                 || !(fact.label().isIdenticalTo() || fact.label() == LinkNatureImpl.IS_ASSIGNED_FROM
                                      || fact.label() == LinkNatureImpl.IS_ASSIGNED_TO)));
@@ -808,6 +819,16 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
 
         private static boolean isNullConstant(Variable v) {
             return v instanceof MarkerVariable mv && mv.isConstant() && mv.assignmentExpression() instanceof NullConstant;
+        }
+
+        // a composite with a null constant at an end: only 'x ← $_ce', or its mirror '$_ce → x'
+        private static boolean nullOnlyAssigned(Fact<Variable, LinkNature> fact) {
+            boolean source = isNullConstant(fact.source());
+            boolean target = isNullConstant(fact.target());
+            if (!source && !target) return true;
+            if (source && target) return false;
+            return target ? fact.label() == LinkNatureImpl.IS_ASSIGNED_FROM
+                    : fact.label() == LinkNatureImpl.IS_ASSIGNED_TO;
         }
 
         private Links filteredPi(ParameterInfo pi, Set<ParameterInfo> ignoreReturnValue, VariableData vd,

@@ -359,6 +359,8 @@ public final class NullabilityPass {
     private final Set<Object> nonNullContracts = new HashSet<>();
     // (method, null marker): a return statement guarded the marker's link into the method's return (linksOf)
     private final Set<List<Object>> guardedReturnMarkers = new HashSet<>();
+    // (method, null marker): a statement carried the marker's link into the method's return (linksOf)
+    private final Set<List<Object>> returnMarkersSeen = new HashSet<>();
     // the analysed method a local belongs to (a lambda's local: the method the lambda is in)
     private final Map<Local, MethodInfo> localOwner = new HashMap<>();
     private MethodInfo owner;
@@ -378,6 +380,8 @@ public final class NullabilityPass {
     private java.util.function.BiPredicate<Object, TypeInfo> narrowedReads;
     // gate NOGAP9 for A/B: every call's result is the callee's return, as before
     private static final boolean GAP9_OFF = System.getenv("NOGAP9") != null;
+    // NODIRECT: read the closure's products (Link.derived()) as before, for an A/B against the direct links only
+    private static final boolean DERIVED_LINKS = System.getenv("NODIRECT") != null;
     // a parameter the body assigns (CodeLaser/maddi-mod#22 gap 5, #9): the parameter node is the caller's value only; what
     // the body assigns goes to a shadow local of the same name (the Kotlin printer's `var p = p`), which the parameter
     // flows into, and which reads after the first assignment resolve to (from the loop's start, for an assignment
@@ -1902,6 +1906,12 @@ public final class NullabilityPass {
         // 'x = ctx.get(KEY)' on a keyed map: the value read is the key's, not every key's (gap 2)
         Keyed keyed = statement == null ? null : keyedRead(statement, v);
         for (Link link : links) {
+            // a product of the link graph's closure says that two variables are related, not where: the pass
+            // composes the statements' own links itself, over its locals (Link.derived()). A null marker's link
+            // is still read from the closure: the reconstruction of an assignment group does not spell the hop
+            // through a local's face ('return b.get()' on a 'Box<String> b = new Box<>(null)' has no 'read ← b.t'),
+            // and the marker rules below decide per statement anyway.
+            if (link.derived() && !DERIVED_LINKS && !isNullMarker(link.to())) continue;
             // links about a face of v ('this.f.g') are not about v; an element of v ('r[1] <- null', an initializer)
             // is v's Content, its hidden content ('l.§$s', 'm.§$$s[-2]', 'b.t') a type argument's slot
             Object from;
@@ -1939,12 +1949,21 @@ public final class NullabilityPass {
                     // method's own summary repeats the link (no statement): skipped once a return guarded it.
                     if (fromVar instanceof ReturnVariable) {
                         List<Object> key = List.of(mi, link.to());
-                        Expression returned = statement == null ? null : assignedValue(statement, fromVar);
-                        if (returned != null && facts.nonNull(returned, facts.before(statement))) {
-                            guardedReturnMarkers.add(key);
-                            continue;
+                        if (statement == null) {
+                            if (guardedReturnMarkers.contains(key)) continue;
+                        } else {
+                            // the graph is persistent: every later statement repeats the return's link to the
+                            // marker, so the first statement carrying it (in walk order, the statement that
+                            // introduced it) decides. In 'var v = pick(); if (v != null) return v; ...; return
+                            // other();' the second return's data still says 'return ← pick's null', though it
+                            // returns something else (timefold ValueRangeState.getReachableValues)
+                            if (!returnMarkersSeen.add(key)) continue;
+                            Expression returned = assignedValue(statement, fromVar);
+                            if (returned != null && facts.nonNull(returned, facts.before(statement))) {
+                                guardedReturnMarkers.add(key);
+                                continue;
+                            }
                         }
-                        if (statement == null && guardedReturnMarkers.contains(key)) continue;
                     }
                     // a variable becomes null only where it is assigned: '≡' is transitive in the links, so in
                     // 'checked = check(key)' with 'check' returning its argument or null, 'key ≡ return ≡ null'
@@ -2984,13 +3003,18 @@ public final class NullabilityPass {
             }
         }
         if (analysed.contains(callee) && !callee.isConstructor() && !callee.returnType().isVoid()) {
+            ParameterizedType rt = callee.returnType();
             // the same object: its content slots are one (coupleContent); not where the callee's type arguments are
-            // type variables, which each call instantiates anew
-            if (concreteArguments(callee.returnType())) flows.add(List.of(callee, target));
+            // type variables, which each call instantiates anew. An array's elements are the callee's whatever its
+            // component's type arguments ('Node<K, V>[] createTable(int n) { return new Node[n]; }': guava
+            // HashBiMap.hashTableVToK, ImmutableMapEntry.createEntryArray), unless the component is the callee's own
+            // type variable ('<T> T[] toArray(T[] a)'), which would tie the arrays of all its callers
+            if (concreteArguments(rt) || rt.arrays() > 0 && !isMethodTypeVariable(rt.componentType())) {
+                flows.add(List.of(callee, target));
+            }
             // a class type variable's own null ('E getWithKey(K k) { ... return null; }', E?) holds for every
             // instantiation; so does a method type variable's, unless a parameter of that very type can carry the
             // caller's null back out ('<X> X id(X x)'): '<T> T getAttribute(Key<T> key)' returns a map's lookup
-            ParameterizedType rt = callee.returnType();
             boolean ownNull = rt.arrays() == 0 && rt.typeParameter() != null
                               && (!rt.typeParameter().isMethodTypeParameter()
                                   || callee.parameters().stream().noneMatch(pi ->

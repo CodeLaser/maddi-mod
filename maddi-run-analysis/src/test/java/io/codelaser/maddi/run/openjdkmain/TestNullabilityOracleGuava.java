@@ -213,6 +213,9 @@ public class TestNullabilityOracleGuava {
                 "preconditions take back part of what outside callers gave up");
     }
 
+    private static final List<String> EXPLAIN = System.getenv("ORACLE_EXPLAIN") == null ? List.of()
+            : List.of(System.getenv("ORACLE_EXPLAIN").split(","));
+
     private static NullabilityComparison measure(String name, List<TypeInfo> types, DeclaredNullability dn,
                                                  NullabilityPass.Report report) {
         NullabilityComparison comparison = new NullabilityComparison();
@@ -223,6 +226,12 @@ public class TestNullabilityOracleGuava {
             if (verdict == null) {
                 missing[0]++;
                 return;
+            }
+            // ORACLE_EXPLAIN=<substring>,...: the cause chains of these declarations whatever the outcome (an
+            // agreement has no row), for an A/B of what carried a null before a change
+            if (EXPLAIN.stream().anyMatch(info.fullyQualifiedName()::contains)) {
+                disagreements.add("EXPLAIN\t" + kind + "\t" + info.fullyQualifiedName() + "\t" + report.explain(info)
+                                  + "\t|\t" + report.explain(new NullabilityPass.Content(info)));
             }
             int unsafeBefore = comparison.count(Outcome.UNSAFE);
             int noiseBefore = comparison.count(Outcome.NOISE);

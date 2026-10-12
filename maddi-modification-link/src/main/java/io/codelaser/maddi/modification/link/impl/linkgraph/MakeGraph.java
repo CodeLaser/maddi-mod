@@ -98,6 +98,7 @@ public record MakeGraph(JavaInspector javaInspector, Runtime runtime, Graph grap
     boolean expandGraph(String statementIndex, Set<Variable> modifiedInThisEvaluation) {
         Map<Variable, Set<Variable>> subs = computeSubs(modifiedInThisEvaluation);
         List<Edge> newLinks = new ArrayList<>();
+        List<Edge> directMirrors = new ArrayList<>();
         // TODO should we use graph.edges() here, or graph.edgesWithEquivalence() ? if so, we'll need to cache the result
         for (Map.Entry<Variable, Map<Variable, LinkNature>> entry : graph.edges()) {
             Variable vFrom = entry.getKey();
@@ -105,6 +106,9 @@ public record MakeGraph(JavaInspector javaInspector, Runtime runtime, Graph grap
                 Variable vTo = entry2.getKey();
                 LinkNature linkNature = entry2.getValue();
                 if (linkNature.isIdenticalToOrAssignedFromTo()) {
+                    // the field-level mirrors of a statement's own edge are the statement's too ('r ← out' gives
+                    // 'r.§$s ⊆ out.§$s', what the nullability pass reads as the content copied), see Link.derived()
+                    boolean direct = graph.isDirect(vFrom, linkNature, vTo);
                     Set<Variable> subsOfFrom = subs.get(vFrom);
                     if (subsOfFrom != null && vTo.equals(Util.firstRealVariable(vTo)) && isNotNullConstant(vTo)) {
                         for (Variable s : subsOfFrom) {
@@ -119,6 +123,7 @@ public record MakeGraph(JavaInspector javaInspector, Runtime runtime, Graph grap
                                         ln = linkNature;
                                     }
                                     newLinks.add(new Edge(s, ln, sub));
+                                    if (direct) directMirrors.add(new Edge(s, ln, sub));
                                 }
                             }
                         }
@@ -137,6 +142,7 @@ public record MakeGraph(JavaInspector javaInspector, Runtime runtime, Graph grap
                                         ln = linkNature;
                                     }
                                     newLinks.add(new Edge(sub, ln, s));
+                                    if (direct) directMirrors.add(new Edge(sub, ln, s));
                                 }
                             }
                         }
@@ -150,6 +156,7 @@ public record MakeGraph(JavaInspector javaInspector, Runtime runtime, Graph grap
             }
         }
         boolean change = false;
+        for (Edge edge : directMirrors) graph.markDirect(edge.from(), edge.linkNature(), edge.to());
         for (Edge edge : newLinks) {
             change |= graph.mergeEdgeBi(edge.from(), edge.linkNature(), edge.to(), statementIndex);
         }

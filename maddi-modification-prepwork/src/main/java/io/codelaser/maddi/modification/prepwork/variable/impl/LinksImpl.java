@@ -237,7 +237,7 @@ public class LinksImpl implements Links {
         @Override
         public void replace(Link link, LinkNature newLinkNature) {
             links.replaceAll(l -> {
-                if (l.equals(link)) return new LinkImpl(l.from(), newLinkNature, l.to());
+                if (l.equals(link)) return new LinkImpl(l.from(), newLinkNature, l.to(), l.mediated(), l.derived());
                 return l;
             });
             invalidateIndexes();
@@ -276,9 +276,14 @@ public class LinksImpl implements Links {
 
         @Override
         public Builder add(Variable from, LinkNature linkNature, Variable to, boolean mediated) {
+            return add(from, linkNature, to, mediated, false);
+        }
+
+        @Override
+        public Builder add(Variable from, LinkNature linkNature, Variable to, boolean mediated, boolean derived) {
             assert primary instanceof This || Util.isPartOf(primary, from);
             if (!representable(from, to)) return this;
-            LinkImpl link = new LinkImpl(from, linkNature, to, mediated);
+            LinkImpl link = new LinkImpl(from, linkNature, to, mediated, derived);
             links.add(link);
             addToIndexes(link);
             return this;
@@ -379,10 +384,15 @@ public class LinksImpl implements Links {
     }
 
     // private so that we can ensure that only the links builder can make link objects
-    public record LinkImpl(Variable from, LinkNature linkNature, Variable to, boolean mediated) implements Link {
+    public record LinkImpl(Variable from, LinkNature linkNature, Variable to, boolean mediated, boolean derived)
+            implements Link {
 
         public LinkImpl(Variable from, LinkNature linkNature, Variable to) {
-            this(from, linkNature, to, false);
+            this(from, linkNature, to, false, false);
+        }
+
+        public LinkImpl(Variable from, LinkNature linkNature, Variable to, boolean mediated) {
+            this(from, linkNature, to, mediated, false);
         }
 
         public LinkImpl {
@@ -436,13 +446,13 @@ public class LinksImpl implements Links {
         public Link translate(TranslationMap translationMap) {
             Variable tFrom = translationMap.translateVariableRecursively(from);
             Variable tTo = translationMap.translateVariableRecursively(to);
-            return new LinkImpl(tFrom, linkNature, tTo, mediated);
+            return new LinkImpl(tFrom, linkNature, tTo, mediated, derived);
         }
 
         @Override
         public Link translateFrom(TranslationMap translationMap) {
             Variable tFrom = translationMap.translateVariableRecursively(from);
-            return new LinkImpl(tFrom, linkNature, to, mediated);
+            return new LinkImpl(tFrom, linkNature, to, mediated, derived);
         }
 
         @Override
@@ -567,7 +577,8 @@ public class LinksImpl implements Links {
         // re-point, and the non-null-primary constructor would reject it.
         if (primary == null) return this;
         List<Link> rewiredLinks = linkSet.stream()
-                .map(l -> (Link) new LinkImpl(l.from().rewire(infoMap), l.linkNature(), l.to().rewire(infoMap)))
+                .map(l -> (Link) new LinkImpl(l.from().rewire(infoMap), l.linkNature(), l.to().rewire(infoMap),
+                        l.mediated(), l.derived()))
                 .toList();
         return new LinksImpl(primary.rewire(infoMap), rewiredLinks);
     }

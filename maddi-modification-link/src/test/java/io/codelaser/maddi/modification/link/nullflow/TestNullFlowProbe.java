@@ -321,4 +321,91 @@ public class TestNullFlowProbe extends CommonTest {
         // unchanged where the summary was not marker-only
         assertEquals("[-, -] --> ternary←$_ce0,ternary←1:s", summary(t, "ternary"));
     }
+
+    // the links of 'variable' at the end of the method, split: the statements' own (Link.derived() false) | the
+    // closure's products
+    private static String directAndDerived(TypeInfo type, String method, String variable) {
+        VariableData vd = VariableDataImpl.of(method(type, method));
+        Links links = vd.variableInfoStream()
+                .filter(vi -> vi.variable().simpleName().equals(variable))
+                .map(VariableInfo::linkedVariables)
+                .findFirst().orElse(null);
+        if (links == null) return "<unknown>";
+        return links.stream().filter(l -> !l.derived()).map(Link::toString).collect(Collectors.joining(","))
+               + " | "
+               + links.stream().filter(Link::derived).map(Link::toString).collect(Collectors.joining(","));
+    }
+
+    @DisplayName("8 direct links, and the null constant as a terminal of the closure")
+    @Test
+    public void directAndTerminal() {
+        @Language("java") String src = """
+                package a.b;
+                import java.util.*;
+                class N8 {
+                    static class Box<T> {
+                        private T t;
+                        Box(T t) { this.t = t; }
+                        T get() { return t; }
+                    }
+                    private String f;
+                    String viaLocal(String s) { String x = s; String y = x; return y; }
+                    Object safeGet(Map<String, Object> map, String k, boolean b) { Object v = map.get(k); return b ? v : null; }
+                    String check(String k, boolean b) { return b ? null : k; }
+                    String identity(String key) { String checked = check(key, true); return checked; }
+                    String viaHolder() { Box<String> b = new Box<>(null); return b.get(); }
+                    void addLocal(List<String> list) { String x = null; list.add(x); }
+                    void join(boolean b, String s) { String x = null; if (b) x = s; this.f = x; }
+                    String arm(int k) {
+                        String r = switch (k) {
+                            case 1 -> { String s = null; yield s; }
+                            default -> "x";
+                        };
+                        return r;
+                    }
+                }
+                """;
+        TypeInfo t = analyze("a.b.N8", src, NULL_RETURNS);
+        String actual = String.join("\n",
+                // 'y ← x' is the statement's own link; the closure's 'y ← 0:s' goes to the summary through the group
+                "viaLocal y: " + directAndDerived(t, "viaLocal", "y"),
+                "viaLocal: " + summary(t, "viaLocal"),
+                // the null is not an element of the map the value was read from (the terminal rule)
+                "safeGet: " + directAndDerived(t, "safeGet", "return safeGet"),
+                "safeGet: " + summary(t, "safeGet"),
+                // the callee's null reaches the caller's argument only through the assignment group: derived
+                "check: " + summary(t, "check"),
+                "check: " + directAndDerived(t, "check", "return check"),
+                "identity key: " + directAndDerived(t, "identity", "key"),
+                "identity checked: " + directAndDerived(t, "identity", "checked"),
+                // a null carried by a local into the return is still exported
+                "viaHolder: " + directAndDerived(t, "viaHolder", "return viaHolder"),
+                "viaHolder: " + summary(t, "viaHolder"),
+                // a null carried by a local into a container is not: the write is the call site's
+                "addLocal list: " + directAndDerived(t, "addLocal", "list"),
+                "addLocal: " + summary(t, "addLocal"),
+                // the if-without-else join still gives the field both sources
+                "join f: " + directAndDerived(t, "join", "f"),
+                // a switch expression's block arm: its intermediate carries the arm's value to the assigned local
+                "arm r: " + directAndDerived(t, "arm", "r"),
+                "arm s: " + directAndDerived(t, "arm", "s"),
+                "arm: " + summary(t, "arm"));
+        assertEquals("""
+                viaLocal y: y→viaLocal,y←x |\s
+                viaLocal: [-] --> viaLocal←0:s
+                safeGet: safeGet←$_ce1 | safeGet∈0:map.§$$s[-2]
+                safeGet: [-, -, -] --> safeGet←$_ce1,safeGet∈0:map.§$$s[-2]
+                check: [-, -] --> check←$_ce0,check←0:k
+                check: check←$_ce0,check←0:k |\s
+                identity key: 0:key→checked | 0:key→identity
+                identity checked: checked←$_ce0,checked→identity,checked←0:key |\s
+                viaHolder:  | viaHolder←$_ce1
+                viaHolder: [] --> viaHolder←$_ce1
+                addLocal list: 0:list.§$s∋x |\s
+                addLocal: [-] --> -
+                join f: this.f←x | this.f←$_ce0
+                arm r: r←$_ce3,r→arm,r←s | r←$_ce2
+                arm s: <unknown>
+                arm: [-] --> arm←$_ce2""", actual);
+    }
 }

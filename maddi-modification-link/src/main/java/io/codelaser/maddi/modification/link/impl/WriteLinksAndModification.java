@@ -359,7 +359,8 @@ class WriteLinksAndModification {
                             // mediation provenance: the flag is erased inside the engine/collapse; recover it
                             // from the graph's direct-pair registry at this final emission point (task #39)
                             builder.add(from, link.linkNature(), to,
-                                    link.mediated() || followGraph.graph().isMediatedPair(from, to));
+                                    link.mediated() || followGraph.graph().isMediatedPair(from, to),
+                                    !followGraph.graph().isDirect(from, link.linkNature(), to));
                         }
                     }));
         }
@@ -382,7 +383,8 @@ class WriteLinksAndModification {
                                 && !isInternalSelfFieldLink(link.from(), link.to()))
                 .forEach(link -> {
                     builder.add(link.from(), link.linkNature(), link.to(),
-                            link.mediated() || followGraph.graph().isMediatedPair(link.from(), link.to()));
+                            link.mediated() || followGraph.graph().isMediatedPair(link.from(), link.to()),
+                            !followGraph.graph().isDirect(link.from(), link.linkNature(), link.to()));
                     // a real assignment graph edge gets its §m modification-equivalence generated in FollowGraph;
                     // a reconstructed intra-group edge bypasses it, so add it here too (this.list ← 0:l yields
                     // 0:l.§m ≡ this.list.§m). Same guards as FollowGraph: skip return values and virtual fields.

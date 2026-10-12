@@ -27,6 +27,16 @@ public interface Link extends Comparable<Link> {
         return false;
     }
 
+    /** true when this link is a product of the link graph's closure (a composition of two or more facts, or the
+     * shared-variable reconstruction of one), false when the statement's own evaluation produced it: an assignment,
+     * a call's summary applied at the call site, an element or field access. A consumer that follows VALUE flow
+     * (the nullability pass) composes direct links itself, per statement; the closure's products say that two
+     * variables are related, not where. In-run provenance only: it is not encoded, and a decoded link reads as
+     * direct. */
+    default boolean derived() {
+        return false;
+    }
+
     @NotNull String toString(Set<Variable> modified);
 
     @Override
