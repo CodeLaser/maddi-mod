@@ -17,6 +17,7 @@ package io.codelaser.maddi.modification.prepwork.io;
 import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
 import io.codelaser.maddi.cst.api.analysis.Codec;
 import io.codelaser.maddi.cst.api.analysis.Property;
+import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.element.SourceSet;
 import io.codelaser.maddi.cst.api.info.*;
 import io.codelaser.maddi.cst.api.runtime.Runtime;
@@ -84,6 +85,27 @@ public class WriteAnalysisResults {
         this.runtime = runtime;
         this.typePredicate = typePredicate;
         this.propertyPredicate = propertyPredicate;
+    }
+
+    /*
+     The properties whose FALSE is written out rather than left out as the default (CodeLaser/maddi#64). Left out,
+     "decided FALSE" and "not decided" read back alike, as absent. A hint compile decides every parameter it writes
+     (the shallow analyzer always returns a value, annotated or not: not only the ANNOTATED_API elements), and a
+     reader that asks getOrNull (the shadow pass's seeds, the guard analyzer, PassedFunction) took the absent value
+     for "undecided". Only the hints compiler sets this; source and checkpoint results are written as before. The
+     reader already decodes 0, so files of either kind load with either reader.
+     */
+    private Set<Property> explicitFalse = Set.of();
+
+    public WriteAnalysisResults setExplicitFalse(Set<Property> properties) {
+        this.explicitFalse = Objects.requireNonNull(properties);
+        return this;
+    }
+
+    private boolean writeFalseExplicitly(Info info, io.codelaser.maddi.cst.api.analysis.PropertyValueMap.PropertyValue pv) {
+        return !explicitFalse.isEmpty()
+               && explicitFalse.contains(pv.property())
+               && pv.value() instanceof Value.Bool b && b.isFalse();
     }
 
     public void write(String destinationDirectory, Trie<TypeInfo> typeTrie) throws IOException {
@@ -229,9 +251,12 @@ public class WriteAnalysisResults {
 
     private Codec.EncodedValue write(Codec codec, Codec.Context context, Info info, int index) {
         Stream<Codec.EncodedPropertyValue> stream = info.analysis().propertyValueStream()
-                .filter(pv -> !pv.value().isDefault()) // not streaming default values
+                // not streaming default values, except a FALSE that must stay distinguishable from "not decided"
+                .filter(pv -> !pv.value().isDefault() || writeFalseExplicitly(info, pv))
                 .filter(pv -> NEVER_SERIALISED.test(pv.property()) && propertyPredicate.test(pv.property()))
-                .map(pv -> encodeOrSkip(codec, context, pv))
+                .map(pv -> writeFalseExplicitly(info, pv)
+                        ? new Codec.EncodedPropertyValue(pv.property().key(), codec.encodeInt(context, 0))
+                        : encodeOrSkip(codec, context, pv))
                 .filter(Objects::nonNull); // some properties will (temporarily) not be streamed
         return codec.encode(context, info, "" + index, stream, null);
     }
