@@ -36,6 +36,6 @@ public class TestJavaToCSharpTimefoldFacts {
     public void test() throws Exception {
         JavaToKotlinRatchet.Corpus corpus = JavaToKotlinRatchet.parse("timefold-solver");
         new JavaToCSharpRatchet("timefold-facts", Path.of("src/test/resources/j2cs/timefold-facts.ratchet"),
-                CorpusNullability.csharpPolicy(corpus, corpus.types())).run(corpus);
+                CorpusNullability.csharpPolicy(corpus, corpus.types())).withMapping("timefold-gizmo.csmap").run(corpus);
     }
 }
