@@ -56,6 +56,21 @@ public class TestJavaUtil extends CommonTest {
     }
 
 
+    // a library's own function type ignores modifications like java.util.function's: Comparator is annotated
+    // @FunctionalInterface; Executor has one abstract method but is not a function type (FunctionTypes.isLibraryFunctionType)
+    @Test
+    public void testFunctionTypeParameters() {
+        TypeInfo collections = compiledTypesManager().typeIfLoaded(Collections.class);
+        MethodInfo sort = collections.findUniqueMethod("sort", 2);
+        assertEquals("java.util.Collections.sort(java.util.List,java.util.Comparator)", sort.fullyQualifiedName());
+        assertSame(TRUE, sort.parameters().get(1).analysis().getOrDefault(IGNORE_MODIFICATIONS_PARAMETER, FALSE));
+
+        TypeInfo completableFuture = compiledTypesManager().typeIfLoaded(java.util.concurrent.CompletableFuture.class);
+        MethodInfo runAsync = completableFuture.findUniqueMethod("runAsync", 2);
+        assertSame(TRUE, runAsync.parameters().getFirst().analysis().getOrDefault(IGNORE_MODIFICATIONS_PARAMETER, FALSE));
+        assertSame(FALSE, runAsync.parameters().get(1).analysis().getOrDefault(IGNORE_MODIFICATIONS_PARAMETER, FALSE));
+    }
+
     @Test
     public void testArraysEquals() {
         TypeInfo typeInfo = compiledTypesManager().typeIfLoaded(Arrays.class);

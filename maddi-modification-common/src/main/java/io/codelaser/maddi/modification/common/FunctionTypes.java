@@ -38,6 +38,7 @@ public final class FunctionTypes {
     }
 
     private static final boolean KOTLIN_FUNCTION_TYPES_CUSTOM = System.getenv("KFNCUSTOM") != null;
+    private static final boolean LIBRARY_FUNCTION_TYPES_CUSTOM = System.getenv("LIBFNCUSTOM") != null;
 
     /** A Kotlin function type: {@code kotlin.jvm.functions.Function0..22} or {@code FunctionN}. */
     public static boolean isKotlinFunctionType(TypeInfo typeInfo) {
@@ -60,5 +61,30 @@ public final class FunctionTypes {
         if (methodInfo.isSAMOfStandardFunctionalInterface()) return true;
         return !KOTLIN_FUNCTION_TYPES_CUSTOM && isKotlinFunctionType(methodInfo.typeInfo())
                && methodInfo == methodInfo.typeInfo().singleAbstractMethod();
+    }
+
+    /**
+     * Whether a library method's parameter of this type ignores modifications: a standard functional interface, or a
+     * library's own function type, one that is annotated {@code @FunctionalInterface} or extends a standard one
+     * (Guava's {@code Predicate}, vavr's {@code Function1}, Eclipse Collections' {@code Procedure}, {@code Comparator},
+     * {@code Callable}). Calling such an argument does not modify it, so before this a Guava {@code Iterables.any}
+     * read its predicate as modified where the JDK's {@code Collection.removeIf} did not. The decision stops at the
+     * shallow defaults of library methods: inside the link engine these types stay custom (their summaries, their
+     * hidden content). A single-abstract-method type that is neither ({@code Iterable}, {@code Executor},
+     * {@code Comparable}) keeps its default. Gate {@code LIBFNCUSTOM} restores the previous reading for A/B.
+     */
+    public static boolean isLibraryFunctionType(ParameterizedType pt) {
+        if (isStandardFunctionalInterface(pt)) return true;
+        if (LIBRARY_FUNCTION_TYPES_CUSTOM || pt.arrays() > 0 || !pt.isFunctionalInterface()) return false;
+        TypeInfo typeInfo = pt.typeInfo();
+        return typeInfo != null && typeInfo.isInterface()
+               && (isAnnotatedFunctionalInterface(typeInfo)
+                   || typeInfo.interfacesImplemented().stream()
+                           .anyMatch(i -> isStandardFunctionalInterface(i.typeInfo())));
+    }
+
+    private static boolean isAnnotatedFunctionalInterface(TypeInfo typeInfo) {
+        return typeInfo.annotations().stream()
+                .anyMatch(ae -> "java.lang.FunctionalInterface".equals(ae.typeInfo().fullyQualifiedName()));
     }
 }

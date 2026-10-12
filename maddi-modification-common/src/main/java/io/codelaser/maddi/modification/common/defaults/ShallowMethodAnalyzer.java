@@ -425,7 +425,7 @@ public class ShallowMethodAnalyzer extends AnnotationToProperty {
 
     private ValueOrigin computeParameterIgnoreModifications(ParameterInfo parameterInfo) {
         ParameterizedType pt = parameterInfo.parameterizedType();
-        return FunctionTypes.isStandardFunctionalInterface(pt) ? FROM_TYPE_TRUE : DEFAULT_FALSE;
+        return FunctionTypes.isLibraryFunctionType(pt) ? FROM_TYPE_TRUE : DEFAULT_FALSE;
     }
 
     // a parameter has one nullability along its override chain (Kotlin's rule): nullable when an overridden method
