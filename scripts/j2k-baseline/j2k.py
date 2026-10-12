@@ -58,6 +58,40 @@ def ensure_idea(build: str) -> Path:
     return home
 
 
+def configure_kotlin_maven(pom: Path, version: str):
+    """What IntelliJ's "Configure Kotlin in Project" does to a Maven module: kotlin-stdlib, and kotlin-maven-plugin
+    compiling src/main/java. Without it the converted files do not resolve, and J2K's post-processing (redundant
+    modifiers, primary constructors, properties) does not run."""
+    text = pom.read_text()
+    # skip <dependencies> and <plugins> inside dependencyManagement / pluginManagement
+    def top_level(tag):
+        masked = re.sub(r"<(dependencyManagement|pluginManagement)>.*?</\1>",
+                        lambda m: " " * len(m.group(0)), text, flags=re.S)
+        i = masked.find(f"</{tag}>")
+        return i
+    dep = (f"<dependency><groupId>org.jetbrains.kotlin</groupId><artifactId>kotlin-stdlib</artifactId>"
+           f"<version>{version}</version></dependency>\n")
+    plugin = (f"<plugin><groupId>org.jetbrains.kotlin</groupId><artifactId>kotlin-maven-plugin</artifactId>"
+              f"<version>{version}</version><executions>"
+              f"<execution><id>compile</id><goals><goal>compile</goal></goals><configuration><sourceDirs>"
+              f"<sourceDir>${{project.basedir}}/src/main/java</sourceDir></sourceDirs></configuration></execution>"
+              f"<execution><id>test-compile</id><goals><goal>test-compile</goal></goals></execution>"
+              f"</executions></plugin>\n")
+    i = top_level("plugins")
+    if i < 0:
+        j = text.rfind("</project>")
+        text = text[:j] + f"<build><plugins>{plugin}</plugins></build>\n" + text[j:]
+    else:
+        text = text[:i] + plugin + text[i:]
+    i = top_level("dependencies")
+    if i < 0:
+        j = text.rfind("</project>")
+        text = text[:j] + f"<dependencies>{dep}</dependencies>\n" + text[j:]
+    else:
+        text = text[:i] + dep + text[i:]
+    pom.write_text(text)
+
+
 def git(repo: Path, *args) -> str:
     return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True).stdout.strip()
 
@@ -117,6 +151,7 @@ def main():
     ap.add_argument("--work", default=None)
     ap.add_argument("--batch", type=int, default=0, help="files per convert call; 0 = all in one call")
     ap.add_argument("--xmx", default="8g")
+    ap.add_argument("--kotlin", default="2.1.21", help="Kotlin version configured in the copy (langchain4j's own)")
     ap.add_argument("--jdk", default=None, help="the project JDK; default $JAVA_HOME, else the java on PATH")
     a = ap.parse_args()
 
@@ -143,6 +178,11 @@ def main():
     copy = work / checkout.name
     shutil.copytree(checkout, copy, ignore=shutil.ignore_patterns(".git", "target", "build", ".gradle", ".idea"))
     project = copy / rel
+    if (project / "pom.xml").exists():
+        configure_kotlin_maven(project / "pom.xml", a.kotlin)
+        log(f"configured Kotlin {a.kotlin} in {rel}/pom.xml")
+    else:
+        raise SystemExit("only Maven modules can be configured for Kotlin so far")
     main_root = project / "src" / "main" / "java"
     test_root = project / "src" / "test" / "java"
     java_files = sorted(p.relative_to(project).as_posix() for p in main_root.rglob("*.java"))
@@ -210,6 +250,7 @@ def main():
     left = sorted(p.relative_to(main_root).as_posix() for p in main_root.rglob("*.java"))
     kt = sorted(main_root.rglob("*.kt"))
     # a JDK J2K could not resolve shows as java.lang.Object kept as a type
+    public = sum(len(re.findall(r"^\s*public ", p.read_text(errors="replace"), re.M)) for p in kt)
     unresolved = sum(len(re.findall(r"\bObject\b\??[>,)\s]", p.read_text(errors="replace"))) for p in kt)
     shutil.copytree(main_root, out / "src", ignore=shutil.ignore_patterns("*.java"))
     if test_root.is_dir():
@@ -217,7 +258,9 @@ def main():
     (out / "provenance.txt").write_text("\n".join([
         f"ide: {build_txt}",
         f"jdk: {jdk} ({jdk_version})",
+        f"kotlin configured: {a.kotlin}",
         f"sanity: 'Object' kept as a Kotlin type {unresolved} times (should be ~0: Any)",
+        f"sanity: 'public' modifiers {public} (J2K's post-processing removes them; thousands = it did not run)",
         f"corpus: {checkout.name} {git(checkout, 'rev-parse', 'HEAD')} {rel}",
         f"main java files: {len(java_files)}",
         f"kotlin files produced: {len(kt)}",
