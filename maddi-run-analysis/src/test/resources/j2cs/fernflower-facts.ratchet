@@ -1,7 +1,7 @@
 # TestJavaToCSharpFernflowerFacts: fernflower printed as C# with the modification analysis's and the NullabilityPass's
-# (NULL_MARKED) facts, judged by Roslyn (see maddi-run-openjdk's JavaToCSharpRatchet). Lower is better for
-# printerCrashes, syntaxErrors, unmappedJdkUses and nullableWarnings, higher for syntaxCleanFiles and compilingFiles;
-# `types` must not move. Write a better value here in the commit that earns it.
+# facts (NULL_MARKED, since 2026-10-12 KOTLIN), judged by Roslyn (see maddi-run-openjdk's JavaToCSharpRatchet). Lower
+# is better for printerCrashes, syntaxErrors, unmappedJdkUses and nullableWarnings, higher for syntaxCleanFiles and
+# compilingFiles; `types` must not move. Write a better value here in the commit that earns it.
 #
 # 2026-10-11, first record, with maddi 50ecbe6a0 (read-only parameters where every caller's argument converts):
 # 98 read-only collection parameters (81 IReadOnlyList) and nullable declarations as T?, with the same 182 compiling
@@ -11,10 +11,15 @@
 # locals as T?, no ? on simple enums and structs): 2029 nullable warnings, 1150 of them CS8602 (a dereference of a
 # possibly null value), 261 CS8604, 212 CS8625 (null into a non-null array element or field), 119 CS8603. Still 182
 # files compile; ClasspathScanner, which did not, has 8 more errors (? on its unmapped JDK types).
+#
+# 2026-10-12, `!` at a dereference of a value that may be null (maddi CSharpNullability: call results, fields,
+# parameters and locals, unless the use-site facts know them non-null; asserted locals' initializers), with the pass
+# under Policy.KOTLIN (call results make variables nullable, locals asserted at their declaration): CS8602 1150 -> 13,
+# 2029 -> 875 nullable warnings. Still 182 files compile.
 types	199
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	199
 compilingFiles	182
 unmappedJdkUses	15
-nullableWarnings	2029
+nullableWarnings	875

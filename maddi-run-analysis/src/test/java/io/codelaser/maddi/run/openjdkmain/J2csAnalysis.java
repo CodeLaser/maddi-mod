@@ -3,7 +3,17 @@ package io.codelaser.maddi.run.openjdkmain;
 import io.codelaser.maddi.analysis.api.PrepOutcome;
 import io.codelaser.maddi.analysis.api.PrepRequest;
 import io.codelaser.maddi.callgraph.ComputeAnalysisOrder;
+import io.codelaser.maddi.cst.api.element.Element;
+import io.codelaser.maddi.cst.api.expression.Expression;
+import io.codelaser.maddi.cst.api.info.FieldInfo;
 import io.codelaser.maddi.cst.api.info.Info;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.ParameterInfo;
+import io.codelaser.maddi.cst.api.statement.Statement;
+import io.codelaser.maddi.cst.api.type.NullableState;
+import io.codelaser.maddi.cst.api.type.ParameterizedType;
+import io.codelaser.maddi.cst.api.variable.LocalVariable;
+import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.cst.print.csharp.CSharpFacts;
 import io.codelaser.maddi.cst.print.csharp.CSharpProgram;
 import io.codelaser.maddi.inspection.api.integration.JavaInspector;
@@ -18,11 +28,15 @@ import java.util.Set;
 
 /**
  * The C# ratchets with the analysis's facts: the corpus analysed as {@link J2kNullability} analyses it (JDK hints,
- * prep, call-graph order, MODREACH, nullability), then the NullabilityPass under {@code NULL_MARKED}, whose verdicts
- * it writes on the declarations. The printer's default facts ({@code CSharpFacts.STORED}) read those, and the
- * modification analysis's {@code UNMODIFIED_PARAMETER}: unmodified collection parameters become read-only, nullable
- * declarations {@code T?}. Under {@code NULL_MARKED} every other declaration is not null: the facts say the
- * analysis covered the program ({@code STORED_NULL_MARKED}), and the judge enables C#'s nullable reference types.
+ * prep, call-graph order, MODREACH, nullability), then the NullabilityPass, whose verdicts it writes on the
+ * declarations. The printer's facts read those ({@code CSharpFacts.STORED}), and the modification analysis's
+ * {@code UNMODIFIED_PARAMETER}: unmodified collection parameters become read-only, nullable declarations {@code T?}.
+ * <p>
+ * The pass's policy is the Kotlin translation's, {@code KOTLIN}: C# with nullable reference types is a null-checked
+ * target as Kotlin is. Every declaration that is not nullable is not null, a variable assigned a nullable call result
+ * is nullable, and where Kotlin asserts with {@code !!} C# says {@code !}, which does not throw: the C# fails where
+ * Java does. The facts say the analysis covered the program, so that the judge enables C#'s nullable reference types;
+ * the pass's report adds what is not stored, the locals' verdicts and the use-site facts, for the printer's {@code !}.
  */
 final class J2csAnalysis {
 
@@ -30,6 +44,63 @@ final class J2csAnalysis {
             "../../maddi/maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles/jdk";
 
     private J2csAnalysis() {
+    }
+
+    /** The stored verdicts, and the pass's report for the locals and the use-site facts. */
+    private record Facts(NullabilityPass.Report report) implements CSharpFacts {
+        @Override
+        public boolean unmodified(ParameterInfo parameter) {
+            return STORED.unmodified(parameter);
+        }
+
+        @Override
+        public NullableState nullable(FieldInfo field) {
+            return STORED.nullable(field);
+        }
+
+        @Override
+        public NullableState nullable(ParameterInfo parameter) {
+            return STORED.nullable(parameter);
+        }
+
+        @Override
+        public NullableState nullable(MethodInfo method) {
+            return STORED.nullable(method);
+        }
+
+        /** As the Kotlin ratchet: a verdict that is no decision (a degraded method's local) counts as nullable. */
+        @Override
+        public NullableState nullable(MethodInfo method, Element declaration, LocalVariable variable) {
+            ParameterizedType verdict = report.local(method, declaration, variable);
+            if (verdict == null) return NullableState.UNSPECIFIED;
+            return verdict.nullable() == NullableState.UNSPECIFIED && !verdict.isPrimitiveExcludingVoid()
+                    ? NullableState.NULLABLE : verdict.nullable();
+        }
+
+        @Override
+        public boolean assertedAtDeclaration(MethodInfo method, Element declaration, LocalVariable variable) {
+            return report.assertedAtDeclaration(method, declaration, variable);
+        }
+
+        @Override
+        public boolean nonNullAt(Statement statement, Variable variable) {
+            return report.smartCasts().nonNullAt(statement, variable);
+        }
+
+        @Override
+        public boolean nonNullAt(Expression expression, Variable variable) {
+            return report.smartCasts().nonNullAt(expression, variable);
+        }
+
+        @Override
+        public boolean callResultNonNull(Expression call) {
+            return report.callResultNonNull(call);
+        }
+
+        @Override
+        public boolean nullabilityAnalysed() {
+            return true;
+        }
     }
 
     /** Analyses the parsed corpus; the policy whose facts read what the analysis stored. */
@@ -50,7 +121,7 @@ final class J2csAnalysis {
                         .setNullability(true)
                         .build());
         analyzer.analyze(order, prep.callGraph().graph());
-        new NullabilityPass(NullabilityPass.Policy.NULL_MARKED).go(order);
-        return CSharpProgram.Policy.DEFAULT.withFacts(CSharpFacts.STORED_NULL_MARKED);
+        NullabilityPass.Report report = new NullabilityPass(NullabilityPass.Policy.KOTLIN).go(order);
+        return CSharpProgram.Policy.DEFAULT.withFacts(new Facts(report));
     }
 }
