@@ -20,6 +20,7 @@ import io.codelaser.maddi.modification.prepwork.io.WriteAnalysisResults;
 import io.codelaser.maddi.cst.api.analysis.Message;
 import io.codelaser.maddi.cst.api.element.Element;
 import io.codelaser.maddi.cst.api.info.Info;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.runtime.Runtime;
@@ -120,10 +121,17 @@ public class AnalysisHintsCompiler {
                 && !pi.analysis().haveAnalyzedValueFor(PropertyImpl.UNMODIFIED_PARAMETER)) {
                 pi.analysis().set(PropertyImpl.UNMODIFIED_PARAMETER, ValueImpl.BoolImpl.FALSE);
             }
+            // the same for a method that modifies its receiver
+            if (element instanceof MethodInfo mi && writeOut.contains(mi.typeInfo())
+                && data.originMap().containsKey(PropertyImpl.NON_MODIFYING_METHOD)
+                && !mi.analysis().haveAnalyzedValueFor(PropertyImpl.NON_MODIFYING_METHOD)) {
+                mi.analysis().set(PropertyImpl.NON_MODIFYING_METHOD, ValueImpl.BoolImpl.FALSE);
+            }
         });
-        // a hint states every parameter: an unmodified FALSE is written, not left out as "undecided" (maddi#64)
+        // a hint states every parameter and method: an unmodified / non-modifying FALSE is written, not left out
+        // as "undecided" (maddi#64)
         WriteAnalysisResults wa = new WriteAnalysisResults(runtime, writeOut::contains)
-                .setExplicitFalse(Set.of(PropertyImpl.UNMODIFIED_PARAMETER));
+                .setExplicitFalse(Set.of(PropertyImpl.UNMODIFIED_PARAMETER, PropertyImpl.NON_MODIFYING_METHOD));
         Trie<TypeInfo> trie = new Trie<>();
         for (TypeInfo ti : analysisHintsParser.types()) {
             if (ti.isPrimaryType()) {
