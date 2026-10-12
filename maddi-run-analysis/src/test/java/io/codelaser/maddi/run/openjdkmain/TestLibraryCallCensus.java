@@ -63,8 +63,14 @@ public class TestLibraryCallCensus {
         String corpora = Objects.requireNonNullElse(System.getenv("CENSUS"), DEFAULT_CORPORA);
         Path out = Path.of("build/census");
         Files.createDirectories(out);
+        List<String> skipped = new ArrayList<>();
         for (String corpusName : corpora.split(",")) {
-            census(corpusName.strip(), out);
+            // a corpus that does not parse (a stale jar, a missing build) is reported, not fatal: the census is a ranking
+            try {
+                census(corpusName.strip(), out);
+            } catch (Exception | AssertionError e) {
+                skipped.add(corpusName.strip() + ": " + String.valueOf(e.getMessage()).lines().findFirst().orElse(""));
+            }
             System.gc();
         }
         Map<String, long[]> total = new TreeMap<>();
@@ -76,6 +82,7 @@ public class TestLibraryCallCensus {
         }));
         List<String> lines = new ArrayList<>();
         lines.add("# corpora: " + String.join(", ", perCorpus.keySet()));
+        skipped.forEach(s -> lines.add("# skipped " + s));
         lines.add("# library\tcorpora\tcalls\tmembers(sum)\tcallsWithoutHints\tmodifyingCalls");
         total.entrySet().stream()
                 .sorted((a, b) -> Long.compare(b.getValue()[3], a.getValue()[3]))
