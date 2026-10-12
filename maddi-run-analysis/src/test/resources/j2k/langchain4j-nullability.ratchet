@@ -44,12 +44,19 @@
 # verdict) and 106abb776 (no T : Any where a parameter's type argument feeds T): 316 files compiling (44 type errors),
 # 315 to class files; 1,086 tests pass with the Kotlin classes, 1,077 translated. Both knowing drops above are back:
 # OutputGuardrailResult's SUCCESS initializer and DefaultRetrievalAugmentor's builder.executor(null).
+# 2026-10-12, maddi's cb326c140 (the printer: groups 1 and 2 of the type errors, boxed types nullable in signatures
+# Java calls, Integer.class as Int::class.javaObjectType, no unboxing assert in string concatenation, a read-only
+# Object[] parameter as Array<out Any?>): 326 files compiling (24 type errors), 325 to class files; 1,105 tests pass
+# with the Kotlin classes, 1,102 translated. Five tests that passed now fail, knowingly: DocumentSplitter's and
+# TextSegmentTransformer's null array into varargs (a Kotlin vararg is never null), Metadata's null key (a verdict on
+# the key's type argument), and BatchItemResult's two null-rejecting tests (a record whose constructor takes null
+# where the component does not; the printer's, next).
 types	346
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	346
-compilingFiles	316
-bytecodeFiles	315
-testsPassing	1086
-testBytecodeFiles	128
-translatedTestsPassing	1077
+compilingFiles	326
+bytecodeFiles	325
+testsPassing	1105
+testBytecodeFiles	131
+translatedTestsPassing	1102
