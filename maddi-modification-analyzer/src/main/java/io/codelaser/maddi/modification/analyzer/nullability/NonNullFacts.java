@@ -285,6 +285,7 @@ public final class NonNullFacts {
                     facts.removeIf(v -> dependsOnAssigned(v, Set.of(lv)));
                     if (nonNull(lv.assignmentExpression(), facts)) facts.add(lv);
                     narrowedRead(lv, lv.assignmentExpression(), facts);
+                    navigatedKey(lv, lv.assignmentExpression(), facts);
                 });
                 return new Out(facts, true);
             }
@@ -445,6 +446,11 @@ public final class NonNullFacts {
                    || dv.arrayVariable() instanceof LocalVariable lv && !lv.simpleName().startsWith("$"));
     }
 
+    // a non-final field the call may assign: any, except one of this when the call cannot reach this
+    private static boolean changesAtCall(Variable v, boolean keepsThis) {
+        return isNonFinalField(v) && !(keepsThis && v instanceof FieldReference fr && fr.scopeIsThis());
+    }
+
     private static boolean isNonFinalField(Variable v) {
         return v instanceof FieldReference fr && !fr.fieldInfo().isFinal();
     }
@@ -459,7 +465,18 @@ public final class NonNullFacts {
      one handed the map. Java only: Kotlin does not smart-cast a lookup.
      */
     private static final Set<String> MAP_READS = Set.of("get", "getOrDefault", "containsKey", "containsValue",
-            "size", "isEmpty", "keySet", "values", "entrySet", "forEach", "equals", "hashCode", "toString");
+            "size", "isEmpty", "keySet", "values", "entrySet", "forEach", "equals", "hashCode", "toString",
+            "firstKey", "lastKey", "higherKey", "lowerKey", "ceilingKey", "floorKey", "navigableKeySet",
+            "descendingKeySet");
+
+    /*
+     CodeLaser/maddi-mod#29 C: a key a navigable map hands out is one of its keys ('k = map.higherKey(k)', timefold
+     TreeMultiSet). When there is none it is null instead, and 'map.get(null)' throws on a TreeMap rather than
+     answering the absent key's null; a comparator that accepts null is the exception, and not looked at.
+     */
+    private static final Set<String> MAP_KEYS = Set.of("firstKey", "lastKey", "higherKey", "lowerKey", "ceilingKey",
+            "floorKey");
+    private static final Set<String> KEY_VIEWS = Set.of("keySet", "navigableKeySet", "descendingKeySet");
 
     /** Is the key of {@code lookup} ({@code map.get(k)}, {@code map.remove(k)}) known present when it is called? */
     public boolean keyPresentWhenCalled(MethodCall lookup) {
@@ -539,14 +556,29 @@ public final class NonNullFacts {
                && wi.parameterExpressions().size() == 1 && nonNullFunction(wi.parameterExpressions().getFirst());
     }
 
-    // 'for (K k : map.keySet())': k is present in map throughout the body
+    // 'for (K k : map.keySet())' (or the navigable views): k is present in map throughout the body
     private Variable keySetLoop(ForEachStatement fe) {
         if (kotlinSmartCasts || !(unwrap(fe.expression()) instanceof MethodCall mc) || mc.methodInfo() == null
-            || !"keySet".equals(mc.methodInfo().name()) || mc.object() == null) return null;
+            || !KEY_VIEWS.contains(mc.methodInfo().name()) || mc.object() == null) return null;
         Variable map = trackableVariable(mc.object());
         LocalVariable k = fe.initializer().localVariable();
         if (map == null || k == null || !isMap(mc.object().parameterizedType())) return null;
         return keyPresence(map, k, mc.object().parameterizedType());
+    }
+
+    // 'k = map.higherKey(x)', 'k = map.isEmpty() ? null : map.firstKey()': k is present in map (MAP_KEYS)
+    private void navigatedKey(Variable key, Expression value, Set<Variable> facts) {
+        if (kotlinSmartCasts || key == null) return;
+        Expression v = unwrap(value);
+        if (v instanceof InlineConditional ic) {
+            if (unwrap(ic.ifTrue()) instanceof NullConstant) v = unwrap(ic.ifFalse());
+            else if (unwrap(ic.ifFalse()) instanceof NullConstant) v = unwrap(ic.ifTrue());
+        }
+        if (!(v instanceof MethodCall mc) || mc.methodInfo() == null || mc.object() == null
+            || !MAP_KEYS.contains(mc.methodInfo().name())) return;
+        Variable map = trackableVariable(mc.object());
+        if (map == null || !isMap(mc.object().parameterizedType())) return;
+        facts.add(keyPresence(map, key, mc.object().parameterizedType()));
     }
 
     private Variable trackableVariable(Expression e) {
@@ -593,7 +625,9 @@ public final class NonNullFacts {
         boolean keepsThis = !reachesThis(call);
         facts.removeIf(v -> isNonFinalField(v) && !(keepsThis && v instanceof FieldReference fr && fr.scopeIsThis())
                             || v instanceof DependentVariable
-                            || v instanceof KeyPresence kp && touches(kp.map(), receiver, read, arguments)
+                            || v instanceof KeyPresence kp && (touches(kp.map(), receiver, read, arguments)
+                                                               || changesAtCall(kp.key(), keepsThis)
+                                                               || changesAtCall(kp.map(), keepsThis))
                             || v instanceof PureCall pc && modifying
                                && (isNonFinalField(pc.receiver()) || touches(pc.receiver(), receiver, false, arguments)));
     }
@@ -970,7 +1004,10 @@ public final class NonNullFacts {
                         boolean nonNull = a.assignmentOperator() == null && nonNull(a.value(), facts);
                         facts.remove(target);
                         if (nonNull) facts.add(target);
-                        if (a.assignmentOperator() == null) narrowedRead(target, a.value(), facts);
+                        if (a.assignmentOperator() == null) {
+                            narrowedRead(target, a.value(), facts);
+                            navigatedKey(target, a.value(), facts);
+                        }
                     }
                     return false;
                 }
