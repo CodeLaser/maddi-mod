@@ -147,7 +147,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--module", required=True)
     ap.add_argument("--out", required=True)
-    ap.add_argument("--idea-build", default="263.5153.40")
+    ap.add_argument("--idea-build", default="263.6800.24")
     ap.add_argument("--work", default=None)
     ap.add_argument("--batch", type=int, default=0, help="files per convert call; 0 = all in one call")
     ap.add_argument("--xmx", default="8g")
@@ -249,6 +249,12 @@ def main():
 
     left = sorted(p.relative_to(main_root).as_posix() for p in main_root.rglob("*.java"))
     kt = sorted(main_root.rglob("*.kt"))
+    idea_log = work / "ide" / "log" / "idea.log"
+    if idea_log.exists():
+        shutil.copy(idea_log, out / "idea.log")
+    severe = idea_log.read_text(errors="replace") if idea_log.exists() else ""
+    post_errors = len(re.findall(r"SEVERE - #o\.j\.k\.j\.PostProcessor - (?!Current Command|Last Action|Plugin to blame|OS:|JDK:|IntelliJ)",
+                                 severe))
     # a JDK J2K could not resolve shows as java.lang.Object kept as a type
     public = sum(len(re.findall(r"^\s*public ", p.read_text(errors="replace"), re.M)) for p in kt)
     unresolved = sum(len(re.findall(r"\bObject\b\??[>,)\s]", p.read_text(errors="replace"))) for p in kt)
@@ -260,6 +266,7 @@ def main():
         f"jdk: {jdk} ({jdk_version})",
         f"kotlin configured: {a.kotlin}",
         f"sanity: 'Object' kept as a Kotlin type {unresolved} times (should be ~0: Any)",
+        f"sanity: J2K post-processor exceptions {post_errors} (one aborts the remaining post-processing; see idea.log)",
         f"sanity: 'public' modifiers {public} (J2K's post-processing removes them; thousands = it did not run)",
         f"corpus: {checkout.name} {git(checkout, 'rev-parse', 'HEAD')} {rel}",
         f"main java files: {len(java_files)}",
