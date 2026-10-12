@@ -3802,6 +3802,60 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals(true, report.useSites().nonNullAt(read, parent), "Group never stores a null parent");
     }
 
+    // CodeLaser/maddi-mod#30, the diagnostics' open world: outside code calls the constructors it sees and extends the
+    // classes it sees, nothing more. A parameter dereferenced before it is stored is non-null whoever passes it.
+    @DisplayName("narrowed reads in an open world: by the constructors outside code can call or extend")
+    @Test
+    public void narrowedThisFieldOpenWorld() {
+        NullabilityPass.Report report = run("a.b.OW", """
+                package a.b;
+                public class OW {
+                    public enum Semantics { A }
+                    public abstract static class Grand {
+                        protected final Semantics semantics;
+                        protected Grand(Semantics semantics) { this.semantics = semantics; }
+                    }
+                    public abstract static class Root extends Grand {
+                        protected final Root parent;
+                        // timefold BavetAbstractConstraintStream: the dereference is in the explicit super(...) call
+                        protected Root(Root parent) { super(parent.semantics); this.parent = parent; }
+                        protected Root(Root parent, Semantics s) { super(s); this.parent = parent; }
+                        protected Root(Semantics s) { super(s); this.parent = null; }
+                    }
+                    public static final class Source extends Root { public Source() { super(Semantics.A); } }
+                    public static final class Group extends Root {
+                        public Group(Root parent) { super(parent); }
+                        public Semantics up() { Semantics n = parent.semantics; return n; }
+                    }
+                    public static final class Loose extends Root {
+                        public Loose(Root parent) { super(parent, Semantics.A); }
+                        public Semantics up() { Semantics n = parent.semantics; return n; }
+                    }
+                    public static class Extensible extends Root {
+                        public Extensible(Root parent) { super(parent); }
+                        public Semantics up() { Semantics n = parent.semantics; return n; }
+                    }
+                    static Semantics make() { return new Group(new Source()).up(); }
+                }
+                """, NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY.withoutContracts()
+                .withWorld(NullabilityPass.World.OPEN));
+        System.out.println(explain(report));
+        assertEquals(true, parentReadNonNull(report, "Group"), "every Group constructor dereferences its parent");
+        assertEquals(false, parentReadNonNull(report, "Loose"), "outside code may call new Loose(null)");
+        assertEquals(true, parentReadNonNull(report, "Extensible"),
+                "an unseen subclass of Extensible runs its one constructor, which dereferences the parent");
+    }
+
+    // 'Semantics n = parent.semantics;' in up(): is 'this.parent' non-null there?
+    private Boolean parentReadNonNull(NullabilityPass.Report report, String type) {
+        TypeInfo t = parsed.subTypes().stream().filter(x -> type.equals(x.simpleName())).findFirst().orElseThrow();
+        Statement read = t.findUniqueMethod("up", 0).methodBody().statements().getFirst();
+        var value = ((io.codelaser.maddi.cst.api.statement.LocalVariableCreation) read).localVariable().assignmentExpression();
+        var parent = ((io.codelaser.maddi.cst.api.variable.FieldReference) ((VariableExpression) value).variable())
+                .scopeVariable();
+        return report.useSites().nonNullAt(read, parent);
+    }
+
     // timefold AbstractExhaustiveSearchDecider.moveRepository (CodeLaser/maddi-mod#30 3): Mixed stores null, overrides
     // every lifecycle method that reads the field, and never receives the protected expand the others call on this
     @DisplayName("narrowed reads: this's final field in a method no null-storing class can run (timefold exhaustive search)")
