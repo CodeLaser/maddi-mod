@@ -23,6 +23,7 @@ import io.codelaser.maddi.cst.api.statement.Statement;
 import io.codelaser.maddi.cst.api.statement.TryStatement;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -4176,4 +4177,99 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("Object", byName.get("a.b.HB.removeExactly(Object,int):0:element"));
     }
 
+
+    @Language("java")
+    private static final String PRECONDITIONS = """
+            package a.b;
+            import java.util.*;
+            class PF {
+                static class Node { Node next; String name = "x"; }
+                interface Visitor { void visit(Node n); }
+                static class Printer implements Visitor { public void visit(Node n) { System.out.println(n.name); } }
+                static class Counter implements Visitor {
+                    int count;
+                    public void visit(Node n) { count += n.name.length(); }
+                }
+                interface Sink { void accept(Node n); }
+                static class Strict implements Sink { public void accept(Node n) { System.out.println(n.name); } }
+                static class Lenient implements Sink { public void accept(Node n) { if (n != null) System.out.println(n.name); } }
+                interface Echo { void echo(Node n); }
+                static class Loud implements Echo { public void echo(Node n) { System.out.println(n.name); } }
+                interface Quiet { void hush(Node n); }
+                static class Hush implements Quiet { public void hush(Node n) { System.out.println(n.name); } }
+                static class St {
+                    St parent;
+                    final List<St> stats = new ArrayList<>();
+                    void replace(St oldstat, St newstat) {
+                        stats.add(newstat);
+                        newstat.parent = this;
+                    }
+                }
+                static class IfSt extends St {
+                    St ifs;
+                    @Override
+                    void replace(St oldstat, St newstat) {
+                        super.replace(oldstat, newstat);
+                        if (ifs == oldstat) ifs = newstat;
+                    }
+                }
+                static void show(Node n) { System.out.println(n.name); }
+                static void named(Node n) { System.out.println(n.name); }
+                static void checked(Node n) {
+                    if (n == null) throw new IllegalArgumentException("n");
+                    System.out.println(n.name);
+                }
+                static void use(Node node, Visitor v, Sink s, Echo e, Quiet q, St parent, St first) {
+                    v.visit(node.next);
+                    s.accept(node.next);
+                    e.echo(node.next);
+                    q.hush(node.next);
+                    parent.replace(first, parent.parent);
+                    named(null);
+                    checked(node.next);
+                    Echo shown = PF::show;
+                    Quiet silent = n -> { };
+                    shown.echo(node);
+                    silent.hush(node);
+                }
+            }
+            """;
+
+    @DisplayName("Preconditions: a parameter every member of its override family throws on null (maddi-mod#41)")
+    @Test
+    public void preconditionFamilies() {
+        NullabilityPass.Report report = run("a.b.PF", PRECONDITIONS, NullabilityPass.Policy.KOTLIN);
+        System.out.println(explain(report));
+        Set<String> preconditions = report.preconditions().stream().map(pi -> pi.methodInfo().typeInfo().simpleName()
+                + "." + pi.methodInfo().name() + ":" + pi.name()).collect(Collectors.toCollection(java.util.TreeSet::new));
+        assertEquals("[Counter.visit:n, IfSt.replace:newstat, PF.checked:n, PF.named:n, PF.show:n, PF.use:e, "
+                     + "PF.use:node, PF.use:parent, PF.use:q, PF.use:s, PF.use:v, Printer.visit:n, St.replace:newstat, "
+                     + "Visitor.visit:n]", preconditions.toString(),
+                "Sink: Lenient accepts null; Echo: a method reference implements it; Quiet: a lambda that does not "
+                + "throw; IfSt: through super.replace");
+        Set<String> nullArguments = report.nullArguments().stream().map(a -> a.parameter().methodInfo().name() + "("
+                + a.argument() + (a.literal() ? ", literal" : "") + ")").collect(Collectors.toCollection(java.util.TreeSet::new));
+        assertEquals("[checked(node.next), named(null, literal), replace(parent.parent), visit(node.next)]",
+                nullArguments.toString());
+
+        Map<String, String> byName = byName(report);
+        assertEquals("Node?", byName.get("a.b.PF.Visitor.visit(a.b.PF.Node):0:n"), "the policy is off in KOTLIN");
+
+        NullabilityPass.Report declared = run("a.b.PE", PRECONDITIONS.replace("PF", "PE"),
+                NullabilityPass.Policy.KOTLIN.withPreconditionsNonNull());
+        Map<String, String> declaredByName = byName(declared);
+        assertEquals("Node", declaredByName.get("a.b.PE.Visitor.visit(a.b.PE.Node):0:n"), "the interface with its family");
+        assertEquals("Node", declaredByName.get("a.b.PE.Printer.visit(a.b.PE.Node):0:n"));
+        assertEquals("Node", declaredByName.get("a.b.PE.Counter.visit(a.b.PE.Node):0:n"));
+        assertEquals("St", declaredByName.get("a.b.PE.IfSt.replace(a.b.PE.St,a.b.PE.St):1:newstat"));
+        assertEquals("Node?", declaredByName.get("a.b.PE.Sink.accept(a.b.PE.Node):0:n"), "not a precondition");
+        assertEquals("Node?", declaredByName.get("a.b.PE.named(a.b.PE.Node):0:n"), "a call passes the literal null");
+        assertEquals("Node?", declaredByName.get("a.b.PE.checked(a.b.PE.Node):0:n"), "its answer to null is an IAE");
+        assertEquals(report.nullArguments().size(), declared.nullArguments().size(), "decided before the policy");
+
+        // no null flows on from a declared precondition; under KOTLIN the content write would be asserted anyway
+        assertEquals("List<St?>", byName(run("a.b.PG", PRECONDITIONS.replace("PF", "PG"))).get("a.b.PG.St.stats"));
+        assertEquals("List<St>", byName(run("a.b.PH", PRECONDITIONS.replace("PF", "PH"),
+                NullabilityPass.Policy.NULL_MARKED.withPreconditionsNonNull())).get("a.b.PH.St.stats"));
+    }
 }

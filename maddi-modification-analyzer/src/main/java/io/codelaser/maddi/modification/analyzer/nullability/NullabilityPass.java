@@ -156,16 +156,23 @@ public final class NullabilityPass {
      *                  the local is non-null and no null flows on from it (fernflower's
      *                  {@code protectedRange.add(block); block.addSuccessorException(handle)}). It moves the NPE
      *                  forward, from the dereference to the declaration. Off for Java annotations.
+     * @param preconditionsNonNull a parameter that is a precondition ({@link Report#preconditions}: its method, and
+     *                  in a closed world every method of its override family, dereferences it or throws on null on
+     *                  every normal exit) is declared non-null, so no null flows on from it into the method's slots;
+     *                  a nullable argument is asserted at the call ({@link Report#nullArguments}). Not where a call
+     *                  passes the literal null, nor for a method a method reference or a JUnit null source hands to
+     *                  outside code. Off in every preset (CodeLaser/maddi-mod#41): for Java annotations and C# it
+     *                  changes nothing at run time; for Kotlin it moves the NPE from inside the method to the call.
      */
     public record Policy(NullableState unreached, boolean nullTests, boolean contracts, World world,
                          boolean assertContentWrites, boolean callResults, boolean assertAtDeclaration,
-                         boolean libraryCallbacks, boolean testNulls) {
+                         boolean libraryCallbacks, boolean testNulls, boolean preconditionsNonNull) {
         public static final Policy NULL_MARKED = new Policy(NullableState.NONNULL, true, true, World.CLOSED, false,
-                false, false, false, true);
+                false, false, false, true, false);
         public static final Policy NULL_MARKED_FLOW_ONLY = new Policy(NullableState.NONNULL, false, true,
-                World.CLOSED, false, false, false, false, true);
+                World.CLOSED, false, false, false, false, true, false);
         public static final Policy CAUTIOUS = new Policy(NullableState.UNSPECIFIED, true, true, World.CLOSED, false,
-                false, false, false, true);
+                false, false, false, true, false);
         /**
          * {@link #NULL_MARKED} for the Java→Kotlin translation: content writes are asserted, and a variable assigned an
          * analysed method's nullable result is nullable (Kotlin will not compile it otherwise), and a parameter of an
@@ -173,16 +180,16 @@ public final class NullabilityPass {
          * with what it likes; Kotlin checks a non-null parameter on entry).
          */
         public static final Policy KOTLIN = new Policy(NullableState.NONNULL, true, true, World.CLOSED, true, true,
-                true, true, true);
+                true, true, true, false);
 
         public Policy withoutContracts() {
             return new Policy(unreached, nullTests, false, world, assertContentWrites, callResults, assertAtDeclaration,
-                    libraryCallbacks, testNulls);
+                    libraryCallbacks, testNulls, preconditionsNonNull);
         }
 
         public Policy withWorld(World world) {
             return new Policy(unreached, nullTests, contracts, world, assertContentWrites, callResults, assertAtDeclaration,
-                    libraryCallbacks, testNulls);
+                    libraryCallbacks, testNulls, preconditionsNonNull);
         }
 
         /**
@@ -192,12 +199,18 @@ public final class NullabilityPass {
          */
         public Policy withoutTestNulls() {
             return new Policy(unreached, nullTests, contracts, world, assertContentWrites, callResults, assertAtDeclaration,
-                    libraryCallbacks, false);
+                    libraryCallbacks, false, preconditionsNonNull);
+        }
+
+        /** The precondition parameters are declared non-null ({@link #preconditionsNonNull}). */
+        public Policy withPreconditionsNonNull() {
+            return new Policy(unreached, nullTests, contracts, world, assertContentWrites, callResults, assertAtDeclaration,
+                    libraryCallbacks, testNulls, true);
         }
 
         public Policy withAssertContentWrites(boolean assertContentWrites) {
             return new Policy(unreached, nullTests, contracts, world, assertContentWrites, callResults, assertAtDeclaration,
-                    libraryCallbacks, testNulls);
+                    libraryCallbacks, testNulls, preconditionsNonNull);
         }
     }
 
@@ -225,6 +238,16 @@ public final class NullabilityPass {
     }
 
     /**
+     * A call that may pass null to a precondition parameter ({@link Report#preconditions}).
+     *
+     * @param call     the method call, constructor call, or {@code super(...)}/{@code this(...)} statement's call
+     * @param argument the argument expression
+     * @param literal  the argument is (or may be, as a conditional's branch) the literal {@code null}
+     */
+    public record NullArgument(Element call, ParameterInfo parameter, Expression argument, boolean literal) {
+    }
+
+    /**
      * @param verdicts fields, parameters, and methods (their return value)
      * @param locals   every declared local variable, by its declaration
      * @param useSites per statement, the locals and parameters known non-null when it starts (M4)
@@ -232,6 +255,13 @@ public final class NullabilityPass {
      *                   {@code !!} where Kotlin will see the variable as non-null
      * @param nonNullCallResults calls to an analysed method whose return null reaches, where it reaches only through
      *                   parameters whose arguments at that call cannot be null (by identity; see {@link #callResultNonNull})
+     * @param preconditions the parameters a null argument makes throw before their method completes (dereferenced,
+     *                   required, rejected on every normal exit), in a closed world with their whole override family
+     *                   (CodeLaser/maddi-mod#41). A fact about the program, whatever the policy: diagnose reports
+     *                   their {@link #nullArguments}, an annotator writes {@code @NonNull}, a printer under
+     *                   {@link Policy#preconditionsNonNull} declares them non-null
+     * @param nullArguments the calls that may pass null to a precondition parameter, as the analysis without
+     *                   {@link Policy#preconditionsNonNull} sees them: where the NPE inside the callee comes from
      * @implNote the report is the {@link NullabilityFacts} a printer of a null-checked language asks for: the
      * declaration verdicts, the locals, the assertions at a declaration, the use-site facts, as smart casts only, and
      * the call results. A printer with hints for the library's declarations composes it with
@@ -240,7 +270,8 @@ public final class NullabilityPass {
     public record Report(Map<Info, ParameterizedType> verdicts, Map<Local, ParameterizedType> locals,
                          Map<Object, Object> cause, Map<Object, String> seedOrigin, NonNullFacts useSites,
                          NonNullFacts smartCasts, Set<Local> asserted, Set<Local> unobserved,
-                         Set<Expression> nonNullCallResults) implements NullabilityFacts {
+                         Set<Expression> nonNullCallResults, Set<ParameterInfo> preconditions,
+                         List<NullArgument> nullArguments) implements NullabilityFacts {
 
         @Override
         public ParameterizedType field(FieldInfo fieldInfo) {
@@ -371,6 +402,15 @@ public final class NullabilityPass {
     private final Set<MethodInfo> trustedReturns;
     // analysed parameters an earlier round found non-null on every normal exit of their method: passing null throws
     private final Set<ParameterInfo> preconditions;
+    // CodeLaser/maddi-mod#41: the lambdas in analysed bodies (members of their functional method's family); the analysed
+    // methods a method reference implements (their family has a member the pass does not see); the methods a method
+    // reference hands to whoever calls the function; the parameters a call passes the literal null to; per
+    // precondition parameter, the calls and the node of what each passes
+    private final Set<MethodInfo> lambdaMethods = new HashSet<>();
+    private final Set<MethodInfo> referencedSams = new HashSet<>();
+    private final Set<MethodInfo> referencedMethods = new HashSet<>();
+    private final Set<ParameterInfo> nullLiteralParameters = new HashSet<>();
+    private final List<Object[]> preconditionArguments = new ArrayList<>();
     // what an earlier round found about final fields per runtime class: a read narrowed by 'instanceof' (gap 3)
     private final NarrowedReads narrowed;
     private List<FieldInfo> analysedFields = List.of();
@@ -786,9 +826,15 @@ public final class NullabilityPass {
         };
     }
 
+    // gate NOFAMILYPRECONDITIONS: only methods no override replaces have preconditions, as before CodeLaser/maddi-mod#41
+    private static final boolean FAMILY_PRECONDITIONS_OFF = System.getenv("NOFAMILYPRECONDITIONS") != null;
+
     private Set<ParameterInfo> preconditions() {
         Set<ParameterInfo> set = new HashSet<>();
+        Map<MethodInfo, Set<MethodInfo>> families = policy.world() == World.CLOSED && !FAMILY_PRECONDITIONS_OFF
+                ? families() : Map.of();
         for (MethodInfo mi : analysed) {
+            if (families.containsKey(mi)) continue;
             // a call runs this body only when no override replaces it: an analysed one; in an open world any
             boolean overridable = !mi.isConstructor() && !mi.isStatic() && !mi.access().isPrivate()
                                   && !mi.isFinal() && !mi.typeInfo().isFinal();
@@ -797,7 +843,202 @@ public final class NullabilityPass {
                 if (facts.nonNullAtExit(mi, pi)) set.add(pi);
             }
         }
+        Set<Set<MethodInfo>> distinct = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+        distinct.addAll(families.values());
+        for (Set<MethodInfo> family : distinct) familyPreconditions(family, set);
         return Set.copyOf(set);
+    }
+
+    /*
+     CodeLaser/maddi-mod#41. In a closed world a call to a method an override may replace runs one of its family: the
+     analysed methods connected to it by overriding, up and down (an interface method, its implementations, their
+     overrides, the lambdas implementing it). Kotlin and C# need the family to agree on a parameter's type anyway
+     (f7c595bd, reverted: fernflower's ExprentIterator.processExprent kept a nullable interface parameter under non-null
+     implementations). A library method does not join a family: a call to it is the library's contract, and Kotlin
+     lets each override of a Java declaration choose ('equals(Object)' would otherwise make all of them one family).
+     A parameter position is a precondition of the whole family when
+     - no method reference implements one of its methods: the referenced method is not a member the pass sees;
+     - every member with a body throws on null there: by its own body (NonNullFacts.nonNullAtExit), or by handing the
+       parameter to a member that does, through 'super' (fernflower's IfStatement.replaceStatement);
+     - at least one member has a body.
+     */
+    private void familyPreconditions(Set<MethodInfo> family, Set<ParameterInfo> set) {
+        MethodInfo first = family.iterator().next();
+        int n = first.parameters().size();
+        for (MethodInfo m : family) {
+            if (m.parameters().size() != n || referencedSams.contains(m)) {
+                return;
+            }
+        }
+        for (int i = 0; i < n; i++) {
+            int index = i;
+            Set<MethodInfo> throwing = new HashSet<>();
+            for (MethodInfo m : family) {
+                if (hasBody(m) && facts.nonNullAtExit(m, m.parameters().get(index))) throwing.add(m);
+            }
+            boolean added = true;
+            while (added) {
+                added = false;
+                for (MethodInfo m : family) {
+                    if (hasBody(m) && !throwing.contains(m) && passesToSuper(m, index, throwing)) {
+                        added = throwing.add(m);
+                    }
+                }
+            }
+            if (throwing.isEmpty() || family.stream().anyMatch(m -> hasBody(m) && !throwing.contains(m))) continue;
+            family.forEach(m -> set.add(m.parameters().get(index)));
+        }
+    }
+
+    private void indexFunctionals(List<MethodInfo> methods) {
+        for (MethodInfo mi : methods) {
+            if (mi.methodBody() == null) continue;
+            mi.methodBody().visit(e -> {
+                if (e instanceof Lambda lambda && lambda.methodInfo() != null) {
+                    lambdaMethods.add(lambda.methodInfo());
+                } else if (e instanceof MethodReference mr && mr.methodInfo() != null) {
+                    referencedMethods.add(mr.methodInfo());
+                    ParameterizedType functional = mr.parameterizedType();
+                    MethodInfo sam = functional == null || functional.typeInfo() == null ? null
+                            : functional.typeInfo().singleAbstractMethod();
+                    if (sam != null) referencedSams.add(sam);
+                }
+                return true;
+            });
+        }
+    }
+
+    // what a call passes to a precondition parameter: per alternative of the argument, the literal null or its node,
+    // decided after the closure (nullArguments). Not the caller's own precondition parameter passed on
+    // ('super.replace(oldstat, newstat)'): a null there is reported where it enters the caller
+    private void preconditionArgument(MethodInfo mi, Scope scope, Statement statement, Expression call,
+                                      ParameterInfo parameter, Expression argument) {
+        if (NonNullFacts.unwrap(argument) instanceof VariableExpression own && own.variable() instanceof ParameterInfo pi
+            && preconditions.contains(pi) && !reassigned.contains(pi)) {
+            return;
+        }
+        boolean literal = false;
+        List<Object> nodes = new ArrayList<>();
+        for (Expression alternative : alternatives(argument)) {
+            Expression unwrapped = NonNullFacts.unwrap(alternative);
+            if (unwrapped instanceof NullConstant) {
+                literal = true;
+            } else if (!(unwrapped instanceof VariableExpression ve
+                         && (call != null && facts.nonNullWhenCalled(call, ve.variable())
+                             || facts.nonNullAt(statement, ve.variable())))) {
+                Object node = argumentNode(mi, scope, alternative);
+                if (node != null) nodes.add(node);
+            }
+        }
+        if (literal) nullLiteralParameters.add(parameter);
+        preconditionArguments.add(new Object[]{call != null ? call : statement, parameter, argument, literal, nodes});
+    }
+
+    private List<NullArgument> nullArguments(Set<Object> reached) {
+        List<NullArgument> list = new ArrayList<>();
+        for (Object[] a : preconditionArguments) {
+            boolean literal = (Boolean) a[3];
+            @SuppressWarnings("unchecked") List<Object> nodes = (List<Object>) a[4];
+            if (literal || nodes.stream().anyMatch(reached::contains)) {
+                list.add(new NullArgument((Element) a[0], (ParameterInfo) a[1], (Expression) a[2], literal));
+            }
+        }
+        return List.copyOf(list);
+    }
+
+    /*
+     Policy.preconditionsNonNull: the precondition parameters declared non-null, a family at a time (its members' types
+     must agree). Not a family a call passes the literal null to ('f(null)' always throws, and 'f(null!!)' says nothing
+     more), nor one a method reference hands to outside code, a member overriding a library method calls back
+     (Policy.libraryCallbacks), or JUnit fills from a null source. Nor one a member compares with null: its
+     'if (p == null) throw new IllegalArgumentException(...)' is the method's answer to null, which the caller's
+     assertion would replace by an NPE (langchain4j's ensureNotNull; CodeLaser/maddi-mod#28).
+     */
+    private Set<ParameterInfo> declaredPreconditions() {
+        Map<MethodInfo, Set<MethodInfo>> families = policy.world() == World.CLOSED && !FAMILY_PRECONDITIONS_OFF
+                ? families() : Map.of();
+        Set<ParameterInfo> declared = new HashSet<>();
+        for (ParameterInfo pi : preconditions) {
+            Set<MethodInfo> family = families.getOrDefault(pi.methodInfo(), Set.of(pi.methodInfo()));
+            boolean excluded = family.stream().anyMatch(m -> m.parameters().size() <= pi.index()
+                    || nullLiteralParameters.contains(m.parameters().get(pi.index()))
+                    || referencedMethods.contains(m) || junitNullSource(m)
+                    || hasBody(m) && comparedWithNull(m, m.parameters().get(pi.index()))
+                    || overrides(m).stream().anyMatch(o -> !analysed.contains(o)));
+            if (!excluded) declared.add(pi);
+        }
+        return declared;
+    }
+
+    private static boolean comparedWithNull(MethodInfo m, ParameterInfo pi) {
+        boolean[] found = {false};
+        m.methodBody().visit(e -> {
+            if (e instanceof BinaryOperator bo) {
+                Expression other = bo.lhs() instanceof NullConstant ? bo.rhs()
+                        : bo.rhs() instanceof NullConstant ? bo.lhs() : null;
+                if (other instanceof VariableExpression ve && pi.equals(ve.variable())) found[0] = true;
+            }
+            return !found[0];
+        });
+        return found[0];
+    }
+
+    private static boolean hasBody(MethodInfo m) {
+        return !m.isAbstract() && m.methodBody() != null;
+    }
+
+    // the analysed methods, and the lambdas in their bodies, connected by overriding; only methods in a family of two
+    // or more. A method reference implementing an analysed method marks that method's family (referencedSams)
+    private Map<MethodInfo, Set<MethodInfo>> families() {
+        Map<MethodInfo, Set<MethodInfo>> family = new HashMap<>();
+        for (MethodInfo mi : analysed) {
+            if (mi.isConstructor() || mi.isStatic()) continue;
+            for (MethodInfo overridden : overrides(mi)) {
+                if (analysed.contains(overridden)) merge(family, mi, overridden);
+            }
+        }
+        for (MethodInfo mi : lambdaMethods) {
+            for (MethodInfo overridden : overrides(mi)) {
+                if (analysed.contains(overridden)) merge(family, mi, overridden);
+            }
+        }
+        return family;
+    }
+
+    private static void merge(Map<MethodInfo, Set<MethodInfo>> family, MethodInfo a, MethodInfo b) {
+        Set<MethodInfo> fa = family.computeIfAbsent(a, k -> new HashSet<>(Set.of(k)));
+        Set<MethodInfo> fb = family.computeIfAbsent(b, k -> new HashSet<>(Set.of(k)));
+        if (fa == fb) return;
+        Set<MethodInfo> big = fa.size() >= fb.size() ? fa : fb;
+        Set<MethodInfo> small = big == fa ? fb : fa;
+        big.addAll(small);
+        for (MethodInfo m : small) family.put(m, big);
+    }
+
+    /*
+     The method hands its parameter to a member of 'to' through 'super', as a statement of its body that every normal
+     exit passes (nothing before it may leave), and never assigns the parameter.
+     */
+    private static boolean passesToSuper(MethodInfo m, int index, Set<MethodInfo> to) {
+        ParameterInfo pi = m.parameters().get(index);
+        boolean[] assigned = {false};
+        m.methodBody().visit(e -> {
+            if (e instanceof Assignment a && pi.equals(a.variableTarget())) assigned[0] = true;
+            return !assigned[0];
+        });
+        if (assigned[0]) return false;
+        for (Statement statement : m.methodBody().statements()) {
+            if (statement instanceof ExpressionAsStatement eas && eas.expression() instanceof MethodCall mc
+                && to.contains(mc.methodInfo()) && index < mc.parameterExpressions().size()
+                && mc.object() instanceof VariableExpression receiver
+                && receiver.variable() instanceof io.codelaser.maddi.cst.api.variable.This t && t.writeSuper()
+                && NonNullFacts.unwrap(mc.parameterExpressions().get(index)) instanceof VariableExpression ve
+                && pi.equals(ve.variable())) {
+                return true;
+            }
+            if (mayLeave(statement)) return false;
+        }
+        return false;
     }
 
     // analysed methods with a reference return no null reached, not degraded. A type-variable return counts too:
@@ -828,6 +1069,7 @@ public final class NullabilityPass {
                 implementations.computeIfAbsent(overridden, _ -> new java.util.ArrayList<>()).add(mi);
             }
         }
+        indexFunctionals(methods);
         indexKeyedMaps(methods, fields);
         predicates = NullPredicates.infer(methods);
         narrowedReads = narrowed.isEmpty() ? null : narrowed::nonNull;
@@ -891,6 +1133,15 @@ public final class NullabilityPass {
 
         Map<Object, Object> cause = new LinkedHashMap<>();
         reached = closure(cause);
+        List<NullArgument> nullArguments = nullArguments(reached);
+        if (policy.preconditionsNonNull()) {
+            Set<ParameterInfo> declared = declaredPreconditions();
+            if (!declared.isEmpty()) {
+                nonNullContracts.addAll(declared);
+                cause.clear();
+                reached = closure(cause);
+            }
+        }
         if (policy.assertAtDeclaration()) {
             // only where null arrives: elsewhere the assertion would be a '!!' on a non-null value
             assertCandidates.forEach(local -> {
@@ -944,7 +1195,7 @@ public final class NullabilityPass {
                 .withNotNullable(e -> notNullable(e, nonNullCallResults));
         methods.forEach(useSites::walk);
         return new Report(verdicts, locals, cause, seedOrigin, useSites, smartCasts, Set.copyOf(asserted),
-                Set.copyOf(unobservedCandidates), nonNullCallResults);
+                Set.copyOf(unobservedCandidates), nonNullCallResults, preconditions, nullArguments);
     }
 
     /*
@@ -3829,6 +4080,9 @@ public final class NullabilityPass {
                 // an element of the array the call creates: the array is never null, the argument is an element
                 argument(mi, scope, statement, call, list, arguments, i, new Content(parameter));
                 continue;
+            }
+            if (preconditions.contains(parameter)) {
+                preconditionArgument(mi, scope, statement, call, parameter, arguments.get(i));
             }
             // a library parameter typed by its class's type variable ('Map.put(K, V)') does not take the argument: the
             // write is the receiver's slot (receiverSlots), and the parameter would carry it down into every analysed
