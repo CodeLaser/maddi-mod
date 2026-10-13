@@ -623,6 +623,44 @@ public class TestNullabilityPass extends CommonTest {
     }
 
     @Language("java")
+    private static final String ANNOTATION_PRESENT = """
+            package a.b;
+            import java.lang.annotation.Retention;
+            import java.lang.annotation.RetentionPolicy;
+            import java.lang.reflect.Method;
+            class AP {
+                @Retention(RetentionPolicy.RUNTIME)
+                @interface Secured { String action(); }
+                static String enableAuth(Secured secured) { return secured.action(); }
+                static String unchecked(Secured secured) { return secured.action(); }
+                static String reassigned(Secured secured) { return secured.action(); }
+                static String checked(Method method) {
+                    if (method.isAnnotationPresent(Secured.class)) return enableAuth(method.getAnnotation(Secured.class));
+                    return "";
+                }
+                static String plain(Method method) { return unchecked(method.getAnnotation(Secured.class)); }
+                static String moved(Method method, Method other) {
+                    if (!method.isAnnotationPresent(Secured.class)) return "";
+                    method = other;
+                    return reassigned(method.getAnnotation(Secured.class));
+                }
+            }
+            """;
+
+    @DisplayName("isAnnotationPresent(X.class) makes getAnnotation(X.class) on the same element non-null (diagnose, nacos)")
+    @Test
+    public void annotationPresent() {
+        NullabilityPass.Report report = run("a.b.AP", ANNOTATION_PRESENT);
+        System.out.println(explain(report));
+        Map<String, String> byName = byName(report);
+        assertEquals("Secured?", byName.get("a.b.AP.unchecked(a.b.AP.Secured):0:secured"),
+                "the JDK's getAnnotation may return null: the test needs that hint");
+        assertEquals("Secured", byName.get("a.b.AP.enableAuth(a.b.AP.Secured):0:secured"),
+                "nacos AbstractProtocolAuthService.enableAuth: checked by the caller");
+        assertEquals("Secured?", byName.get("a.b.AP.reassigned(a.b.AP.Secured):0:secured"), "the element was reassigned");
+    }
+
+    @Language("java")
     private static final String IN_STATEMENT = """
             package a.b;
             import java.util.HashMap;
