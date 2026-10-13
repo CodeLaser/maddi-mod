@@ -21,10 +21,14 @@
 #
 # 2026-10-13, maddi c2be5f33e: a type parameter that is, or is passed as, a dictionary's key is where K : notnull
 # (CS8714): 52 -> 49 nullable warnings.
+#
+# 2026-10-13, maddi ce6ecea39: notnull dictionary keys through wildcards (CS8714 4 -> 1), measured together with
+# the JDK nullability hints from JSpecify's annotated JDK (fd3f8419c, merged in the meantime), which move the
+# printer's ! assertions throughout: 49 -> 55 nullable warnings.
 types	346
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	346
 compilingFiles	284
 unmappedJdkUses	153
-nullableWarnings	49
+nullableWarnings	55
