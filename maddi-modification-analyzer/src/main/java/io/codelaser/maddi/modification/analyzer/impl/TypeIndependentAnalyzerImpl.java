@@ -558,13 +558,13 @@ public class TypeIndependentAnalyzerImpl extends CommonAnalyzerImpl implements T
                     MethodLinkedVariablesImpl.class);
             if (mlv == null || parameterIndex >= mlv.ofParameters().size()) return false;
             for (Link link : parameterIndex < 0 ? mlv.ofReturnValue() : mlv.ofParameters().get(parameterIndex)) {
-                Value.Immutable reached = LinkToField.immutableOfLinkedField(link, analysisHelper);
+                Value.Immutable reached = LinkToField.immutableOfLinkedField(link, implementation, analysisHelper);
                 if (reached == null) {
-                    if (LinkToField.reachesJudgeableField(link)) return false;
+                    if (LinkToField.reachesJudgeableField(link, implementation)) return false;
                     continue;
                 }
                 if (!reached.isMutable()) continue;
-                ParameterizedType reachedType = LinkToField.reachedFieldType(link);
+                ParameterizedType reachedType = LinkToField.reachedFieldType(link, implementation);
                 TypeInfo reachedTypeInfo = reachedType == null ? null : reachedType.bestTypeInfo();
                 if (reachedTypeInfo == null) return false;
                 Value.EventuallyImmutable ev = eventuallyImmutable(reachedTypeInfo);

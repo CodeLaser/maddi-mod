@@ -1038,10 +1038,12 @@ public class GuardAnalyzerImpl extends CommonAnalyzerImpl implements GuardAnalyz
     private Message blameMethodDependent(MethodInfo impl) {
         MethodLinkedVariables mlv = impl.analysis().getOrNull(METHOD_LINKS, MethodLinkedVariablesImpl.class);
         if (mlv == null) return null;
-        FieldReference fr = LinkToField.firstDependentLinkToField(mlv.ofReturnValue(), analysisHelper);
-        if (fr == null) return null;
-        return MessageImpl.cause(impl, "its return value is linked to the field '" + fr.fieldInfo().name()
-                                       + "', which is mutable: the caller can reach the type's own state through it");
+        Variable reached = LinkToField.firstDependentLinkToField(mlv.ofReturnValue(), impl, analysisHelper);
+        if (reached == null) return null;
+        String what = reached instanceof FieldReference fr ? "the field '" + fr.fieldInfo().name() + "'"
+                : "the captured variable '" + reached.simpleName() + "'";
+        return MessageImpl.cause(impl, "its return value is linked to " + what
+                                       + ", which is mutable: the caller can reach the type's own state through it");
     }
 
     /**

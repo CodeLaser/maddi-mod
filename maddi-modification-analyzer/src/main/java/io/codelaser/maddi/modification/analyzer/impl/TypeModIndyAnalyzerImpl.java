@@ -356,7 +356,7 @@ normal methods: does a modification to the return value imply any modification i
         if (pi.methodInfo().isAbstract() || pi.methodInfo().methodBody().isEmpty()) return DEPENDENT;
         assert pi.index() < mlv.ofParameters().size();
         Links links = mlv.ofParameters().get(pi.index());
-        return worstLinkToFields(links);
+        return worstLinkToFields(links, pi.methodInfo());
     }
 
     private Independent doIndependentMethod(MethodInfo methodInfo, MethodLinkedVariables mlv) {
@@ -366,7 +366,7 @@ normal methods: does a modification to the return value imply any modification i
         if (fluent) return INDEPENDENT;
         boolean typeIsImmutable = analysisHelper.typeImmutable(methodInfo.returnType()).isImmutable();
         if (typeIsImmutable) return INDEPENDENT;
-        Independent worst = worstLinkToFields(mlv.ofReturnValue());
+        Independent worst = worstLinkToFields(mlv.ofReturnValue(), methodInfo);
         if (worst == null || worst.isDependent()) return worst;
         return withDependentExceptions(methodInfo, mlv.ofReturnValue(), worst);
     }
@@ -411,13 +411,13 @@ normal methods: does a modification to the return value imply any modification i
      * hc↔FF fork of the statement family. A decided MUTABLE still concludes DEPENDENT immediately — the bottom
      * dominates whatever the undecided links might become.
      */
-    private Independent worstLinkToFields(Links links) {
+    private Independent worstLinkToFields(Links links, MethodInfo methodInfo) {
         boolean immutableHc = false;
         boolean undecided = false;
         for (Link link : links) {
-            Immutable fieldImmutable = LinkToField.immutableOfLinkedField(link, analysisHelper);
+            Immutable fieldImmutable = LinkToField.immutableOfLinkedField(link, methodInfo, analysisHelper);
             if (fieldImmutable == null) {
-                if (LinkToField.reachesJudgeableField(link)) undecided = true;
+                if (LinkToField.reachesJudgeableField(link, methodInfo)) undecided = true;
             } else {
                 if (fieldImmutable.isMutable()) return DEPENDENT;
                 if (fieldImmutable.isImmutableHC()) immutableHc = true;
