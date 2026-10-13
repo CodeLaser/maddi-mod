@@ -1977,6 +1977,44 @@ public class TestNullabilityPass extends CommonTest {
                 "Java annotations say what can happen");
     }
 
+    @DisplayName("Kotlin: a local a for loop's init clause or condition dereferences is asserted at its declaration")
+    @Test
+    public void assertedBeforeForLoop() {
+        NullabilityPass.Report report = run("a.b.AF", """
+                package a.b;
+                class AF {
+                    static class Block { void touch() { } }
+                    static Block[] holes(int n) { return n > 0 ? new Block[n] : null; }
+                    void clear(int n) {
+                        Block[] arr = holes(n);
+                        int[] counts = new int[3];
+                        for (int i = arr.length - 1; i >= 0; i--) {
+                            if (arr[i] != null) { arr[i].touch(); counts[0]++; }
+                        }
+                    }
+                    void viaCondition(int n) {
+                        Block[] arr = holes(n);
+                        for (int i = 0; i < arr.length; i++) { System.out.println(arr[i]); }
+                    }
+                    void notCertain(int n) {
+                        Block[] arr = holes(n);
+                        for (int i = 0; i < n; i++) { System.out.println(arr.length); }
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        List<String> asserted = new java.util.ArrayList<>();
+        for (MethodInfo mi : parsed.methods()) {
+            mi.methodBody().visit(e -> {
+                if (e instanceof io.codelaser.maddi.cst.api.statement.LocalVariableCreation lvc) {
+                    lvc.localVariableStream().filter(lv -> report.assertedAtDeclaration(mi, lvc, lv))
+                            .forEach(lv -> asserted.add(mi.name() + "." + lv.simpleName()));
+                }
+                return true;
+            });
+        }
+        assertEquals("[clear.arr, viaCondition.arr]", asserted.toString(), "not a dereference only in the body");
+    }
+
     @Language("java")
     private static final String LOOKUP = """
             package a.b;
