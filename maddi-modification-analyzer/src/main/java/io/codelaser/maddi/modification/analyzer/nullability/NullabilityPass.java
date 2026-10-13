@@ -2628,7 +2628,15 @@ public final class NullabilityPass {
             case LocalVariableCreation lvc -> lvc.localVariableStream()
                     .anyMatch(v -> v.assignmentExpression() != null && dereferences(v.assignmentExpression(), lv));
             case ForEachStatement fe -> isVariable(fe.expression(), lv) || dereferences(fe.expression(), lv);
-            case DoStatement _, ForStatement _, TryStatement _, Block _ -> false;
+            // the init clause, then the condition, run before any iteration: 'for (int i = arr.length - 1; ...)'
+            // (fernflower SFormsFastMapDirect.removeAllFields: 'val arr = elements[2]' then 'arr!!.size', 'arr!![i]')
+            case ForStatement fs -> fs.initializers().stream().anyMatch(init -> switch (init) {
+                case LocalVariableCreation lvc -> lvc.localVariableStream()
+                        .anyMatch(v -> v.assignmentExpression() != null && dereferences(v.assignmentExpression(), lv));
+                case Expression e -> dereferences(e, lv);
+                default -> false;
+            }) || fs.expression() != null && dereferences(fs.expression(), lv);
+            case DoStatement _, TryStatement _, Block _ -> false;
             default -> statement.expression() != null && dereferences(statement.expression(), lv);
         };
     }
