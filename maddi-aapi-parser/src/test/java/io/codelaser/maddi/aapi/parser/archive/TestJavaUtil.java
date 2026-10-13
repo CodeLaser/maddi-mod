@@ -510,7 +510,8 @@ public class TestJavaUtil extends CommonTest {
 
         ParameterInfo p1 = methodInfo.parameters().get(1);
         assertFalse(p1.isModified());
-        assertEquals("U", p1.analysis().getOrDefault(NULLABILITY_PARAMETER, UNSPECIFIED).toString());
+        // JSpecify's JDK: getOrDefault(.., @Nullable V defaultValue), 2026-10-13
+        assertEquals("Q", p1.analysis().getOrDefault(NULLABILITY_PARAMETER, UNSPECIFIED).toString());
         assertSame(IMMUTABLE_HC, p1.analysis().getOrDefault(IMMUTABLE_PARAMETER, MUTABLE));
         assertEquals("@Independent(hc=true, hcReturnValue=true)",
                 p1.analysis().getOrDefault(INDEPENDENT_PARAMETER, DEPENDENT).toString());
@@ -738,7 +739,8 @@ public class TestJavaUtil extends CommonTest {
 
         ParameterInfo p0 = methodInfo.parameters().getFirst();
         assertFalse(p0.isModified());
-        assertEquals("U", p0.analysis().getOrDefault(NULLABILITY_PARAMETER, UNSPECIFIED).toString());
+        // JSpecify's JDK: hash(@Nullable Object @Nullable ... values), 2026-10-13
+        assertEquals("Q", p0.analysis().getOrDefault(NULLABILITY_PARAMETER, UNSPECIFIED).toString());
         assertSame(TRUE, p0.analysis().getOrDefault(CONTAINER_PARAMETER, FALSE));
     }
 

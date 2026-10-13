@@ -102,7 +102,8 @@ public class TestJavaIo extends CommonTest {
 
         ParameterInfo p0 = methodInfo.parameters().getFirst();
         assertSame(INDEPENDENT, p0.analysis().getOrDefault(INDEPENDENT_PARAMETER, DEPENDENT));
-        assertEquals("U", p0.analysis().getOrDefault(NULLABILITY_PARAMETER, UNSPECIFIED).toString());
+        // JSpecify's JDK: println(@Nullable Object x), 2026-10-13
+        assertEquals("Q", p0.analysis().getOrDefault(NULLABILITY_PARAMETER, UNSPECIFIED).toString());
         assertSame(TRUE, p0.analysis().getOrDefault(UNMODIFIED_PARAMETER, FALSE));
     }
 
@@ -135,7 +136,8 @@ public class TestJavaIo extends CommonTest {
 
         ParameterInfo p0 = methodInfo.parameters().getFirst();
         assertSame(DEPENDENT, p0.analysis().getOrDefault(INDEPENDENT_PARAMETER, DEPENDENT));
-        assertEquals("N", p0.analysis().getOrDefault(NULLABILITY_PARAMETER, UNSPECIFIED).toString());
+        // JSpecify's JDK: FilterOutputStream(@Nullable OutputStream out), 2026-10-13
+        assertEquals("Q", p0.analysis().getOrDefault(NULLABILITY_PARAMETER, UNSPECIFIED).toString());
         assertSame(FALSE, p0.analysis().getOrDefault(UNMODIFIED_PARAMETER, FALSE));
     }
 

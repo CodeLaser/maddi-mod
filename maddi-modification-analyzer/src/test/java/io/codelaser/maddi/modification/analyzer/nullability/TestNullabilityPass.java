@@ -2348,6 +2348,12 @@ public class TestNullabilityPass extends CommonTest {
                         @Override
                         public void uncaughtException(Thread t, Throwable e) { }
                     }
+                    static class Completion implements java.nio.channels.CompletionHandler<Integer, Void> {
+                        @Override
+                        public void completed(Integer result, Void attachment) { }
+                        @Override
+                        public void failed(Throwable exc, Void attachment) { }
+                    }
                 }
                 """;
         NullabilityPass.Report kotlin = run("a.b.LO", source, NullabilityPass.Policy.KOTLIN);
@@ -2361,8 +2367,10 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("Path", k.get("a.b.LO.$0.visitFile(java.nio.file.Path,java.nio.file.attribute.BasicFileAttributes):0:file"));
         // hinted non-null: the JDK passes the file's attributes
         assertEquals("BasicFileAttributes", k.get("a.b.LO.$0.visitFile(java.nio.file.Path,java.nio.file.attribute.BasicFileAttributes):1:attrs"));
-        // no hint: the JVM calls it back with what it likes
-        assertEquals("Throwable?", k.get("a.b.LO.Handler.uncaughtException(Thread,Throwable):1:e"));
+        // hinted non-null since the JDK hints took JSpecify's nullability (2026-10-13): the JVM passes the throwable
+        assertEquals("Throwable", k.get("a.b.LO.Handler.uncaughtException(Thread,Throwable):1:e"));
+        // no hint (java.nio.channels has none): the library calls it back with what it likes
+        assertEquals("Throwable?", k.get("a.b.LO.Completion.failed(Throwable,Void):0:exc"));
 
         NullabilityPass.Report java = run("a.b.LJ", source.replace("class LO", "class LJ"),
                 NullabilityPass.Policy.NULL_MARKED);

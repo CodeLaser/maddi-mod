@@ -1324,3 +1324,15 @@ policy) 4 nullable verdicts gone, the same in every run. `TestNullabilityPass` 8
 are not reproducible with C: in two of four runs of the same code the smear above reaches the 8 `RandomSubListSelector`
 declarations, in the other two it does not; four runs without C agreed exactly. Not traced (CodeLaser/maddi-mod#33).
 The A-and-C run above was one of those runs, so A's share in the 8 is not established either.
+
+### 2026-10-13 — the JDK hints take JSpecify's annotated JDK
+
+The JDK hints' nullability is generated from [JSpecify's JDK](https://github.com/jspecify/jdk) (maddi
+`corpus/scripts/jspecify-jdk/jspecify-jdk-nullness.py`; rules, exceptions and numbers in maddi
+`maddi-aapi-archive/.../jdk/JDK-NULLNESS.md`). Nullable returns in the compiled JDK results 161 → 596, nullable
+parameters 173 → 906, non-null parameters 2,689 → 7,048 (primitives included). Non-null returns are not written: the
+pass seeds nothing from them. Returns that are null only through an argument or a function (`orElse`, `getOrDefault`,
+`compute`, `getProperty(key, def)`, ...) and `readObject` stay unhinted, so the per-call reading ("gap 9") keeps
+working. Guava oracle (laser1, current configuration), `NULL_MARKED`: unsafe 368 → 357, noise 1,706 → 1,738 (all from
+JDK returns that are nullable by contract where guava's context guarantees a value); `OPEN`: agree 15,067 → 15,269,
+undecided 3,295 → 3,066. J2K ratchets unchanged.
