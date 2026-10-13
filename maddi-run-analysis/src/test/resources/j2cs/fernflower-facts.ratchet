@@ -37,10 +37,13 @@
 # 2026-10-12, the merged nullability work (maddi-mod c74b6641/6472d988, maddi 7dbf49efe), not the printer: 42 -> 43
 # nullable warnings, a CS8601 in VarProcessor where a map value's ! went away; maddi 3855fc420, before the printer's
 # next commits, already has it.
+#
+# 2026-10-13, maddi c2be5f33e: a type parameter that is, or is passed as, a dictionary's key is where K : notnull
+# (CS8714): 43 -> 38 nullable warnings.
 types	199
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	199
 compilingFiles	182
 unmappedJdkUses	15
-nullableWarnings	43
+nullableWarnings	38
