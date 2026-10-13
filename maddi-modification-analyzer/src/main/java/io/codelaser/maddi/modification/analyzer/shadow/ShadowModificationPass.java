@@ -901,11 +901,16 @@ public class ShadowModificationPass {
                 // projected here. A builder setter returns 'this' and 'anyOf.anyOf <- 0:anyOf': following the
                 // component link made the next setter in the chain modify the first one's argument (#24 R2,
                 // TestBuilderFieldAssignment). A boundary outer callee, or an argument (outer null), keeps it.
+                // The result's own modification face is the whole result, not a component: an accessor's
+                // 'delegate.§m ≡ this.§m' carries guava's ForwardingTable.clear, 'delegate().clear()' on the analyzed
+                // Table.clear, to the receiver (CodeLaser/maddi-mod#42; followsReturnLink admits only ≡ between
+                // modification faces there)
                 String resultFqn = mlv.ofReturnValue().primary() == null ? null
                         : mlv.ofReturnValue().primary().fullyQualifiedName();
                 boolean wholeResultOnly = outer != null && orderMethods.contains(outer) && resultFqn != null;
                 mlv.ofReturnValue().stream().filter(link -> followsReturnLink(link, outer))
-                        .filter(link -> !wholeResultOnly || resultFqn.equals(link.from().fullyQualifiedName()))
+                        .filter(link -> !wholeResultOnly || resultFqn.equals(link.from().fullyQualifiedName())
+                                        || resultModificationFace(link.from(), resultFqn))
                         .forEach(link -> link.to().variableStreamDescend().forEach(v -> {
                     switch (v) {
                         case This thisVar -> {
@@ -1080,6 +1085,12 @@ public class ShadowModificationPass {
      * {@code values.iterator().next()} modify {@code values} (CodeLaser/maddi-mod#24 R1,
      * TestReceiverChainThroughLibrary).
      */
+    // 'rv.§m': the modification face of the result variable itself
+    private static boolean resultModificationFace(Variable from, String resultFqn) {
+        return Util.isVirtualModification(from) && from instanceof FieldReference fr && fr.scopeVariable() != null
+               && resultFqn.equals(fr.scopeVariable().fullyQualifiedName());
+    }
+
     static boolean followsReturnLink(Link link, MethodInfo outer) {
         if (!Util.virtual(link.from()) && !Util.virtual(link.to())) return true;
         if (!link.linkNature().isIdenticalTo()
