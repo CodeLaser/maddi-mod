@@ -1009,6 +1009,7 @@ public class ShadowModificationPass {
                 }
                 case DependentVariable dv -> push(todo, dv.arrayVariable());
                 default -> {
+                    if (!NO_VIEW_LOCAL && v instanceof LocalVariable lv) out.addAll(projectViewLocal(mi, vd, lv));
                     VariableInfoContainer vic = vd.variableInfoContainerOrNull(v.fullyQualifiedName());
                     if (vic != null) {
                         Links links = vic.best().linkedVariables();
@@ -1032,6 +1033,35 @@ public class ShadowModificationPass {
                         }
                     }
                 }
+            }
+        }
+        return out;
+    }
+
+    private static final boolean NO_VIEW_LOCAL = io.codelaser.maddi.modification.link.impl.Gate.isSet("NOVIEWLOCAL");
+
+    /*
+     A local initialised with a call whose result is a VIEW of an argument: the callee's summary says
+     'rv.§m ≡ i:p.§m' (a library factory with @Independent(dependentReturnValue = true), Collections.synchronizedList;
+     CodeLaser/maddi-mod#40). The local is that result, so modifying it modifies the argument, as the chained
+     'synchronizedList(list).add(x)' does through projectReceiverChain. Only this link shape: the plain ≡ links between
+     modification faces in general are not followed from a local (projectModificationIdenticals), and the local's own
+     links carry the view as 's.§m ≡ 0:list.§m', which that rule rightly ignores. Gate NOVIEWLOCAL.
+     */
+    private Set<Object> projectViewLocal(MethodInfo mi, VariableData vd, LocalVariable lv) {
+        if (!(lv.assignmentExpression() instanceof MethodCall mc) || mc.methodInfo() == null) return Set.of();
+        MethodInfo callee = mc.methodInfo();
+        MethodLinkedVariables mlv = callee.analysis().getOrNull(MethodLinkedVariablesImpl.METHOD_LINKS,
+                MethodLinkedVariablesImpl.class);
+        if (mlv == null || mlv.ofReturnValue().primary() == null) return Set.of();
+        String resultFqn = mlv.ofReturnValue().primary().fullyQualifiedName();
+        Set<Object> out = new LinkedHashSet<>();
+        for (Link link : mlv.ofReturnValue()) {
+            if (!link.linkNature().isIdenticalTo() || !link.linkNature().pass().isEmpty()
+                || !resultModificationFace(link.from(), resultFqn) || !Util.isVirtualModification(link.to())) continue;
+            if (Util.firstRealVariable(link.to()) instanceof ParameterInfo pi && pi.methodInfo() == callee
+                && pi.index() < mc.parameterExpressions().size()) {
+                out.addAll(projectReceiverChain(mi, vd, mc.parameterExpressions().get(pi.index()), null));
             }
         }
         return out;

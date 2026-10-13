@@ -88,6 +88,44 @@ class AnnotationToProperty {
         };
     }
 
+    /*
+     @NotNull/@Nullable(nullableArguments = {..}): those type arguments, or for an array its elements (position 0), may
+     hold null; the others stay UNSPECIFIED, as their declaration says. One level deep (see the annotation).
+     */
+    private static Value.Nullability withNullableArguments(ValueImpl.NullabilityImpl top, AnnotationExpression ae,
+                                                          Info info) {
+        io.codelaser.maddi.cst.api.type.ParameterizedType declared = declaredType(info);
+        List<Integer> positions = nullableArguments(ae);
+        if (positions.isEmpty() || declared == null) return top;
+        int n = declared.arrays() > 0 ? 1 : declared.parameters().size();
+        List<ValueImpl.NullabilityImpl> arguments = new java.util.ArrayList<>();
+        for (int i = 0; i < n; i++) {
+            arguments.add(positions.contains(i) ? ValueImpl.NullabilityImpl.NULLABLE
+                    : ValueImpl.NullabilityImpl.UNSPECIFIED);
+        }
+        if (positions.stream().anyMatch(i -> i < 0 || i >= n)) {
+            LOGGER.warn("nullableArguments {} out of range for {} of {}", positions, declared, info);
+        }
+        return new ValueImpl.NullabilityImpl(top.state(), arguments);
+    }
+
+    private static List<Integer> nullableArguments(AnnotationExpression ae) {
+        List<Integer> positions = new java.util.ArrayList<>();
+        for (AnnotationExpression.KV kv : ae.keyValuePairs()) {
+            if (!"nullableArguments".equals(kv.key())) continue;
+            collectInts(kv.value(), positions);
+        }
+        return positions;
+    }
+
+    private static void collectInts(io.codelaser.maddi.cst.api.expression.Expression e, List<Integer> out) {
+        if (e instanceof io.codelaser.maddi.cst.api.expression.IntConstant ic) {
+            out.add(ic.constant());
+        } else if (e instanceof io.codelaser.maddi.cst.api.expression.ArrayInitializer ai) {
+            ai.expressions().forEach(x -> collectInts(x, out));
+        }
+    }
+
     protected Map<Property, Value> annotationsToMap(Info info, List<AnnotationExpression> annotations) {
         Value.Immutable immutable = null;
         Value.Independent independent = null;
@@ -227,10 +265,11 @@ class AnnotationToProperty {
                 } else if (ae.extractBoolean("content") && declaredType(info) != null) {
                     nullability = ValueImpl.NullabilityImpl.contentNonNull(declaredType(info));
                 } else {
-                    nullability = ValueImpl.NullabilityImpl.NONNULL;
+                    nullability = withNullableArguments(ValueImpl.NullabilityImpl.NONNULL, ae, info);
                 }
             } else if (Nullable.class.getCanonicalName().equals(fqn)) {
-                nullability = isAbsent ? ValueImpl.NullabilityImpl.UNSPECIFIED : ValueImpl.NullabilityImpl.NULLABLE;
+                nullability = isAbsent ? ValueImpl.NullabilityImpl.UNSPECIFIED
+                        : withNullableArguments(ValueImpl.NullabilityImpl.NULLABLE, ae, info);
             } else if (Final.class.getCanonicalName().equals(fqn)) {
                 isFinal = valueForTrue;
                 if (!isAbsent) finalAfter = ae.extractString("after", "");

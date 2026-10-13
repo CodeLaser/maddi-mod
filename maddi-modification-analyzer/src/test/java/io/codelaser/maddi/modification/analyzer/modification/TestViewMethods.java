@@ -12,12 +12,11 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Library "view" methods: {@code Collections.synchronizedList(list)} returns an object through which {@code list} can
- * be modified, but the call itself changes nothing. The convention to reach: the argument {@code @NotModified} and
- * {@code @Independent(dependentReturnValue = true)}, so that only a modification through the view reaches the argument
- * ("syncDiscarded=U syncRead=U syncAdd=M ..."). It needs the link engine to share the modification component between a
- * static method's result and such a parameter, which it does not yet (CodeLaser/maddi-mod#40): with that hint, every
- * case read U, which is unsound. Until then the view factories keep the default, the argument modified, and this test
- * pins that sound but imprecise reading; an unmodifiable view's argument is read-only either way.
+ * be modified, but the call itself changes nothing. The JDK hints state the argument {@code @NotModified} and
+ * {@code @Independent(dependentReturnValue = true)}; the shallow link computer shares the modification component of
+ * the result and that argument ({@code rv.§m ≡ 0:list.§m}, CodeLaser/maddi-mod#40), so that only a modification
+ * through the view reaches the argument. Before the link existed the hint read every case U, which is unsound, and
+ * the factories kept the default (every case M). An unmodifiable view's argument is read-only either way.
  */
 public class TestViewMethods extends CommonTest {
 
@@ -36,6 +35,8 @@ public class TestViewMethods extends CommonTest {
                 void checkedClear(List<String> list) { Collections.checkedList(list, String.class).clear(); }
                 void checkedRead(List<String> list) { System.out.println(Collections.checkedList(list, String.class).isEmpty()); }
                 void unmodRead(List<String> list) { System.out.println(Collections.unmodifiableList(list).size()); }
+                static Set<String> wrapper(Map<String, Boolean> map) { return Collections.newSetFromMap(map); }
+                void wrapperAdd(Map<String, Boolean> map) { wrapper(map).add("x"); }
             }
             """;
 
@@ -55,7 +56,12 @@ public class TestViewMethods extends CommonTest {
             sb.append(m).append('=').append(X.findUniqueMethod(m, 1).parameters().getFirst().isUnmodified() ? "U" : "M")
                     .append(' ');
         }
-        assertEquals("syncDiscarded=M syncRead=M syncAdd=M syncAddChained=M setFromMapAdd=M setFromMapRead=M "
-                     + "lifoPush=M checkedClear=M checkedRead=M unmodRead=U ", sb.toString());
+        // a source method passing the view on: its own parameter is read only, and a caller modifying the view it
+        // returns modifies the caller's map (guava's Sets.newSetFromMap)
+        assertEquals("wrapper=" + X.findUniqueMethod("wrapper", 1).parameters().getFirst().isUnmodified()
+                     + " wrapperAdd=" + X.findUniqueMethod("wrapperAdd", 1).parameters().getFirst().isUnmodified(),
+                "wrapper=true wrapperAdd=false");
+        assertEquals("syncDiscarded=U syncRead=U syncAdd=M syncAddChained=M setFromMapAdd=M setFromMapRead=U "
+                     + "lifoPush=M checkedClear=M checkedRead=U unmodRead=U ", sb.toString());
     }
 }

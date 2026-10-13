@@ -53,6 +53,7 @@ import io.codelaser.maddi.cst.api.statement.Statement;
 import io.codelaser.maddi.cst.api.statement.ThrowStatement;
 import io.codelaser.maddi.cst.api.statement.TryStatement;
 import io.codelaser.maddi.cst.api.statement.YieldStatement;
+import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.type.NullableState;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.api.variable.DependentVariable;
@@ -1423,6 +1424,32 @@ public final class NullabilityPass {
         return explicit != null ? explicit : NullableState.UNSPECIFIED;
     }
 
+    /*
+     The content an overridden library method declares nullable, one level down (the hints' nullableArguments, from
+     JSpecify): the elements of 'Object[] toArray()' (guava's overrides of Collection.toArray()), the elements of
+     InvocationHandler.invoke's 'args'. Seeded on the override's own node, the return or the parameter, where the
+     override declares the same shape (the same class or array of it), so that the positions correspond.
+     */
+    private void libraryNullableContent(Object node, ParameterizedType declared,
+                                        java.util.function.Function<MethodInfo, Value.Nullability> nullabilityOf,
+                                        java.util.function.Function<MethodInfo, ParameterizedType> typeOf) {
+        MethodInfo mi = node instanceof ParameterInfo pi ? pi.methodInfo() : (MethodInfo) node;
+        if (declared == null || declared.isVoid() || declared.isPrimitiveExcludingVoid() && declared.arrays() == 0) return;
+        for (MethodInfo m : overrides(mi)) {
+            if (analysed.contains(m)) continue;
+            ParameterizedType theirs = typeOf.apply(m);
+            if (theirs == null || theirs.arrays() != declared.arrays() || theirs.typeInfo() != declared.typeInfo()
+                || theirs.parameters().size() != declared.parameters().size()) continue;
+            List<? extends Value.Nullability> arguments = nullabilityOf.apply(m).arguments();
+            for (int j = 0; j < arguments.size(); j++) {
+                if (arguments.get(j).state() != NullableState.NULLABLE) continue;
+                Object content = declared.arrays() > 0 ? new Content(node) : new Arg(node, j);
+                seed(content, "overrides " + m.fullyQualifiedName() + ", whose "
+                              + (declared.arrays() > 0 ? "elements" : "type argument " + j) + " may be null");
+            }
+        }
+    }
+
     /** A library method, {@code mi} or one it overrides, whose parameter {@code index} accepts null. */
     private String libraryNullableParameter(MethodInfo mi, int index) {
         return java.util.stream.Stream.concat(java.util.stream.Stream.of(mi), overrides(mi).stream())
@@ -2299,7 +2326,14 @@ public final class NullabilityPass {
         if (!mi.isConstructor()) {
             String lib = libraryNullableReturn(mi);
             if (lib != null && !mi.returnType().isVoid()) seed(mi, "overrides " + lib);
+            libraryNullableContent(mi, mi.returnType(), m -> m.analysis().getOrDefault(PropertyImpl.NULLABILITY_METHOD,
+                    ValueImpl.NullabilityImpl.UNSPECIFIED), MethodInfo::returnType);
             for (ParameterInfo pi : mi.parameters()) {
+                int index = pi.index();
+                libraryNullableContent(pi, pi.parameterizedType(), m -> index < m.parameters().size()
+                        ? m.parameters().get(index).analysis().getOrDefault(PropertyImpl.NULLABILITY_PARAMETER,
+                        ValueImpl.NullabilityImpl.UNSPECIFIED) : ValueImpl.NullabilityImpl.UNSPECIFIED,
+                        m -> index < m.parameters().size() ? m.parameters().get(index).parameterizedType() : null);
                 String libParam = libraryNullableParameter(mi, pi.index());
                 if (libParam != null) {
                     seed(pi, "overrides " + libParam);
@@ -4297,6 +4331,37 @@ public final class NullabilityPass {
         }
     }
 
+    /*
+     A lambda handed to a library parameter whose functional type has a nullable type argument (the hints'
+     nullableArguments, from JSpecify): the library calls the lambda with null in each SAM parameter typed by that type
+     argument. 'map.compute(k, (key, old) -> ...)' ('BiFunction<? super K, ? super @Nullable V, ? extends @Nullable
+     V>'): 'old' is null for an absent key. Only where the SAM is declared by the parameter's own functional type, so
+     that its type variables are the ones the positions name.
+     */
+    private void libraryCallback(Lambda lambda, Object pi) {
+        if (!(pi instanceof ParameterInfo parameter) || analysed.contains(parameter.methodInfo())
+            || lambda.methodInfo() == null) return;
+        List<? extends Value.Nullability> arguments = parameter.analysis()
+                .getOrDefault(PropertyImpl.NULLABILITY_PARAMETER, ValueImpl.NullabilityImpl.UNSPECIFIED).arguments();
+        ParameterizedType formal = parameter.parameterizedType();
+        if (arguments.isEmpty() || formal.arrays() > 0 || formal.typeInfo() == null) return;
+        MethodInfo sam = formal.typeInfo().singleAbstractMethod();
+        if (sam == null || sam.typeInfo() != formal.typeInfo()) return;
+        List<ParameterInfo> lambdaParameters = lambda.methodInfo().parameters();
+        if (lambdaParameters.size() != sam.parameters().size()) return;
+        for (int j = 0; j < arguments.size() && j < formal.typeInfo().typeParameters().size(); j++) {
+            if (arguments.get(j).state() != NullableState.NULLABLE) continue;
+            var typeParameter = formal.typeInfo().typeParameters().get(j);
+            for (ParameterInfo samParameter : sam.parameters()) {
+                ParameterizedType t = samParameter.parameterizedType();
+                if (t.arrays() == 0 && t.typeParameter() == typeParameter) {
+                    seed(lambdaParameters.get(samParameter.index()), "called back with null by "
+                                                                     + parameter.methodInfo().fullyQualifiedName());
+                }
+            }
+        }
+    }
+
     // pi: the parameter, or the Content of a varargs parameter
     private void argument(MethodInfo mi, Scope scope, Statement statement, Expression call,
                           LinkComputer.ListOfLinks list, List<Expression> arguments, int i, Object pi) {
@@ -4316,6 +4381,7 @@ public final class NullabilityPass {
         seedCreated(pi, arguments.get(i), mi);
         Expression unwrappedArgument = NonNullFacts.unwrap(arguments.get(i));
         if (policy.callResults() && unwrappedArgument instanceof Lambda lambda) lambdaResult(lambda, pi);
+        if (unwrappedArgument instanceof Lambda lambda) libraryCallback(lambda, pi);
         // 'getUniqueNext(graph, new HashSet<>(mapNext.values()))': a library copy constructor as the argument copies
         // its argument's content into the parameter's slots (fernflower FinallyProcessor)
         if (unwrappedArgument instanceof ConstructorCall copy && copy.constructor() != null

@@ -244,6 +244,16 @@ public record ShallowMethodLinkComputer(Runtime runtime, VirtualFieldComputer vi
                 }
             }
 
+            if (linkLevelRv == 0 && methodInfo.hasReturnValue()) {
+
+                // *************************************************
+                // the result is a view of the parameter (@Independent(dependentReturnValue = true)): what modifies
+                // the result modifies the argument -- Collections.synchronizedList(list).add(x), CodeLaser/maddi-mod#40
+                // *************************************************
+
+                sharedModification(ofReturnValue, returnType, pi);
+            }
+
             // *************************************************
             // links between parameters
             // *************************************************
@@ -287,6 +297,27 @@ public record ShallowMethodLinkComputer(Runtime runtime, VirtualFieldComputer vi
 
     private TypeParameter formalToConcrete(TypeParameter formal, ParameterizedType parameterizedType) {
         return parameterizedType.parameters().get(formal.getIndex()).typeParameter();
+    }
+
+    /*
+     'rv.§m ≡ pi.§m': the returned object and the argument share their modification component, as an instance method's
+     dependent result shares it with 'this' (transfer with the receiver's mutable field). Content is not linked: a view
+     shares the argument's elements through its own type's hidden content, which the call site does not need for
+     modification. Nothing when either type has no modification component (a type parameter, an immutable type).
+     */
+    private void sharedModification(Links.Builder builder, ParameterizedType returnType, ParameterInfo pi) {
+        if (returnType.typeParameter() != null && returnType.arrays() == 0
+            || pi.parameterizedType().typeParameter() != null && pi.parameterizedType().arrays() == 0) return;
+        VirtualFields vfReturn = virtualFieldComputer.compute(returnType, false).virtualFields();
+        VirtualFields vfParameter = virtualFieldComputer.compute(pi.parameterizedType(), false).virtualFields();
+        if (vfReturn == null || vfReturn.mutable() == null || vfParameter == null || vfParameter.mutable() == null) {
+            return;
+        }
+        FieldReference returnM = runtime.newFieldReference(vfReturn.mutable(),
+                runtime.newVariableExpression(builder.primary()), vfReturn.mutable().type());
+        FieldReference parameterM = runtime.newFieldReference(vfParameter.mutable(),
+                runtime.newVariableExpression(pi), vfParameter.mutable().type());
+        builder.add(returnM, LinkNatureImpl.makeIdenticalTo(null), parameterM);
     }
 
     private void modificationExceptLink(Links.Builder builder, ParameterizedType returnType, FieldInfo thisMutable,

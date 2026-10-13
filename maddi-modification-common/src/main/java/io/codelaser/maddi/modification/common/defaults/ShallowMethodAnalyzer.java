@@ -170,13 +170,37 @@ public class ShallowMethodAnalyzer extends AnnotationToProperty {
                 .map(mi -> mi.analysis().getOrDefault(NULLABILITY_METHOD, ValueImpl.NullabilityImpl.UNSPECIFIED)
                         .state())
                 .collect(Collectors.toUnmodifiableSet());
-        if (overridden.contains(NullableState.NONNULL)) {
-            return new ValueOrigin(ValueImpl.NullabilityImpl.NONNULL, FROM_OVERRIDE);
-        }
-        if (overridden.contains(NullableState.NULLABLE)) {
-            return new ValueOrigin(ValueImpl.NullabilityImpl.NULLABLE, FROM_OVERRIDE);
+        for (NullableState state : List.of(NullableState.NONNULL, NullableState.NULLABLE)) {
+            if (overridden.contains(state)) {
+                return new ValueOrigin(inherited(state, methodInfo.returnType(), methodInfo.overrides().stream()
+                        .filter(MethodInfo::isPublic)
+                        .map(mi -> new Declared(mi.returnType(), mi.analysis().getOrDefault(NULLABILITY_METHOD,
+                                ValueImpl.NullabilityImpl.UNSPECIFIED)))
+                        .toList()), FROM_OVERRIDE);
+            }
         }
         return UNSPECIFIED_DEFAULT;
+    }
+
+    private record Declared(ParameterizedType type, Value.Nullability nullability) {
+    }
+
+    /*
+     The state an override inherits, with the overridden declaration's type-argument states when the override declares
+     the same shape (the same class or array of it): guava's 'Object[] toArray()' inherits Collection.toArray()'s
+     nullable elements, N(Q). A different shape ('List<E> subList' over a raw or re-parameterized type) takes the
+     state only: the positions would not correspond.
+     */
+    private static Value.Nullability inherited(NullableState state, ParameterizedType declared, List<Declared> overridden) {
+        for (Declared d : overridden) {
+            if (d.nullability().state() != state || d.nullability().arguments().isEmpty()) continue;
+            if (declared.arrays() == d.type().arrays() && declared.typeInfo() != null
+                && declared.typeInfo() == d.type().typeInfo()
+                && declared.parameters().size() == d.type().parameters().size()) {
+                return d.nullability();
+            }
+        }
+        return state == NullableState.NONNULL ? ValueImpl.NullabilityImpl.NONNULL : ValueImpl.NullabilityImpl.NULLABLE;
     }
 
     private static final ValueOrigin MUTABLE_DEFAULT = new ValueOrigin(ValueImpl.ImmutableImpl.MUTABLE, DEFAULT);
@@ -439,11 +463,15 @@ public class ShallowMethodAnalyzer extends AnnotationToProperty {
                 .map(pi -> pi.analysis().getOrDefault(NULLABILITY_PARAMETER, ValueImpl.NullabilityImpl.UNSPECIFIED)
                         .state())
                 .collect(Collectors.toUnmodifiableSet());
-        if (overridden.contains(NullableState.NULLABLE)) {
-            return new ValueOrigin(ValueImpl.NullabilityImpl.NULLABLE, FROM_OVERRIDE);
-        }
-        if (overridden.contains(NullableState.NONNULL)) {
-            return new ValueOrigin(ValueImpl.NullabilityImpl.NONNULL, FROM_OVERRIDE);
+        for (NullableState state : List.of(NullableState.NULLABLE, NullableState.NONNULL)) {
+            if (overridden.contains(state)) {
+                return new ValueOrigin(inherited(state, pt, parameterInfo.methodInfo().overrides().stream()
+                        .filter(MethodInfo::isPublic)
+                        .map(mi -> mi.parameters().get(parameterInfo.index()))
+                        .map(pi -> new Declared(pi.parameterizedType(), pi.analysis().getOrDefault(NULLABILITY_PARAMETER,
+                                ValueImpl.NullabilityImpl.UNSPECIFIED)))
+                        .toList()), FROM_OVERRIDE);
+            }
         }
         return UNSPECIFIED_DEFAULT;
     }

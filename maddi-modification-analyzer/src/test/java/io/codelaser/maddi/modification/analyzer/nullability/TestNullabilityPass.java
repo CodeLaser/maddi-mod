@@ -2408,6 +2408,54 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("Map<Integer, Exprent?>", byName.get("a.b.SP.byEdge(java.util.List)"));
     }
 
+    @DisplayName("library content nullable one level down (JSpecify's nested positions): overrides and callbacks")
+    @Test
+    public void libraryNestedNullability() {
+        String source = """
+                package a.b;
+                import java.lang.reflect.InvocationHandler;
+                import java.lang.reflect.Method;
+                import java.util.AbstractCollection;
+                import java.util.Iterator;
+                import java.util.List;
+                import java.util.Map;
+                class LN {
+                    static class Bag extends AbstractCollection<String> {
+                        private final List<String> items;
+                        Bag(List<String> items) { this.items = items; }
+                        @Override public Iterator<String> iterator() { return items.iterator(); }
+                        @Override public int size() { return items.size(); }
+                        @Override public Object[] toArray() { return items.toArray(); }
+                    }
+                    static class Handler implements InvocationHandler {
+                        @Override
+                        public Object invoke(Object proxy, Method method, Object[] args) {
+                            return args.length;
+                        }
+                    }
+                    static void count(Map<String, Integer> counts, String word) {
+                        counts.compute(word, (key, old) -> old + 1);
+                    }
+                    static void touch(Map<String, Integer> counts, String word) {
+                        counts.computeIfPresent(word, (key, old) -> old + 1);
+                    }
+                }
+                """;
+        NullabilityPass.Report kotlin = run("a.b.LN", source, NullabilityPass.Policy.KOTLIN);
+        System.out.println(explain(kotlin));
+        Map<String, String> k = kotlin.verdicts().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
+        // Collection.toArray(): '@Nullable Object[]' in JSpecify, the elements; the array itself is not null
+        assertEquals("Object?[]", k.get("a.b.LN.Bag.toArray()"));
+        // InvocationHandler.invoke: 'args' is null for a method without parameters, and its elements may be
+        assertEquals("Object?[]?", k.get("a.b.LN.Handler.invoke(Object,java.lang.reflect.Method,Object[]):2:args"));
+        // Map.compute calls the remapping function with null for an absent key ('? super @Nullable V');
+        // computeIfPresent never does ('? super @NonNull V')
+        // the lambdas in source order: $0 in count, $1 in touch
+        assertEquals("Integer?", k.get("a.b.LN.$0.apply(String,Integer):1:old"));
+        assertEquals("Integer", k.get("a.b.LN.$1.apply(String,Integer):1:old"));
+    }
+
     @DisplayName("a parameter of a library override is nullable for Kotlin unless the library declares it non-null")
     @Test
     public void libraryOverrideParameter() {
