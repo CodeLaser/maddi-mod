@@ -271,6 +271,10 @@ def main():
     ap.add_argument("--jvm-target", default="21", help="Gradle builds: Kotlin's JVM target (Java's)")
     ap.add_argument("--timeout", type=int, default=45, help="minutes per IDE step (warmup, conversion)")
     ap.add_argument("--jdk", default=None, help="the project JDK; default $JAVA_HOME, else the java on PATH")
+    ap.add_argument("--per-package", action="store_true",
+                    help="--plugin: one conversion per package directory, deepest first, as converting a project "
+                         "package by package in the IDE does (guava: one call over 611 files fails with 'PSI and "
+                         "index do not match' on files J2K itself has edited)")
     ap.add_argument("--reindex", action="store_true",
                     help="drop the warmup's indexes, so the conversion run indexes the imported project itself (guava: "
                          "'PSI and index do not match' halfway through the conversion)")
@@ -345,7 +349,23 @@ def main():
             shutil.rmtree(work / "ide" / "system" / d, ignore_errors=True)
         log("dropped the warmup's indexes and caches")
 
-    if a.plugin:
+    failed_packages = []
+    if a.plugin and a.per_package:
+        package_dirs = sorted({p.parent for p in main_root.rglob("*.java")},
+                              key=lambda d: (-len(d.relative_to(main_root).parts), d.as_posix()))
+        batches = package_dirs
+        for i, d in enumerate(package_dirs, 1):
+            rel_dir = d.relative_to(project)
+            t1 = time.time()
+            with open(j2k_log, "a") as lf:
+                lf.write(f"\n=== maddi-j2k {rel_dir}\n")
+                lf.flush()
+                rc = run_bounded([idea_sh, "maddi-j2k", str(project), str(rel_dir)], env, lf, a.timeout)
+            left_here = len(list(d.glob("*.java")))
+            log(f"[{i}/{len(package_dirs)}] {rel_dir}: rc={rc} after {time.time() - t1:.0f}s, {left_here} .java left")
+            if rc != 0:
+                failed_packages.append(f"{rel_dir} (rc={rc})")
+    elif a.plugin:
         batches = [java_files]
         t1 = time.time()
         log("maddi-j2k: the action's code path")
@@ -388,9 +408,11 @@ def main():
         f"kotlin files produced: {len(kt)}",
         f"java files left unconverted: {len(left)}",
         f"batches: {len(batches)}",
-        f"path: {'maddi-j2k plugin (the action)' if a.plugin else 'MCP convert_java_to_kotlin'}",
+        f"path: {'maddi-j2k plugin (the action)' if a.plugin else 'MCP convert_java_to_kotlin'}"
+        + (" per package" if a.per_package else ""),
+        f"failed packages: {len(failed_packages)}",
         f"seconds: {time.time() - t0:.0f}",
-    ] + [f"  left: {f}" for f in left]) + "\n")
+    ] + [f"  failed: {f}" for f in failed_packages] + [f"  left: {f}" for f in left]) + "\n")
     log(f"done: {len(kt)} .kt, {len(left)} .java left; {out}")
 
 
