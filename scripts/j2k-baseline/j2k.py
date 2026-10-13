@@ -147,6 +147,19 @@ def configure_kotlin_gradle(build: Path, version: str, main_root: str, jvm_targe
     build.write_text(text)
 
 
+def run_bounded(cmd: list, env: dict, logfile, timeout_minutes: int) -> int:
+    """An IDE step, killed with its process group after the timeout: a headless IDE that fails to open a project can
+    hang instead of exiting (fernflower, 2026-10-12: nine hours)."""
+    p = subprocess.Popen(cmd, env=env, stdout=logfile, stderr=subprocess.STDOUT, start_new_session=True)
+    try:
+        return p.wait(timeout=timeout_minutes * 60)
+    except subprocess.TimeoutExpired:
+        log(f"timeout after {timeout_minutes} min: {cmd[1]}; killing it")
+        os.killpg(p.pid, 9)
+        p.wait()
+        return 124
+
+
 def git(repo: Path, *args) -> str:
     return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True).stdout.strip()
 
@@ -256,6 +269,7 @@ def main():
     ap.add_argument("--source-root", default="src/main/java", help="the main sources, relative to the module")
     ap.add_argument("--test-root", default="src/test/java", help="the test sources, relative to the module")
     ap.add_argument("--jvm-target", default="21", help="Gradle builds: Kotlin's JVM target (Java's)")
+    ap.add_argument("--timeout", type=int, default=45, help="minutes per IDE step (warmup, conversion)")
     ap.add_argument("--jdk", default=None, help="the project JDK; default $JAVA_HOME, else the java on PATH")
     a = ap.parse_args()
 
@@ -304,6 +318,9 @@ def main():
         f"-Didea.plugins.path={work}/ide/plugins", f"-Didea.log.path={work}/ide/log",
         # without a project JDK J2K resolves no java.* type: `Object?`, no MutableList (warmup's JdkWarmupProjectActivity)
         f"-Dproject.jdk={jdk}", "-Dproject.jdk.name=corpus-jdk",
+        # a directory that several configurators accept (fernflower: Gradle, Eclipse) is not opened headless without
+        # it: 'Missing value for the environment key project.open.type', and the IDE hangs instead of exiting
+        f"-Dproject.open.type={'Maven' if (project / 'pom.xml').exists() else 'Gradle'}",
     ]) + "\n")
     env = dict(os.environ, IDEA_VM_OPTIONS=str(vmoptions))
     if a.plugin:
@@ -316,8 +333,7 @@ def main():
     t0 = time.time()
     log("warmup (project import and indexing)")
     with open(j2k_log, "w") as lf:
-        rc = subprocess.run([idea_sh, "warmup", f"--project-dir={project}"], env=env, stdout=lf,
-                            stderr=subprocess.STDOUT).returncode
+        rc = run_bounded([idea_sh, "warmup", f"--project-dir={project}"], env, lf, a.timeout)
     log(f"warmup rc={rc} after {time.time() - t0:.0f}s")
     if rc != 0:
         raise SystemExit(f"warmup failed; see {j2k_log}")
@@ -329,8 +345,8 @@ def main():
         with open(j2k_log, "a") as lf:
             lf.write("\n=== maddi-j2k\n")
             lf.flush()
-            rc = subprocess.run([idea_sh, "maddi-j2k", str(project), str(main_root.relative_to(project))], env=env,
-                                stdout=lf, stderr=subprocess.STDOUT).returncode
+            rc = run_bounded([idea_sh, "maddi-j2k", str(project), str(main_root.relative_to(project))], env, lf,
+                             a.timeout)
         log(f"maddi-j2k rc={rc} after {time.time() - t1:.0f}s")
         if rc != 0:
             raise SystemExit(f"maddi-j2k failed; see {j2k_log}")
