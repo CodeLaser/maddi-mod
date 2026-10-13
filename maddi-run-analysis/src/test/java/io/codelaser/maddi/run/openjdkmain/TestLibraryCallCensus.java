@@ -43,7 +43,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
  * modifying instance method and the index of every parameter read as modified ("-": none). A parameter whose
  * modifications are ignored (a function argument) does not count. {@code build/census/summary.txt} adds the
  * corpora up per library: calls, members, calls to members without hints, and calls that read an argument or the
- * receiver as modified, which is what hints would have to correct.
+ * receiver as modified, which is what hints would have to correct. The last column is the member's nullability:
+ * the return's state, a colon, then each parameter's (N non-null, Q nullable, U unspecified, - primitive or void).
  */
 @Tag("slow")
 public class TestLibraryCallCensus {
@@ -131,7 +132,7 @@ public class TestLibraryCallCensus {
                     return e.getValue() + "\t" + (hinted ? "hinted" : "DEFAULT") + "\t" + lib + "\t"
                            + m.fullyQualifiedName() + "\t" + m.parameters().stream()
                                    .map(p -> p.parameterizedType().toString().replaceFirst("^Type ", ""))
-                                   .collect(Collectors.joining(", ")) + "\t" + modifies;
+                                   .collect(Collectors.joining(", ")) + "\t" + modifies + "\t" + nullability(m);
                 })
                 .toList();
         Files.write(out.resolve(corpusName + ".txt"), lines);
@@ -151,6 +152,27 @@ public class TestLibraryCallCensus {
             }
         }
         return list.isEmpty() ? "-" : String.join(",", list);
+    }
+
+    // the return's state, then each parameter's: N non-null, Q nullable, U unspecified, - primitive or void
+    private static String nullability(MethodInfo m) {
+        String r = m.isConstructor() || m.returnType().isVoidOrJavaLangVoid() || m.returnType().isPrimitiveExcludingVoid()
+                ? "-" : state(m.analysis().getOrDefault(PropertyImpl.NULLABILITY_METHOD,
+                ValueImpl.NullabilityImpl.UNSPECIFIED));
+        String ps = m.parameters().stream()
+                .map(p -> p.parameterizedType().isPrimitiveExcludingVoid() ? "-"
+                        : state(p.analysis().getOrDefault(PropertyImpl.NULLABILITY_PARAMETER,
+                        ValueImpl.NullabilityImpl.UNSPECIFIED)))
+                .collect(Collectors.joining());
+        return r + ":" + ps;
+    }
+
+    private static String state(io.codelaser.maddi.cst.api.analysis.Value.Nullability n) {
+        return switch (n.state()) {
+            case NONNULL -> "N";
+            case NULLABLE -> "Q";
+            default -> "U";
+        };
     }
 
     // the jar (or jmod) the type was loaded from, without its version; the package's first three segments when the
