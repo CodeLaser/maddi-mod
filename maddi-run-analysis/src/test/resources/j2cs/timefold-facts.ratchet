@@ -29,10 +29,18 @@
 # not printed, used through the mapping's rules) and Micrometer as System.Diagnostics.Metrics: 1386 -> 777 unmapped
 # uses, 2863 -> 2618 errors, 601 -> 596 nullable warnings. types stays the corpus's 1583; 18 fewer files:
 # syntaxCleanFiles 1583 -> 1565, compilingFiles 1013 -> 1007 (8 of the excluded compiled; Micrometer's mapping +2).
+#
+# 2026-10-13, maddi ff94c0d60: type parameters in scope, navigable and sequenced collections on C#'s sorted and ordered
+# ones, JAXB as System.Xml.Serialization with its runtime in the compatibility library (JavaXml.cs), Java resources,
+# Math's exact arithmetic and more of the JDK: 777 -> 381 unmapped uses, 1007 -> 1030 compiling files, 2618 -> 2232
+# errors. 596 -> 611 nullable warnings: CS8714 +12 and CS8602 +3 in the score collectors (AbstractMinMaxSlot,
+# TreeMultiSet, ConnectedRangeChainImpl), whose unconstrained type parameters are now keys of SortedDictionary and
+# OrderedDictionary, which want notnull keys (a `where K : notnull` constraint would answer them); the rest in
+# GenericJaxbIO and its adapters, newly mapped code that meets System.Xml's annotations.
 types	1583
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	1565
-compilingFiles	1007
-unmappedJdkUses	777
-nullableWarnings	596
+compilingFiles	1030
+unmappedJdkUses	381
+nullableWarnings	611
