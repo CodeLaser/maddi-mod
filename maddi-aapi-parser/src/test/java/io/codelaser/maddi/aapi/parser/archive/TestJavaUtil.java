@@ -739,8 +739,8 @@ public class TestJavaUtil extends CommonTest {
 
         ParameterInfo p0 = methodInfo.parameters().getFirst();
         assertFalse(p0.isModified());
-        // JSpecify's JDK: hash(@Nullable Object @Nullable ... values), 2026-10-13
-        assertEquals("Q", p0.analysis().getOrDefault(NULLABILITY_PARAMETER, UNSPECIFIED).toString());
+        // JSpecify's JDK: hash(@Nullable Object @Nullable ... values), 2026-10-13: the array, and its elements
+        assertEquals("Q(Q)", p0.analysis().getOrDefault(NULLABILITY_PARAMETER, UNSPECIFIED).toString());
         assertSame(TRUE, p0.analysis().getOrDefault(CONTAINER_PARAMETER, FALSE));
     }
 

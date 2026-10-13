@@ -1337,6 +1337,41 @@ working. Guava oracle (laser1, current configuration), `NULL_MARKED`: unsafe 368
 JDK returns that are nullable by contract where guava's context guarantees a value); `OPEN`: agree 15,067 → 15,269,
 undecided 3,295 → 3,066. J2K ratchets unchanged.
 
+### 2026-10-13 — JDK hints one level down: elements and type arguments from JSpecify
+
+JSpecify's annotated JDK states nullability below the top level in 170 members of java.base and java.logging, all one
+level deep: an array's elements (`@Nullable Object[] toArray()`, `format`'s `@Nullable Object... args`), a type argument
+(`TemporalQuery<@Nullable ZoneId>`, `Comparator<@Nullable T> nullsFirst`), or a wildcard's bound in a callback
+(`Map.compute`'s `BiFunction<? super K, ? super @Nullable V, ? extends @Nullable V>`, `Optional.map`'s
+`Function<? super T, ? extends @Nullable U>`).
+
+- **Vocabulary.** maddi's `@NotNull` and `@Nullable` get `nullableArguments = {..}`: the type arguments, or for an array
+  its elements (position 0), that may hold null; the others stay UNSPECIFIED. `AnnotationToProperty` builds the B2
+  value (`N(Q)`, `N(U,Q,Q)`). A declaration attribute rather than type-use annotations, after `@NotNull(content =
+  true)`: the hint files and their parser stay as they are.
+- **Generated** by the JSpecify script (188 positions; a plain annotation of the same state is upgraded in place, one
+  with other attributes is left and listed). Non-null returns carrying nested facts now get `@NotNull` (62, e.g.
+  `toArray()`): JSpecify says so, and the attribute needs a host.
+- **Inherited.** The shallow analyzer's override rule carries the argument states when the override declares the same
+  shape (same class or array of it): guava's `toArray()` overrides compile `N(Q)`.
+- **The pass reads two of them.** (1) An analysed override of a library method seeds its return's or parameter's
+  content where the library declares it nullable (`libraryNullableContent`): guava's `toArray()` overrides, and the
+  `args` elements of `InvocationHandler.invoke` overrides. (2) A lambda handed to a library parameter whose functional
+  type has a nullable type argument has the SAM parameters typed by it nullable (`libraryCallback`): `compute`'s `old`,
+  not `computeIfPresent`'s (`? super @NonNull V`). Permissions (a callback that may return null, a collector that
+  accepts null elements) and nested facts of a library call's RESULT at a call site (`Object[] a = c.toArray()`) are
+  not read yet.
+
+Guava oracle (Mac, current configuration), `NULL_MARKED`: unsafe 357 → 341 (the 10 `toArray()` overrides, the 6
+`InvocationHandler` overrides' `args` elements), noise 1,736 → 1,740 (`handleInvocation` gets `args` after `invoke`
+replaced a null with `NO_ARGS`, which the pass does not see; `ConcurrentHashMultiset` and `EvictingQueue` declare
+their `toArray()` elements non-null where the contract allows null). `OPEN`: unsafe 221 → 211. J2K ratchets unchanged
+(fernflower 199/199, 264 tests; langchain4j 344/346, 1,106): their corpora have one `compute` lambda each and no
+`toArray()` call. `TestNullabilityPass.libraryNestedNullability`.
+
+The Kotlin printer's own list of nullable JDK results (`KotlinNullability.NULLABLE_JDK_RESULTS`) stays: it serves a
+translation without the analysis, where no hints are loaded; with the analysis the stored verdicts already decide.
+
 ### 2026-10-13 — parameter preconditions as a fact, per override family (CodeLaser/maddi-mod#41)
 
 A parameter that its method dereferences, requires, or rejects on every normal exit (`NonNullFacts.nonNullAtExit`)
