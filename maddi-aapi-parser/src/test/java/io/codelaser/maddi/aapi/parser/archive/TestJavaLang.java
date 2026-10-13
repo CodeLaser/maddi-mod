@@ -132,7 +132,8 @@ public class TestJavaLang extends CommonTest {
         ParameterInfo p0 = methodInfo.parameters().getFirst();
         assertSame(INDEPENDENT, p0.analysis().getOrDefault(INDEPENDENT_PARAMETER, DEPENDENT));
         assertSame(IMMUTABLE, p0.analysis().getOrDefault(IMMUTABLE_PARAMETER, MUTABLE));
-        assertEquals("U", p0.analysis().getOrDefault(NULLABILITY_PARAMETER, UNSPECIFIED).toString());
+        // JSpecify's JDK: append(@Nullable String str) appends "null", 2026-10-13
+        assertEquals("Q", p0.analysis().getOrDefault(NULLABILITY_PARAMETER, UNSPECIFIED).toString());
         assertSame(TRUE, p0.analysis().getOrDefault(UNMODIFIED_PARAMETER, FALSE));
     }
 
