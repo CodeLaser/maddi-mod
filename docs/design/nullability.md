@@ -1324,3 +1324,33 @@ policy) 4 nullable verdicts gone, the same in every run. `TestNullabilityPass` 8
 are not reproducible with C: in two of four runs of the same code the smear above reaches the 8 `RandomSubListSelector`
 declarations, in the other two it does not; four runs without C agreed exactly. Not traced (CodeLaser/maddi-mod#33).
 The A-and-C run above was one of those runs, so A's share in the 8 is not established either.
+
+### 2026-10-13 — parameter preconditions as a fact, per override family (CodeLaser/maddi-mod#41)
+
+A parameter that its method dereferences, requires, or rejects on every normal exit (`NonNullFacts.nonNullAtExit`)
+is a **precondition**: a null argument throws anyway. Until now the pass knew this only for a method no override
+replaces, and used it between rounds as the callee's contract (an argument is non-null after the call).
+
+- **Families.** In a closed world a call to an overridable method runs one member of its family: the analysed
+  methods connected to it by overriding, up and down, including the lambdas implementing it. A position is a
+  precondition of the whole family when every member with a body throws there, by its own body or by handing the
+  parameter to one that does through `super` (fernflower's `IfStatement.replaceStatement`), and at least one member
+  has a body. A method reference implementing a member rules the family out, because the referenced method is not a
+  member the pass sees. A library method does not join a family: a call to it follows the library's contract, and
+  Kotlin lets each override of a Java declaration choose its own nullability (otherwise every `equals(Object)` would
+  be one family). In an open world only methods no override can replace qualify, as before. Gate
+  `NOFAMILYPRECONDITIONS`.
+- **Reported.** `Report.preconditions()`, and `Report.nullArguments()`: the calls that may pass null to one,
+  decided by the closure before any policy acts. A caller's own precondition parameter passed on is not listed,
+  because its null is reported where it enters. This is the fact diagnose (where the NPE comes from), the Java
+  annotator (`@NonNull`) and the C# printer (non-nullable parameter, `!` at the caller) can use without any
+  change at run time.
+- **`Policy.preconditionsNonNull`**, off in every preset, `withPreconditionsNonNull()`. It declares the family's
+  parameters non-null, so no null flows on into the method's slots. Excluded are families where a call passes the
+  literal null, where a method reference hands a member to outside code, where a member overrides a library method
+  (`libraryCallbacks`) or takes a JUnit null source, and where a member compares the parameter with null (an
+  `IllegalArgumentException` would become the caller's NPE, #28). For Kotlin it moves the NPE from the method's body
+  to the call, the behaviour change not approved on 2026-10-08 (f7c595bd, reverted); the printer side and the
+  measurement are CodeLaser/maddi#125.
+
+`TestNullabilityPass.preconditionFamilies`.
