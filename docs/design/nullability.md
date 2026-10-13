@@ -1353,4 +1353,7 @@ replaces, and used it between rounds as the callee's contract (an argument is no
   to the call, the behaviour change not approved on 2026-10-08 (f7c595bd, reverted); the printer side and the
   measurement are CodeLaser/maddi#125.
 
-`TestNullabilityPass.preconditionFamilies`.
+Guava oracle against the gate `NOFAMILYPRECONDITIONS`: the same disagreements under all four policies
+(NULL_MARKED 416 unsafe / 2,184 noise, OPEN 271 / 2,190). Only the cause chain the explanation picks differs for
+52 of them, an equally long path through another override (`ForwardingSet.delegate()` against
+`ForwardingCollection.delegate()`). `TestNullabilityPass.preconditionFamilies`.
