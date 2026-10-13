@@ -58,4 +58,42 @@ public class TestMockitoVerify extends CommonTest {
         assertEquals("verifyThenAdd=U verifyTimesThenClear=U verifySize=U verifyNoMore=U resetMock=M ",
                 sb.toString());
     }
+
+    // stubbing (OrgMockitoStubbing): the values and throwables a stub hands out later are stored, not changed
+    @Language("java")
+    private static final String STUBBING = """
+            package a.b;
+            import java.util.List;
+            import static org.mockito.Mockito.*;
+            import static org.mockito.BDDMockito.willThrow;
+            class Y {
+                @SuppressWarnings("unchecked")
+                private final List<Object> m = mock(List.class);
+                void thenReturnNext(List<String> next) { when(m.get(0)).thenReturn("a", next); }
+                void thenThrowIt(RuntimeException e) { when(m.size()).thenThrow(e); }
+                void doThrowIt(RuntimeException e) { doThrow(e).when(m).clear(); }
+                void doReturnNext(List<String> next) { doReturn(1, next).when(m).size(); }
+                void willThrowIt(RuntimeException e) { willThrow(e).given(m).clear(); }
+                void inOrderOf(List<String> list) { inOrder(list); }
+            }
+            """;
+
+    @Test
+    public void testStubbing() {
+        TypeInfo Y = javaInspector.parse("a.b.Y", STUBBING);
+        List<Info> ao = prepWork(Y);
+        var iterating = new io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl(javaInspector,
+                new io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl.ConfigurationBuilder()
+                        .setMaxIterations(10)
+                        .setModificationViaReachability(true)
+                        .build());
+        iterating.analyze(ao);
+        StringBuilder sb = new StringBuilder();
+        for (String m : List.of("thenReturnNext", "thenThrowIt", "doThrowIt", "doReturnNext", "willThrowIt", "inOrderOf")) {
+            sb.append(m).append('=').append(Y.findUniqueMethod(m, 1).parameters().getFirst().isUnmodified() ? "U" : "M")
+                    .append(' ');
+        }
+        assertEquals("thenReturnNext=U thenThrowIt=U doThrowIt=U doReturnNext=U willThrowIt=U inOrderOf=U ",
+                sb.toString());
+    }
 }
