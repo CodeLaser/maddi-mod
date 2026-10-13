@@ -41,7 +41,11 @@ public class TestGuava {
         // whole corpus -- TestGuava skipped in 9 ms with no guava on disk and the build said
         // SUCCESSFUL (measured 2026-09-30).
         Corpora.oss("guava").requireConfig();
-        int exitValue = Main.execute(new String[]{
+        // GUAVA_RESULTS_DIR=<dir> writes the results too: the source run that libs/guava's hints are composed from
+        // (GUAVA.md §Regenerating), at the work ceiling it names. Read before the fixpoint engine's class loads.
+        String resultsDir = System.getenv("GUAVA_RESULTS_DIR");
+        if (resultsDir != null) System.setProperty("maddi.workCeiling", "30000000");
+        java.util.List<String> args = new java.util.ArrayList<>(java.util.List.of(
                 "--input-configuration=" + CONFIG
                 , "--analysis-steps=modification"
                 , "--preload-analysis-results-dirs=../../maddi/maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles/jdk"
@@ -50,8 +54,9 @@ public class TestGuava {
                 // java.base package. Without this flag the unit is dropped and the run ends at
                 // EXIT_PARSER_ERROR before the analyzer is reached at all, so the test would be guarding the
                 // parse and nothing else.
-                , "--jdk-internals"
-        });
+                , "--jdk-internals"));
+        if (resultsDir != null) args.add("--analysis-results-dir=" + resultsDir);
+        int exitValue = Main.execute(args.toArray(new String[0]));
         assertEquals(Main.EXIT_OK, exitValue);
     }
 }
