@@ -15,11 +15,14 @@
 package io.codelaser.maddi.modification.analyzer.impl;
 
 import io.codelaser.maddi.modification.common.AnalysisHelper;
+import io.codelaser.maddi.modification.link.impl.Gate;
 import io.codelaser.maddi.modification.link.impl.LinkNatureImpl;
 import io.codelaser.maddi.modification.prepwork.Util;
 import io.codelaser.maddi.modification.prepwork.variable.Link;
 import io.codelaser.maddi.modification.prepwork.variable.Links;
 import io.codelaser.maddi.cst.api.analysis.Value;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.cst.api.variable.Variable;
@@ -31,8 +34,21 @@ import io.codelaser.maddi.cst.api.variable.Variable;
  * guard explaining a violation ({@code GuardAnalyzerImpl.blameMethodDependent}) share one definition. They must not
  * drift: the guard's job is to name the very link the analyzer's verdict rests on, so a second, hand-rolled notion of
  * "links to a mutable field" would sooner or later blame something other than the cause.
+ * <p>
+ * A variable CAPTURED from an enclosing method counts as a field of the instance (CodeLaser/maddi-mod#39). The method
+ * of a local or anonymous class, or a lambda, that links to a parameter of the method it sits in reaches its own state:
+ * the captured variable is the object's synthetic final field, and a caller that modifies what the method returns
+ * modifies that state (guava's {@code new ForwardingDeque<T>() { delegate() { return delegate; } }}: read as independent,
+ * it made the abstract {@code delegate()} independent through the fold, and every mutator of the six Forwarding* types
+ * whose only implementations capture, {@code push}, {@code pop}, ..., non-modifying). The modification side already
+ * counted a captured variable as the instance's ({@code copyModificationsIntoMethod}'s closure set); this is the
+ * independence side of the same fact. A captured LOCAL variable does not reach the summary's links (the statement-level
+ * link to it is not built), so only captured parameters are judged here. Gate {@code NOCAPTURED} restores the
+ * fields-only rule, for an A/B.
  */
 class LinkToField {
+
+    private static final boolean NO_CAPTURED = Gate.isSet("NOCAPTURED");
 
     private LinkToField() {
         // utility
@@ -47,15 +63,36 @@ class LinkToField {
      * Callers that must distinguish "no field to judge" from "field, still undecided" pair this with
      * {@link #reachesJudgeableField}.
      */
-    static Value.Immutable immutableOfLinkedField(Link link, AnalysisHelper analysisHelper) {
+    static Value.Immutable immutableOfLinkedField(Link link, MethodInfo methodInfo, AnalysisHelper analysisHelper) {
         Variable primaryTo = Util.firstRealVariable(link.to());
-        if (!(primaryTo instanceof FieldReference fr) || !fr.scopeIsRecursivelyThis()) return null;
+        if (!reachesInstance(primaryTo, methodInfo)) return null;
         ParameterizedType type = linkedType(link, primaryTo);
         if (type == null) return null;
         Value.Immutable ofDeclaredType = analysisHelper.typeImmutableNullIfUndecided(type);
         if (ofDeclaredType == null) return null; // undecided source type: no verdict, rather than the MUTABLE default
-        Value.Immutable dynamic = dynamicImmutabilityOfWholeField(link, primaryTo, fr);
+        Value.Immutable dynamic = primaryTo instanceof FieldReference fr && fr.scopeIsRecursivelyThis()
+                ? dynamicImmutabilityOfWholeField(link, primaryTo, fr) : null;
         return dynamic == null ? ofDeclaredType : ofDeclaredType.max(dynamic);
+    }
+
+    /** A field of the instance, or a variable captured from an enclosing method: see the class comment. */
+    private static boolean reachesInstance(Variable primaryTo, MethodInfo methodInfo) {
+        if (primaryTo instanceof FieldReference fr && fr.scopeIsRecursivelyThis()) return true;
+        return isCaptured(primaryTo, methodInfo);
+    }
+
+    /**
+     * Whether {@code variable} (or the variable at the root of its field chain) is a parameter of a method that
+     * encloses {@code methodInfo}: the enclosing method of {@code methodInfo}'s local or anonymous class, or of its
+     * lambda, through any such chain. The method's own parameters are not captured, nor are a sibling method's
+     * (which never reach a summary, {@code LinkComputerImpl.isParameterOfSiblingMethod}).
+     */
+    static boolean isCaptured(Variable variable, MethodInfo methodInfo) {
+        if (NO_CAPTURED) return false;
+        Variable root = Util.primary(variable);
+        return root instanceof ParameterInfo pi
+               && pi.methodInfo() != methodInfo
+               && Util.isOrEncloses(pi.methodInfo(), methodInfo);
     }
 
     /**
@@ -63,19 +100,18 @@ class LinkToField {
      * {@link #immutableOfLinkedField} could produce a verdict once the type's immutability is decided. A
      * {@code null} verdict on a link that passes this test means UNDECIDED (wait), not "nothing to judge" (skip).
      */
-    static boolean reachesJudgeableField(Link link) {
+    static boolean reachesJudgeableField(Link link, MethodInfo methodInfo) {
         Variable primaryTo = Util.firstRealVariable(link.to());
-        return primaryTo instanceof FieldReference fr && fr.scopeIsRecursivelyThis()
-               && linkedType(link, primaryTo) != null;
+        return reachesInstance(primaryTo, methodInfo) && linkedType(link, primaryTo) != null;
     }
 
     /**
      * The type whose immutability {@link #immutableOfLinkedField} judges for this link, or {@code null} when the
      * link does not reach a field of the instance with a judgeable type.
      */
-    static ParameterizedType reachedFieldType(Link link) {
+    static ParameterizedType reachedFieldType(Link link, MethodInfo methodInfo) {
         Variable primaryTo = Util.firstRealVariable(link.to());
-        if (!(primaryTo instanceof FieldReference fr) || !fr.scopeIsRecursivelyThis()) return null;
+        if (!reachesInstance(primaryTo, methodInfo)) return null;
         return linkedType(link, primaryTo);
     }
 
@@ -124,15 +160,15 @@ class LinkToField {
     }
 
     /**
-     * The field the first dependence-causing link of {@code links} reaches: the one that makes
+     * The field (or captured variable) the first dependence-causing link of {@code links} reaches: the one that makes
      * {@code worstLinkToFields} return DEPENDENT, i.e. the first link to a field of the instance whose reached type is
      * mutable. {@code null} when no link is that link.
      */
-    static FieldReference firstDependentLinkToField(Links links, AnalysisHelper analysisHelper) {
+    static Variable firstDependentLinkToField(Links links, MethodInfo methodInfo, AnalysisHelper analysisHelper) {
         for (Link link : links) {
-            Value.Immutable immutable = immutableOfLinkedField(link, analysisHelper);
+            Value.Immutable immutable = immutableOfLinkedField(link, methodInfo, analysisHelper);
             if (immutable != null && immutable.isMutable()) {
-                return (FieldReference) Util.firstRealVariable(link.to());
+                return Util.firstRealVariable(link.to());
             }
         }
         return null;
