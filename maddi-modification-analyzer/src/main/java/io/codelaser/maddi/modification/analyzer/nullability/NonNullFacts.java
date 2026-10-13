@@ -432,13 +432,25 @@ public final class NonNullFacts {
         return assigned;
     }
 
-    // locals, parameters, and the instance fields of 'this' (Kotlin smart casts: only the final ones)
+    // locals, parameters, and the instance fields of 'this' (Kotlin smart casts: only the final ones). Kotlin also
+    // smart-casts a val property of a stable receiver: 'cl.superClass != null && cl.superClass.name' with 'cl' a
+    // parameter or a local and 'superClass' a final field of a source type (fernflower; a property of this module,
+    // no custom getter). Forgotten when the receiver is assigned (dependsOnAssigned)
     private boolean trackable(Variable v) {
         return v instanceof ParameterInfo
                || v instanceof LocalVariable lv && !lv.simpleName().startsWith("$")
                || v instanceof FieldReference fr && fr.scopeIsRecursivelyThis() && !fr.fieldInfo().isStatic()
                   && (!kotlinSmartCasts || fr.fieldInfo().isFinal())
+               || kotlinSmartCasts && stableReceiverProperty(v)
                || !kotlinSmartCasts && isConstantElement(v);
+    }
+
+    private static boolean stableReceiverProperty(Variable v) {
+        return v instanceof FieldReference fr && !fr.fieldInfo().isStatic() && fr.fieldInfo().isFinal()
+               && !fr.fieldInfo().owner().compilationUnit().externalLibrary()
+               && fr.scopeVariable() != null
+               && (fr.scopeVariable() instanceof ParameterInfo
+                   || fr.scopeVariable() instanceof LocalVariable lv && !lv.simpleName().startsWith("$"));
     }
 
     /*
@@ -608,7 +620,9 @@ public final class NonNullFacts {
 
     // an element or key-presence fact of a variable that is assigned
     private static boolean dependsOnAssigned(Variable v, Set<Variable> assigned) {
-        return v instanceof DependentVariable dv
+        return v instanceof FieldReference fr && fr.scopeVariable() != null && !fr.scopeIsRecursivelyThis()
+               && assigned.contains(fr.scopeVariable())
+               || v instanceof DependentVariable dv
                && (dv.arrayVariable() != null && assigned.contains(dv.arrayVariable())
                    || dv.indexVariable() != null && assigned.contains(dv.indexVariable()))
                || v instanceof KeyPresence kp && (assigned.contains(kp.map()) || assigned.contains(kp.key()))

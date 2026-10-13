@@ -574,6 +574,54 @@ public class TestNullabilityPass extends CommonTest {
     }
 
     @Language("java")
+    private static final String PROPERTY_SMART_CASTS = """
+            package a.b;
+            class SP {
+                static class Cl {
+                    final Cl superClass;
+                    Cl next;
+                    final String name = "n";
+                    Cl(Cl superClass) { this.superClass = superClass; }
+                }
+                int depth(Cl cl) {
+                    if (cl.superClass == null) return 0;
+                    return cl.superClass.name.length();
+                }
+                int moved(Cl cl, Cl other) {
+                    if (cl.superClass == null) return 0;
+                    cl = other;
+                    return cl.superClass.name.length();
+                }
+                int mutable(Cl cl) {
+                    if (cl.next == null) return 0;
+                    return cl.next.name.length();
+                }
+            }
+            """;
+
+    @DisplayName("smart casts: a final field of a parameter or local is a val property Kotlin smart-casts")
+    @Test
+    public void propertySmartCasts() {
+        NullabilityPass.Report report = run("a.b.SP", PROPERTY_SMART_CASTS, NullabilityPass.Policy.KOTLIN);
+        assertEquals(true, smartCastAtReturn(report, "depth", 1, "superClass"), "'cl.superClass' after the check");
+        assertEquals(false, smartCastAtReturn(report, "moved", 2, "superClass"), "'cl' was assigned in between");
+        assertEquals(false, smartCastAtReturn(report, "mutable", 1, "next"), "a var property is not smart-cast");
+    }
+
+    private boolean smartCastAtReturn(NullabilityPass.Report report, String method, int n, String field) {
+        MethodInfo mi = parsed.findUniqueMethod(method, n);
+        io.codelaser.maddi.cst.api.statement.Statement ret = mi.methodBody().statements().getLast();
+        io.codelaser.maddi.cst.api.variable.Variable[] found = {null};
+        ret.expression().visit(e -> {
+            if (found[0] == null && e instanceof VariableExpression ve
+                && ve.variable() instanceof io.codelaser.maddi.cst.api.variable.FieldReference fr
+                && field.equals(fr.fieldInfo().name())) found[0] = fr;
+            return true;
+        });
+        return report.smartCasts().nonNullAt(ret, found[0]);
+    }
+
+    @Language("java")
     private static final String IN_STATEMENT = """
             package a.b;
             import java.util.HashMap;
