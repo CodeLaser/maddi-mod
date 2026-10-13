@@ -16,10 +16,12 @@
 #
 # 2026-10-12, after the merged nullability work and maddi e15baf22f (result-only self-bounded type parameters
 # erased): 53 -> 52 nullable warnings.
+#
+# 2026-10-13, maddi ff94c0d60: the JDK mappings that came with JAXB: 154 -> 153 unmapped uses.
 types	346
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	346
 compilingFiles	284
-unmappedJdkUses	154
+unmappedJdkUses	153
 nullableWarnings	52
