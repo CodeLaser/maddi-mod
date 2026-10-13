@@ -271,6 +271,9 @@ def main():
     ap.add_argument("--jvm-target", default="21", help="Gradle builds: Kotlin's JVM target (Java's)")
     ap.add_argument("--timeout", type=int, default=45, help="minutes per IDE step (warmup, conversion)")
     ap.add_argument("--jdk", default=None, help="the project JDK; default $JAVA_HOME, else the java on PATH")
+    ap.add_argument("--reindex", action="store_true",
+                    help="drop the warmup's indexes, so the conversion run indexes the imported project itself (guava: "
+                         "'PSI and index do not match' halfway through the conversion)")
     a = ap.parse_args()
 
     module = Path(a.module).expanduser().resolve()
@@ -337,6 +340,10 @@ def main():
     log(f"warmup rc={rc} after {time.time() - t0:.0f}s")
     if rc != 0:
         raise SystemExit(f"warmup failed; see {j2k_log}")
+    if a.reindex:
+        for d in ("index", "caches"):
+            shutil.rmtree(work / "ide" / "system" / d, ignore_errors=True)
+        log("dropped the warmup's indexes and caches")
 
     if a.plugin:
         batches = [java_files]
