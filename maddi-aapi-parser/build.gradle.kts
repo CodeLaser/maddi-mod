@@ -69,6 +69,8 @@ dependencies {
     testImplementation("org.hamcrest:hamcrest:2.2")
     testImplementation("org.junit.jupiter:junit-jupiter-params:6.0.3")
     testImplementation("org.mockito:mockito-core:5.23.0") // libs/mockito
+    testImplementation("commons-io:commons-io:2.20.0") // libs/commonsio
+    testImplementation("com.fasterxml.jackson.core:jackson-databind:2.20.2") // libs/jackson
 
     testRuntimeOnly("info.picocli:picocli:4.7.7")
     testRuntimeOnly("org.junit.jupiter:junit-jupiter:5.9.2")

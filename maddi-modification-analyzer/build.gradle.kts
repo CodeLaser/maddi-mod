@@ -45,6 +45,9 @@ dependencies {
     testImplementation("io.codelaser:maddi-inspection-resource:$maddiVersion")
     // TestMockitoVerify: Mockito on the class path of that one test (CommonTest.extraClassPathParts), for its hints
     testImplementation("org.mockito:mockito-core:5.23.0")
+    // TestJacksonCommonsIo, the same
+    testImplementation("commons-io:commons-io:2.20.0")
+    testImplementation("com.fasterxml.jackson.core:jackson-databind:2.20.2")
     testImplementation("io.codelaser:maddi-java-bytecode:$maddiVersion")
     testImplementation("io.codelaser:maddi-java-parser:$maddiVersion")
 

@@ -55,7 +55,8 @@ public class CompileAnalysisHints {
     // nothing regenerates and nothing loads (it is not in LoadAnalysisResults.ANALYZED_RESULTS either). The
     // pre-rename file name is the giveaway.
     static final List<String> LIBRARIES = List.of("jdk", "libs/test", "libs/log", "libs/kotlin", "libs/assertj",
-            "libs/guava", "libs/hamcrest", "libs/junitparams", "libs/mockito");
+            "libs/guava", "libs/hamcrest", "libs/junitparams", "libs/mockito",
+            "libs/commonsio", "libs/jackson");
     /**
      * Compiled like {@link #LIBRARIES}, but NOT packed into {@code libs.jar} and NOT in
      * {@code LoadAnalysisResults.ANALYZED_RESULTS}: campaign hints for third-party libraries (the analysis-hints
@@ -71,6 +72,8 @@ public class CompileAnalysisHints {
     static final String HAMCREST_LIBRARY = "libs/hamcrest";
     static final String JUNIT_PARAMS_LIBRARY = "libs/junitparams";
     static final String MOCKITO_LIBRARY = "libs/mockito";
+    static final String COMMONS_IO_LIBRARY = "libs/commonsio";
+    static final String JACKSON_LIBRARY = "libs/jackson";
     /** {@link #RESULTS_BASE} as a path; the directory the committed results live in. */
     static final Path RESULTS_BASE_DIR = Path.of(RESULTS_BASE);
     static final String KOTLIN_LIBRARY = "libs/kotlin";
@@ -189,6 +192,15 @@ public class CompileAnalysisHints {
                 compile(new AnalysisHintsCompiler(libraryJavaInspectorFactory("org.mockito.",
                         org.mockito.Mockito.class, net.bytebuddy.ByteBuddy.class,
                         org.hamcrest.Matcher.class), null, jdkPreload), library, resultsBase);
+            } else if (COMMONS_IO_LIBRARY.equals(library)) {
+                // as for AssertJ (the library-call census, 2026-10-13)
+                compile(new AnalysisHintsCompiler(libraryJavaInspectorFactory("org.apache.commons.io.",
+                        org.apache.commons.io.IOUtils.class), null, jdkPreload), library, resultsBase);
+            } else if (JACKSON_LIBRARY.equals(library)) {
+                // the same; jackson-core and -annotations too, which databind's signatures name
+                compile(new AnalysisHintsCompiler(libraryJavaInspectorFactory("com.fasterxml.jackson.",
+                        com.fasterxml.jackson.databind.ObjectMapper.class, com.fasterxml.jackson.core.JsonParser.class,
+                        com.fasterxml.jackson.annotation.JsonInclude.class), null, jdkPreload), library, resultsBase);
             } else if (JUNIT_PARAMS_LIBRARY.equals(library)) {
                 // junit-jupiter-params is not on the shared factory, which carries junit-jupiter-api only; the api and
                 // platform-commons jars too, which its class files reference (otherwise JUnitException and

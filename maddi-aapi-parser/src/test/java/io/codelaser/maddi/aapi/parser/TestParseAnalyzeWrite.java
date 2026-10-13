@@ -110,7 +110,8 @@ public class TestParseAnalyzeWrite extends CommonTest {
         // the Kotlin units that import nothing from kotlin.*, it survives whatever the shared factory carries
         // + JavaUtilLogging, OrgHamcrest, OrgJunitJupiterParamsProvider and OrgMockito (2026-10-12): the last three name
         // their types in full, as OrgAssertjCoreApi does
-        assertEquals(39 + kotlinUnits, types.size() - sideLoadedUnits); // 28 + JavaMath + JavaTimeFormat + OrgE2immuSupport + JavaLangRef + JavaUtilJar + OrgAssertjCoreApi + JavaUtilLogging + OrgHamcrest + OrgJunitJupiterParamsProvider + OrgMockito + OrgMockitoStubbing
+        // + OrgMockitoStubbing, OrgApacheCommonsIo and the three Jackson units (2026-10-13), the same
+        assertEquals(43 + kotlinUnits, types.size() - sideLoadedUnits); // 28 + JavaMath + JavaTimeFormat + OrgE2immuSupport + JavaLangRef + JavaUtilJar + OrgAssertjCoreApi + JavaUtilLogging + OrgHamcrest + OrgJunitJupiterParamsProvider + OrgMockito + OrgMockitoStubbing + OrgApacheCommonsIo + 3 x ComFasterxmlJacksonDatabind*
         for (TypeInfo typeInfo : types) {
             if ("JavaLang".equals(typeInfo.fullyQualifiedName())) {
                 TypeInfo charSeq = typeInfo.findSubType("CharSequence$");
