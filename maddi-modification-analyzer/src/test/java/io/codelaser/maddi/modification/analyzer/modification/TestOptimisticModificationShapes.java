@@ -360,4 +360,51 @@ public class TestOptimisticModificationShapes extends CommonTest {
             assertTrue(method(coll, "removeIf").isNonModifying(), "removeIf, modReach=" + modReach);
         }
     }
+
+    /*
+     CodeLaser/maddi-mod#42, guava's ForwardingTable: a forwarding method calls an ANALYZED interface method on the
+     result of its accessor, 'delegate().clear()'. The accessor's summary carries the receiver on its modification
+     face, 'delegate.§m ≡ this.§m'; the R2 rule (#24, only the whole result for an analyzed outer callee) dropped that
+     link, so the MODREACH cutover wrote clear() non-modifying. With a library interface (ForwardingCollection's
+     Collection.clear) R2 does not apply and the same link was followed.
+     */
+    @Language("java")
+    private static final String FORWARDING = """
+            package a.b;
+            import java.util.ArrayList;
+            import java.util.List;
+            class FW {
+                interface Tbl { void clear(); void put(String s); int size(); }
+                static class Std implements Tbl {
+                    private final List<String> list = new ArrayList<>();
+                    public void clear() { list.clear(); }
+                    public void put(String s) { list.add(s); }
+                    public int size() { return list.size(); }
+                }
+                static abstract class FwdTbl implements Tbl {
+                    protected abstract Tbl delegate();
+                    public void clear() { delegate().clear(); }
+                    public void put(String s) { delegate().put(s); }
+                    public int size() { return delegate().size(); }
+                }
+                static class Wrapping extends FwdTbl {
+                    private final Tbl d;
+                    Wrapping(Tbl d) { this.d = d; }
+                    @Override protected Tbl delegate() { return d; }
+                }
+            }
+            """;
+
+    @DisplayName("#42: modifying an analyzed interface through an accessor's result modifies the receiver")
+    @Test
+    public void forwardingThroughAnalyzedInterface() {
+        TypeInfo X = javaInspector.parse("a.b.FW", FORWARDING);
+        analyze(X);
+        TypeInfo fwd = X.findSubType("FwdTbl");
+        assertTrue(method(fwd, "delegate").isNonModifying(),
+                "the accessor itself does not modify");
+        assertTrue(!method(fwd, "clear").isNonModifying(), "delegate().clear() modifies this, through delegate.§m");
+        assertTrue(!method(fwd, "put").isNonModifying(), "delegate().put(s) modifies this");
+        assertTrue(method(fwd, "size").isNonModifying(), "delegate().size() does not");
+    }
 }
