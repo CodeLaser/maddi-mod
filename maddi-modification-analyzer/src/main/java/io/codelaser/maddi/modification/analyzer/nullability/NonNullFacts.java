@@ -500,6 +500,8 @@ public final class NonNullFacts {
 
     /** Is the key of {@code lookup} ({@code map.get(k)}, {@code map.remove(k)}) known present when it is called? */
     public boolean keyPresentWhenCalled(MethodCall lookup) {
+        Variable annotated = annotationPresence(lookup, "getAnnotation");
+        if (annotated != null) return whenCalled.getOrDefault(lookup, Set.of()).contains(annotated);
         if (lookup.methodInfo() == null
             || !("get".equals(lookup.methodInfo().name()) || "remove".equals(lookup.methodInfo().name()))) {
             return false;
@@ -587,6 +589,29 @@ public final class NonNullFacts {
     }
 
     // 'k = map.higherKey(x)', 'k = map.isEmpty() ? null : map.firstKey()': k is present in map (MAP_KEYS)
+    /*
+     'element.isAnnotationPresent(X.class)' / 'element.getAnnotation(X.class)' on a parameter or local of a type that is
+     a java.lang.reflect.AnnotatedElement (Method, Class, Field, ...): the presence fact, or null. A field as the element
+     is left out: a call may assign it, and nothing forgets the fact then (diagnose, nacos 2026-10-13)
+     */
+    private Variable annotationPresence(MethodCall mc, String name) {
+        if (kotlinSmartCasts || mc.methodInfo() == null || mc.object() == null || mc.parameterExpressions().size() != 1
+            || !name.equals(mc.methodInfo().name())) return null;
+        if (!(unwrap(mc.object()) instanceof VariableExpression ve)
+            || !(ve.variable() instanceof ParameterInfo || ve.variable() instanceof LocalVariable)
+            || !trackable(ve.variable())
+            || !(unwrap(mc.parameterExpressions().getFirst()) instanceof ClassExpression ce)
+            || ce.type() == null || ce.type().typeInfo() == null
+            || !isAnnotatedElement(mc.methodInfo().typeInfo())) return null;
+        return new AnnotationPresence(ve.variable(), ce.type().typeInfo().fullyQualifiedName());
+    }
+
+    private static boolean isAnnotatedElement(TypeInfo ti) {
+        return ti != null && ("java.lang.reflect.AnnotatedElement".equals(ti.fullyQualifiedName())
+                              || ti.superTypesExcludingJavaLangObject().stream()
+                                      .anyMatch(t -> "java.lang.reflect.AnnotatedElement".equals(t.fullyQualifiedName())));
+    }
+
     private void navigatedKey(Variable key, Expression value, Set<Variable> facts) {
         if (kotlinSmartCasts || key == null || NAV_KEYS_OFF) return;
         Expression v = unwrap(value);
@@ -626,6 +651,7 @@ public final class NonNullFacts {
                && (dv.arrayVariable() != null && assigned.contains(dv.arrayVariable())
                    || dv.indexVariable() != null && assigned.contains(dv.indexVariable()))
                || v instanceof KeyPresence kp && (assigned.contains(kp.map()) || assigned.contains(kp.key()))
+               || v instanceof AnnotationPresence ap && assigned.contains(ap.element())
                || v instanceof PureCall pc && assigned.contains(pc.receiver())
                || v instanceof Narrowing n && (assigned.contains(n.subject())
                                                || n.local() != null && assigned.contains(n.local()));
@@ -862,6 +888,8 @@ public final class NonNullFacts {
                 set.addAll(predicated(mc, NullPredicates.When.FALSE_IF_NULL));
                 Variable present = keyPresence(mc, "containsKey");
                 if (present != null) set.add(present);
+                Variable annotated = annotationPresence(mc, "isAnnotationPresent");
+                if (annotated != null) set.add(annotated);
             }
             default -> {
             }
