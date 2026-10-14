@@ -48,10 +48,14 @@
 # 2026-10-13, the code review's fixes at maddi e92ecb0f9 (#130): hoisted anonymous constructors typed by the
 # superclass constructor, boxed overrides of a type parameter's member, mutually creating inner classes, Math by
 # meaning: 1030 -> 1034 compiling files; nullable warnings unchanged (575).
+#
+# 2026-10-14, the nullability pass's parameter preconditions (CodeLaser/maddi#125, maddi-mod#41): a parameter that its
+# method, with its whole override family, dereferences or rejects on every normal exit is non-nullable, and a caller
+# that may pass null says !, which does not throw: 575 -> 553 nullable warnings; 1034 compiling files unchanged.
 types	1583
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	1565
 compilingFiles	1034
 unmappedJdkUses	381
-nullableWarnings	575
+nullableWarnings	553
