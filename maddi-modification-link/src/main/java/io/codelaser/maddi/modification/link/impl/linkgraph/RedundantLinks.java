@@ -5,8 +5,6 @@ import io.codelaser.maddi.modification.link.impl.localvar.FunctionalInterfaceVar
 import io.codelaser.maddi.modification.prepwork.variable.LinkNature;
 import io.codelaser.maddi.modification.prepwork.variable.Links;
 import io.codelaser.maddi.cst.api.variable.Variable;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.*;
 
@@ -25,7 +23,6 @@ import static io.codelaser.maddi.modification.link.impl.LinkNatureImpl.*;
  'stream1.§xs ⊆ stream.§xs' and drops the transitive 'stream1.§xs ⊆ 0:in.§xs'.
  */
 public class RedundantLinks {
-    private static final Logger LOGGER = LoggerFactory.getLogger(RedundantLinks.class);
 
     // the guards are filled up as more calls to redundantLinks follow
     private final Map<LinkNature, Map<Variable, Set<Variable>>> completionGuard = new HashMap<>();

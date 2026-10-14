@@ -64,11 +64,9 @@ class AnnotationToProperty {
             DEFAULT);
 
     protected final AnnotationProvider annotationProvider;
-    protected final Runtime runtime;
 
     AnnotationToProperty(Runtime runtime, AnnotationProvider annotationProvider) {
         this.annotationProvider = annotationProvider;
-        this.runtime = runtime;
     }
 
     @SuppressWarnings("unchecked")

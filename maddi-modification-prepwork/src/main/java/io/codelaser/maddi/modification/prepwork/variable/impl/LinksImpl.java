@@ -17,8 +17,6 @@ import io.codelaser.maddi.cst.api.variable.This;
 import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import org.jetbrains.annotations.NotNull;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.*;
 import java.util.function.Predicate;
@@ -26,7 +24,6 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 public class LinksImpl implements Links {
-    private static final Logger LOGGER = LoggerFactory.getLogger(LinksImpl.class);
 
     public static final Links EMPTY = new LinksImpl(null);
     public static final Property LINKS = new PropertyImpl("links", EMPTY);
