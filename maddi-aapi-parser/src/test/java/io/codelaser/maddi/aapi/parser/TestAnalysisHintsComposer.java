@@ -134,8 +134,8 @@ public class TestAnalysisHintsComposer extends CommonTest {
                             M changeParameterType(int i, F f) { return null; }
                             M changeReturnType(F f) { return null; }
                             M dropParameterTypes(int i, int i1) { return null; }
-                            M insertParameterTypes(int i, F ... f) { return null; }
-                            F [] parameterArray() { return null; }
+                            M insertParameterTypes(int i, F... f) { return null; }
+                            F[] parameterArray() { return null; }
                             int parameterCount() { return 0; }
                             List<F> parameterList() { return null; }
                             F parameterType(int i) { return null; }
@@ -319,7 +319,7 @@ public class TestAnalysisHintsComposer extends CommonTest {
                         H extends HttpSecurityBuilder<H>> {
                         //public abstract class AbstractInterceptUrlRegistry extends AbstractConfigAttributeRequestMatcherRegistry<T>
                         class AbstractInterceptUrlRegistry<
-                            R extends AbstractInterceptUrlConfigurer<C, H> . AbstractInterceptUrlRegistry<R, T> ,
+                            R extends AbstractInterceptUrlConfigurer<C, H>.AbstractInterceptUrlRegistry<R, T>,
                             T> {
                             R filterSecurityInterceptorOncePerRequest(boolean filterSecurityInterceptorOncePerRequest) { return null; }
                         }

@@ -73,14 +73,14 @@ public class TestNullabilityAnnotations extends CommonTest {
                 class X {
                     @Nullable private String lazy;
                     private final String fin;
-                    private String [] arr;
+                    private String[] arr;
                     X(String fin) { this.fin = fin; }
-                    String getLazy() { if (lazy == null) { lazy = "y"; } return lazy; }
+                    String getLazy() { if (lazy == null) lazy = "y"; return lazy; }
                     @Nullable String find(Map<String, String> map, String key) { return map.get(key); }
                     int count(@Nullable String s) { return s.length(); }
                     void call() { System.out.println(count(null)); }
-                    String [] getArr() { return arr; }
-                    @Nullable String [] fresh(int n) { return new String[n]; }
+                    String[] getArr() { return arr; }
+                    @Nullable String[] fresh(int n) { return new String[n]; }
                     @io.codelaser.maddi.annotation.NotNull String declared() { return null; }
                 }
                 """, print(x, NullabilityDecorator.Options.JSPECIFY_NULL_MARKED));
@@ -100,14 +100,14 @@ public class TestNullabilityAnnotations extends CommonTest {
                 class X {
                     @Nullable private String lazy;
                     @Nonnull private final String fin;
-                    @Nullable private String [] arr;
+                    @Nullable private String[] arr;
                     X(@Nonnull String fin) { this.fin = fin; }
-                    @Nonnull String getLazy() { if (lazy == null) { lazy = "y"; } return lazy; }
+                    @Nonnull String getLazy() { if (lazy == null) lazy = "y"; return lazy; }
                     @Nullable String find(@Nonnull Map<String, String> map, @Nonnull String key) { return map.get(key); }
                     int count(@Nullable String s) { return s.length(); }
                     void call() { System.out.println(count(null)); }
-                    @Nullable String [] getArr() { return arr; }
-                    @Nonnull String [] fresh(int n) { return new String[n]; }
+                    @Nullable String[] getArr() { return arr; }
+                    @Nonnull String[] fresh(int n) { return new String[n]; }
                     @io.codelaser.maddi.annotation.NotNull String declared() { return null; }
                 }
                 """, print(x, new NullabilityDecorator.Options(NullabilityDecorator.Flavour.JSR305, true)));

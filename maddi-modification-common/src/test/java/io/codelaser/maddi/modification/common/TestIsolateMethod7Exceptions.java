@@ -35,7 +35,7 @@ public class TestIsolateMethod7Exceptions extends CommonIsolateMethodTest {
         @Language("java")
         String expected = """
                 public class X_method {
-                    static class MyException extends Exception {MyException() { } }
+                    static class MyException extends Exception { MyException() { } }
                     void method() throws MyException {
                     throw new MyException();
                 }

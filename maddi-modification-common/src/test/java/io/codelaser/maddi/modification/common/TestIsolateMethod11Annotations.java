@@ -75,7 +75,7 @@ public class TestIsolateMethod11Annotations extends CommonIsolateMethodTest {
         String expected = """
                 import java.lang.annotation.Annotation;
                 public class X_method {
-                    @interface Named {String value() default ""; }
+                    @interface Named { String value() default ""; }
                     @Named("orderService")
                 String method() {
                     return "x";
@@ -120,7 +120,7 @@ public class TestIsolateMethod11Annotations extends CommonIsolateMethodTest {
         String expected = """
                 import java.lang.annotation.Annotation;
                 public class X_method {
-                    @interface Named {String value() default "";int count() default 0; }
+                    @interface Named { String value() default ""; int count() default 0; }
                     String method(Named named) {
                     return named.value() + named.count();
                 }

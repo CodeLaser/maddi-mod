@@ -147,7 +147,7 @@ public class TestStructuralModificationContract extends CommonTest {
                     @NotModified static void shuffle(@Independent Use.Bag bag) { bag.shuffle(); }
                     @NotModified
                     static void touchAll(@Independent @Modified(hc = true) List<StringBuilder> items) {
-                        for (StringBuilder sb : items) { sb.append("x"); }
+                        for (StringBuilder sb : items) sb.append("x");
                     }
                 }
                 """;

@@ -138,7 +138,7 @@ public class TestIsolateMethod3TypeParameters extends CommonIsolateMethodTest {
         @Language("java")
         String expected = """
                 public class X_method {
-                    static class Helper {<Z> void process(Z z) { } }
+                    static class Helper { <Z> void process(Z z) { } }
                     void method(Helper h) {
                     h.process("x");
                 }

@@ -128,7 +128,7 @@ public class TestIsolateMethod14Hierarchy extends CommonIsolateMethodTest {
         @Language("java")
         String expected = """
                 public class X_method {
-                    static class ArrayList extends java.util.ArrayList<String> {ArrayList() { } }
+                    static class ArrayList extends java.util.ArrayList<String> { ArrayList() { } }
                     Object method() {
                     ArrayList list = new ArrayList();
                     return list.get(0);
@@ -177,7 +177,7 @@ public class TestIsolateMethod14Hierarchy extends CommonIsolateMethodTest {
                     static class LongVector implements Serializable, Iterable<Long> {
                         LongVector() { }
                         boolean add(long o) { return false; }
-                        long [] toArray() { return null; }
+                        long[] toArray() { return null; }
                         public Iterator<Long> iterator() { return null; }
                     }
 
@@ -225,7 +225,7 @@ public class TestIsolateMethod14Hierarchy extends CommonIsolateMethodTest {
         String expected = """
                 public class X_method {
                     static class IDataType { }
-                    static class ObjectID extends IDataType {String getDefaultValue() { return null; } }
+                    static class ObjectID extends IDataType { String getDefaultValue() { return null; } }
                     String method(ObjectID id) {
                     return id.toString() + id.getDefaultValue();
                 }
@@ -269,7 +269,7 @@ public class TestIsolateMethod14Hierarchy extends CommonIsolateMethodTest {
         @Language("java")
         String expected = """
                 public class X_method {
-                    static class ArrayList<I> extends java.util.ArrayList<I> {ArrayList() { } }
+                    static class ArrayList<I> extends java.util.ArrayList<I> { ArrayList() { } }
                     Object method() {
                     ArrayList<String> list = new ArrayList<>();
                     list.add("x");
@@ -412,9 +412,9 @@ public class TestIsolateMethod14Hierarchy extends CommonIsolateMethodTest {
         @Language("java")
         String expected = """
                 public class X_method {
-                    static class Holder implements Sink {Holder() { }public void accept(IDataType t) { } }
-                    static class IDataType implements Comparable<IDataType> {public int compareTo(IDataType arg0) { return 0; } }
-                    interface Sink {void accept(IDataType t); }
+                    static class Holder implements Sink { Holder() { } public void accept(IDataType t) { } }
+                    static class IDataType implements Comparable<IDataType> { public int compareTo(IDataType arg0) { return 0; } }
+                    interface Sink { void accept(IDataType t); }
                     Object method() {
                     Holder h = new Holder();
                     return h;

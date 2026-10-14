@@ -38,7 +38,7 @@ public class TestIsolateMethod1 extends CommonIsolateMethodTest {
         String expected = """
                 import java.util.ArrayList;
                 import java.util.List;
-                public class X_method {void _method_to_be_replaced_() { } }
+                public class X_method { void _method_to_be_replaced_() { } }
                 """;
         assertEquals(expected, isolateMethod.print(r));
     }
@@ -80,7 +80,7 @@ public class TestIsolateMethod1 extends CommonIsolateMethodTest {
                 import java.util.List;
                 public class X_method {
                     static int length(List<String> list) { return 0; }
-                    void add(List<String> list, String ... elements) { }
+                    void add(List<String> list, String... elements) { }
                     void _method_to_be_replaced_() { }
                 }
                 """;
@@ -117,7 +117,7 @@ public class TestIsolateMethod1 extends CommonIsolateMethodTest {
         String expected = """
                 public class X_method {
                     static Logger LOGGER;
-                    interface Logger {default void info(String arg0, Object arg1) { } }
+                    interface Logger { default void info(String arg0, Object arg1) { } }
                     static class R { }
                     void method(R r) {
                     LOGGER.info("... {}", r);
@@ -162,7 +162,7 @@ public class TestIsolateMethod1 extends CommonIsolateMethodTest {
                 import java.util.List;
                 public class X_method {
                     static Logger LOGGER;
-                    interface Logger {default void info(String arg0, Object arg1) { } }
+                    interface Logger { default void info(String arg0, Object arg1) { } }
                     static class R { List<S> strings; }
                     static class S { String s; }
                     void method(R r) {
