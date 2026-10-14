@@ -27,8 +27,6 @@ import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.output.Qualification;
 import io.codelaser.maddi.cst.api.runtime.Runtime;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -37,7 +35,6 @@ import java.util.function.Function;
 import java.util.stream.Stream;
 
 class DecoratorWithComments extends DecoratorImpl {
-    private static final Logger LOGGER = LoggerFactory.getLogger(DecoratorWithComments.class);
 
     private final io.codelaser.maddi.cst.api.runtime.Runtime runtime;
     private final Map<Element, Element> translationMap;

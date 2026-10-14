@@ -4431,6 +4431,12 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("Node?", declaredByName.get("a.b.PE.named(a.b.PE.Node):0:n"), "a call passes the literal null");
         assertEquals("Node?", declaredByName.get("a.b.PE.checked(a.b.PE.Node):0:n"), "its answer to null is an IAE");
         assertEquals(report.nullArguments().size(), declared.nullArguments().size(), "decided before the policy");
+        // what the printers report (CodeLaser/maddi#125): the declared ones that null reached without the policy
+        Set<String> nonNull = declared.preconditionsNonNull().stream().map(pi -> pi.methodInfo().typeInfo().simpleName()
+                + "." + pi.methodInfo().name() + ":" + pi.name()).collect(Collectors.toCollection(java.util.TreeSet::new));
+        assertEquals("[Counter.visit:n, IfSt.replace:newstat, Printer.visit:n, St.replace:newstat, Visitor.visit:n]",
+                nonNull.toString());
+        assertTrue(report.preconditionsNonNull().isEmpty(), "the policy is off");
 
         // no null flows on from a declared precondition; under KOTLIN the content write would be asserted anyway
         assertEquals("List<St?>", byName(run("a.b.PG", PRECONDITIONS.replace("PF", "PG"))).get("a.b.PG.St.stats"));

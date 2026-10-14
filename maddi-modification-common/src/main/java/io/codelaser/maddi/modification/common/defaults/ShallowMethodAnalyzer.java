@@ -52,7 +52,6 @@ property-value map (analysis()).
 public class ShallowMethodAnalyzer extends AnnotationToProperty {
     private static final Logger LOGGER = LoggerFactory.getLogger(ShallowMethodAnalyzer.class);
     private final AnalysisHelper analysisHelper;
-    private final Map<TypeInfo, Set<TypeInfo>> hierarchyProblems = new HashMap<>();
     // shared instance, reachable from concurrently analyzed elements
     private final List<Message> messages = Collections.synchronizedList(new LinkedList<>());
 

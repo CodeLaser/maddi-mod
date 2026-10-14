@@ -425,8 +425,11 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                         java.util.Set<Info> initialDirty, java.util.function.Consumer<Info> beforeFirstRecompute) {
         iterate(analysisOrder, dependencyGraph, initialDirty, beforeFirstRecompute);
         if (configuration.nullability()) {
-            // docs/design/nullability.md M3/B2: one-shot, over the converged link facts
-            var policy = io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass.Policy.NULL_MARKED;
+            // docs/design/nullability.md M3/B2: one-shot, over the converged link facts. The stored verdicts are the
+            // Java annotations' (NullabilityDecorator): a parameter its method needs non-null is @NonNull, which
+            // changes nothing at run time (CodeLaser/maddi#125)
+            var policy = io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass.Policy.NULL_MARKED
+                    .withPreconditionsNonNull();
             if (configuration.nullabilityOpenWorld()) {
                 policy = policy.withWorld(io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass.World.OPEN);
             }

@@ -198,11 +198,6 @@ abstract class IsolationCore {
         }
     }
 
-    /** package-private members are unreachable once a stub lives in its own package; see above */
-    void applyStubMemberAccess(MethodInfo.Builder builder) {
-        if (stubsCrossPackageBoundaries()) builder.addMethodModifier(runtime.methodModifierPublic());
-    }
-
     /** Classes the whole program never extends; empty unless the caller supplies them. See applyStubTypeAccess. */
     Set<TypeInfo> classesNeverExtended = Set.of();
 

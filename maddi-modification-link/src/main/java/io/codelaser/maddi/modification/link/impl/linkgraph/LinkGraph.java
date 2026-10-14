@@ -29,10 +29,10 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 public class LinkGraph {
-    Runtime runtime;
-    boolean checkDuplicateNames;
-    Graph graph;
-    MakeGraph makeGraph;
+    final Runtime runtime;
+    final boolean checkDuplicateNames;
+    final Graph graph;
+    final MakeGraph makeGraph;
 
     public LinkGraph(Runtime runtime,
                      boolean checkDuplicateNames,

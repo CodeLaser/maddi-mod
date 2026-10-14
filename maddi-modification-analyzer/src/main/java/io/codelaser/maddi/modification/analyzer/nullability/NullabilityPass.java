@@ -263,6 +263,9 @@ public final class NullabilityPass {
      *                   {@link Policy#preconditionsNonNull} declares them non-null
      * @param nullArguments the calls that may pass null to a precondition parameter, as the analysis without
      *                   {@link Policy#preconditionsNonNull} sees them: where the NPE inside the callee comes from
+     * @param preconditionsNonNull under {@link Policy#preconditionsNonNull}, the precondition parameters it declared
+     *                   non-null that null reached without it: where a printer reports the change
+     *                   ({@link #preconditionNonNull}). Empty under any other policy
      * @implNote the report is the {@link NullabilityFacts} a printer of a null-checked language asks for: the
      * declaration verdicts, the locals, the assertions at a declaration, the use-site facts, as smart casts only, and
      * the call results. A printer with hints for the library's declarations composes it with
@@ -272,7 +275,8 @@ public final class NullabilityPass {
                          Map<Object, Object> cause, Map<Object, String> seedOrigin, NonNullFacts useSites,
                          NonNullFacts smartCasts, Set<Local> asserted, Set<Local> unobserved,
                          Set<Expression> nonNullCallResults, Set<ParameterInfo> preconditions,
-                         List<NullArgument> nullArguments) implements NullabilityFacts {
+                         List<NullArgument> nullArguments, Set<ParameterInfo> preconditionsNonNull)
+            implements NullabilityFacts {
 
         @Override
         public ParameterizedType field(FieldInfo fieldInfo) {
@@ -304,6 +308,11 @@ public final class NullabilityPass {
         @Override
         public boolean nonNullAt(Expression expression, Variable variable) {
             return smartCasts.nonNullAt(expression, variable);
+        }
+
+        @Override
+        public boolean preconditionNonNull(ParameterInfo parameterInfo) {
+            return preconditionsNonNull.contains(parameterInfo);
         }
 
         /** The pass analysed the program: a declaration without a nullable verdict is not null. */
@@ -1135,8 +1144,13 @@ public final class NullabilityPass {
         Map<Object, Object> cause = new LinkedHashMap<>();
         reached = closure(cause);
         List<NullArgument> nullArguments = nullArguments(reached);
+        Set<ParameterInfo> preconditionsNonNull = Set.of();
         if (policy.preconditionsNonNull()) {
             Set<ParameterInfo> declared = declaredPreconditions();
+            Set<Object> reachedBefore = reached;
+            // the printers report only these: elsewhere the parameter is non-null without the policy
+            preconditionsNonNull = declared.stream().filter(reachedBefore::contains)
+                    .collect(java.util.stream.Collectors.toUnmodifiableSet());
             if (!declared.isEmpty()) {
                 nonNullContracts.addAll(declared);
                 cause.clear();
@@ -1196,7 +1210,7 @@ public final class NullabilityPass {
                 .withNotNullable(e -> notNullable(e, nonNullCallResults));
         methods.forEach(useSites::walk);
         return new Report(verdicts, locals, cause, seedOrigin, useSites, smartCasts, Set.copyOf(asserted),
-                Set.copyOf(unobservedCandidates), nonNullCallResults, preconditions, nullArguments);
+                Set.copyOf(unobservedCandidates), nonNullCallResults, preconditions, nullArguments, preconditionsNonNull);
     }
 
     /*
