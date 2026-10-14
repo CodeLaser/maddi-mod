@@ -25,10 +25,15 @@
 # 2026-10-13, maddi ce6ecea39: notnull dictionary keys through wildcards (CS8714 4 -> 1), measured together with
 # the JDK nullability hints from JSpecify's annotated JDK (fd3f8419c, merged in the meantime), which move the
 # printer's ! assertions throughout: 49 -> 55 nullable warnings.
+#
+# 2026-10-14, the compatibility library under #nullable enable (maddi 5a6347e13, CodeLaser/maddi#131), and the printer
+# asserting what C# then declares nullable (maddi aad8cd424, cce1665b1: a mapping file's ->?, locals the analysis
+# finds not null after containsKey, casts to a method's type parameter): 55 -> 32 nullable warnings, CS8622 8 -> 0
+# (Optional's Map takes T?), CS8602 7 -> 0, CS8618 4 -> 0, CS8601 6 -> 2. 284 files compile, as before.
 types	346
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	346
 compilingFiles	284
 unmappedJdkUses	153
-nullableWarnings	55
+nullableWarnings	32

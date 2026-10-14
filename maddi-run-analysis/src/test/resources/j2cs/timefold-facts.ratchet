@@ -52,10 +52,15 @@
 # 2026-10-14, the nullability pass's parameter preconditions (CodeLaser/maddi#125, maddi-mod#41): a parameter that its
 # method, with its whole override family, dereferences or rejects on every normal exit is non-nullable, and a caller
 # that may pass null says !, which does not throw: 575 -> 553 nullable warnings; 1034 compiling files unchanged.
+#
+# 2026-10-14, the compatibility library under #nullable enable (maddi 5a6347e13, CodeLaser/maddi#131), and the printer
+# asserting what C# then declares nullable (maddi aad8cd424, cce1665b1: a mapping file's ->?, locals the analysis
+# finds not null after containsKey, casts to a method's type parameter): 553 -> 511 nullable warnings, CS8600 22 ->
+# 11, CS8603 84 -> 69, CS8602 34 -> 26, CS8622 6 -> 1. 1034 compiling files unchanged.
 types	1583
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	1565
 compilingFiles	1034
 unmappedJdkUses	381
-nullableWarnings	553
+nullableWarnings	511
