@@ -50,10 +50,18 @@
 # to null is an IllegalArgumentException (also through a helper or a constructor); and maddi f779bcd8b: ! on a
 # call to a method declared T? where the pass proves that call non-null, which C# cannot see: 39 -> 38
 # nullable warnings; compiling files unchanged.
+#
+# 2026-10-14, the compatibility library under #nullable enable (maddi 5a6347e13, CodeLaser/maddi#131), and the printer
+# asserting what C# then declares nullable (maddi aad8cd424, cce1665b1: a mapping file's ->?, locals the analysis
+# finds not null after containsKey, casts to a method's type parameter): 40 -> 32 nullable warnings (devel had 40
+# against this file's 39), CS8602 11 -> 7, CS8601 5 -> 3, CS8604 7 -> 5. Still 182 files compile, 36 errors.
+#
+# Merged on 2026-10-14: the two changes above were each measured alone, from the same base; together not yet.
+# The ceiling is ws/maddi-csharp's, the lower one, so a first run of both says whether they add up.
 types	199
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	199
 compilingFiles	182
 unmappedJdkUses	15
-nullableWarnings	38
+nullableWarnings	32
