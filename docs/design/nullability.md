@@ -1396,7 +1396,10 @@ replaces, and used it between rounds as the callee's contract (an argument is no
   parameters non-null, so no null flows on into the method's slots. Excluded are families where a call passes the
   literal null, where a method reference hands a member to outside code, where a member overrides a library method
   (`libraryCallbacks`) or takes a JUnit null source, and where a member compares the parameter with null (an
-  `IllegalArgumentException` would become the caller's NPE, #28). For Kotlin it moves the NPE from the method's body
+  `IllegalArgumentException` would become the caller's NPE, #28). That comparison counts transitively: a parameter
+  handed to an analysed method that compares its own parameter with null, also through a constructor call,
+  `this(...)` or `super(...)` (langchain4j's `ensureNotBlank` → `isNullOrBlank`, and `Document.from(text)` →
+  `new DefaultDocument(text)`; 173cc319, da2f2c26, found by the Kotlin measurement of maddi#125). For Kotlin it moves the NPE from the method's body
   to the call, the behaviour change not approved on 2026-10-08 (f7c595bd, reverted); the printer side and the
   measurement are CodeLaser/maddi#125.
 
