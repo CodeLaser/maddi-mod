@@ -114,11 +114,13 @@ public class AnalysisEngineImpl implements AnalysisEngine {
     @Override
     public NullabilityFacts nullabilityFacts(List<Info> order, NullabilityTarget target) {
         // both targets have no platform type: what the pass does not call nullable is non-null (Policy.KOTLIN); the
-        // C# printer reads a library's declarations from what the analyzer stored, as TestJavaToCSharp*Facts do
-        NullabilityPass.Report report = new NullabilityPass(NullabilityPass.Policy.KOTLIN).go(order);
+        // C# printer reads a library's declarations from what the analyzer stored, as TestJavaToCSharp*Facts do. C#
+        // also takes the parameter preconditions as non-null, which changes nothing at run time (its ! does not
+        // throw); Kotlin does not, where the NPE would move from the method's body to the call (CodeLaser/maddi#125)
         return switch (target) {
-            case KOTLIN -> report;
-            case CSHARP -> report.orElse(NullabilityFacts.STORED);
+            case KOTLIN -> new NullabilityPass(NullabilityPass.Policy.KOTLIN).go(order);
+            case CSHARP -> new NullabilityPass(NullabilityPass.Policy.KOTLIN.withPreconditionsNonNull()).go(order)
+                    .orElse(NullabilityFacts.STORED);
         };
     }
 

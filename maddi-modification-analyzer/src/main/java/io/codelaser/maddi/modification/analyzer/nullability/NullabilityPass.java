@@ -973,20 +973,35 @@ public final class NullabilityPass {
             boolean excluded = family.stream().anyMatch(m -> m.parameters().size() <= pi.index()
                     || nullLiteralParameters.contains(m.parameters().get(pi.index()))
                     || referencedMethods.contains(m) || junitNullSource(m)
-                    || hasBody(m) && comparedWithNull(m, m.parameters().get(pi.index()))
+                    || hasBody(m) && comparedWithNull(m, m.parameters().get(pi.index()), new HashSet<>())
                     || overrides(m).stream().anyMatch(o -> !analysed.contains(o)));
             if (!excluded) declared.add(pi);
         }
         return declared;
     }
 
-    private static boolean comparedWithNull(MethodInfo m, ParameterInfo pi) {
+    /*
+     The parameter is compared with null in m's body, or handed to an analysed method that compares its own parameter
+     with null, transitively: langchain4j's 'if (isNullOrBlank(string)) throw illegalArgument(...)' in ensureNotBlank,
+     where isNullOrBlank says 'string == null || ...' (CodeLaser/maddi#125, the Kotlin measurement).
+     */
+    private boolean comparedWithNull(MethodInfo m, ParameterInfo pi, Set<ParameterInfo> seen) {
+        if (!seen.add(pi)) return false;
         boolean[] found = {false};
         m.methodBody().visit(e -> {
             if (e instanceof BinaryOperator bo) {
                 Expression other = bo.lhs() instanceof NullConstant ? bo.rhs()
                         : bo.rhs() instanceof NullConstant ? bo.lhs() : null;
                 if (other instanceof VariableExpression ve && pi.equals(ve.variable())) found[0] = true;
+            } else if (e instanceof MethodCall mc && analysed.contains(mc.methodInfo()) && hasBody(mc.methodInfo())) {
+                List<ParameterInfo> calleeParameters = mc.methodInfo().parameters();
+                for (int i = 0; i < mc.parameterExpressions().size() && i < calleeParameters.size(); i++) {
+                    if (mc.parameterExpressions().get(i) instanceof VariableExpression ve && pi.equals(ve.variable())
+                        && !calleeParameters.get(i).isVarArgs()
+                        && comparedWithNull(mc.methodInfo(), calleeParameters.get(i), seen)) {
+                        found[0] = true;
+                    }
+                }
             }
             return !found[0];
         });

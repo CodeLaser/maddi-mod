@@ -4348,7 +4348,7 @@ public class TestNullabilityPass extends CommonTest {
             package a.b;
             import java.util.*;
             class PF {
-                static class Node { Node next; String name = "x"; }
+                static class Node { Node next; String name = "x"; String label; }
                 interface Visitor { void visit(Node n); }
                 static class Printer implements Visitor { public void visit(Node n) { System.out.println(n.name); } }
                 static class Counter implements Visitor {
@@ -4384,6 +4384,11 @@ public class TestNullabilityPass extends CommonTest {
                     if (n == null) throw new IllegalArgumentException("n");
                     System.out.println(n.name);
                 }
+                static boolean isNullOrEmpty(String s) { return s == null || s.isEmpty(); }
+                static String ensureNotEmpty(String s) {
+                    if (isNullOrEmpty(s)) throw new IllegalArgumentException("s");
+                    return s;
+                }
                 static void use(Node node, Visitor v, Sink s, Echo e, Quiet q, St parent, St first) {
                     v.visit(node.next);
                     s.accept(node.next);
@@ -4392,6 +4397,7 @@ public class TestNullabilityPass extends CommonTest {
                     parent.replace(first, parent.parent);
                     named(null);
                     checked(node.next);
+                    ensureNotEmpty(node.label);
                     Echo shown = PF::show;
                     Quiet silent = n -> { };
                     shown.echo(node);
@@ -4407,14 +4413,14 @@ public class TestNullabilityPass extends CommonTest {
         System.out.println(explain(report));
         Set<String> preconditions = report.preconditions().stream().map(pi -> pi.methodInfo().typeInfo().simpleName()
                 + "." + pi.methodInfo().name() + ":" + pi.name()).collect(Collectors.toCollection(java.util.TreeSet::new));
-        assertEquals("[Counter.visit:n, IfSt.replace:newstat, PF.checked:n, PF.named:n, PF.show:n, PF.use:e, "
+        assertEquals("[Counter.visit:n, IfSt.replace:newstat, PF.checked:n, PF.ensureNotEmpty:s, PF.named:n, PF.show:n, PF.use:e, "
                      + "PF.use:node, PF.use:parent, PF.use:q, PF.use:s, PF.use:v, Printer.visit:n, St.replace:newstat, "
                      + "Visitor.visit:n]", preconditions.toString(),
                 "Sink: Lenient accepts null; Echo: a method reference implements it; Quiet: a lambda that does not "
                 + "throw; IfSt: through super.replace");
         Set<String> nullArguments = report.nullArguments().stream().map(a -> a.parameter().methodInfo().name() + "("
                 + a.argument() + (a.literal() ? ", literal" : "") + ")").collect(Collectors.toCollection(java.util.TreeSet::new));
-        assertEquals("[checked(node.next), named(null, literal), replace(parent.parent), visit(node.next)]",
+        assertEquals("[checked(node.next), ensureNotEmpty(node.label), named(null, literal), replace(parent.parent), visit(node.next)]",
                 nullArguments.toString());
 
         Map<String, String> byName = byName(report);
@@ -4430,6 +4436,8 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("Node?", declaredByName.get("a.b.PE.Sink.accept(a.b.PE.Node):0:n"), "not a precondition");
         assertEquals("Node?", declaredByName.get("a.b.PE.named(a.b.PE.Node):0:n"), "a call passes the literal null");
         assertEquals("Node?", declaredByName.get("a.b.PE.checked(a.b.PE.Node):0:n"), "its answer to null is an IAE");
+        assertEquals("String?", declaredByName.get("a.b.PE.ensureNotEmpty(String):0:s"),
+                "its answer to null is an IAE, through isNullOrEmpty's comparison");
         assertEquals(report.nullArguments().size(), declared.nullArguments().size(), "decided before the policy");
         // what the printers report (CodeLaser/maddi#125): the declared ones that null reached without the policy
         Set<String> nonNull = declared.preconditionsNonNull().stream().map(pi -> pi.methodInfo().typeInfo().simpleName()
