@@ -44,10 +44,16 @@
 # 2026-10-13, maddi ce6ecea39: notnull dictionary keys through wildcards (CS8714 5 -> 0), measured together with
 # the JDK nullability hints from JSpecify's annotated JDK (fd3f8419c, merged in the meantime), which move the
 # printer's ! assertions throughout: 38 -> 39 nullable warnings.
+#
+# 2026-10-14, the parameter preconditions (CodeLaser/maddi#125, maddi-mod#41): non-nullable where the method,
+# with its whole override family, needs the value, ! at a caller that may pass null, not where the method's answer
+# to null is an IllegalArgumentException (also through a helper or a constructor); and maddi f779bcd8b: ! on a
+# call to a method declared T? where the pass proves that call non-null, which C# cannot see: 39 -> 38
+# nullable warnings; compiling files unchanged.
 types	199
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	199
 compilingFiles	182
 unmappedJdkUses	15
-nullableWarnings	39
+nullableWarnings	38

@@ -52,10 +52,16 @@
 # 2026-10-14, the nullability pass's parameter preconditions (CodeLaser/maddi#125, maddi-mod#41): a parameter that its
 # method, with its whole override family, dereferences or rejects on every normal exit is non-nullable, and a caller
 # that may pass null says !, which does not throw: 575 -> 553 nullable warnings; 1034 compiling files unchanged.
+#
+# 2026-10-14, the parameter preconditions (CodeLaser/maddi#125, maddi-mod#41): non-nullable where the method,
+# with its whole override family, needs the value, ! at a caller that may pass null, not where the method's answer
+# to null is an IllegalArgumentException (also through a helper or a constructor); and maddi f779bcd8b: ! on a
+# call to a method declared T? where the pass proves that call non-null, which C# cannot see: 553 -> 547
+# nullable warnings; compiling files unchanged.
 types	1583
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	1565
 compilingFiles	1034
 unmappedJdkUses	381
-nullableWarnings	553
+nullableWarnings	547
