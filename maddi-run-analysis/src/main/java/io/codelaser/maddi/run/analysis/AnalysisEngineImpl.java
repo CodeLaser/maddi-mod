@@ -23,6 +23,7 @@ import io.codelaser.maddi.analysis.api.HintsSpec;
 import io.codelaser.maddi.analysis.api.ModificationOptions;
 import io.codelaser.maddi.analysis.api.ModificationOutcome;
 import io.codelaser.maddi.analysis.api.ModificationRequest;
+import io.codelaser.maddi.analysis.api.NullabilityTarget;
 import io.codelaser.maddi.analysis.api.PrepOutcome;
 import io.codelaser.maddi.analysis.api.PrepRequest;
 import io.codelaser.maddi.callgraph.ComputeCallGraph;
@@ -43,6 +44,7 @@ import io.codelaser.maddi.modification.analyzer.IteratingAnalyzer;
 import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
 import io.codelaser.maddi.modification.analyzer.impl.EventualCluster;
 import io.codelaser.maddi.modification.analyzer.impl.StaticSideEffectAnalyzerImpl;
+import io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass;
 import io.codelaser.maddi.modification.analyzer.shadow.ShadowModificationPass;
 import io.codelaser.maddi.modification.common.AnalyzerException;
 import io.codelaser.maddi.modification.common.defaults.ShallowMethodAnalyzer;
@@ -55,6 +57,7 @@ import io.codelaser.maddi.modification.prepwork.io.LoadAnalysisResults;
 import io.codelaser.maddi.modification.prepwork.io.PrepWorkCodec;
 import io.codelaser.maddi.modification.prepwork.io.WriteAnalysisResults;
 import io.codelaser.maddi.cst.impl.analysis.ConsumptionEdgeRecorder;
+import io.codelaser.maddi.cst.impl.analysis.NullabilityFacts;
 import io.codelaser.maddi.util.Trie;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -106,6 +109,17 @@ public class AnalysisEngineImpl implements AnalysisEngine {
         return exceptions.stream()
                 .map(ae -> new AnalysisProblem(ae.getInfo(), ae.getCause() == null ? ae : ae.getCause()))
                 .toList();
+    }
+
+    @Override
+    public NullabilityFacts nullabilityFacts(List<Info> order, NullabilityTarget target) {
+        // both targets have no platform type: what the pass does not call nullable is non-null (Policy.KOTLIN); the
+        // C# printer reads a library's declarations from what the analyzer stored, as TestJavaToCSharp*Facts do
+        NullabilityPass.Report report = new NullabilityPass(NullabilityPass.Policy.KOTLIN).go(order);
+        return switch (target) {
+            case KOTLIN -> report;
+            case CSHARP -> report.orElse(NullabilityFacts.STORED);
+        };
     }
 
     @Override
@@ -162,6 +176,8 @@ public class AnalysisEngineImpl implements AnalysisEngine {
         }
         if (o.faultTolerant() != null) builder.setFaultTolerant(o.faultTolerant());
         if (o.warnNearMisses() != null) builder.setWarnNearMisses(o.warnNearMisses());
+        // after the gates: nullability needs trackObjectCreations, which SHADOWDIFF's gate would turn off again
+        if (Boolean.TRUE.equals(o.nullability())) builder.setNullability(true);
         IteratingAnalyzer analyzer = new IteratingAnalyzerImpl(javaInspector, builder.build());
         if (request.valueFeed() != null) {
             analyzer.setValueFeed(request.valueFeed());
