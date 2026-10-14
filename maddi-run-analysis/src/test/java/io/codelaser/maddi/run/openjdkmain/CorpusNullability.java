@@ -30,7 +30,9 @@ import java.util.Set;
  * The pass's policy is the Kotlin translation's, {@code KOTLIN}, for C# as well: C# with nullable reference types is
  * a null-checked target as Kotlin is. Every declaration that is not nullable is not null, a variable assigned a
  * nullable call result is nullable, and where Kotlin asserts with {@code !!} C# says {@code !}, which does not throw:
- * the C# fails where Java does.
+ * the C# fails where Java does. For C# with {@code withPreconditionsNonNull()} (CodeLaser/maddi#125): a parameter its
+ * method needs non-null is non-nullable, and a caller that may pass null says {@code !}; nothing changes at run time.
+ * Not for Kotlin, where the NullPointerException would move from the method's body to the call (not approved).
  */
 final class CorpusNullability {
 
@@ -42,7 +44,7 @@ final class CorpusNullability {
 
     /** Analyses the parsed corpus, main and test sources. */
     static NullabilityPass.Report report(JavaToKotlinRatchet.Corpus corpus) throws IOException {
-        return report(corpus, corpus.summary().parseResult().primaryTypes());
+        return report(corpus, corpus.summary().parseResult().primaryTypes(), NullabilityPass.Policy.KOTLIN);
     }
 
     /**
@@ -50,8 +52,14 @@ final class CorpusNullability {
      * MODREACH and nullability, then the pass. A large reactor's translated source set (timefold's core/main) rather
      * than everything it parses.
      */
-    static NullabilityPass.Report report(JavaToKotlinRatchet.Corpus corpus, Collection<TypeInfo> types)
-            throws IOException {
+    static NullabilityPass.Report report(JavaToKotlinRatchet.Corpus corpus, Collection<TypeInfo> types,
+                                         NullabilityPass.Policy policy) throws IOException {
+        return reports(corpus, types, List.of(policy)).getFirst();
+    }
+
+    /** One analysis, one pass per policy: a measurement that compares policies. */
+    static List<NullabilityPass.Report> reports(JavaToKotlinRatchet.Corpus corpus, Collection<TypeInfo> types,
+                                                List<NullabilityPass.Policy> policies) throws IOException {
         JavaInspector javaInspector = corpus.javaInspector();
         AnalysisEngineImpl engine = new AnalysisEngineImpl();
         engine.resultsLoader(javaInspector.runtime(), javaInspector.mainSources()).load(List.of(JDK_HINTS));
@@ -68,12 +76,19 @@ final class CorpusNullability {
                         .setNullability(true)
                         .build());
         analyzer.analyze(order, prep.callGraph().graph());
-        return new NullabilityPass(NullabilityPass.Policy.KOTLIN).go(order);
+        return policies.stream().map(policy -> new NullabilityPass(policy).go(order)).toList();
     }
 
     /** The Kotlin printer with the pass's report: its verdicts, and {@code !!} where Kotlin needs a non-null value. */
     static KotlinPrintOptions kotlinOptions(JavaToKotlinRatchet.Corpus corpus) throws IOException {
-        return new KotlinPrintOptions(report(corpus), KotlinPrintOptions.NullCheck.ASSERT);
+        return kotlinOptions(corpus, NullabilityPass.Policy.KOTLIN);
+    }
+
+    /** As {@link #kotlinOptions(JavaToKotlinRatchet.Corpus)}, under another policy: a measurement. */
+    static KotlinPrintOptions kotlinOptions(JavaToKotlinRatchet.Corpus corpus, NullabilityPass.Policy policy)
+            throws IOException {
+        return new KotlinPrintOptions(report(corpus, corpus.summary().parseResult().primaryTypes(), policy),
+                KotlinPrintOptions.NullCheck.ASSERT);
     }
 
     static CSharpProgram.Policy csharpPolicy(JavaToKotlinRatchet.Corpus corpus) throws IOException {
@@ -88,7 +103,8 @@ final class CorpusNullability {
      */
     static CSharpProgram.Policy csharpPolicy(JavaToKotlinRatchet.Corpus corpus, Collection<TypeInfo> types)
             throws IOException {
-        NullabilityFacts facts = report(corpus, types).orElse(NullabilityFacts.STORED);
+        NullabilityFacts facts = report(corpus, types, NullabilityPass.Policy.KOTLIN.withPreconditionsNonNull())
+                .orElse(NullabilityFacts.STORED);
         return CSharpProgram.Policy.DEFAULT.withFacts(CSharpFacts.of(facts, ParameterInfo::isUnmodified));
     }
 }
