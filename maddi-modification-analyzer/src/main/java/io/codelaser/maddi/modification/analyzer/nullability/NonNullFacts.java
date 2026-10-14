@@ -810,11 +810,18 @@ public final class NonNullFacts {
         return uo.operator() != null && "!".equals(uo.operator().name());
     }
 
-    // the variable compared with null in 'v == null' / 'v != null', or null
+    // the variable compared with null in 'v == null' / 'v != null', or null. Also the target of an assignment compared
+    // with null, the read loop's '(entry = zis.getNextEntry()) != null' / '(line = reader.readLine()) != null': the
+    // comparison is of the value just assigned (diagnose, alpha.16's JSpecify seeds). Java only: Kotlin has no
+    // assignment expression, and the printer rewrites such a loop
     private Variable nullCompared(BinaryOperator bo) {
         Expression other = bo.lhs() instanceof NullConstant ? bo.rhs()
                 : bo.rhs() instanceof NullConstant ? bo.lhs() : null;
         if (unwrap(other) instanceof VariableExpression ve && trackable(ve.variable())) return ve.variable();
+        if (!kotlinSmartCasts && unwrap(other) instanceof Assignment a && a.assignmentOperator() == null
+            && a.variableTarget() != null && trackable(a.variableTarget())) {
+            return a.variableTarget();
+        }
         if (unwrap(other) instanceof MethodCall mc) return pureCall(mc);
         return null;
     }

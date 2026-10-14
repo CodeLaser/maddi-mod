@@ -647,6 +647,23 @@ public class TestNullabilityPass extends CommonTest {
             }
             """;
 
+    @Language("java")
+    private static final String READ_LOOP = """
+            package a.b;
+            import java.io.BufferedReader;
+            import java.io.IOException;
+            class RL {
+                static int count(BufferedReader reader) throws IOException {
+                    int n = 0;
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        n += line.length();
+                    }
+                    return n;
+                }
+            }
+            """;
+
     @DisplayName("isAnnotationPresent(X.class) makes getAnnotation(X.class) on the same element non-null (diagnose, nacos)")
     @Test
     public void annotationPresent() {
@@ -658,6 +675,20 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("Secured", byName.get("a.b.AP.enableAuth(a.b.AP.Secured):0:secured"),
                 "nacos AbstractProtocolAuthService.enableAuth: checked by the caller");
         assertEquals("Secured?", byName.get("a.b.AP.reassigned(a.b.AP.Secured):0:secured"), "the element was reassigned");
+    }
+
+    @DisplayName("a read loop: '(line = reader.readLine()) != null' makes line non-null in the body (diagnose)")
+    @Test
+    public void readLoop() {
+        NullabilityPass.Report report = run("a.b.RL", READ_LOOP);
+        MethodInfo count = parsed.findUniqueMethod("count", 1);
+        io.codelaser.maddi.cst.api.statement.WhileStatement loop = (io.codelaser.maddi.cst.api.statement.WhileStatement)
+                count.methodBody().statements().get(2);
+        io.codelaser.maddi.cst.api.statement.Statement body = loop.block().statements().getFirst();
+        io.codelaser.maddi.cst.api.variable.Variable line = ((io.codelaser.maddi.cst.api.statement.LocalVariableCreation)
+                count.methodBody().statements().get(1)).localVariable();
+        assertEquals(true, report.useSites().nonNullAt(body, line), "inside the loop");
+        assertEquals(false, report.smartCasts().nonNullAt(body, line), "not a Kotlin smart cast");
     }
 
     @Language("java")
