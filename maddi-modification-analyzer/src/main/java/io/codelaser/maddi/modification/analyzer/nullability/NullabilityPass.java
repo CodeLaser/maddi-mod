@@ -444,8 +444,9 @@ public final class NullabilityPass {
     // edges in once, unless the class itself makes the formal slot nullable (instantiatedSlots)
     private final List<Object[]> invariantTies = new ArrayList<>();
     // nodes seeded by a null that is written (a literal, an argument, an initializer, an annotation), not by indirect
-    // evidence only (seedLibrary): Policy.assertContentWrites
-    private final Set<Object> strictSeeds = new HashSet<>();
+    // evidence only (seedLibrary): Policy.assertContentWrites. Insertion-ordered: it seeds a closure whose cause
+    // chains are reported, and a Local hashes by identity, so a hash order differs between runs (maddi-mod#33)
+    private final Set<Object> strictSeeds = new LinkedHashSet<>();
     // per seed, the types whose code writes its null (a literal, a default value, a comparison); a null element: a
     // seed without a writer in the code (an annotation, a library contract). Read by holderFields.
     private final Map<Object, List<TypeInfo>> seedWriters = new HashMap<>();
