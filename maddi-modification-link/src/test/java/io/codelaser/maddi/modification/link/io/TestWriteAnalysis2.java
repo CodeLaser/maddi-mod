@@ -145,6 +145,8 @@ public class TestWriteAnalysis2 extends CommonTest {
             """;
 
     // FIXME PRINT want a space after int i,; too many spaces after ArrayList<>
+    // The comment after 'setAdd(r);' on its line belongs to that statement (CodeLaser/maddi#128); the printer writes a
+    // statement's comments in front of it (comment positions on output: CodeLaser/maddi#49)
     @Language("java")
     private static final String OUTPUT2 = """
             package a.b;
@@ -158,8 +160,8 @@ public class TestWriteAnalysis2 extends CommonTest {
                     List<String> l = new ArrayList<>();
                     Set<Integer> s = new HashSet<>();
                     X.R r = new X.R(s, 3, l);
-                    setAdd(r);
                     // at this point, s1 should have been modified, via???
+                    setAdd(r);
                 }
             }
             """;
