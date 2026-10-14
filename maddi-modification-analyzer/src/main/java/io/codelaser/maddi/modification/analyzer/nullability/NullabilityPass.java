@@ -993,19 +993,41 @@ public final class NullabilityPass {
                 Expression other = bo.lhs() instanceof NullConstant ? bo.rhs()
                         : bo.rhs() instanceof NullConstant ? bo.lhs() : null;
                 if (other instanceof VariableExpression ve && pi.equals(ve.variable())) found[0] = true;
-            } else if (e instanceof MethodCall mc && analysed.contains(mc.methodInfo()) && hasBody(mc.methodInfo())) {
-                List<ParameterInfo> calleeParameters = mc.methodInfo().parameters();
-                for (int i = 0; i < mc.parameterExpressions().size() && i < calleeParameters.size(); i++) {
-                    if (mc.parameterExpressions().get(i) instanceof VariableExpression ve && pi.equals(ve.variable())
-                        && !calleeParameters.get(i).isVarArgs()
-                        && comparedWithNull(mc.methodInfo(), calleeParameters.get(i), seen)) {
-                        found[0] = true;
-                    }
+            } else {
+                // a call, a constructor call (Document.from(text) is 'new DefaultDocument(text)'), this(...), super(...)
+                MethodInfo callee = null;
+                List<Expression> arguments = null;
+                if (e instanceof MethodCall mc) {
+                    callee = mc.methodInfo();
+                    arguments = mc.parameterExpressions();
+                } else if (e instanceof ConstructorCall cc && cc.constructor() != null && cc.anonymousClass() == null) {
+                    callee = cc.constructor();
+                    arguments = cc.parameterExpressions();
+                } else if (e instanceof ExplicitConstructorInvocation eci && eci.methodInfo() != null) {
+                    callee = eci.methodInfo();
+                    arguments = eci.parameterExpressions();
+                }
+                if (callee != null && analysed.contains(callee) && hasBody(callee)
+                    && passedOnAndTested(pi, callee, arguments, seen)) {
+                    found[0] = true;
                 }
             }
             return !found[0];
         });
         return found[0];
+    }
+
+    private boolean passedOnAndTested(ParameterInfo pi, MethodInfo callee, List<Expression> arguments,
+                                      Set<ParameterInfo> seen) {
+        List<ParameterInfo> calleeParameters = callee.parameters();
+        for (int i = 0; i < arguments.size() && i < calleeParameters.size(); i++) {
+            if (arguments.get(i) instanceof VariableExpression ve && pi.equals(ve.variable())
+                && !calleeParameters.get(i).isVarArgs()
+                && comparedWithNull(callee, calleeParameters.get(i), seen)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean hasBody(MethodInfo m) {
