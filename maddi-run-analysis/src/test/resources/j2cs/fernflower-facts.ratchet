@@ -58,10 +58,14 @@
 #
 # Merged on 2026-10-14: the two changes above were each measured alone, from the same base; together not yet.
 # The ceiling is ws/maddi-csharp's, the lower one, so a first run of both says whether they add up.
+#
+# 2026-10-15, maddi 7717d7f4b, f9973dec2, f355bb80b: record patterns as property patterns, a record's equals as
+# Equals(R? o) with its components' hash where it has no hashCode, and a class that implements a functional interface
+# C# has as a delegate is the delegate's method group where one is expected: 182 -> 183 compiling files, 36 -> 35 errors.
 types	199
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	199
-compilingFiles	182
+compilingFiles	183
 unmappedJdkUses	15
 nullableWarnings	32

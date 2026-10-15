@@ -48,10 +48,14 @@
 # unconstrained type parameter is asserted into a reference parameter, JAXB's getNode is ->?, and a parameter whose
 # wildcards are the method's type parameters keeps its ?: 26 -> 24 nullable warnings; compiling files and errors
 # unchanged.
+#
+# 2026-10-15, maddi 7717d7f4b, f9973dec2, f355bb80b: record patterns as property patterns, a record's equals as
+# Equals(R? o) with its components' hash where it has no hashCode, and a class that implements a functional interface
+# C# has as a delegate is the delegate's method group where one is expected: 284 -> 287 compiling files, 234 -> 231 errors.
 types	346
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	346
-compilingFiles	284
+compilingFiles	287
 unmappedJdkUses	153
 nullableWarnings	24

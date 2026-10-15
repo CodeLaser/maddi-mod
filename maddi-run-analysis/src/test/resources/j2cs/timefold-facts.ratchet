@@ -83,10 +83,18 @@
 # 2026-10-15, maddi 31e8b73db: a superclass's method that implements a subclass's interface method stays a method,
 # and the abstract class in between does not redeclare it (the Bavet streams' GetRetrievalSemantics and
 # GuaranteesDistinct, CS0534): 1034 -> 1086 compiling files, 2217 -> 2112 errors.
+#
+# 2026-10-15, maddi 7717d7f4b, f9973dec2, f355bb80b: record patterns as property patterns, a record's equals as
+# Equals(R? o) with its components' hash where it has no hashCode, and a class that implements a functional interface
+# C# has as a delegate is the delegate's method group where one is expected: 1086 -> 1110 compiling files, 2112 ->
+# 2001 errors.
+# nullableWarnings 478 -> 480, raised: BavetConstraintFactory's two CS1503 errors became two CS8621 warnings, the
+# method group ForEachFilteringCriteriaPredicateFunction.Apply returns Func<A, bool>? where the delegate's type
+# argument has no ?; a method group takes no !, and a lambda around it would evaluate its receiver at every call.
 types	1583
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	1565
-compilingFiles	1086
+compilingFiles	1110
 unmappedJdkUses	379
-nullableWarnings	478
+nullableWarnings	480
