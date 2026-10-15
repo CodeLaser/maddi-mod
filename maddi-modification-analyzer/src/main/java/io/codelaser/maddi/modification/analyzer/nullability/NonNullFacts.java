@@ -78,6 +78,8 @@ public final class NonNullFacts {
     private final Set<Expression> callsWalked = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
     // per private instance method, the fields of this non-null at its entry (withFieldsAtEntry)
     private Map<MethodInfo, Set<Variable>> fieldsAtEntry = Map.of();
+    // gate NOENTRYFIELDS (with NullabilityPass's): forget at a compound statement as before #48 A5 (A/B)
+    private static final boolean ENTRY_FIELDS_OFF = System.getenv("NOENTRYFIELDS") != null;
     // the method being walked
     private MethodInfo walking;
     // the facts at each normal exit (a return, the end of the body) of the method being walked; null in a lambda
@@ -426,9 +428,10 @@ public final class NonNullFacts {
      */
     private void forget(Set<Variable> facts, Statement statement) {
         Set<Variable> assigned = assignedIn(statement);
-        facts.removeAll(kotlinSmartCasts ? assigned : mayAssignNull(statement));
+        boolean coarse = kotlinSmartCasts || ENTRY_FIELDS_OFF;
+        facts.removeAll(coarse ? assigned : mayAssignNull(statement));
         facts.removeIf(v -> dependsOnAssigned(v, assigned));
-        if (kotlinSmartCasts) {
+        if (coarse) {
             if (containsCall(statement)) facts.removeIf(NonNullFacts::isNonFinalField);
             return;
         }
