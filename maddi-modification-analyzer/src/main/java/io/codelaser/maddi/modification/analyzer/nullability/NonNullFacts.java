@@ -80,6 +80,10 @@ public final class NonNullFacts {
     private Map<MethodInfo, Set<Variable>> fieldsAtEntry = Map.of();
     // gate NOENTRYFIELDS (with NullabilityPass's): forget at a compound statement as before #48 A5 (A/B)
     private static final boolean ENTRY_FIELDS_OFF = System.getenv("NOENTRYFIELDS") != null;
+    // gate NOCHAINEDKEYS: no constant key, no map reached through pure calls in key presence (A/B for #48 A2)
+    private static final boolean CHAINED_KEYS_OFF = System.getenv("NOCHAINEDKEYS") != null;
+    // gate NOTERNARYFACTS: a ternary's branches without their condition's facts in nonNull (A/B for #48 A3)
+    private static final boolean TERNARY_FACTS_OFF = System.getenv("NOTERNARYFACTS") != null;
     // the method being walked
     private MethodInfo walking;
     // the facts at each normal exit (a return, the end of the body) of the method being walked; null in a lambda
@@ -593,7 +597,7 @@ public final class NonNullFacts {
      */
     private Variable mapVariable(Expression e) {
         Variable v = trackableVariable(e);
-        if (v != null || !(unwrap(e) instanceof MethodCall mc)) return v;
+        if (v != null || CHAINED_KEYS_OFF || !(unwrap(e) instanceof MethodCall mc)) return v;
         MethodInfo mi = mc.methodInfo();
         if (mi == null || mi.isStatic() || !mc.parameterExpressions().isEmpty() || mc.object() == null
             || !(mi.isNonModifying() || libraryGetter(mi)) || mi.returnType().isPrimitiveExcludingVoid()) return null;
@@ -620,8 +624,8 @@ public final class NonNullFacts {
             return trackableVariable(gk.object());
         }
         // a constant: 'containsKey(HEART_BEAT_INTERVAL)' (#48 A2)
-        if (unwrap(key) instanceof VariableExpression ve && ve.variable() instanceof FieldReference fr
-            && fr.fieldInfo().isStatic() && fr.fieldInfo().isFinal()) {
+        if (!CHAINED_KEYS_OFF && unwrap(key) instanceof VariableExpression ve
+            && ve.variable() instanceof FieldReference fr && fr.fieldInfo().isStatic() && fr.fieldInfo().isFinal()) {
             return fr;
         }
         Variable v = trackableVariable(key);
@@ -919,7 +923,7 @@ public final class NonNullFacts {
     }
 
     private Set<Variable> withCondition(Set<Variable> facts, Set<Variable> condition) {
-        if (condition.isEmpty()) return facts;
+        if (condition.isEmpty() || TERNARY_FACTS_OFF) return facts;
         Set<Variable> copy = new HashSet<>(facts);
         addCondition(copy, condition);
         return copy;
