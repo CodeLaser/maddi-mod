@@ -75,10 +75,14 @@
 # unconstrained type parameter is asserted into a reference parameter, JAXB's getNode is ->?, and a parameter whose
 # wildcards are the method's type parameters keeps its ?: 499 -> 479 nullable warnings; compiling files and errors
 # unchanged.
+#
+# 2026-10-15, maddi 3e89075ca: java.time.OffsetDateTime is DateTimeOffset, so that JaxbOffsetDateTimeAdapter's
+# Marshal override matches the base's B? (CS8765): 381 -> 379 unmapped uses, 479 -> 478 nullable warnings, 2221 ->
+# 2217 errors.
 types	1583
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	1565
 compilingFiles	1034
-unmappedJdkUses	381
-nullableWarnings	479
+unmappedJdkUses	379
+nullableWarnings	478
