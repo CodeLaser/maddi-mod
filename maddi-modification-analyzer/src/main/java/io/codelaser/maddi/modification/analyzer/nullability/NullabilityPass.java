@@ -167,7 +167,15 @@ public final class NullabilityPass {
      */
     public record Policy(NullableState unreached, boolean nullTests, boolean contracts, World world,
                          boolean assertContentWrites, boolean callResults, boolean assertAtDeclaration,
-                         boolean libraryCallbacks, boolean testNulls, boolean preconditionsNonNull) {
+                         boolean libraryCallbacks, boolean testNulls, boolean preconditionsNonNull,
+                         boolean rejectionsNullable) {
+        public Policy(NullableState unreached, boolean nullTests, boolean contracts, World world,
+                      boolean assertContentWrites, boolean callResults, boolean assertAtDeclaration,
+                      boolean libraryCallbacks, boolean testNulls, boolean preconditionsNonNull) {
+            this(unreached, nullTests, contracts, world, assertContentWrites, callResults, assertAtDeclaration,
+                    libraryCallbacks, testNulls, preconditionsNonNull, false);
+        }
+
         public static final Policy NULL_MARKED = new Policy(NullableState.NONNULL, true, true, World.CLOSED, false,
                 false, false, false, true, false);
         public static final Policy NULL_MARKED_FLOW_ONLY = new Policy(NullableState.NONNULL, false, true,
@@ -185,12 +193,12 @@ public final class NullabilityPass {
 
         public Policy withoutContracts() {
             return new Policy(unreached, nullTests, false, world, assertContentWrites, callResults, assertAtDeclaration,
-                    libraryCallbacks, testNulls, preconditionsNonNull);
+                    libraryCallbacks, testNulls, preconditionsNonNull, rejectionsNullable);
         }
 
         public Policy withWorld(World world) {
             return new Policy(unreached, nullTests, contracts, world, assertContentWrites, callResults, assertAtDeclaration,
-                    libraryCallbacks, testNulls, preconditionsNonNull);
+                    libraryCallbacks, testNulls, preconditionsNonNull, rejectionsNullable);
         }
 
         /**
@@ -200,18 +208,28 @@ public final class NullabilityPass {
          */
         public Policy withoutTestNulls() {
             return new Policy(unreached, nullTests, contracts, world, assertContentWrites, callResults, assertAtDeclaration,
-                    libraryCallbacks, false, preconditionsNonNull);
+                    libraryCallbacks, false, preconditionsNonNull, rejectionsNullable);
         }
 
         /** The precondition parameters are declared non-null ({@link #preconditionsNonNull}). */
         public Policy withPreconditionsNonNull() {
             return new Policy(unreached, nullTests, contracts, world, assertContentWrites, callResults, assertAtDeclaration,
-                    libraryCallbacks, testNulls, true);
+                    libraryCallbacks, testNulls, true, rejectionsNullable);
+        }
+
+        /**
+         * A parameter whose method answers null with its own exception ({@link Report#rejectsNull}) is nullable: a Java
+         * caller's null reaches that check instead of Kotlin's entry check (CodeLaser/maddi-mod#28). Opt-in, for a
+         * translation that must keep its Java callers' exceptions; every defensively checked parameter becomes '?'.
+         */
+        public Policy withRejectionsNullable() {
+            return new Policy(unreached, nullTests, contracts, world, assertContentWrites, callResults, assertAtDeclaration,
+                    libraryCallbacks, testNulls, preconditionsNonNull, true);
         }
 
         public Policy withAssertContentWrites(boolean assertContentWrites) {
             return new Policy(unreached, nullTests, contracts, world, assertContentWrites, callResults, assertAtDeclaration,
-                    libraryCallbacks, testNulls, preconditionsNonNull);
+                    libraryCallbacks, testNulls, preconditionsNonNull, rejectionsNullable);
         }
     }
 
@@ -275,7 +293,8 @@ public final class NullabilityPass {
                          Map<Object, Object> cause, Map<Object, String> seedOrigin, NonNullFacts useSites,
                          NonNullFacts smartCasts, Set<Local> asserted, Set<Local> unobserved,
                          Set<Expression> nonNullCallResults, Set<ParameterInfo> preconditions,
-                         List<NullArgument> nullArguments, Set<ParameterInfo> preconditionsNonNull)
+                         List<NullArgument> nullArguments, Set<ParameterInfo> preconditionsNonNull,
+                         Set<ParameterInfo> rejectsNull)
             implements NullabilityFacts {
 
         @Override
@@ -313,6 +332,11 @@ public final class NullabilityPass {
         @Override
         public boolean preconditionNonNull(ParameterInfo parameterInfo) {
             return preconditionsNonNull.contains(parameterInfo);
+        }
+
+        @Override
+        public boolean rejectsNull(ParameterInfo parameterInfo) {
+            return rejectsNull.contains(parameterInfo);
         }
 
         /** The pass analysed the program: a declaration without a nullable verdict is not null. */
@@ -982,6 +1006,27 @@ public final class NullabilityPass {
     }
 
     /*
+     CodeLaser/maddi-mod#28: the parameters whose method answers null with its own check rather than a dereference. A
+     precondition (needed on every normal exit) that the method, or an analysed callee it hands it to, compares with
+     null first: 'if (p == null) throw new IllegalArgumentException(...)', langchain4j's ensureNotBlank. The printer
+     reports them where they stay non-null; Policy.rejectionsNullable makes them nullable.
+     */
+    private Set<ParameterInfo> rejectsNull() {
+        Set<ParameterInfo> set = new LinkedHashSet<>();
+        for (ParameterInfo pi : preconditions) {
+            if (rejects(pi)) set.add(pi);
+        }
+        return Set.copyOf(set);
+    }
+
+    private boolean rejects(ParameterInfo pi) {
+        ParameterizedType type = pi.parameterizedType();
+        MethodInfo m = pi.methodInfo();
+        return preconditions.contains(pi) && !(type.isPrimitiveExcludingVoid() && type.arrays() == 0) && hasBody(m)
+               && comparedWithNull(m, pi, new HashSet<>());
+    }
+
+    /*
      The parameter is compared with null in m's body, or handed to an analysed method that compares its own parameter
      with null, transitively: langchain4j's 'if (isNullOrBlank(string)) throw illegalArgument(...)' in ensureNotBlank,
      where isNullOrBlank says 'string == null || ...' (CodeLaser/maddi#125, the Kotlin measurement).
@@ -1248,7 +1293,8 @@ public final class NullabilityPass {
                 .withNotNullable(e -> notNullable(e, nonNullCallResults));
         methods.forEach(useSites::walk);
         return new Report(verdicts, locals, cause, seedOrigin, useSites, smartCasts, Set.copyOf(asserted),
-                Set.copyOf(unobservedCandidates), nonNullCallResults, preconditions, nullArguments, preconditionsNonNull);
+                Set.copyOf(unobservedCandidates), nonNullCallResults, preconditions, nullArguments, preconditionsNonNull,
+                rejectsNull());
     }
 
     /*
@@ -2404,6 +2450,12 @@ public final class NullabilityPass {
                     if (type.isPrimitiveExcludingVoid() && type.arrays() == 0) continue;
                     seed(pi, "JUnit null source of " + mi.fullyQualifiedName());
                 }
+            }
+        }
+        // Policy.rejectionsNullable (#28): a Java caller's null should reach the method's own check; constructors too
+        if (policy.rejectionsNullable()) {
+            for (ParameterInfo pi : mi.parameters()) {
+                if (rejects(pi)) seed(pi, mi.fullyQualifiedName() + " rejects null with its own exception");
             }
         }
         if (mi.analysis().getOrDefault(PropertyImpl.DEGRADED_ANALYSIS_METHOD,
