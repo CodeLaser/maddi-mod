@@ -496,7 +496,8 @@ public final class NonNullFacts {
     private static final boolean NAV_KEYS_OFF = System.getenv("NONAVKEYS") != null;
     private static final Set<String> MAP_KEYS = Set.of("firstKey", "lastKey", "higherKey", "lowerKey", "ceilingKey",
             "floorKey");
-    private static final Set<String> KEY_VIEWS = Set.of("keySet", "navigableKeySet", "descendingKeySet");
+    // "entrySet": the loop's entry stands for its key, as 'map.get(e.getKey())' resolves (keyPresence)
+    private static final Set<String> KEY_VIEWS = Set.of("keySet", "navigableKeySet", "descendingKeySet", "entrySet");
 
     /** Is the key of {@code lookup} ({@code map.get(k)}, {@code map.remove(k)}) known present when it is called? */
     public boolean keyPresentWhenCalled(MethodCall lookup) {
@@ -515,9 +516,31 @@ public final class NonNullFacts {
         if (kotlinSmartCasts || mc.methodInfo() == null || mc.object() == null || mc.parameterExpressions().isEmpty()
             || name != null && !name.equals(mc.methodInfo().name())) return null;
         Variable map = trackableVariable(mc.object());
-        Variable key = trackableVariable(mc.parameterExpressions().getFirst());
+        Variable key = keyVariable(mc.parameterExpressions().getFirst());
         if (map == null || key == null || !isMap(mc.object().parameterizedType())) return null;
         return keyPresence(map, key, mc.object().parameterizedType());
+    }
+
+    /*
+     The variable that stands for a key: the key itself, or for 'e.getKey()' the entry e (a loop over the map's
+     entrySet makes map[e] present, CodeLaser/maddi-mod#48 A4, nacos IstioCrdUtil). So an entry used as a key itself
+     ('map.get(e)') has no presence of its own: it would claim e's key.
+     */
+    private Variable keyVariable(Expression key) {
+        if (unwrap(key) instanceof MethodCall gk && gk.methodInfo() != null && "getKey".equals(gk.methodInfo().name())
+            && gk.parameterExpressions().isEmpty() && gk.object() != null && isEntry(gk.object().parameterizedType())) {
+            return trackableVariable(gk.object());
+        }
+        Variable v = trackableVariable(key);
+        return v == null || isEntry(v.parameterizedType()) ? null : v;
+    }
+
+    private static boolean isEntry(ParameterizedType pt) {
+        TypeInfo ti = pt == null || pt.arrays() > 0 ? null : pt.typeInfo();
+        if (ti == null) return false;
+        return "java.util.Map.Entry".equals(ti.fullyQualifiedName())
+               || ti.superTypesExcludingJavaLangObject().stream()
+                       .anyMatch(t -> "java.util.Map.Entry".equals(t.fullyQualifiedName()));
     }
 
     /*
@@ -585,6 +608,8 @@ public final class NonNullFacts {
         Variable map = trackableVariable(mc.object());
         LocalVariable k = fe.initializer().localVariable();
         if (map == null || k == null || !isMap(mc.object().parameterizedType())) return null;
+        // an entry stands for its key (keyVariable): only the entrySet's entry, not a key that is an entry
+        if (isEntry(k.parameterizedType()) != "entrySet".equals(mc.methodInfo().name())) return null;
         return keyPresence(map, k, mc.object().parameterizedType());
     }
 

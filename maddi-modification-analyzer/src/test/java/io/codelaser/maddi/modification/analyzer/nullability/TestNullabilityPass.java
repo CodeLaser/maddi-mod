@@ -1586,6 +1586,54 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("{anonymous.next=true, first=true, next=true, other=false, view=true}", present.toString());
     }
 
+    // CodeLaser/maddi-mod#48 A4 (nacos IstioCrdUtil) and B6 (nacos ClientBasicParamUtil)
+    @DisplayName("key presence: the key of an entry of the same map, and a put of a defaulted Properties lookup")
+    @Test
+    public void keyPresenceEntriesAndDefaults() {
+        NullabilityPass.Report report = run("a.b.KE", """
+                package a.b;
+                import java.util.*;
+                class KE {
+                    int entries(Map<String, Integer> m) {
+                        int s = 0;
+                        for (Map.Entry<String, Integer> e : m.entrySet()) s += m.get(e.getKey());
+                        return s;
+                    }
+                    int otherMap(Map<String, Integer> a, Map<String, Integer> b) {
+                        int s = 0;
+                        for (Map.Entry<String, Integer> e : a.entrySet()) s += b.get(e.getKey());
+                        return s;
+                    }
+                    int entryAsKey(Map<Object, Integer> m) {
+                        int s = 0;
+                        for (Map.Entry<Object, Integer> e : m.entrySet()) s += m.get(e);
+                        return s;
+                    }
+                    String defaulted(Map<String, String> m, Properties p, String k) {
+                        m.put(k, p.getProperty(k, ""));
+                        return m.get(k);
+                    }
+                    String system(Map<String, String> m, String k) {
+                        m.put(k, System.getProperty(k, "none"));
+                        return m.get(k);
+                    }
+                    String notDefaulted(Map<String, String> m, Properties p, String k) {
+                        m.put(k, p.getProperty(k));
+                        return m.get(k);
+                    }
+                }
+                """, NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY.withoutContracts().withWorld(NullabilityPass.World.CLOSED));
+        Map<String, Boolean> present = new java.util.TreeMap<>();
+        parsed.methods().forEach(m -> m.methodBody().visit(e -> {
+            if (e instanceof MethodCall mc && mc.methodInfo() != null && "get".equals(mc.methodInfo().name())) {
+                present.merge(m.name(), report.useSites().keyPresentWhenCalled(mc), Boolean::logicalAnd);
+            }
+            return true;
+        }));
+        assertEquals("{defaulted=true, entries=true, entryAsKey=false, notDefaulted=false, otherMap=false, system=true}",
+                present.toString());
+    }
+
     @DisplayName("a null returned by a method that may return its argument does not flow back into the argument")
     @Test
     public void identityReturn() {
