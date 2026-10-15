@@ -72,7 +72,16 @@ public class AnalysisHelper {
             Value.Immutable inMap = bestType.analysis().getOrNull(PropertyImpl.IMMUTABLE_TYPE, ValueImpl.ImmutableImpl.class);
             if (inMap == null) {
                 if (nullIfUndecided && isPartOfSourceCode(bestType)) return null;
-                dynamicBaseValue = ValueImpl.ImmutableImpl.MUTABLE;
+                // java.lang.Object is pure hidden content, like an unbound type parameter: the shallow analyzer
+                // (ShallowMethodAnalyzer.computeMethodIndependentReturnValue) already says so for a bodiless
+                // method returning Object, whatever hints are loaded. Without the JDK hints (which store
+                // @ImmutableContainer(hc=true) on Object), the deep side defaulted to MUTABLE and the two
+                // disagreed on every Object getter implementing such a declaration: the abstract-method fold
+                // then tried to downgrade @Independent(hc=true) to @Dependent on every pass (refused, and
+                // reported at certification; refactor-base's support module, maddi-mod#53).
+                dynamicBaseValue = bestType.isJavaLangObject()
+                        ? ValueImpl.ImmutableImpl.IMMUTABLE_HC
+                        : ValueImpl.ImmutableImpl.MUTABLE;
             } else {
                 dynamicBaseValue = inMap;
             }
@@ -133,7 +142,11 @@ public class AnalysisHelper {
                         .reduce(ValueImpl.IndependentImpl.INDEPENDENT, Value.Independent::min);
             }
         }
-        return bestType.analysis().getOrDefault(PropertyImpl.INDEPENDENT_TYPE, ValueImpl.IndependentImpl.DEPENDENT);
+        Value.Independent independent = bestType.analysis().getOrNull(PropertyImpl.INDEPENDENT_TYPE,
+                ValueImpl.IndependentImpl.class);
+        if (independent != null) return independent;
+        // see typeImmutable: Object without a stored value is hidden content
+        return bestType.isJavaLangObject() ? ValueImpl.IndependentImpl.INDEPENDENT_HC : ValueImpl.IndependentImpl.DEPENDENT;
     }
 
     /** What the type alone says: a primitive is non-null; anything else is not decided by its type. */
