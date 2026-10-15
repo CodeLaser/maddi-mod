@@ -71,12 +71,16 @@
 # 964/287 after. The type errors read 8, not 2: a final val left unassigned where a delegating constructor's
 # arguments do not type-check (EmbeddingStoreContentRetriever, maddi-mod#38's lambda) cascades into one
 # "property must be initialized" per field, in a file that did not compile before either.
+# 2026-10-15, maddi af913cce6 (maddi#140 item 1: x ?: d and x?.m() from Java's null-check conditionals, == for
+# Objects.equals and a.equals(b)): 345 files compile, 1 type error. In the output, .equals( 205 -> 9 (Objects.equals
+# 192 -> 5), ?: 0 -> 6, !! 219 -> 218; fernflower unchanged at 199/264, with ?. 0 -> 11, ?: 0 -> 16, .equals( 424 -> 152,
+# !! 2893 -> 2880.
 types	346
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	346
-compilingFiles	344
-bytecodeFiles	344
+compilingFiles	345
+bytecodeFiles	345
 testsPassing	1106
 testBytecodeFiles	135
 translatedTestsPassing	1106
