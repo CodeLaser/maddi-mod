@@ -160,8 +160,7 @@ public class TestWriteAnalysis2 extends CommonTest {
                     List<String> l = new ArrayList<>();
                     Set<Integer> s = new HashSet<>();
                     X.R r = new X.R(s, 3, l);
-                    // at this point, s1 should have been modified, via???
-                    setAdd(r);
+                    setAdd(r); // at this point, s1 should have been modified, via???
                 }
             }
             """;
