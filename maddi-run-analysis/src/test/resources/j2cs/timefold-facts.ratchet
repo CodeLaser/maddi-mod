@@ -70,10 +70,15 @@
 # 2026-10-14, maddi 69f2fe385: an Optional is T? in a nullable context, whatever the analysis says of the Optional
 # itself, and Optional.get is asserted where it is dereferenced: 511 -> 499 nullable warnings; compiling files and
 # errors unchanged.
+#
+# 2026-10-14, maddi a8882a1ab: a class's enumerator asserts an iterator() the analysis finds nullable, a value of an
+# unconstrained type parameter is asserted into a reference parameter, JAXB's getNode is ->?, and a parameter whose
+# wildcards are the method's type parameters keeps its ?: 499 -> 479 nullable warnings; compiling files and errors
+# unchanged.
 types	1583
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	1565
 compilingFiles	1034
 unmappedJdkUses	381
-nullableWarnings	499
+nullableWarnings	479
