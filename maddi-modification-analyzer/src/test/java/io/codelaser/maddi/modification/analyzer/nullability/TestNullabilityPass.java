@@ -3960,6 +3960,57 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("Object?", s.get("cleared(0:val)"), "reset() may remove the key: " + s);
     }
 
+    /*
+     CodeLaser/maddi-mod#48 B8, nacos RequestHandlerRegistry: 'while (!clazz.getSuperclass().equals(H.class)) { if
+     (clazz.getSuperclass().equals(Object.class)) break; clazz = clazz.getSuperclass(); }'. The loop assigns clazz only
+     the repeated pure call its condition dereferenced (gap 8), so clazz is non-null at every start of the loop. Not
+     when the loop assigns it a value that may be null.
+     */
+    @DisplayName("loops: a variable non-null at the loop's entry and at every way back")
+    @Test
+    public void loopBackEdges() {
+        NullabilityPass.Report report = run("a.b.LB", """
+                package a.b;
+                class LB {
+                    static abstract class H { }
+                    static boolean superclasses(H h) {
+                        Class<?> clazz = h.getClass();
+                        while (!clazz.getSuperclass().equals(H.class)) {
+                            if (clazz.getSuperclass().equals(Object.class)) {
+                                return false;
+                            }
+                            clazz = clazz.getSuperclass();
+                        }
+                        return true;
+                    }
+                    static boolean unchecked(H h) {
+                        Class<?> clazz = h.getClass();
+                        while (!clazz.getName().isEmpty()) {
+                            clazz = clazz.getSuperclass();
+                        }
+                        return true;
+                    }
+                }
+                """);
+        assertTrue(receiverKnownInCondition(report, "superclasses"), "clazz = clazz.getSuperclass(), dereferenced");
+        assertFalse(receiverKnownInCondition(report, "unchecked"), "clazz = clazz.getSuperclass(), unchecked");
+    }
+
+    // the facts on clazz at the loop condition's first call, 'clazz.getX()'
+    private boolean receiverKnownInCondition(NullabilityPass.Report report, String method) {
+        MethodInfo mi = parsed.methods().stream().filter(m -> m.name().equals(method)).findFirst().orElseThrow();
+        Statement loop = mi.methodBody().statements().get(1);
+        List<io.codelaser.maddi.cst.api.expression.MethodCall> calls = new java.util.ArrayList<>();
+        loop.expression().visit(e -> {
+            if (e instanceof io.codelaser.maddi.cst.api.expression.MethodCall mc && mc.object() != null
+                && mc.object() instanceof io.codelaser.maddi.cst.api.expression.VariableExpression) calls.add(mc);
+            return true;
+        });
+        io.codelaser.maddi.cst.api.expression.MethodCall first = calls.getFirst();
+        Variable clazz = ((io.codelaser.maddi.cst.api.expression.VariableExpression) first.object()).variable();
+        return report.useSites().nonNullAt(loop, clazz) || report.useSites().nonNullAt(first, clazz);
+    }
+
     // the facts on key at 'INSTANCES.remove(key)', the method's second statement
     private boolean keyKnownAtRemove(NullabilityPass.Report report, String method) {
         MethodInfo mi = parsed.methods().stream()
