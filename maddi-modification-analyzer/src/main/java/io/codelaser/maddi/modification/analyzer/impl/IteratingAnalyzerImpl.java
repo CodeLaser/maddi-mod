@@ -214,7 +214,9 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                 io.codelaser.maddi.cst.impl.analysis.PropertyImpl.INDEPENDENT_PARAMETER.key(),
                 io.codelaser.maddi.cst.impl.analysis.PropertyImpl.CONTAINER_METHOD.key(),
                 io.codelaser.maddi.cst.impl.analysis.PropertyImpl.CONTAINER_PARAMETER.key(),
-                io.codelaser.maddi.cst.impl.analysis.PropertyImpl.CONTAINER_FIELD.key()));
+                io.codelaser.maddi.cst.impl.analysis.PropertyImpl.CONTAINER_FIELD.key(),
+                io.codelaser.maddi.cst.impl.analysis.PropertyImpl.UNMODIFIABLE_TYPE.key(),
+                io.codelaser.maddi.cst.impl.analysis.PropertyImpl.UNMODIFIABLE_VIEW_METHOD.key()));
         if (EventualCluster.ENABLED) {
             // EVENTUALCLUSTER: the eventual layer derives from modification exactly like the immutability
             // family. Computed pre-cutover, an abstract enm union freezes on optimistic TRUEs and survives

@@ -471,6 +471,18 @@ public class TestJavaUtil extends CommonTest {
         TypeInfo typeInfo = compiledTypesManager().typeIfLoaded(HashMap.class);
     }
 
+    // CodeLaser/maddi-mod#52: a view is unmodifiable through its reference, and not a copy
+    @Test
+    public void testCollectionsUnmodifiableList() {
+        TypeInfo collections = compiledTypesManager().typeIfLoaded(Collections.class);
+        MethodInfo methodInfo = collections.findUniqueMethod("unmodifiableList", 1);
+        assertTrue(methodInfo.analysis().getOrDefault(io.codelaser.maddi.cst.impl.analysis.PropertyImpl.UNMODIFIABLE_VIEW_METHOD,
+                io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.FALSE).isTrue());
+        assertSame(MUTABLE, methodInfo.analysis().getOrDefault(IMMUTABLE_METHOD, MUTABLE));
+        assertTrue(methodInfo.isNonModifying());
+        assertFalse(methodInfo.parameters().getFirst().isModified());
+    }
+
     @Test
     public void testMapPut() {
         TypeInfo typeInfo = compiledTypesManager().typeIfLoaded(Map.class);

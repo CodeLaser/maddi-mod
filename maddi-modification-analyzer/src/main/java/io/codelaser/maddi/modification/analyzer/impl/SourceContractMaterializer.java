@@ -109,6 +109,8 @@ public class SourceContractMaterializer {
             // deep arm above reads the @Modified, this writes the "hidden content only" refinement beside it, on
             // the method and on each parameter. Absent, readers fall back to the deep value.
             materializeTrueBool(methodInfo, io.codelaser.maddi.cst.impl.analysis.PropertyImpl.STRUCTURALLY_NON_MODIFYING_METHOD);
+            // @UnmodifiableView (#52): a pure contract on a bodiless declaration; a method with a body is computed
+            materializeTrueBool(methodInfo, io.codelaser.maddi.cst.impl.analysis.PropertyImpl.UNMODIFIABLE_VIEW_METHOD);
             for (io.codelaser.maddi.cst.api.info.ParameterInfo pi : methodInfo.parameters()) {
                 materializeTrueBool(pi, io.codelaser.maddi.cst.impl.analysis.PropertyImpl.STRUCTURALLY_UNMODIFIED_PARAMETER);
             }

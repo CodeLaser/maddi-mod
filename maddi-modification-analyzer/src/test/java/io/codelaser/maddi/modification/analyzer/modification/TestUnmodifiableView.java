@@ -1,0 +1,133 @@
+/*
+ * maddi: a modification analyzer for duplication detection and immutability.
+ * Copyright 2020-2025, Bart Naudts, https://github.com/CodeLaser/maddi
+ *
+ * This program is free software: you can redistribute it and/or modify it under the
+ * terms of the GNU Lesser General Public License as published by the Free Software
+ * Foundation, either version 3 of the License, or (at your option) any later version.
+ * This program is distributed in the hope that it will be useful, but WITHOUT ANY
+ * WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ * FOR A PARTICULAR PURPOSE.  See the GNU Lesser General Public License for
+ * more details. You should have received a copy of the GNU Lesser General Public
+ * License along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+package io.codelaser.maddi.modification.analyzer.modification;
+
+import io.codelaser.maddi.cst.api.analysis.Property;
+import io.codelaser.maddi.cst.api.analysis.Value;
+import io.codelaser.maddi.cst.api.element.SourceSet;
+import io.codelaser.maddi.cst.api.info.Info;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
+import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
+import io.codelaser.maddi.modification.analyzer.CommonTest;
+import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
+import io.codelaser.maddi.modification.common.defaults.ContractReader;
+import io.codelaser.maddi.modification.prepwork.io.DecoratorImpl;
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+import java.util.List;
+import java.util.Map;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+/**
+ * CodeLaser/maddi-mod#52: nothing is added to or removed from this object through this reference. The type-level
+ * property is rule 0 and the structural rule 1 before the independence cap; the method-level one is a contract on a
+ * bodiless declaration.
+ */
+public class TestUnmodifiableView extends CommonTest {
+
+    @Language("java")
+    private static final String INPUT = """
+            package a.b;
+            import io.codelaser.maddi.annotation.UnmodifiableView;
+            import java.util.ArrayList;
+            import java.util.List;
+            class Views {
+                // a view: a final field, only reads; the constructor stores what it is given, so the type is dependent
+                // and immutability stops at FINAL_FIELDS -- the verdict this property looks past
+                static class View {
+                    private final List<String> list;
+                    View(List<String> list) { this.list = list; }
+                    String get(int i) { return list.get(i); }
+                    int size() { return list.size(); }
+                }
+                static class Bag {
+                    private final List<String> list = new ArrayList<>();
+                    void add(String s) { list.add(s); }
+                    int size() { return list.size(); }
+                }
+                static class Counter {
+                    private int n;
+                    void inc() { n++; }
+                    int n() { return n; }
+                }
+                interface Source {
+                    @UnmodifiableView List<String> view();
+                    List<String> plain();
+                }
+            }
+            """;
+
+    private static MethodInfo method(TypeInfo typeInfo, String name) {
+        return typeInfo.methods().stream().filter(m -> m.name().equals(name)).findFirst().orElseThrow();
+    }
+
+    private static Value.Bool unmodifiable(TypeInfo typeInfo) {
+        return typeInfo.analysis().getOrNull(PropertyImpl.UNMODIFIABLE_TYPE, ValueImpl.BoolImpl.class);
+    }
+
+    @DisplayName("@UnmodifiableView read as a contract")
+    @Test
+    public void contractReader() {
+        TypeInfo source = javaInspector.parse("a.b.Views", INPUT).findSubType("Source");
+        ContractReader reader = new ContractReader(runtime);
+        Map<Property, Value> view = reader.contracts(method(source, "view"));
+        assertSame(ValueImpl.BoolImpl.TRUE, view.get(PropertyImpl.UNMODIFIABLE_VIEW_METHOD));
+        assertNull(view.get(PropertyImpl.IMMUTABLE_METHOD)); // a view is not a copy
+        assertNull(reader.contracts(method(source, "plain")).get(PropertyImpl.UNMODIFIABLE_VIEW_METHOD));
+    }
+
+    @DisplayName("rule 0 and the structural rule 1 decide the type; the contract is materialized and printed")
+    @Test
+    public void analyzeAndPrint() {
+        TypeInfo views = javaInspector.parse("a.b.Views", INPUT);
+        List<Info> ao = prepWork(views);
+        new IteratingAnalyzerImpl(javaInspector, new IteratingAnalyzerImpl.ConfigurationBuilder()
+                .setMaxIterations(10).build()).analyze(ao);
+
+        TypeInfo view = views.findSubType("View");
+        assertSame(ValueImpl.BoolImpl.TRUE, unmodifiable(view));
+        Value.Immutable viewImmutable = view.analysis().getOrDefault(PropertyImpl.IMMUTABLE_TYPE,
+                ValueImpl.ImmutableImpl.MUTABLE);
+        assertTrue(viewImmutable.isFinalFields(), "a dependent constructor caps immutability: " + viewImmutable);
+
+        assertSame(ValueImpl.BoolImpl.FALSE, unmodifiable(views.findSubType("Bag")));     // rule 1
+        assertSame(ValueImpl.BoolImpl.FALSE, unmodifiable(views.findSubType("Counter"))); // rule 0
+
+        TypeInfo source = views.findSubType("Source");
+        MethodInfo viewMethod = method(source, "view");
+        assertSame(ValueImpl.BoolImpl.TRUE, viewMethod.analysis().getOrNull(PropertyImpl.UNMODIFIABLE_VIEW_METHOD,
+                ValueImpl.BoolImpl.class));
+        MethodInfo plainMethod = method(source, "plain");
+        assertNull(plainMethod.analysis().getOrNull(PropertyImpl.UNMODIFIABLE_VIEW_METHOD, ValueImpl.BoolImpl.class));
+        // the contract says nothing about immutability: both bodiless methods get the same verdict there (the
+        // abstract-method fold's, IMMUTABLE for a declaration without implementations)
+        assertSame(plainMethod.analysis().getOrDefault(PropertyImpl.IMMUTABLE_METHOD, ValueImpl.ImmutableImpl.MUTABLE),
+                viewMethod.analysis().getOrDefault(PropertyImpl.IMMUTABLE_METHOD, ValueImpl.ImmutableImpl.MUTABLE));
+
+        SourceSet sourceSetOfRequest = javaInspector.mainSources();
+        String printed = javaInspector.print2(views.compilationUnit(),
+                new DecoratorImpl(runtime, sourceSetOfRequest),
+                javaInspector.importComputer(4, sourceSetOfRequest));
+        // the source annotation, and the decorator's beside it (the printer keeps the source annotations and adds
+        // the decorator's, as TestStructuralModificationContract shows); plain() gets none
+        assertTrue(printed.contains("@UnmodifiableView @UnmodifiableView "), printed);
+        String plainLine = printed.lines().filter(l -> l.contains("plain()")).findFirst().orElseThrow();
+        assertFalse(plainLine.contains("@UnmodifiableView"), plainLine);
+    }
+}

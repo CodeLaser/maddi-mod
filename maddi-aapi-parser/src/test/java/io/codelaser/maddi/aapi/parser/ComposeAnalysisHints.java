@@ -159,7 +159,7 @@ public class ComposeAnalysisHints {
             "ignoreModificationsField", "ignoreModsParameter", "immutableField", "immutableMethod",
             "immutableParameter", "immutableType", "independentField", "independentMethod", "independentParameter",
             "independentType", "independentTypeParameter", "methodAllowsInterrupts", "nonModifyingMethod",
-            "nullabilityField", "nullabilityMethod", "nullabilityParameter", "staticSideEffectsMethod", "unmodifiedField",
+            "nullabilityField", "nullabilityMethod", "nullabilityParameter", "staticSideEffectsMethod", "unmodifiableViewMethod", "unmodifiedField",
             "unmodifiedParameter", "utilityClass");
 
     // see the class comment, -Pmaddi.compose.exclude

@@ -142,6 +142,7 @@ class AnnotationToProperty {
         Value.GetSetEquivalent getSetEquivalent = null;
         Value.CommutableData commutableData = null;
         Value.Bool utilityClass = null;
+        Value.Bool unmodifiableView = null; // CodeLaser/maddi-mod#52
         // eventual immutability (road to immutability §060): the mark label of @Immutable(after=) etc. on a type,
         // of @Final(after=)/@NotModified(after=) on a field, and the @Mark/@Only/@TestMark family on a method
         String immutableAfter = null;
@@ -254,6 +255,8 @@ class AnnotationToProperty {
                 }
             } else if (Identity.class.getCanonicalName().equals(fqn)) {
                 identity = valueForTrue;
+            } else if (UnmodifiableView.class.getCanonicalName().equals(fqn)) {
+                unmodifiableView = valueForTrue;
             } else if (Fluent.class.getCanonicalName().equals(fqn)) {
                 fluent = valueForTrue;
             } else if (NotNull.class.getCanonicalName().equals(fqn)) {
@@ -353,6 +356,7 @@ class AnnotationToProperty {
         if (info instanceof MethodInfo) {
             if (fluent != null) map.put(PropertyImpl.FLUENT_METHOD, fluent);
             if (identity != null) map.put(PropertyImpl.IDENTITY_METHOD, identity);
+            if (unmodifiableView != null) map.put(PropertyImpl.UNMODIFIABLE_VIEW_METHOD, unmodifiableView);
             if (getSetField != null) map.put(PropertyImpl.GET_SET_FIELD, getSetField);
             if (immutable != null) map.put(PropertyImpl.IMMUTABLE_METHOD, immutable);
             if (independent != null) {

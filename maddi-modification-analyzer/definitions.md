@@ -216,6 +216,25 @@ The `ArrayContainer1/2/3` and `SetBasedContainer1..6` example series in §050 wa
 constructor parameter (rule 3), public modifiable field (rule 2), exposing getter (rule 3), added modifying method
 (rule 1).
 
+### Unmodifiable views (CodeLaser/maddi-mod#52)
+
+A weaker fact than immutability, computed beside it and never derived from it: *nothing is added to or removed from
+this object through this reference*. `Collections.unmodifiableList(x)` returns such a **view**: it never adds or removes
+anything itself, but whoever holds `x` can, and the view shows it. The view's type passes rules 0, 1 and 2 and fails
+rule 3 (a dependent constructor), which stops it at `@FinalFields`, and `@FinalFields` does not say whether rule 1
+failed or only rule 3 did.
+
+- `UNMODIFIABLE_TYPE` (`unmodifiableType`): rule 0 and the structural reading of rule 1 (`STRUCTURALLY_UNMODIFIED_FIELD`,
+  the abstract methods `STRUCTURALLY_NON_MODIFYING_METHOD`), read before the rule-3 cap; a supertype must hold it or be
+  immutable-HC (a library supertype without either decides against). Implied by `@Immutable(hc=true)`. Undecided while
+  a field, an abstract method or a source supertype is; `false` under cycle breaking. Says nothing about hidden content
+  nor about `@Container`.
+- `UNMODIFIABLE_VIEW_METHOD` (`unmodifiableViewMethod`): the result is such an object. A contract, `@UnmodifiableView`, on
+  a bodiless declaration (`Collections.unmodifiable*` in the archive), materialized like `@Modified(hc=true)` and
+  printed back by the decorator. Not yet computed from a method's returned values.
+- Neither is read by immutability, independence or the container analysis; the Java-to-Kotlin printer reads them for
+  Kotlin's read-only collection types (maddi#141 reads immutability only).
+
 ### Abstract types (§050)
 
 Variants of the rules, obeyed by the abstract methods:

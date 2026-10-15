@@ -70,6 +70,7 @@ public class DecoratorImpl implements Qualification.Decorator {
     private final TypeInfo testMarkTi;
     private final AnnotationExpression ignoreModifications;
     private final AnnotationExpression identityAnnotation;
+    private final AnnotationExpression unmodifiableViewAnnotation;
     private final AnnotationExpression fluentAnnotation;
     private final AnnotationExpression finalAnnotation;
     private final AnnotationExpression containerAnnotation;
@@ -118,6 +119,8 @@ public class DecoratorImpl implements Qualification.Decorator {
         containerAnnotation = runtime.newAnnotationExpressionBuilder().setTypeInfo(containerTi).build();
         TypeInfo identityTi = runtime.getFullyQualified(Identity.class, true, sourceSetOfRequest);
         identityAnnotation = runtime.newAnnotationExpressionBuilder().setTypeInfo(identityTi).build();
+        TypeInfo unmodifiableViewTi = runtime.getFullyQualified(UnmodifiableView.class, true, sourceSetOfRequest);
+        unmodifiableViewAnnotation = runtime.newAnnotationExpressionBuilder().setTypeInfo(unmodifiableViewTi).build();
         TypeInfo fluentTi = runtime.getFullyQualified(Fluent.class, true, sourceSetOfRequest);
         fluentAnnotation = runtime.newAnnotationExpressionBuilder().setTypeInfo(fluentTi).build();
         notNullTi = runtime.getFullyQualified(NotNull.class, true, sourceSetOfRequest);
@@ -173,6 +176,7 @@ public class DecoratorImpl implements Qualification.Decorator {
         Property propertyFinalField = null;
         Property propertyContainer = null;
         Property propertyIdentity = null;
+        Property propertyUnmodifiableView = null;
         Property propertyFluent = null;
         Property propertyFinalizer = null;
         // the declared type of the value whose nullability is printed, and its property (explicit mode only:
@@ -217,6 +221,9 @@ public class DecoratorImpl implements Qualification.Decorator {
                     propertyModifiedAnnotated = NON_MODIFYING_METHOD;
                 }
                 propertyIdentity = methodInfo.isIdentity() ? IDENTITY_METHOD : null;
+                propertyUnmodifiableView = !methodInfo.isConstructor()
+                                           && analysis.getOrDefault(UNMODIFIABLE_VIEW_METHOD, FALSE).isTrue()
+                        ? UNMODIFIABLE_VIEW_METHOD : null;
                 propertyFluent = methodInfo.isFluent() ? FLUENT_METHOD : null;
                 propertyIgnoreModifications = methodInfo.isIgnoreModification() ? IGNORE_MODIFICATION_METHOD : null;
                 propertyStaticSideEffects = analysis.getOrDefault(STATIC_SIDE_EFFECTS_METHOD, FALSE).isTrue()
@@ -307,6 +314,10 @@ public class DecoratorImpl implements Qualification.Decorator {
         if (propertyIdentity != null) {
             importsNeeded.add(Identity.class);
             list.add(new AnnotationProperty(identityAnnotation, propertyIdentity));
+        }
+        if (propertyUnmodifiableView != null) {
+            importsNeeded.add(UnmodifiableView.class);
+            list.add(new AnnotationProperty(unmodifiableViewAnnotation, propertyUnmodifiableView));
         }
         if (propertyFluent != null) {
             importsNeeded.add(Fluent.class);

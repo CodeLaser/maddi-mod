@@ -74,6 +74,7 @@ public class TypeImmutableAnalyzerImpl extends CommonAnalyzerImpl implements Typ
 
     @Override
     public void go(TypeInfo typeInfo, boolean activateCycleBreaking) {
+        decideUnmodifiable(typeInfo, activateCycleBreaking);
         Immutable currentImmutable = typeInfo.analysis().getOrDefault(IMMUTABLE_TYPE, MUTABLE);
         if (currentImmutable.isImmutable()) {
             return; // nothing to be gained
@@ -457,6 +458,78 @@ public class TypeImmutableAnalyzerImpl extends CommonAnalyzerImpl implements Typ
         Immutable immutable = fieldType.analysis().getOrNull(IMMUTABLE_TYPE, ValueImpl.ImmutableImpl.class);
         if (immutable != null && immutable.isAtLeastImmutableHC()) return true;
         return eventualCluster.treatAsEventuallyImmutable(typeInfo, fieldType, ev);
+    }
+
+    /**
+     * UNMODIFIABLE_TYPE (CodeLaser/maddi-mod#52): nothing is added to or removed from an instance through any
+     * reference to it. Rule 0 and the structural reading of rule 1, read before the independence cap that keeps an
+     * unmodifiable view at FINAL_FIELDS; computed beside IMMUTABLE_TYPE, never derived from it. Undecided while a
+     * field, an abstract method or a source supertype is; FALSE under cycle breaking, the safe side.
+     */
+    private void decideUnmodifiable(TypeInfo typeInfo, boolean activateCycleBreaking) {
+        Boolean unmodifiable = computeUnmodifiableType(typeInfo);
+        if (unmodifiable == null && activateCycleBreaking) unmodifiable = false;
+        if (unmodifiable == null) {
+            UNDECIDED.debug("TI: Unmodifiable of type {} undecided", typeInfo);
+            return;
+        }
+        Value.Bool value = ValueImpl.BoolImpl.from(unmodifiable);
+        if (TolerantWrite.setAllowControlledOverwrite(typeInfo.analysis(),
+                io.codelaser.maddi.cst.impl.analysis.PropertyImpl.UNMODIFIABLE_TYPE, value, typeInfo)) {
+            DECIDE.debug("TI: Decide unmodifiable of type {} = {}", typeInfo, value);
+            propertyChanges.incrementAndGet();
+        }
+    }
+
+    private Boolean computeUnmodifiableType(TypeInfo typeInfo) {
+        Immutable immutable = typeInfo.analysis().getOrNull(IMMUTABLE_TYPE, ValueImpl.ImmutableImpl.class);
+        if (immutable != null && immutable.isAtLeastImmutableHC()) return true;
+        // rule 0: an assignable field, or a setter on a synthetic one
+        if (typeInfo.fields().stream().anyMatch(fi -> !fi.isPropertyFinal())) return false;
+        if (typeInfo.methodStream().anyMatch(mi -> mi.getSetField() != null && mi.getSetField().setter())) return false;
+        Boolean result = true;
+        // a supertype's content is this instance's content too: it must hold the property, or be immutable-HC. A
+        // library supertype without either (java.util.AbstractList) decides against; its verdicts never arrive
+        for (TypeInfo superType : typeInfo.superTypesExcludingJavaLangObject()) {
+            Immutable superImmutable = superType.analysis().getOrNull(IMMUTABLE_TYPE, ValueImpl.ImmutableImpl.class);
+            if (superImmutable != null && superImmutable.isAtLeastImmutableHC()) continue;
+            Value.Bool superUnmodifiable = superType.analysis().getOrNull(
+                    io.codelaser.maddi.cst.impl.analysis.PropertyImpl.UNMODIFIABLE_TYPE, ValueImpl.BoolImpl.class);
+            if (superUnmodifiable == null) {
+                boolean source = superType.compilationUnit() != null && superType.compilationUnit().sourceSet() != null
+                                 && !superType.compilationUnit().sourceSet().externalLibrary();
+                if (!source) return false;
+                result = null;
+            } else if (superUnmodifiable.isFalse()) {
+                return false;
+            }
+        }
+        // rule 1, structurally: the twin where it is written, the deep verdict where it is not (a library contract)
+        for (FieldInfo fieldInfo : typeInfo.fields()) {
+            if (!isNotSelf(fieldInfo) || fieldInfo.isIgnoreModifications()) continue;
+            Immutable fieldTypeImmutable = analysisHelper.typeImmutableNullIfUndecided(fieldInfo.type());
+            if (fieldTypeImmutable != null && fieldTypeImmutable.isAtLeastImmutableHC()) continue;
+            Bool unmodified = fieldInfo.analysis().getOrNull(
+                    io.codelaser.maddi.cst.impl.analysis.PropertyImpl.STRUCTURALLY_UNMODIFIED_FIELD, ValueImpl.BoolImpl.class);
+            if (unmodified == null) unmodified = fieldInfo.analysis().getOrNull(UNMODIFIED_FIELD, ValueImpl.BoolImpl.class);
+            if (unmodified == null) {
+                result = null;
+            } else if (unmodified.isFalse()) {
+                return false;
+            }
+        }
+        for (MethodInfo methodInfo : typeInfo.methods()) {
+            if (!methodInfo.isAbstract()) continue; // a concrete method counts through the fields it modifies
+            Bool nonModifying = methodInfo.analysis().getOrNull(
+                    io.codelaser.maddi.cst.impl.analysis.PropertyImpl.STRUCTURALLY_NON_MODIFYING_METHOD, ValueImpl.BoolImpl.class);
+            if (nonModifying == null) nonModifying = methodInfo.analysis().getOrNull(NON_MODIFYING_METHOD, ValueImpl.BoolImpl.class);
+            if (nonModifying == null) {
+                result = null;
+            } else if (nonModifying.isFalse()) {
+                return false;
+            }
+        }
+        return result;
     }
 
     private Boolean loopOverFieldsAndMethods(TypeInfo typeInfo, boolean abstractMethods, AfterMark afterMark) {
