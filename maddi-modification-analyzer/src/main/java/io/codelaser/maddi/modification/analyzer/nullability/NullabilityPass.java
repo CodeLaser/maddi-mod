@@ -3624,6 +3624,10 @@ public final class NullabilityPass {
                 Object node = argumentNode(readScope.mi(), readScope.scope(), source);
                 if (node != null) flows.add(List.of(node, target)); // Kotlin infers one type: content slots tied
             }
+            typeArgumentsPassedThrough(mc).forEach((source, k) -> {
+                Object node = argumentNode(readScope.mi(), readScope.scope(), source);
+                if (node != null) flows.add(List.of(new Arg(node, k), target));
+            });
         }
         if (analysed.contains(callee) && !callee.isConstructor() && !callee.returnType().isVoid()) {
             ParameterizedType rt = callee.returnType();
@@ -3705,6 +3709,37 @@ public final class NullabilityPass {
                     ? passedThrough(inner) : List.of();
             if (nested.isEmpty()) out.add(argument);
             else out.addAll(nested);
+        }
+        return out;
+    }
+
+    /*
+     Kotlin: a generic method whose result is its type variable T, with a parameter that carries T as a type argument
+     ('<T> T readValue(String, TypeReference<T>)', '<T> T convert(Object, Class<T>)'), infers T from that argument:
+     the result's type is the argument's type argument k, and generic types are invariant, so their content slots are
+     one (langchain4j DefaultStructuredPromptFactory: 'return OBJECT_MAPPER.readValue(json, MAP_TYPE)' with a
+     'TypeReference<Map<String, Object>> MAP_TYPE' returned a MutableMap<String, Any?>, maddi-mod#38). Per argument,
+     the position k.
+     */
+    private static Map<Expression, Integer> typeArgumentsPassedThrough(MethodCall mc) {
+        MethodInfo callee = mc.methodInfo();
+        if (callee == null || !isMethodTypeVariable(callee.returnType())) return Map.of();
+        var typeVariable = callee.returnType().typeParameter();
+        List<ParameterInfo> parameters = callee.parameters();
+        List<Expression> arguments = mc.parameterExpressions();
+        Map<Expression, Integer> out = new LinkedHashMap<>();
+        for (int i = 0; i < parameters.size() && i < arguments.size(); i++) {
+            if (parameters.get(i).isVarArgs()) break;
+            ParameterizedType formal = parameters.get(i).parameterizedType();
+            if (formal.arrays() > 0) continue;
+            List<ParameterizedType> typeArguments = formal.parameters();
+            for (int k = 0; k < typeArguments.size(); k++) {
+                ParameterizedType a = typeArguments.get(k);
+                if (a.arrays() == 0 && a.wildcard() == null && typeVariable.equals(a.typeParameter())) {
+                    out.put(arguments.get(i), k);
+                    break;
+                }
+            }
         }
         return out;
     }

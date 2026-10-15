@@ -3568,6 +3568,34 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("String", s.get("a.b.LR.named()"), s.toString());
     }
 
+    // langchain4j DefaultStructuredPromptFactory: 'return OBJECT_MAPPER.readValue(json, MAP_TYPE)' with a
+    // 'TypeReference<Map<String, Object>> MAP_TYPE'. Kotlin infers readValue's T from the TypeReference, so the field's
+    // type argument is the result's type: a nullable map value in the result is one in the field (maddi-mod#38)
+    @Test
+    public void typeArgumentArgumentGivesTheResultsType() {
+        NullabilityPass.Report report = run("a.b.TR", """
+                package a.b;
+                import java.util.Map;
+                class TR {
+                    static abstract class TypeRef<T> { }
+                    interface Mapper { <T> T read(String json, TypeRef<T> type); }
+                    private static final TypeRef<Map<String, Object>> MAP_TYPE = new TypeRef<>() { };
+                    static Map<String, Object> extract(Mapper mapper, String json) {
+                        return mapper.read(json, MAP_TYPE);
+                    }
+                    static String fill(Mapper mapper) {
+                        Map<String, Object> variables = extract(mapper, "{}");
+                        variables.put("absent", null);
+                        return variables.toString();
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("Map<String, Object?>", s.get("a.b.TR.extract(a.b.TR.Mapper,String)"), s.toString());
+        assertEquals("TypeRef<Map<String, Object?>>", s.get("a.b.TR.MAP_TYPE"), s.toString());
+    }
+
     // langchain4j OutputGuardrailExecutor.execute overrides GuardrailExecutor's 'R execute(P)', R bounded by
     // GuardrailResult<R>: Kotlin refuses a nullable override there, so the return is non-null and the null asserted
     @DisplayName("Kotlin: an override of a bounded type variable's return stays non-null")
