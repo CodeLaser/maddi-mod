@@ -1634,6 +1634,51 @@ public class TestNullabilityPass extends CommonTest {
                 present.toString());
     }
 
+    @Language("java")
+    private static final String REJECTS = """
+            package a.b;
+            import java.util.Objects;
+            class RJ {
+                private final String text;
+                RJ(String text) {
+                    if (text == null) throw new IllegalArgumentException("text cannot be null");
+                    this.text = text;
+                }
+                static String ensureNotBlank(String s, String name) {
+                    if (s == null || s.isBlank()) throw new IllegalArgumentException(name + " cannot be blank");
+                    return s;
+                }
+                static int helped(String s) { return ensureNotBlank(s, "s").length(); }
+                static int dereferenced(String s) { return s.length(); }
+                static int required(String s) { return Objects.requireNonNull(s).length(); }
+                static RJ make() { return new RJ("x"); }
+            }
+            """;
+
+    // CodeLaser/maddi-mod#28: reported by default, nullable only under Policy.withRejectionsNullable
+    @DisplayName("a parameter whose method answers null with its own exception: the fact, and the opt-in policy")
+    @Test
+    public void rejectsNull() {
+        NullabilityPass.Report report = run("a.b.RJ", REJECTS, NullabilityPass.Policy.KOTLIN);
+        Set<String> rejecting = report.rejectsNull().stream().map(pi -> pi.methodInfo().name() + ":" + pi.name())
+                .collect(Collectors.toCollection(java.util.TreeSet::new));
+        assertEquals("[<init>:text, ensureNotBlank:s, helped:s]", rejecting.toString());
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        // a null test in the method itself already makes the parameter nullable (Policy.nullTests); through a helper
+        // it does not: that is the parameter the printer reports, and the opt-in makes nullable
+        assertEquals("String?", s.get("a.b.RJ.<init>(String):0:text"), s.toString());
+        assertEquals("String", s.get("a.b.RJ.helped(String):0:s"), s.toString());
+
+        NullabilityPass.Report optIn = run("a.b.RJ2", REJECTS.replace("RJ", "RJ2"),
+                NullabilityPass.Policy.KOTLIN.withRejectionsNullable());
+        Map<String, String> o = new java.util.TreeMap<>();
+        optIn.verdicts().forEach((info, pt) -> o.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("String?", o.get("a.b.RJ2.helped(String):0:s"), o.toString());
+        assertEquals("String", o.get("a.b.RJ2.dereferenced(String):0:s"), o.toString());
+        assertEquals("String", o.get("a.b.RJ2.required(String):0:s"), o.toString());
+    }
+
     @DisplayName("a null returned by a method that may return its argument does not flow back into the argument")
     @Test
     public void identityReturn() {
