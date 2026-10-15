@@ -3788,6 +3788,87 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals(false, bufferKnownAtWrite(report, parsed.findUniqueMethod("open", 1)), "grow is overridable");
     }
 
+    /*
+     CodeLaser/maddi-mod#48 A5, nacos CredentialWatcher: 'loadPropertyPath(init); InputStream is =
+     loadPropertyPathToStream();', where the first private helper leaves 'propertyPath' non-null and the second
+     dereferences it. A private method's fields of this are non-null at its entry when they are at each of its calls;
+     not when one call lacks it, when a method reference, a field initializer or an anonymous class calls it too.
+     */
+    @DisplayName("use sites: a field non-null at every call of a private method is non-null at its entry")
+    @Test
+    public void fieldNonNullAtEntry() {
+        NullabilityPass.Report report = run("a.b.FE", """
+                package a.b;
+                import java.util.function.IntSupplier;
+                class FE {
+                    private String path;
+                    private String other;
+                    private final int initial = initialLength();
+                    private void loadPath(boolean init) {
+                        if (path == null) {
+                            path = init ? "a" : "b";
+                        }
+                    }
+                    private int read() { return path.length(); }
+                    private int readOther() { return other.length(); }
+                    private int referenced() { return path.length(); }
+                    private int initialLength() { return path.length(); }
+                    private int chained() { return path.length(); }
+                    private int viaChain() { return chained(); }
+                    private int anonymous() { return path.length(); }
+                    private java.io.InputStream looped() {
+                        java.io.InputStream is = null;
+                        do {
+                            try {
+                                is = new java.io.FileInputStream(path);
+                            } catch (java.io.FileNotFoundException e) {
+                                if (path.equals("a")) {
+                                    path = "b";
+                                    continue;
+                                }
+                            }
+                            break;
+                        } while (true);
+                        return is;
+                    }
+                    void load(boolean init) {
+                        loadPath(init);
+                        int n = read() + viaChain() + initialLength();
+                        if (other != null) readOther();
+                        readOther();
+                        IntSupplier s = this::referenced;
+                        n += referenced();
+                        n += anonymous();
+                        Runnable r = new Runnable() { public void run() { anonymous(); } };
+                        loadPath(init);
+                        java.io.InputStream is = looped();
+                    }
+                    void reset() { path = null; }
+                }
+                """);
+        assertTrue(receiverKnownAtReturn(report, parsed.findUniqueMethod("read", 0)), "only called after loadPath");
+        assertTrue(receiverKnownAtReturn(report, parsed.findUniqueMethod("chained", 0)), "through viaChain");
+        assertFalse(receiverKnownAtReturn(report, parsed.findUniqueMethod("readOther", 0)), "the unguarded call");
+        assertFalse(receiverKnownAtReturn(report, parsed.findUniqueMethod("referenced", 0)), "this::referenced");
+        assertFalse(receiverKnownAtReturn(report, parsed.findUniqueMethod("initialLength", 0)), "the initializer");
+        assertFalse(receiverKnownAtReturn(report, parsed.findUniqueMethod("anonymous", 0)), "the anonymous class");
+        io.codelaser.maddi.cst.api.expression.MethodCall equals = calls("looped", "equals").getFirst();
+        assertTrue(report.useSites().nonNullAt(equals,
+                ((io.codelaser.maddi.cst.api.expression.VariableExpression) equals.object()).variable()),
+                "in the catch of the loop, as CredentialWatcher.loadPropertyPathToStream");
+        assertTrue(report.useSites().nonNullAtExit(parsed.findUniqueMethod("looped", 0),
+                parsed.getFieldByName("path", true)), "the loop assigns it only non-null values");
+    }
+
+    // the facts on x when the method's 'return x.m();' starts
+    private static boolean receiverKnownAtReturn(NullabilityPass.Report report, MethodInfo method) {
+        Statement rs = method.methodBody().statements().getFirst();
+        io.codelaser.maddi.cst.api.expression.MethodCall mc =
+                (io.codelaser.maddi.cst.api.expression.MethodCall) rs.expression();
+        Variable x = ((io.codelaser.maddi.cst.api.expression.VariableExpression) mc.object()).variable();
+        return report.useSites().nonNullAt(rs, x);
+    }
+
     // the facts on 'buffer' when the method's 'buffer[pos++] = v' starts
     private static boolean bufferKnownAtWrite(NullabilityPass.Report report, MethodInfo method) {
         Statement write = method.methodBody().statements().getLast();

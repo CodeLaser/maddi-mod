@@ -72,6 +72,12 @@ public final class NonNullFacts {
     private final Map<MethodInfo, Set<Variable>> atExit = new IdentityHashMap<>();
     // per method: the fields of this non-null at every normal exit (nonNullAtExit(MethodInfo, FieldInfo))
     private final Map<MethodInfo, Set<Variable>> fieldsAtExit = new IdentityHashMap<>();
+    // CodeLaser/maddi-mod#48 A5: per private instance method, the fields of this non-null at every call of it walked
+    // (a call that does not qualify adds none); the calls and method references walked (fieldsAtCalls)
+    private final Map<MethodInfo, Set<Variable>> atCalls = new IdentityHashMap<>();
+    private final Set<Expression> callsWalked = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+    // per private instance method, the fields of this non-null at its entry (withFieldsAtEntry)
+    private Map<MethodInfo, Set<Variable>> fieldsAtEntry = Map.of();
     // the method being walked
     private MethodInfo walking;
     // the facts at each normal exit (a return, the end of the body) of the method being walked; null in a lambda
@@ -139,6 +145,16 @@ public final class NonNullFacts {
         return this;
     }
 
+    /**
+     * The fields of this non-null when a private instance method starts, because they are at every call of it: an
+     * earlier round's {@link #fieldsAtCalls}. Not in {@link #kotlinSmartCasts()}: Kotlin does not smart-cast a
+     * property.
+     */
+    public NonNullFacts withFieldsAtEntry(Map<MethodInfo, Set<Variable>> fieldsAtEntry) {
+        this.fieldsAtEntry = fieldsAtEntry;
+        return this;
+    }
+
     /** The same walk, restricted to what Kotlin's smart cast derives (class comment); walk it before use. */
     public NonNullFacts kotlinSmartCasts() {
         return new NonNullFacts(parameterContract, returnContract, true);
@@ -150,7 +166,9 @@ public final class NonNullFacts {
         if (body == null) return;
         exits = new ArrayList<>();
         walking = methodInfo;
-        Out out = block(body, narrowedThis(methodInfo, body));
+        Set<Variable> in = new HashSet<>(narrowedThis(methodInfo, body));
+        if (!kotlinSmartCasts) in.addAll(fieldsAtEntry.getOrDefault(methodInfo, Set.of()));
+        Out out = block(body, in);
         walking = null;
         if (out.completes) exits.add(out.facts);
         if (!exits.isEmpty()) {
@@ -268,10 +286,7 @@ public final class NonNullFacts {
             // the condition is evaluated again after the body: what the loop assigns is not known at its start
             // ('while (node.parent != null) { node = node.parent; }')
             Set<Variable> stableIn = new HashSet<>(in);
-            Set<Variable> assignedInLoop = assignedIn(statement);
-            stableIn.removeAll(assignedInLoop);
-            stableIn.removeIf(v -> dependsOnAssigned(v, assignedInLoop));
-            if (containsCall(statement)) stableIn.removeIf(NonNullFacts::isNonFinalField);
+            forget(stableIn, statement);
             before.put(statement, Set.copyOf(stableIn));
             return loop(statement, stableIn);
         }
@@ -369,11 +384,8 @@ public final class NonNullFacts {
                 if (statement.expression() != null && !(statement instanceof DoStatement)) {
                     effects(statement.expression(), facts);
                 }
-                Set<Variable> assigned = assignedIn(statement);
                 Set<Variable> stable = new HashSet<>(facts);
-                stable.removeAll(assigned);
-                stable.removeIf(v -> dependsOnAssigned(v, assigned));
-                if (containsCall(statement)) stable.removeIf(NonNullFacts::isNonFinalField);
+                forget(stable, statement);
                 statement.subBlockStream().forEach(sb -> {
                     if (statement instanceof SwitchStatementOldStyle) {
                         // every case label is a jump target: no statement inherits the facts of the one before it
@@ -404,12 +416,49 @@ public final class NonNullFacts {
         return new Out(facts, true);
     }
 
-    // the facts that no longer hold once (part of) the statement may have run: what it assigns, a field at a call
+    /*
+     The facts that no longer hold once (part of) the statement may have run: a variable it may assign null, what
+     depends on a variable it assigns, a field at a call that may change it. Outside Kotlin's smart casts, which drop
+     whatever the statement assigns and every non-final field at any call, a variable it assigns only values non-null
+     by themselves stays, and so do the fields of this when no call reaches this (callMade). CodeLaser/maddi-mod#48 A5,
+     nacos CredentialWatcher: 'do { try { is = new FileInputStream(propertyPath); } catch (...) { if
+     (propertyPath.equals(...)) { propertyPath = CREDENTIAL_PATH + DEFAULT; continue; } ... } break; } while (true);'
+     */
     private void forget(Set<Variable> facts, Statement statement) {
         Set<Variable> assigned = assignedIn(statement);
-        facts.removeAll(assigned);
+        facts.removeAll(kotlinSmartCasts ? assigned : mayAssignNull(statement));
         facts.removeIf(v -> dependsOnAssigned(v, assigned));
-        if (containsCall(statement)) facts.removeIf(NonNullFacts::isNonFinalField);
+        if (kotlinSmartCasts) {
+            if (containsCall(statement)) facts.removeIf(NonNullFacts::isNonFinalField);
+            return;
+        }
+        boolean[] call = {false};
+        boolean[] reaches = {false};
+        statement.visit(e -> {
+            if (e instanceof MethodCall || e instanceof ConstructorCall) {
+                call[0] = true;
+                if (reachesThis((Expression) e)) reaches[0] = true;
+            }
+            return !reaches[0];
+        });
+        if (call[0]) {
+            facts.removeIf(v -> isNonFinalField(v)
+                                && (reaches[0] || !(v instanceof FieldReference fr && fr.scopeIsThis())));
+        }
+    }
+
+    // the variables the statement declares, or assigns a value that is not non-null by itself
+    private Set<Variable> mayAssignNull(Statement statement) {
+        Set<Variable> set = new HashSet<>();
+        statement.visit(e -> {
+            if (e instanceof Assignment a && trackable(a.variableTarget())
+                && (a.assignmentOperator() != null || !nonNull(a.value(), Set.of()))) {
+                set.add(a.variableTarget());
+            }
+            if (e instanceof LocalVariableCreation lvc) lvc.localVariableStream().forEach(set::add);
+            return true;
+        });
+        return set;
     }
 
     private static boolean containsCall(Statement statement) {
@@ -720,6 +769,46 @@ public final class NonNullFacts {
                                      && ve.variable() instanceof io.codelaser.maddi.cst.api.variable.This)) return;
         if (!callee.access().isPrivate() && !callee.isFinal() && !callee.typeInfo().isFinal()) return;
         facts.addAll(fieldsAtExit.getOrDefault(callee, Set.of()));
+    }
+
+    /*
+     A call of a private instance method of this class, on this, with the facts when it is made: the fields of this
+     among them stay candidates for the method's entry (atCalls). Any other use, a method reference or a call from
+     another class (an anonymous one, a nested one), leaves none.
+     */
+    private void callOfPrivate(Expression site, MethodInfo callee, Set<Variable> facts) {
+        if (kotlinSmartCasts || callee == null || !privateInstanceMethod(callee)) return;
+        callsWalked.add(site);
+        Set<Variable> fields = new HashSet<>();
+        if (facts != null && walking != null && callee.typeInfo().equals(walking.typeInfo())
+            && site instanceof MethodCall mc
+            && (mc.object() == null || unwrap(mc.object()) instanceof VariableExpression ve
+                                       && ve.variable() instanceof io.codelaser.maddi.cst.api.variable.This)) {
+            for (Variable v : facts) {
+                if (v instanceof FieldReference fr && fr.scopeIsThis() && !fr.fieldInfo().isStatic()) fields.add(v);
+            }
+        }
+        Set<Variable> known = atCalls.get(callee);
+        if (known == null) atCalls.put(callee, fields);
+        else known.retainAll(fields);
+    }
+
+    static boolean privateInstanceMethod(MethodInfo mi) {
+        return mi.access().isPrivate() && !mi.isStatic() && !mi.isConstructor() && mi.methodBody() != null;
+    }
+
+    /**
+     * Per private instance method, the fields of this non-null at every call of it walked, all on this from its own
+     * class (CodeLaser/maddi-mod#48 A5); empty when a call or a method reference does not qualify. Complete only when
+     * every use of the method was walked: see {@link #walked}.
+     */
+    public Map<MethodInfo, Set<Variable>> fieldsAtCalls() {
+        return atCalls;
+    }
+
+    /** Was the call or method reference walked, as an expression of a method body? */
+    public boolean walked(Expression callOrReference) {
+        return callsWalked.contains(callOrReference);
     }
 
     /*
@@ -1100,6 +1189,7 @@ public final class NonNullFacts {
                     for (Expression argument : arguments) effects(argument, facts);
                     if (mc.methodInfo() != null && !mc.methodInfo().isStatic()) dereference(mc.object(), facts);
                     whenCalled.put(mc, Set.copyOf(facts));
+                    callOfPrivate(mc, mc.methodInfo(), facts);
                     if (mc.methodInfo() != null) demanded(mc.methodInfo(), arguments, facts);
                     callMade(facts, mc);
                     // 'map.put(k, v)' with v non-null: k is present from here on
@@ -1115,6 +1205,10 @@ public final class NonNullFacts {
                     presentAtCalleeExit(mc, facts);
                     fieldsEnsured(mc, facts);
                     return false;
+                }
+                case MethodReference mr -> {
+                    callOfPrivate(mr, mr.methodInfo(), null);
+                    return true;
                 }
                 case ConstructorCall cc -> {
                     record(cc, facts);
