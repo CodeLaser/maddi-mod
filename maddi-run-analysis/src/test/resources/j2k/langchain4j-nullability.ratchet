@@ -75,6 +75,9 @@
 # Objects.equals and a.equals(b)): 345 files compile, 1 type error. In the output, .equals( 205 -> 9 (Objects.equals
 # 192 -> 5), ?: 0 -> 6, !! 219 -> 218; fernflower unchanged at 199/264, with ?. 0 -> 11, ?: 0 -> 16, .equals( 424 -> 152,
 # !! 2893 -> 2880.
+# 2026-10-15, devel with maddi-mod#52 (unmodifiable views as read-only values) and maddi's 4a32dcb61..35418639e
+# (maddi#141: collections born immutable read-only, List.of as listOf), bdc229cf4 (maddi-mod#25: read-only parameters
+# by override family) and 5c50fcba7 (array elements widened): 138 test files compile to class files.
 types	346
 printerCrashes	0
 syntaxErrors	0
@@ -82,5 +85,5 @@ syntaxCleanFiles	346
 compilingFiles	345
 bytecodeFiles	345
 testsPassing	1106
-testBytecodeFiles	135
+testBytecodeFiles	138
 translatedTestsPassing	1106
