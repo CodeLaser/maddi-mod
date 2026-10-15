@@ -101,10 +101,13 @@
 # 2026-10-15, maddi 1b73bbe2e, 2c4419b6b, 519f58f0c: a self-bounded type comparable with itself has IComparable in its
 # wildcard interface; Java's var of a conditional with differing branches declared; a class implementing two iterable
 # interfaces declares its GetEnumerator: 1153 -> 1167 compiling files, nullable warnings stay 467.
+# 2026-10-15, maddi 359209d09: a conditional's var kept where C# cannot write the common type; a class reaching two
+# iterable interfaces through a third declares its GetEnumerator: 1167 -> 1168 compiling files, nullable warnings stay
+# 467.
 types	1583
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	1565
-compilingFiles	1167
+compilingFiles	1168
 unmappedJdkUses	379
 nullableWarnings	467
