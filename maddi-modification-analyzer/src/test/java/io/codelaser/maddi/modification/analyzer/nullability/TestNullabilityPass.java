@@ -3914,6 +3914,52 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("Res", s.get("<init>(0:res)"), s.toString());
     }
 
+    /*
+     CodeLaser/maddi-mod#48 A2, nacos InstanceOperatorClientImpl.getHeartBeatInterval: 'if (metadata.isPresent() &&
+     metadata.get().getExtendData().containsKey(HEART_BEAT_INTERVAL)) return toLong(metadata.get().getExtendData()
+     .get(HEART_BEAT_INTERVAL));'. The map is a chain of pure calls, the key a constant; a modifying call in between
+     forgets it.
+     */
+    @DisplayName("key presence: a constant key in a map reached through pure calls")
+    @Test
+    public void keyPresenceConstantKey() {
+        NullabilityPass.Report report = run("a.b.KC", """
+                package a.b;
+                import java.util.HashMap;
+                import java.util.Map;
+                import java.util.Optional;
+                class KC {
+                    static final String KEY = "interval";
+                    static class Meta {
+                        private final Map<String, Object> data = new HashMap<>();
+                        Map<String, Object> getData() { return data; }
+                        void reset() { data.clear(); }
+                    }
+                    static long guarded(Object val) { return val.hashCode(); }
+                    static long cleared(Object val) { return val == null ? 0 : val.hashCode(); }
+                    static long chained(Object val) { return val.hashCode(); }
+                    static long unguarded(Object val) { return val == null ? 0 : val.hashCode(); }
+                    static long interval(Optional<Meta> metadata, Meta m) {
+                        if (metadata.isPresent() && metadata.get().getData().containsKey(KEY)) {
+                            return chained(metadata.get().getData().get(KEY));
+                        }
+                        if (m.getData().containsKey(KEY)) return guarded(m.getData().get(KEY));
+                        if (metadata.get().getData().containsKey(KEY)) {
+                            metadata.get().reset();
+                            return cleared(metadata.get().getData().get(KEY));
+                        }
+                        return unguarded(m.getData().get(KEY));
+                    }
+                }
+                """);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(label(info), k(pt)));
+        assertEquals("Object", s.get("guarded(0:val)"), s.toString());
+        assertEquals("Object", s.get("chained(0:val)"), s.toString());
+        assertEquals("Object?", s.get("unguarded(0:val)"), s.toString());
+        assertEquals("Object?", s.get("cleared(0:val)"), "reset() may remove the key: " + s);
+    }
+
     // the facts on key at 'INSTANCES.remove(key)', the method's second statement
     private boolean keyKnownAtRemove(NullabilityPass.Report report, String method) {
         MethodInfo mi = parsed.methods().stream()

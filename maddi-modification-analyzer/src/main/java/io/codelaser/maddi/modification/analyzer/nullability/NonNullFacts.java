@@ -428,6 +428,9 @@ public final class NonNullFacts {
      */
     private void forget(Set<Variable> facts, Statement statement) {
         Set<Variable> assigned = assignedIn(statement);
+        if (!kotlinSmartCasts && changesReachedMap(statement)) {
+            facts.removeIf(v -> v instanceof KeyPresence kp && kp.map() instanceof PureCall);
+        }
         boolean coarse = kotlinSmartCasts || ENTRY_FIELDS_OFF;
         facts.removeAll(coarse ? assigned : mayAssignNull(statement));
         facts.removeIf(v -> dependsOnAssigned(v, assigned));
@@ -462,6 +465,15 @@ public final class NonNullFacts {
             return true;
         });
         return set;
+    }
+
+    private static boolean changesReachedMap(Statement statement) {
+        boolean[] found = {false};
+        statement.visit(e -> {
+            if (e instanceof Expression x && changesReachedMap(x)) found[0] = true;
+            return !found[0];
+        });
+        return found[0];
     }
 
     private static boolean containsCall(Statement statement) {
@@ -567,10 +579,34 @@ public final class NonNullFacts {
     private Variable keyPresence(MethodCall mc, String name) {
         if (kotlinSmartCasts || mc.methodInfo() == null || mc.object() == null || mc.parameterExpressions().isEmpty()
             || name != null && !name.equals(mc.methodInfo().name())) return null;
-        Variable map = trackableVariable(mc.object());
+        Variable map = mapVariable(mc.object());
         Variable key = keyVariable(mc.parameterExpressions().getFirst());
         if (map == null || key == null || !isMap(mc.object().parameterizedType())) return null;
         return keyPresence(map, key, mc.object().parameterizedType());
+    }
+
+    /*
+     The map of a key-presence fact: a tracked variable, or a chain of pure calls on one ('m.getData()',
+     'metadata.get().getExtendData()', CodeLaser/maddi-mod#48 A2, nacos InstanceOperatorClientImpl). Such a map is
+     reached through objects a call may change: its presence is forgotten at any call that is neither pure nor a read
+     (callMade), and at a compound statement holding one (forget).
+     */
+    private Variable mapVariable(Expression e) {
+        Variable v = trackableVariable(e);
+        if (v != null || !(unwrap(e) instanceof MethodCall mc)) return v;
+        MethodInfo mi = mc.methodInfo();
+        if (mi == null || mi.isStatic() || !mc.parameterExpressions().isEmpty() || mc.object() == null
+            || !(mi.isNonModifying() || libraryGetter(mi)) || mi.returnType().isPrimitiveExcludingVoid()) return null;
+        Variable receiver = mapVariable(mc.object());
+        return receiver == null ? null : new PureCall(receiver, mi, mi.returnType());
+    }
+
+    // a call that may change a map reached through pure calls: not itself pure, not a map read
+    private static boolean changesReachedMap(Expression call) {
+        if (call instanceof ConstructorCall cc) return cc.constructor() != null || cc.anonymousClass() != null;
+        if (!(call instanceof MethodCall mc)) return false;
+        MethodInfo mi = mc.methodInfo();
+        return mi == null || !MAP_READS.contains(mi.name()) && !mi.isNonModifying() && !libraryGetter(mi);
     }
 
     /*
@@ -582,6 +618,11 @@ public final class NonNullFacts {
         if (unwrap(key) instanceof MethodCall gk && gk.methodInfo() != null && "getKey".equals(gk.methodInfo().name())
             && gk.parameterExpressions().isEmpty() && gk.object() != null && isEntry(gk.object().parameterizedType())) {
             return trackableVariable(gk.object());
+        }
+        // a constant: 'containsKey(HEART_BEAT_INTERVAL)' (#48 A2)
+        if (unwrap(key) instanceof VariableExpression ve && ve.variable() instanceof FieldReference fr
+            && fr.fieldInfo().isStatic() && fr.fieldInfo().isFinal()) {
+            return fr;
         }
         Variable v = trackableVariable(key);
         return v == null || isEntry(v.parameterizedType()) ? null : v;
@@ -727,7 +768,8 @@ public final class NonNullFacts {
                || v instanceof DependentVariable dv
                && (dv.arrayVariable() != null && assigned.contains(dv.arrayVariable())
                    || dv.indexVariable() != null && assigned.contains(dv.indexVariable()))
-               || v instanceof KeyPresence kp && (assigned.contains(kp.map()) || assigned.contains(kp.key()))
+               || v instanceof KeyPresence kp && (assigned.contains(kp.map()) || assigned.contains(kp.key())
+                                                  || kp.map() instanceof PureCall pc && assigned.contains(pc.root()))
                || v instanceof AnnotationPresence ap && assigned.contains(ap.element())
                || v instanceof PureCall pc && assigned.contains(pc.receiver())
                || v instanceof Narrowing n && (assigned.contains(n.subject())
@@ -750,6 +792,7 @@ public final class NonNullFacts {
         boolean keepsThis = !reachesThis(call);
         facts.removeIf(v -> isNonFinalField(v) && !(keepsThis && v instanceof FieldReference fr && fr.scopeIsThis())
                             || v instanceof DependentVariable
+                            || v instanceof KeyPresence kp && kp.map() instanceof PureCall && changesReachedMap(call)
                             || v instanceof KeyPresence kp && (touches(kp.map(), receiver, read, arguments)
                                                                || !NAV_KEYS_OFF && (changesAtCall(kp.key(), keepsThis)
                                                                                     || changesAtCall(kp.map(), keepsThis)))

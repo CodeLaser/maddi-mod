@@ -40,6 +40,11 @@ import java.util.stream.Stream;
  */
 record PureCall(Variable receiver, MethodInfo method, ParameterizedType type) implements Variable {
 
+    /** The tracked variable at the start of the chain: 'm' of 'm.get().getData()'. */
+    Variable root() {
+        return receiver instanceof PureCall pc ? pc.root() : receiver;
+    }
+
     @Override
     public ParameterizedType parameterizedType() {
         return type;
