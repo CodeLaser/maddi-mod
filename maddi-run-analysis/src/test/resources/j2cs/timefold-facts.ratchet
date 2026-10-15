@@ -79,10 +79,14 @@
 # 2026-10-15, maddi 3e89075ca: java.time.OffsetDateTime is DateTimeOffset, so that JaxbOffsetDateTimeAdapter's
 # Marshal override matches the base's B? (CS8765): 381 -> 379 unmapped uses, 479 -> 478 nullable warnings, 2221 ->
 # 2217 errors.
+#
+# 2026-10-15, maddi 31e8b73db: a superclass's method that implements a subclass's interface method stays a method,
+# and the abstract class in between does not redeclare it (the Bavet streams' GetRetrievalSemantics and
+# GuaranteesDistinct, CS0534): 1034 -> 1086 compiling files, 2217 -> 2112 errors.
 types	1583
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	1565
-compilingFiles	1034
+compilingFiles	1086
 unmappedJdkUses	379
 nullableWarnings	478
