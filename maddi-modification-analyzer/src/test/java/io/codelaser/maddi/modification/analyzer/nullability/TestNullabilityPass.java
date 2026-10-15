@@ -3860,6 +3860,77 @@ public class TestNullabilityPass extends CommonTest {
                 parsed.getFieldByName("path", true)), "the loop assigns it only non-null values");
     }
 
+    /*
+     CodeLaser/maddi-mod#48 A3, nacos CredentialService: 'String key = appName != null ? appName : NO_APP_NAME;
+     INSTANCES.remove(key)', with 'freeInstance()' passing null. The use site knows key non-null: each branch of the
+     ternary is evaluated with its condition's facts. Also 'custom == null ? fallback() : custom'
+     (EnvUtil.getApplicationConfFileResource), under the diagnostics' policy.
+     */
+    @DisplayName("use sites: a ternary that replaces null is non-null by its condition")
+    @Test
+    public void ternaryReplacingNull() {
+        NullabilityPass.Report report = run("a.b.TR", """
+                package a.b;
+                import java.io.InputStream;
+                import java.util.Map;
+                import java.util.concurrent.ConcurrentHashMap;
+                class TR {
+                    interface Res { InputStream in(); }
+                    static class Fixed implements Res { public InputStream in() { return InputStream.nullInputStream(); } }
+                    static final Map<String, String> INSTANCES = new ConcurrentHashMap<>();
+                    static String free() { return free(null); }
+                    static String free(String app) {
+                        String key = app != null ? app : "none";
+                        String instance = INSTANCES.remove(key);
+                        return instance;
+                    }
+                    static String unguarded() { return unguarded(null, true); }
+                    static String unguarded(String app, boolean b) {
+                        String key = b ? app : "none";
+                        return INSTANCES.remove(key);
+                    }
+                    static Res conf(String p) {
+                        Res custom = custom(p);
+                        return custom == null ? fallback() : custom;
+                    }
+                    private static Res custom(String p) {
+                        if (p.isEmpty()) return null;
+                        return new Fixed();
+                    }
+                    private static Res fallback() { return new Fixed(); }
+                    static class Reader {
+                        private final InputStream in;
+                        Reader(Res res) { this.in = res.in(); }
+                    }
+                    static Reader load(String p) { return new Reader(conf(p)); }
+                }
+                """, NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY.withoutContracts()
+                        .withWorld(NullabilityPass.World.CLOSED).withoutTestNulls());
+        assertTrue(keyKnownAtRemove(report, "free"), "app != null ? app : \"none\"");
+        assertFalse(keyKnownAtRemove(report, "unguarded"), "b ? app : \"none\"");
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(label(info), k(pt)));
+        assertEquals("Res", s.get("conf()"), s.toString());
+        assertEquals("Res", s.get("<init>(0:res)"), s.toString());
+    }
+
+    // the facts on key at 'INSTANCES.remove(key)', the method's second statement
+    private boolean keyKnownAtRemove(NullabilityPass.Report report, String method) {
+        MethodInfo mi = parsed.methods().stream()
+                .filter(m -> m.name().equals(method) && m.parameters().size() >= 1).findFirst().orElseThrow();
+        Statement st = mi.methodBody().statements().get(1);
+        List<io.codelaser.maddi.cst.api.expression.MethodCall> removes = new java.util.ArrayList<>();
+        st.visit(e -> {
+            if (e instanceof io.codelaser.maddi.cst.api.expression.MethodCall mc && mc.methodInfo() != null
+                && "remove".equals(mc.methodInfo().name())) removes.add(mc);
+            return true;
+        });
+        io.codelaser.maddi.cst.api.expression.MethodCall remove = removes.getFirst();
+        Variable key = ((io.codelaser.maddi.cst.api.expression.VariableExpression) remove.parameterExpressions()
+                .getFirst()).variable();
+        return report.useSites().nonNullAt(st, key) || report.useSites().nonNullAt(remove, key);
+    }
+
     // the facts on x when the method's 'return x.m();' starts
     private static boolean receiverKnownAtReturn(NullabilityPass.Report report, MethodInfo method) {
         Statement rs = method.methodBody().statements().getFirst();

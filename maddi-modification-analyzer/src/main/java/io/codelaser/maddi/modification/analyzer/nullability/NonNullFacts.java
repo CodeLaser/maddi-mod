@@ -875,6 +875,13 @@ public final class NonNullFacts {
         derive(facts);
     }
 
+    private Set<Variable> withCondition(Set<Variable> facts, Set<Variable> condition) {
+        if (condition.isEmpty()) return facts;
+        Set<Variable> copy = new HashSet<>(facts);
+        addCondition(copy, condition);
+        return copy;
+    }
+
     /*
      'l = x.getF()' / 'l = x.f' with x a tracked variable: remembered, so that a later 'x instanceof T' (or an earlier
      one still holding) makes l non-null when no instance of T has a null there. Java only: Kotlin does not smart-cast
@@ -1091,7 +1098,10 @@ public final class NonNullFacts {
             case VariableExpression ve -> ve.variable() instanceof io.codelaser.maddi.cst.api.variable.This
                                           || facts.contains(ve.variable())
                                           || notNullable != null && !kotlinSmartCasts && notNullable.test(ve);
-            case InlineConditional ic -> nonNull(ic.ifTrue(), facts) && nonNull(ic.ifFalse(), facts);
+            // each branch with its condition's facts: 'key = appName != null ? appName : NO_APP_NAME' (#48 A3, nacos
+            // CredentialService), as Kotlin's 'if (appName != null) appName else NO_APP_NAME' is a String
+            case InlineConditional ic -> nonNull(ic.ifTrue(), withCondition(facts, whenTrue(ic.condition())))
+                                         && nonNull(ic.ifFalse(), withCondition(facts, whenFalse(ic.condition())));
             case MethodCall mc -> !kotlinSmartCasts && mc.methodInfo() != null
                                   && (returnContract.apply(mc.methodInfo()) == NullableState.NONNULL
                                       || pureCall(mc) instanceof Variable pc && facts.contains(pc)
