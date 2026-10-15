@@ -80,6 +80,14 @@ public final class NonNullFacts {
     private Map<MethodInfo, Set<Variable>> fieldsAtEntry = Map.of();
     // gate NOENTRYFIELDS (with NullabilityPass's): forget at a compound statement as before #48 A5 (A/B)
     private static final boolean ENTRY_FIELDS_OFF = System.getenv("NOENTRYFIELDS") != null;
+    // gate NOLOOPBACKEDGES: a loop's start knows only what the loop does not change (A/B for #48 B8)
+    private static final boolean LOOP_BACK_EDGES_OFF = System.getenv("NOLOOPBACKEDGES") != null;
+    // the loops refined at once (nested), and the rounds per loop (assumedAtLoopStart): each round walks the body again
+    private static final int MAX_LOOP_DEPTH = 2;
+    private static final int MAX_LOOP_ROUNDS = 2;
+    private int loopDepth;
+    // the facts at each unlabeled 'continue' of the loop whose back edges are collected; null when none is
+    private List<Set<Variable>> continues;
     // gate NOCHAINEDKEYS: no constant key, no map reached through pure calls in key presence (A/B for #48 A2)
     private static final boolean CHAINED_KEYS_OFF = System.getenv("NOCHAINEDKEYS") != null;
     // gate NOTERNARYFACTS: a ternary's branches without their condition's facts in nonNull (A/B for #48 A3)
@@ -293,8 +301,16 @@ public final class NonNullFacts {
             // ('while (node.parent != null) { node = node.parent; }')
             Set<Variable> stableIn = new HashSet<>(in);
             forget(stableIn, statement);
+            Set<Variable> assumed = assumedAtLoopStart(statement, in, stableIn);
+            stableIn.addAll(assumed);
             before.put(statement, Set.copyOf(stableIn));
-            return loop(statement, stableIn);
+            Out out = loop(statement, stableIn, null);
+            if (assumed.isEmpty()) return out;
+            // a break leaves the loop with what its path has: not what the loop's start assumed
+            Set<Variable> after = new HashSet<>(out.facts);
+            after.removeAll(assumed);
+            after.removeIf(v -> dependsOnAssigned(v, assumed));
+            return new Out(after, true);
         }
         before.put(statement, Set.copyOf(in));
         Set<Variable> facts = new HashSet<>(in);
@@ -319,7 +335,10 @@ public final class NonNullFacts {
                 effects(ts.expression(), facts);
                 return new Out(facts, false);
             }
-            case BreakOrContinueStatement _ -> {
+            case BreakOrContinueStatement bc -> {
+                if (continues != null && bc instanceof ContinueStatement && bc.goToLabel() == null) {
+                    continues.add(Set.copyOf(facts));
+                }
                 return new Out(facts, false);
             }
             case AssertStatement as -> {
@@ -392,12 +411,14 @@ public final class NonNullFacts {
                 }
                 Set<Variable> stable = new HashSet<>(facts);
                 forget(stable, statement);
+                Set<Variable> bodyIn = new HashSet<>(stable);
+                if (statement instanceof DoStatement) bodyIn.addAll(assumedAtLoopStart(statement, facts, stable));
                 statement.subBlockStream().forEach(sb -> {
                     if (statement instanceof SwitchStatementOldStyle) {
                         // every case label is a jump target: no statement inherits the facts of the one before it
                         for (Statement s : sb.statements()) statement(s, new HashSet<>(stable));
                     } else {
-                        block(sb, new HashSet<>(stable));
+                        block(sb, new HashSet<>(bodyIn));
                     }
                 });
                 return new Out(stable, true);
@@ -405,10 +426,15 @@ public final class NonNullFacts {
         }
     }
 
-    // a while/for/for-each loop, with the facts that hold at every evaluation of its condition
-    private Out loop(Statement statement, Set<Variable> in) {
+    /*
+     A while/for/for-each loop, with the facts that hold at every evaluation of its condition. backEdges, when not
+     null, collects the facts at each way back to the start: the end of the body, an unlabeled continue.
+     */
+    private Out loop(Statement statement, Set<Variable> in, List<Set<Variable>> backEdges) {
         Set<Variable> facts = new HashSet<>(in);
         if (statement.expression() != null) effects(statement.expression(), facts);
+        List<Set<Variable>> enclosing = continues;
+        continues = backEdges;
         statement.subBlockStream().forEach(sb -> {
             Set<Variable> blockIn = new HashSet<>(facts);
             if (statement.expression() != null) addCondition(blockIn, whenTrue(statement.expression()));
@@ -416,10 +442,80 @@ public final class NonNullFacts {
                 Variable present = keySetLoop(fe);
                 if (present != null) blockIn.add(present);
             }
-            block(sb, blockIn);
+            Out out = block(sb, blockIn);
+            if (backEdges != null && out.completes) backEdges.add(Set.copyOf(out.facts));
         });
+        continues = enclosing;
         // the condition is evaluated on every way out (but the last evaluation's 'false' is not known here)
         return new Out(facts, true);
+    }
+
+    /*
+     CodeLaser/maddi-mod#48 B8, nacos RequestHandlerRegistry: 'while (!clazz.getSuperclass().equals(H.class)) { if
+     (clazz.getSuperclass().equals(Object.class)) { ...; break; } clazz = clazz.getSuperclass(); }'. What holds when
+     the loop is entered and at every way back to its start holds at every start, though the loop changes it: here
+     clazz, assigned the pure call its condition dereferenced (gap 8). The facts the loop's changes drop (in less
+     stable) are assumed, the body walked, and kept only where every way back has them, until that is stable; the
+     caller then walks the body once more with them. Not for Kotlin's smart casts. Not in a loop with a labeled
+     continue or a finally (a way back the walk does not see), nor for what a for's updaters or a do's condition,
+     which the walk does not evaluate, assign; when they call, only for a local or a parameter. At most
+     MAX_LOOP_ROUNDS rounds, and MAX_LOOP_DEPTH nested loops: each round walks the body again.
+     */
+    private Set<Variable> assumedAtLoopStart(Statement statement, Set<Variable> in, Set<Variable> stable) {
+        if (kotlinSmartCasts || LOOP_BACK_EDGES_OFF || loopDepth >= MAX_LOOP_DEPTH) return Set.of();
+        Set<Variable> changed = new HashSet<>(in);
+        changed.removeAll(stable);
+        if (changed.isEmpty() || !refinable(statement)) return Set.of();
+        List<Expression> tail = statement instanceof ForStatement fs ? fs.updaters()
+                : statement instanceof DoStatement && statement.expression() != null ? List.of(statement.expression())
+                : List.of();
+        for (Expression e : tail) {
+            e.visit(x -> {
+                if (x instanceof Assignment a && a.variableTarget() != null) changed.remove(a.variableTarget());
+                if (x instanceof MethodCall || x instanceof ConstructorCall) {
+                    changed.removeIf(v -> !(v instanceof LocalVariable || v instanceof ParameterInfo));
+                }
+                return true;
+            });
+        }
+        Set<Variable> candidates = changed;
+        loopDepth++;
+        try {
+            for (int round = 0; round < MAX_LOOP_ROUNDS && !candidates.isEmpty(); round++) {
+                Set<Variable> head = new HashSet<>(stable);
+                head.addAll(candidates);
+                List<Set<Variable>> backEdges = new ArrayList<>();
+                if (statement instanceof DoStatement) {
+                    List<Set<Variable>> enclosing = continues;
+                    continues = backEdges;
+                    Out out = block(statement.block(), head);
+                    if (out.completes) backEdges.add(Set.copyOf(out.facts));
+                    continues = enclosing;
+                } else {
+                    loop(statement, head, backEdges);
+                }
+                Set<Variable> next = new HashSet<>(candidates);
+                for (Set<Variable> back : backEdges) next.retainAll(back);
+                if (next.equals(candidates)) return Set.copyOf(candidates);
+                candidates = next;
+            }
+            return Set.of();
+        } finally {
+            loopDepth--;
+        }
+    }
+
+    // a loop whose ways back to its start are the end of its body and its unlabeled continues
+    private static boolean refinable(Statement statement) {
+        boolean[] other = {false};
+        statement.visit(e -> {
+            if (e instanceof ContinueStatement cs && cs.goToLabel() != null
+                || e instanceof TryStatement ts && ts.finallyBlock() != null && !ts.finallyBlock().isEmpty()) {
+                other[0] = true;
+            }
+            return !other[0];
+        });
+        return !other[0];
     }
 
     /*
@@ -1176,8 +1272,11 @@ public final class NonNullFacts {
                         in.removeIf(NonNullFacts::isNonFinalField); // the body runs later
                         List<Set<Variable>> enclosing = exits;
                         exits = null; // a return in the lambda does not leave the method
+                        List<Set<Variable>> enclosingLoop = continues;
+                        continues = null;
                         block(lambda.methodBody(), in);
                         exits = enclosing;
+                        continues = enclosingLoop;
                     }
                     return false;
                 }
@@ -1326,6 +1425,10 @@ public final class NonNullFacts {
 
     private void dereference(Expression scope, Set<Variable> facts) {
         if (unwrap(scope) instanceof VariableExpression ve && trackable(ve.variable())) facts.add(ve.variable());
+        // 'clazz.getSuperclass().equals(X.class)': the same pure call again is non-null (gap 8, #48 B8)
+        if (!LOOP_BACK_EDGES_OFF && unwrap(scope) instanceof MethodCall mc && pureCall(mc) instanceof Variable pc) {
+            facts.add(pc);
+        }
     }
 
     private void demanded(MethodInfo callee, List<Expression> arguments, Set<Variable> facts) {
