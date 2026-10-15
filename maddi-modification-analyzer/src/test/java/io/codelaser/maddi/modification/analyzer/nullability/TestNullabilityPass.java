@@ -1586,6 +1586,54 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("{anonymous.next=true, first=true, next=true, other=false, view=true}", present.toString());
     }
 
+    // CodeLaser/maddi-mod#48 A4 (nacos IstioCrdUtil) and B6 (nacos ClientBasicParamUtil)
+    @DisplayName("key presence: the key of an entry of the same map, and a put of a defaulted Properties lookup")
+    @Test
+    public void keyPresenceEntriesAndDefaults() {
+        NullabilityPass.Report report = run("a.b.KE", """
+                package a.b;
+                import java.util.*;
+                class KE {
+                    int entries(Map<String, Integer> m) {
+                        int s = 0;
+                        for (Map.Entry<String, Integer> e : m.entrySet()) s += m.get(e.getKey());
+                        return s;
+                    }
+                    int otherMap(Map<String, Integer> a, Map<String, Integer> b) {
+                        int s = 0;
+                        for (Map.Entry<String, Integer> e : a.entrySet()) s += b.get(e.getKey());
+                        return s;
+                    }
+                    int entryAsKey(Map<Object, Integer> m) {
+                        int s = 0;
+                        for (Map.Entry<Object, Integer> e : m.entrySet()) s += m.get(e);
+                        return s;
+                    }
+                    String defaulted(Map<String, String> m, Properties p, String k) {
+                        m.put(k, p.getProperty(k, ""));
+                        return m.get(k);
+                    }
+                    String system(Map<String, String> m, String k) {
+                        m.put(k, System.getProperty(k, "none"));
+                        return m.get(k);
+                    }
+                    String notDefaulted(Map<String, String> m, Properties p, String k) {
+                        m.put(k, p.getProperty(k));
+                        return m.get(k);
+                    }
+                }
+                """, NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY.withoutContracts().withWorld(NullabilityPass.World.CLOSED));
+        Map<String, Boolean> present = new java.util.TreeMap<>();
+        parsed.methods().forEach(m -> m.methodBody().visit(e -> {
+            if (e instanceof MethodCall mc && mc.methodInfo() != null && "get".equals(mc.methodInfo().name())) {
+                present.merge(m.name(), report.useSites().keyPresentWhenCalled(mc), Boolean::logicalAnd);
+            }
+            return true;
+        }));
+        assertEquals("{defaulted=true, entries=true, entryAsKey=false, notDefaulted=false, otherMap=false, system=true}",
+                present.toString());
+    }
+
     @DisplayName("a null returned by a method that may return its argument does not flow back into the argument")
     @Test
     public void identityReturn() {
@@ -3738,6 +3786,204 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals(false, report.useSites().nonNullAtExit(parsed.findUniqueMethod("reset", 0), buffer));
         assertEquals(true, bufferKnownAtWrite(report, parsed.findUniqueMethod("encode", 1)), "after ensure(1)");
         assertEquals(false, bufferKnownAtWrite(report, parsed.findUniqueMethod("open", 1)), "grow is overridable");
+    }
+
+    /*
+     CodeLaser/maddi-mod#48 A5, nacos CredentialWatcher: 'loadPropertyPath(init); InputStream is =
+     loadPropertyPathToStream();', where the first private helper leaves 'propertyPath' non-null and the second
+     dereferences it. A private method's fields of this are non-null at its entry when they are at each of its calls;
+     not when one call lacks it, when a method reference, a field initializer or an anonymous class calls it too.
+     */
+    @DisplayName("use sites: a field non-null at every call of a private method is non-null at its entry")
+    @Test
+    public void fieldNonNullAtEntry() {
+        NullabilityPass.Report report = run("a.b.FE", """
+                package a.b;
+                import java.util.function.IntSupplier;
+                class FE {
+                    private String path;
+                    private String other;
+                    private final int initial = initialLength();
+                    private void loadPath(boolean init) {
+                        if (path == null) {
+                            path = init ? "a" : "b";
+                        }
+                    }
+                    private int read() { return path.length(); }
+                    private int readOther() { return other.length(); }
+                    private int referenced() { return path.length(); }
+                    private int initialLength() { return path.length(); }
+                    private int chained() { return path.length(); }
+                    private int viaChain() { return chained(); }
+                    private int anonymous() { return path.length(); }
+                    private java.io.InputStream looped() {
+                        java.io.InputStream is = null;
+                        do {
+                            try {
+                                is = new java.io.FileInputStream(path);
+                            } catch (java.io.FileNotFoundException e) {
+                                if (path.equals("a")) {
+                                    path = "b";
+                                    continue;
+                                }
+                            }
+                            break;
+                        } while (true);
+                        return is;
+                    }
+                    void load(boolean init) {
+                        loadPath(init);
+                        int n = read() + viaChain() + initialLength();
+                        if (other != null) readOther();
+                        readOther();
+                        IntSupplier s = this::referenced;
+                        n += referenced();
+                        n += anonymous();
+                        Runnable r = new Runnable() { public void run() { anonymous(); } };
+                        loadPath(init);
+                        java.io.InputStream is = looped();
+                    }
+                    void reset() { path = null; }
+                }
+                """);
+        assertTrue(receiverKnownAtReturn(report, parsed.findUniqueMethod("read", 0)), "only called after loadPath");
+        assertTrue(receiverKnownAtReturn(report, parsed.findUniqueMethod("chained", 0)), "through viaChain");
+        assertFalse(receiverKnownAtReturn(report, parsed.findUniqueMethod("readOther", 0)), "the unguarded call");
+        assertFalse(receiverKnownAtReturn(report, parsed.findUniqueMethod("referenced", 0)), "this::referenced");
+        assertFalse(receiverKnownAtReturn(report, parsed.findUniqueMethod("initialLength", 0)), "the initializer");
+        assertFalse(receiverKnownAtReturn(report, parsed.findUniqueMethod("anonymous", 0)), "the anonymous class");
+        io.codelaser.maddi.cst.api.expression.MethodCall equals = calls("looped", "equals").getFirst();
+        assertTrue(report.useSites().nonNullAt(equals,
+                ((io.codelaser.maddi.cst.api.expression.VariableExpression) equals.object()).variable()),
+                "in the catch of the loop, as CredentialWatcher.loadPropertyPathToStream");
+        assertTrue(report.useSites().nonNullAtExit(parsed.findUniqueMethod("looped", 0),
+                parsed.getFieldByName("path", true)), "the loop assigns it only non-null values");
+    }
+
+    /*
+     CodeLaser/maddi-mod#48 A3, nacos CredentialService: 'String key = appName != null ? appName : NO_APP_NAME;
+     INSTANCES.remove(key)', with 'freeInstance()' passing null. The use site knows key non-null: each branch of the
+     ternary is evaluated with its condition's facts. Also 'custom == null ? fallback() : custom'
+     (EnvUtil.getApplicationConfFileResource), under the diagnostics' policy.
+     */
+    @DisplayName("use sites: a ternary that replaces null is non-null by its condition")
+    @Test
+    public void ternaryReplacingNull() {
+        NullabilityPass.Report report = run("a.b.TR", """
+                package a.b;
+                import java.io.InputStream;
+                import java.util.Map;
+                import java.util.concurrent.ConcurrentHashMap;
+                class TR {
+                    interface Res { InputStream in(); }
+                    static class Fixed implements Res { public InputStream in() { return InputStream.nullInputStream(); } }
+                    static final Map<String, String> INSTANCES = new ConcurrentHashMap<>();
+                    static String free() { return free(null); }
+                    static String free(String app) {
+                        String key = app != null ? app : "none";
+                        String instance = INSTANCES.remove(key);
+                        return instance;
+                    }
+                    static String unguarded() { return unguarded(null, true); }
+                    static String unguarded(String app, boolean b) {
+                        String key = b ? app : "none";
+                        return INSTANCES.remove(key);
+                    }
+                    static Res conf(String p) {
+                        Res custom = custom(p);
+                        return custom == null ? fallback() : custom;
+                    }
+                    private static Res custom(String p) {
+                        if (p.isEmpty()) return null;
+                        return new Fixed();
+                    }
+                    private static Res fallback() { return new Fixed(); }
+                    static class Reader {
+                        private final InputStream in;
+                        Reader(Res res) { this.in = res.in(); }
+                    }
+                    static Reader load(String p) { return new Reader(conf(p)); }
+                }
+                """, NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY.withoutContracts()
+                        .withWorld(NullabilityPass.World.CLOSED).withoutTestNulls());
+        assertTrue(keyKnownAtRemove(report, "free"), "app != null ? app : \"none\"");
+        assertFalse(keyKnownAtRemove(report, "unguarded"), "b ? app : \"none\"");
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(label(info), k(pt)));
+        assertEquals("Res", s.get("conf()"), s.toString());
+        assertEquals("Res", s.get("<init>(0:res)"), s.toString());
+    }
+
+    /*
+     CodeLaser/maddi-mod#48 A2, nacos InstanceOperatorClientImpl.getHeartBeatInterval: 'if (metadata.isPresent() &&
+     metadata.get().getExtendData().containsKey(HEART_BEAT_INTERVAL)) return toLong(metadata.get().getExtendData()
+     .get(HEART_BEAT_INTERVAL));'. The map is a chain of pure calls, the key a constant; a modifying call in between
+     forgets it.
+     */
+    @DisplayName("key presence: a constant key in a map reached through pure calls")
+    @Test
+    public void keyPresenceConstantKey() {
+        NullabilityPass.Report report = run("a.b.KC", """
+                package a.b;
+                import java.util.HashMap;
+                import java.util.Map;
+                import java.util.Optional;
+                class KC {
+                    static final String KEY = "interval";
+                    static class Meta {
+                        private final Map<String, Object> data = new HashMap<>();
+                        Map<String, Object> getData() { return data; }
+                        void reset() { data.clear(); }
+                    }
+                    static long guarded(Object val) { return val.hashCode(); }
+                    static long cleared(Object val) { return val == null ? 0 : val.hashCode(); }
+                    static long chained(Object val) { return val.hashCode(); }
+                    static long unguarded(Object val) { return val == null ? 0 : val.hashCode(); }
+                    static long interval(Optional<Meta> metadata, Meta m) {
+                        if (metadata.isPresent() && metadata.get().getData().containsKey(KEY)) {
+                            return chained(metadata.get().getData().get(KEY));
+                        }
+                        if (m.getData().containsKey(KEY)) return guarded(m.getData().get(KEY));
+                        if (metadata.get().getData().containsKey(KEY)) {
+                            metadata.get().reset();
+                            return cleared(metadata.get().getData().get(KEY));
+                        }
+                        return unguarded(m.getData().get(KEY));
+                    }
+                }
+                """);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(label(info), k(pt)));
+        assertEquals("Object", s.get("guarded(0:val)"), s.toString());
+        assertEquals("Object", s.get("chained(0:val)"), s.toString());
+        assertEquals("Object?", s.get("unguarded(0:val)"), s.toString());
+        assertEquals("Object?", s.get("cleared(0:val)"), "reset() may remove the key: " + s);
+    }
+
+    // the facts on key at 'INSTANCES.remove(key)', the method's second statement
+    private boolean keyKnownAtRemove(NullabilityPass.Report report, String method) {
+        MethodInfo mi = parsed.methods().stream()
+                .filter(m -> m.name().equals(method) && m.parameters().size() >= 1).findFirst().orElseThrow();
+        Statement st = mi.methodBody().statements().get(1);
+        List<io.codelaser.maddi.cst.api.expression.MethodCall> removes = new java.util.ArrayList<>();
+        st.visit(e -> {
+            if (e instanceof io.codelaser.maddi.cst.api.expression.MethodCall mc && mc.methodInfo() != null
+                && "remove".equals(mc.methodInfo().name())) removes.add(mc);
+            return true;
+        });
+        io.codelaser.maddi.cst.api.expression.MethodCall remove = removes.getFirst();
+        Variable key = ((io.codelaser.maddi.cst.api.expression.VariableExpression) remove.parameterExpressions()
+                .getFirst()).variable();
+        return report.useSites().nonNullAt(st, key) || report.useSites().nonNullAt(remove, key);
+    }
+
+    // the facts on x when the method's 'return x.m();' starts
+    private static boolean receiverKnownAtReturn(NullabilityPass.Report report, MethodInfo method) {
+        Statement rs = method.methodBody().statements().getFirst();
+        io.codelaser.maddi.cst.api.expression.MethodCall mc =
+                (io.codelaser.maddi.cst.api.expression.MethodCall) rs.expression();
+        Variable x = ((io.codelaser.maddi.cst.api.expression.VariableExpression) mc.object()).variable();
+        return report.useSites().nonNullAt(rs, x);
     }
 
     // the facts on 'buffer' when the method's 'buffer[pos++] = v' starts

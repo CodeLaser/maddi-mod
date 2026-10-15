@@ -423,6 +423,12 @@ public final class NullabilityPass {
     private final List<Object[]> preconditionArguments = new ArrayList<>();
     // what an earlier round found about final fields per runtime class: a read narrowed by 'instanceof' (gap 3)
     private final NarrowedReads narrowed;
+    // CodeLaser/maddi-mod#48 A5: what an earlier round found non-null at every call of a private instance method, per
+    // method the fields of this; and this round's, for the next (fieldsAtEntry)
+    private final Map<MethodInfo, Set<Variable>> fieldsAtEntry;
+    private Map<MethodInfo, Set<Variable>> nextFieldsAtEntry = Map.of();
+    // gate NOENTRYFIELDS: no field of this is non-null at a private method's entry by its calls (A/B for #48 A5)
+    private static final boolean ENTRY_FIELDS_OFF = System.getenv("NOENTRYFIELDS") != null;
     private List<FieldInfo> analysedFields = List.of();
     // keyed map fields (CodeLaser/maddi-mod#22 gap 2): the value slot per field, the accessors that take the key as a
     // parameter, and the keys written per slot
@@ -497,15 +503,16 @@ public final class NullabilityPass {
     private final Map<MethodInfo, Map<String, List<Local>>> declaredByName = new HashMap<>();
 
     public NullabilityPass(Policy policy) {
-        this(policy, Set.of(), Set.of(), NarrowedReads.NONE);
+        this(policy, Set.of(), Set.of(), NarrowedReads.NONE, Map.of());
     }
 
     private NullabilityPass(Policy policy, Set<MethodInfo> trustedReturns, Set<ParameterInfo> preconditions,
-                            NarrowedReads narrowed) {
+                            NarrowedReads narrowed, Map<MethodInfo, Set<Variable>> fieldsAtEntry) {
         this.policy = policy;
         this.trustedReturns = trustedReturns;
         this.preconditions = preconditions;
         this.narrowed = narrowed;
+        this.fieldsAtEntry = fieldsAtEntry;
     }
 
     private static final int MAX_ROUNDS = 5;
@@ -516,26 +523,58 @@ public final class NullabilityPass {
      * over-approximates) as known non-null values: {@code field = create()} then carries no null. Dropping edges
      * only shrinks what null reaches, so the trusted set grows until it is stable. Likewise the parameters an earlier
      * round found to be preconditions ({@link NonNullFacts#nonNullAtExit}): an argument passed to one is non-null
-     * after the call, which may make the caller's own parameter a precondition.
+     * after the call, which may make the caller's own parameter a precondition. And the fields of this non-null at
+     * every call of a private method ({@link NonNullFacts#fieldsAtCalls}): non-null when its body starts.
      */
     public Report go(List<Info> analysisOrder) {
         Set<MethodInfo> trusted = Set.of();
         Set<ParameterInfo> nonNullAtExit = Set.of();
         NarrowedReads narrowedReads = NarrowedReads.NONE;
+        Map<MethodInfo, Set<Variable>> atEntry = Map.of();
         for (int round = 1; ; round++) {
-            NullabilityPass pass = new NullabilityPass(policy, trusted, nonNullAtExit, narrowedReads);
+            NullabilityPass pass = new NullabilityPass(policy, trusted, nonNullAtExit, narrowedReads, atEntry);
             Report report = pass.once(analysisOrder);
             Set<MethodInfo> next = pass.unreachedReturns();
             Set<ParameterInfo> nextPreconditions = pass.preconditions();
             NarrowedReads nextNarrowed = pass.narrowedReads();
+            Map<MethodInfo, Set<Variable>> nextAtEntry = pass.nextFieldsAtEntry;
             if (next.equals(trusted) && nextPreconditions.equals(nonNullAtExit) && nextNarrowed.equals(narrowedReads)
-                || round == MAX_ROUNDS) {
+                && nextAtEntry.equals(atEntry) || round == MAX_ROUNDS) {
                 return report;
             }
             trusted = next;
             nonNullAtExit = nextPreconditions;
             narrowedReads = nextNarrowed;
+            atEntry = nextAtEntry;
         }
+    }
+
+    /*
+     CodeLaser/maddi-mod#48 A5, nacos CredentialWatcher: 'loadPropertyPath(init); InputStream is =
+     loadPropertyPathToStream();', the first leaving 'propertyPath' non-null, the second dereferencing it. Per private
+     instance method, the fields of this the walk found non-null at every call, provided it walked every use of the
+     method: a call in a field's initializer runs before any method, and is not walked. A private method has no
+     callers outside its class's nest, in an open world too.
+     */
+    private static Map<MethodInfo, Set<Variable>> fieldsAtEntry(NonNullFacts walked, List<MethodInfo> methods,
+                                                                List<FieldInfo> fields) {
+        if (ENTRY_FIELDS_OFF) return Map.of();
+        Set<MethodInfo> unwalked = new HashSet<>();
+        java.util.function.Predicate<Element> uses = e -> {
+            MethodInfo callee = e instanceof MethodCall mc ? mc.methodInfo()
+                    : e instanceof MethodReference mr ? mr.methodInfo() : null;
+            if (callee != null && NonNullFacts.privateInstanceMethod(callee) && !walked.walked((Expression) e)) {
+                unwalked.add(callee);
+            }
+            return true;
+        };
+        for (MethodInfo mi : methods) if (mi.methodBody() != null) mi.methodBody().visit(uses);
+        for (FieldInfo fi : fields) if (fi.initializer() != null) fi.initializer().visit(uses);
+        Map<MethodInfo, Set<Variable>> map = new HashMap<>();
+        walked.fieldsAtCalls().forEach((method, set) -> {
+            if (!set.isEmpty() && !unwalked.contains(method)) map.put(method, Set.copyOf(set));
+        });
+        return Map.copyOf(map);
     }
 
     // ------------------------------------------------------------------ narrowed reads (CodeLaser/maddi-mod#22 gap 3)
@@ -1124,7 +1163,8 @@ public final class NullabilityPass {
         facts = new NonNullFacts(this::parameterContract, this::returnContract)
                 .withPredicates(predicates)
                 .withNarrowedReads(narrowedReads)
-                .withNarrowedInMethod(narrowedReads == null ? null : this::narrowedInMethod);
+                .withNarrowedInMethod(narrowedReads == null ? null : this::narrowedInMethod)
+                .withFieldsAtEntry(fieldsAtEntry);
         if (policy.contracts()) {
             for (FieldInfo fi : fields) contract(fi, fi);
             for (MethodInfo mi : methods) {
@@ -1245,8 +1285,10 @@ public final class NullabilityPass {
                 .withPredicates(predicates)
                 .withNarrowedReads(narrowedReads)
                 .withNarrowedInMethod(narrowedReads == null ? null : this::narrowedInMethod)
-                .withNotNullable(e -> notNullable(e, nonNullCallResults));
+                .withNotNullable(e -> notNullable(e, nonNullCallResults))
+                .withFieldsAtEntry(fieldsAtEntry);
         methods.forEach(useSites::walk);
+        nextFieldsAtEntry = fieldsAtEntry(useSites, methods, fields);
         return new Report(verdicts, locals, cause, seedOrigin, useSites, smartCasts, Set.copyOf(asserted),
                 Set.copyOf(unobservedCandidates), nonNullCallResults, preconditions, nullArguments, preconditionsNonNull);
     }
