@@ -1679,6 +1679,30 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("String", o.get("a.b.RJ2.required(String):0:s"), o.toString());
     }
 
+    // CodeLaser/maddi-mod#49: diagnostics splits results by what reaches them, a written null or a contract only
+    @DisplayName("Report.reachedByWrittenNull: the strict closure, under a policy that does not assert content writes")
+    @Test
+    public void reachedByWrittenNull() {
+        NullabilityPass.Report report = run("a.b.WR", """
+                package a.b;
+                import java.util.Map;
+                class WR {
+                    static String written() { return null; }
+                    static String byContract(Map<String, String> m, String k) { return m.get(k); }
+                    static String both(Map<String, String> m, String k, boolean b) { return b ? null : m.get(k); }
+                    static String through(Map<String, String> m, String k) { return byContract(m, k); }
+                    static String none() { return "x"; }
+                }
+                """, NullabilityPass.Policy.NULL_MARKED);
+        Map<String, String> s = new java.util.TreeMap<>();
+        for (MethodInfo mi : parsed.methods()) {
+            String reached = k(report.verdicts().get(mi)).endsWith("?") ? "reached" : "-";
+            s.put(mi.name(), reached + (report.reachedByWrittenNull(mi) ? "/written" : ""));
+        }
+        assertEquals("{both=reached/written, byContract=reached, none=-, through=-, written=reached/written}",
+                s.toString());
+    }
+
     @DisplayName("a null returned by a method that may return its argument does not flow back into the argument")
     @Test
     public void identityReturn() {

@@ -294,8 +294,18 @@ public final class NullabilityPass {
                          NonNullFacts smartCasts, Set<Local> asserted, Set<Local> unobserved,
                          Set<Expression> nonNullCallResults, Set<ParameterInfo> preconditions,
                          List<NullArgument> nullArguments, Set<ParameterInfo> preconditionsNonNull,
-                         Set<ParameterInfo> rejectsNull)
+                         Set<ParameterInfo> rejectsNull, Set<Object> writtenReach)
             implements NullabilityFacts {
+
+        /**
+         * A written null reaches this node: a literal, an argument, an initializer, an annotation, a default value
+         * (the pass's seed), not only a library contract or other indirect evidence (CodeLaser/maddi-mod#49). Reached
+         * but not by a written null: by contract only. A node can be reached both ways; this says whether the first
+         * holds, whatever {@link #seedOrigin} and {@link #cause} recorded first.
+         */
+        public boolean reachedByWrittenNull(Object node) {
+            return writtenReach.contains(node);
+        }
 
         @Override
         public ParameterizedType field(FieldInfo fieldInfo) {
@@ -461,6 +471,8 @@ public final class NullabilityPass {
     private final Map<MethodInfo, KeyedAccessor> keyedGetters = new HashMap<>();
     private final Map<Arg, Set<Object>> keysUsed = new LinkedHashMap<>();
     private Set<Object> reached = Set.of();
+    // what a written null reaches (the strict closure, from strictSeeds), as of the last closure: Report.writtenReach
+    private Set<Object> writtenReach = Set.of();
     // locals their block dereferences unconditionally further on (Policy.assertAtDeclaration), and those null reaches
     private final Set<Local> assertCandidates = new HashSet<>();
     private final Set<Local> asserted = new HashSet<>();
@@ -1336,7 +1348,7 @@ public final class NullabilityPass {
         nextFieldsAtEntry = fieldsAtEntry(useSites, methods, fields);
         return new Report(verdicts, locals, cause, seedOrigin, useSites, smartCasts, Set.copyOf(asserted),
                 Set.copyOf(unobservedCandidates), nonNullCallResults, preconditions, nullArguments, preconditionsNonNull,
-                rejectsNull());
+                rejectsNull(), writtenReach);
     }
 
     /*
@@ -1807,12 +1819,17 @@ public final class NullabilityPass {
     }
 
     private Set<Object> closure(Map<Object, Object> cause) {
-        if (!policy.assertContentWrites()) return closure(cause, seedOrigin.keySet(), null);
+        if (!policy.assertContentWrites()) {
+            // the strict closure only for the Report (CodeLaser/maddi-mod#49): the verdicts are the full closure's
+            writtenReach = Set.copyOf(closure(new HashMap<>(), strictSeeds, null));
+            return closure(cause, seedOrigin.keySet(), null);
+        }
         // Policy.assertContentWrites: first what null reaches without the library contracts; a value outside it
         // enters a slot only as an asserted write, so that edge is not followed, and a library seed on a slot itself
         // is an asserted write too
         Map<Object, Object> strictCause = new HashMap<>();
         Set<Object> strict = closure(strictCause, strictSeeds, null);
+        writtenReach = Set.copyOf(strict);
         Set<Object> seeds = new LinkedHashSet<>(seedOrigin.keySet());
         seeds.removeIf(n -> isSlot(n) && !strictSeeds.contains(n));
         Set<Object> reached = closure(cause, seeds, strict);
