@@ -95,6 +95,7 @@ public class TypeModIndyAnalyzerImpl extends CommonAnalyzerImpl implements TypeM
         MethodLinkedVariables mlv = methodInfo.analysis().getOrNull(METHOD_LINKS, MethodLinkedVariablesImpl.class);
         if (mlv != null) {
             doIdentityAnalysis(methodInfo, mlv);
+            doUnmodifiableView(cycleBreakingActive, methodInfo);
             doFluentAnalysis(methodInfo, mlv);
             doIndependent(cycleBreakingActive, methodInfo, mlv);
 
@@ -121,6 +122,98 @@ public class TypeModIndyAnalyzerImpl extends CommonAnalyzerImpl implements TypeM
             DECIDE.debug("MI: Decide @Fluent of {} = {}", methodInfo, identityFluent);
             propertyChanges.incrementAndGet();
         }
+    }
+
+    /**
+     * UNMODIFIABLE_VIEW_METHOD (CodeLaser/maddi-mod#52), computed from the values the body returns: every one is an
+     * unmodifiable view (a call of a method with the property), an instance of an UNMODIFIABLE_TYPE, at least
+     * immutable-HC (its type, or a call whose result is, as DynamicImmutabilityInference reads it), a field that
+     * provably holds one, or null. A source callee not yet decided delays the verdict; under cycle breaking it is
+     * FALSE, the safe side. Mirrors nothing about the container aspect, and never writes IMMUTABLE_METHOD.
+     */
+    private void doUnmodifiableView(boolean cycleBreakingActive, MethodInfo methodInfo) {
+        if (methodInfo.isConstructor() || !methodInfo.hasReturnValue() || methodInfo.returnType().isPrimitiveExcludingVoid()
+            || methodInfo.returnType().arrays() > 0 || methodInfo.returnType().typeParameter() != null) {
+            return;
+        }
+        List<io.codelaser.maddi.cst.api.expression.Expression> returned = new java.util.ArrayList<>();
+        methodInfo.methodBody().visit((io.codelaser.maddi.cst.api.element.Element e) -> {
+            if (e instanceof io.codelaser.maddi.cst.api.expression.Lambda) return false; // its returns are its own
+            if (e instanceof io.codelaser.maddi.cst.api.statement.ReturnStatement rs && rs.expression() != null
+                && !rs.expression().isEmpty()) {
+                returned.add(rs.expression());
+            }
+            return true;
+        });
+        Boolean result = returned.isEmpty() ? Boolean.FALSE : Boolean.TRUE;
+        for (io.codelaser.maddi.cst.api.expression.Expression e : returned) {
+            Boolean one = unmodifiableValue(e, 0);
+            if (one == null) result = null;
+            else if (!one) { result = false; break; }
+        }
+        if (result == null && cycleBreakingActive) result = false;
+        if (result == null) {
+            UNDECIDED.debug("MI: unmodifiable view of {} delayed", methodInfo);
+            return;
+        }
+        if (TolerantWrite.setAllowControlledOverwrite(methodInfo.analysis(), UNMODIFIABLE_VIEW_METHOD,
+                ValueImpl.BoolImpl.from(result), methodInfo)) {
+            DECIDE.debug("MI: Decide @UnmodifiableView of {} = {}", methodInfo, result);
+            propertyChanges.incrementAndGet();
+        }
+    }
+
+    /** TRUE, FALSE, or null when a source callee has not been decided yet. */
+    private Boolean unmodifiableValue(io.codelaser.maddi.cst.api.expression.Expression value, int depth) {
+        if (value.isNullConstant()) return true;
+        if (depth > 3) return false;
+        switch (value) {
+            case io.codelaser.maddi.cst.api.expression.EnclosedExpression ee -> { return unmodifiableValue(ee.inner(), depth + 1); }
+            case io.codelaser.maddi.cst.api.expression.Cast cast -> { return unmodifiableValue(cast.expression(), depth + 1); }
+            case io.codelaser.maddi.cst.api.expression.InlineConditional ic -> {
+                Boolean t = unmodifiableValue(ic.ifTrue(), depth + 1);
+                if (t != null && !t) return false;
+                Boolean f = unmodifiableValue(ic.ifFalse(), depth + 1);
+                if (f != null && !f) return false;
+                return t == null || f == null ? null : Boolean.TRUE;
+            }
+            default -> { }
+        }
+        ParameterizedType type = value.parameterizedType();
+        if (type != null) {
+            Value.Immutable ofType = analysisHelper.typeImmutable(type);
+            if (ofType != null && ofType.isAtLeastImmutableHC()) return true;
+            if (type.arrays() == 0 && type.typeInfo() != null) {
+                Value.Bool unmodifiableType = type.typeInfo().analysis().getOrNull(UNMODIFIABLE_TYPE, ValueImpl.BoolImpl.class);
+                if (unmodifiableType != null && unmodifiableType.isTrue()) return true;
+                if (unmodifiableType == null && !(value instanceof io.codelaser.maddi.cst.api.expression.MethodCall)
+                    && type.typeInfo().compilationUnit() != null && type.typeInfo().compilationUnit().sourceSet() != null
+                    && !type.typeInfo().compilationUnit().sourceSet().externalLibrary()) {
+                    return null; // a source type: its verdict arrives with the type analyzers
+                }
+            }
+        }
+        if (value instanceof io.codelaser.maddi.cst.api.expression.MethodCall mc && mc.methodInfo() != null) {
+            MethodInfo callee = mc.methodInfo();
+            Value.Bool view = callee.analysis().getOrNull(UNMODIFIABLE_VIEW_METHOD, ValueImpl.BoolImpl.class);
+            if (view != null) return view.isTrue();
+            Value.Bool identity = callee.analysis().getOrNull(IDENTITY_METHOD, ValueImpl.BoolImpl.class);
+            boolean isIdentity = identity != null && identity.isTrue();
+            Value.Immutable ofMethod = callee.analysis().getOrNull(IMMUTABLE_METHOD, ValueImpl.ImmutableImpl.class);
+            if (!isIdentity && ofMethod != null && ofMethod.isAtLeastImmutableHC()) return true;
+            // a source method with a body gets the property from this very pass: wait for it
+            boolean sourceWithBody = callee.methodBody() != null && !callee.methodBody().isEmpty()
+                                     && callee.typeInfo().compilationUnit() != null
+                                     && callee.typeInfo().compilationUnit().sourceSet() != null
+                                     && !callee.typeInfo().compilationUnit().sourceSet().externalLibrary();
+            return sourceWithBody ? null : Boolean.FALSE;
+        }
+        if (value instanceof io.codelaser.maddi.cst.api.expression.VariableExpression ve
+            && ve.variable() instanceof FieldReference fr) {
+            Value.Immutable ofField = fr.fieldInfo().analysis().getOrNull(IMMUTABLE_FIELD, ValueImpl.ImmutableImpl.class);
+            return ofField != null && ofField.isAtLeastImmutableHC();
+        }
+        return false;
     }
 
     private void doIdentityAnalysis(MethodInfo methodInfo, MethodLinkedVariables mlv) {

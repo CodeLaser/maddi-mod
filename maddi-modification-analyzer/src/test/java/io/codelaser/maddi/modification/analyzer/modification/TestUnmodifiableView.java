@@ -70,11 +70,31 @@ public class TestUnmodifiableView extends CommonTest {
                     @UnmodifiableView List<String> view();
                     List<String> plain();
                 }
+                // computed from the returned values
+                static class Wraps {
+                    private final List<String> list = new ArrayList<>();
+                    List<String> view() { return java.util.Collections.unmodifiableList(list); }
+                    List<String> copy() { return new ArrayList<>(list); }
+                    List<String> both(boolean b) { return b ? java.util.Collections.unmodifiableList(list) : null; }
+                    View asView() { return new View(list); }
+                    List<String> chained() { return view(); }
+                }
+                // a bodiless declaration with implementations: the fold
+                interface Src2 { List<String> get(); }
+                static class Impl implements Src2 {
+                    private final List<String> l = new ArrayList<>();
+                    public List<String> get() { return java.util.Collections.unmodifiableList(l); }
+                }
             }
             """;
 
     private static MethodInfo method(TypeInfo typeInfo, String name) {
         return typeInfo.methods().stream().filter(m -> m.name().equals(name)).findFirst().orElseThrow();
+    }
+
+    private static String unmodifiableView(MethodInfo methodInfo) {
+        Value.Bool b = methodInfo.analysis().getOrNull(PropertyImpl.UNMODIFIABLE_VIEW_METHOD, ValueImpl.BoolImpl.class);
+        return b == null ? "undecided" : String.valueOf(b.isTrue());
     }
 
     private static Value.Bool unmodifiable(TypeInfo typeInfo) {
@@ -119,6 +139,14 @@ public class TestUnmodifiableView extends CommonTest {
         // abstract-method fold's, IMMUTABLE for a declaration without implementations)
         assertSame(plainMethod.analysis().getOrDefault(PropertyImpl.IMMUTABLE_METHOD, ValueImpl.ImmutableImpl.MUTABLE),
                 viewMethod.analysis().getOrDefault(PropertyImpl.IMMUTABLE_METHOD, ValueImpl.ImmutableImpl.MUTABLE));
+
+        TypeInfo wraps = views.findSubType("Wraps");
+        assertEquals("true/false/true/true/true", String.join("/",
+                unmodifiableView(method(wraps, "view")), unmodifiableView(method(wraps, "copy")),
+                unmodifiableView(method(wraps, "both")), unmodifiableView(method(wraps, "asView")),
+                unmodifiableView(method(wraps, "chained"))));
+        assertEquals("true", unmodifiableView(method(views.findSubType("Impl"), "get")));
+        assertEquals("true", unmodifiableView(method(views.findSubType("Src2"), "get")));
 
         SourceSet sourceSetOfRequest = javaInspector.mainSources();
         String printed = javaInspector.print2(views.compilationUnit(),

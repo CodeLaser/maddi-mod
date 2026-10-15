@@ -67,6 +67,7 @@ public class AbstractMethodAnalyzerImpl extends CommonAnalyzerImpl implements Ab
                 }
                 methodNonModifying(concreteImplementations, methodInfo);
                 methodStructurallyNonModifying(concreteImplementations, methodInfo);
+                methodUnmodifiableView(concreteImplementations, methodInfo);
             } else {
                 Iterable<MethodInfo> concreteImplementations = implementations.methodInfoSet();
                 for (ParameterInfo pi : methodInfo.parameters()) {
@@ -78,6 +79,7 @@ public class AbstractMethodAnalyzerImpl extends CommonAnalyzerImpl implements Ab
                 }
                 methodNonModifying(concreteImplementations, methodInfo);
                 methodStructurallyNonModifying(concreteImplementations, methodInfo);
+                methodUnmodifiableView(concreteImplementations, methodInfo);
                 methodIndependent(concreteImplementations, methodInfo);
                 methodEventual(concreteImplementations, methodInfo);
                 methodEventuallyNonModifying(concreteImplementations, methodInfo);
@@ -201,6 +203,28 @@ public class AbstractMethodAnalyzerImpl extends CommonAnalyzerImpl implements Ab
         if (TolerantWrite.setAllowControlledOverwrite(methodInfo.analysis(), STRUCTURALLY_NON_MODIFYING_METHOD,
                 fromImplementations, methodInfo)) {
             DECIDE.debug("AM: Decide structurally non-modifying of method {} = {}", methodInfo, fromImplementations);
+        }
+    }
+
+    /**
+     * UNMODIFIABLE_VIEW_METHOD (CodeLaser/maddi-mod#52) of a bodiless declaration: a contract where one is written
+     * (materialized before this runs), else the fold over the implementations: TRUE when each has it, FALSE when one
+     * does not, nothing while one is undecided.
+     */
+    private void methodUnmodifiableView(Iterable<MethodInfo> concreteImplementations, MethodInfo methodInfo) {
+        if (methodInfo.analysis().getOrDefault(UNMODIFIABLE_VIEW_METHOD, FALSE).isTrue()) return;
+        Value.Bool fromImplementations = TRUE;
+        for (MethodInfo implementation : concreteImplementations) {
+            Value.Bool one = implementation.analysis().getOrNull(UNMODIFIABLE_VIEW_METHOD, ValueImpl.BoolImpl.class);
+            if (one == null) return; // not decided yet
+            if (one.isFalse()) {
+                fromImplementations = FALSE;
+                break;
+            }
+        }
+        if (TolerantWrite.setAllowControlledOverwrite(methodInfo.analysis(), UNMODIFIABLE_VIEW_METHOD,
+                fromImplementations, methodInfo)) {
+            DECIDE.debug("AM: Decide unmodifiable view of method {} = {}", methodInfo, fromImplementations);
         }
     }
 

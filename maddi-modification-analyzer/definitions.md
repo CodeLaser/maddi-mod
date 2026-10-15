@@ -231,7 +231,9 @@ failed or only rule 3 did.
   nor about `@Container`.
 - `UNMODIFIABLE_VIEW_METHOD` (`unmodifiableViewMethod`): the result is such an object. A contract, `@UnmodifiableView`, on
   a bodiless declaration (`Collections.unmodifiable*` in the archive), materialized like `@Modified(hc=true)` and
-  printed back by the decorator. Not yet computed from a method's returned values.
+  printed back by the decorator. Computed for a method with a body from the values it returns (a call with the
+  property, an instance of an `UNMODIFIABLE_TYPE`, an immutable-HC value, a field proven to hold one, `null`), and
+  for a bodiless declaration with implementations as the fold over them.
 - Neither is read by immutability, independence or the container analysis; the Java-to-Kotlin printer reads them for
   Kotlin's read-only collection types (maddi#141 reads immutability only).
 
