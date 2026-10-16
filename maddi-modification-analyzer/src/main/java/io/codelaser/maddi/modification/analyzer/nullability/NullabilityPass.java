@@ -2466,9 +2466,11 @@ public final class NullabilityPass {
                     // reaches 'compare(boolean[] ...)' only where T is boolean[], which nothing here tells. Measured
                     // on guava (2026-10-07): -142 noise; keeping Object implementations ('IdentityFunction.apply')
                     // keeps the unsafe count. A heuristic: a null passed to a Comparator<String> does reach a String
-                    // implementation.
+                    // implementation. Not for Kotlin (Policy.callResults), where an override's parameter must be
+                    // nullable when the overridden one is ('doForward(s: String?)' over 'doForward(a: A?)', guava's
+                    // Converter, CharMatcher over Predicate.apply).
                     ParameterizedType implementationType = mi.parameters().get(i).parameterizedType();
-                    if (!isTypeVariable(overridden.parameters().get(i).parameterizedType())
+                    if (policy.callResults() || !isTypeVariable(overridden.parameters().get(i).parameterizedType())
                         || isTypeVariable(implementationType)
                         || implementationType.typeInfo() != null && implementationType.arrays() == 0
                            && implementationType.typeInfo().isJavaLangObject()) {

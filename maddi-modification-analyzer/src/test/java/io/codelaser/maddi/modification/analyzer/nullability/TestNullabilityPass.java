@@ -1703,6 +1703,44 @@ public class TestNullabilityPass extends CommonTest {
                 s.toString());
     }
 
+    /*
+     Kotlin: an override's parameter types equal the overridden member's, nullability included (guava, the printer
+     session 2026-10-16: 63 "overrides nothing"). 'abstract B doForward(A a)' receives null from 'convert'; the
+     override 'doForward(String s)' of 'Converter<String, String>' must take 'String?'. The diagnostics' policies keep
+     the type-variable heuristic: a null through the generic method need not reach a concrete instantiation.
+     */
+    @DisplayName("Kotlin: an override's parameter is nullable where the overridden type-variable parameter is")
+    @Test
+    public void overrideOfTypeVariableParameter() {
+        String src = """
+                package a.b;
+                class CV {
+                    static abstract class Converter<A, B> {
+                        abstract B doForward(A a);
+                        B convert(A a, boolean b) { return doForward(b ? null : a); }
+                    }
+                    static final class Upper extends Converter<String, String> {
+                        String doForward(String s) { return s == null ? "" : s.toUpperCase(); }
+                    }
+                    static final class Length extends Converter<String, Integer> {
+                        Integer doForward(String s) { return 3; }
+                    }
+                    static String use(Upper u) { return u.convert("x", true); }
+                }
+                """;
+        Map<String, String> kotlin = new java.util.TreeMap<>();
+        run("a.b.CV", src, NullabilityPass.Policy.KOTLIN).verdicts()
+                .forEach((info, pt) -> kotlin.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("A?", kotlin.get("a.b.CV.Converter.doForward(Object):0:a"), kotlin.toString());
+        assertEquals("String?", kotlin.get("a.b.CV.Upper.doForward(String):0:s"), kotlin.toString());
+        assertEquals("String?", kotlin.get("a.b.CV.Length.doForward(String):0:s"), kotlin.toString());
+
+        Map<String, String> flow = new java.util.TreeMap<>();
+        run("a.b.CV2", src.replace("CV", "CV2"), NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY).verdicts()
+                .forEach((info, pt) -> flow.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("String", flow.get("a.b.CV2.Length.doForward(String):0:s"), flow.toString());
+    }
+
     @DisplayName("a null returned by a method that may return its argument does not flow back into the argument")
     @Test
     public void identityReturn() {
