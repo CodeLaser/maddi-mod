@@ -2410,6 +2410,29 @@ public final class NullabilityPass {
         return pt.typeParameter() != null && pt.arrays() == 0 && !pt.typeParameter().isMethodTypeParameter();
     }
 
+    /*
+     Kotlin: a parameter's '?' argument prints as '*', whose values read as Any?: 'for (key in keys)' over
+     'getAllPresent(keys: MutableIterable<*>)' hands an Any? to 'getIfPresent(key)' (guava AbstractCache.kt:17, once
+     3fd57564 cut the hub that had made that parameter nullable by accident). Nothing flows back out of the slot
+     (coupleContent), so the seed reaches only what is read from it.
+     */
+    private void starSlots(ParameterInfo pi) {
+        if (!policy.callResults() || STAR_SLOTS_OFF) return;
+        ParameterizedType pt = pi.parameterizedType();
+        if (pt.arrays() != 0) return;
+        for (int i = 0; i < pt.parameters().size(); i++) {
+            ParameterizedType a = pt.parameters().get(i);
+            if (a.wildcard() != null && (a.wildcard().isUnbound() || a.wildcard().isExtends()
+                                          && a.typeParameter() == null && a.typeInfo() != null
+                                          && a.typeInfo().isJavaLangObject())) {
+                seed(new Arg(pi, i), "read from '*' in " + pi.methodInfo().fullyQualifiedName());
+            }
+        }
+    }
+
+    // gate NOSTARSLOTS: a '?' argument's values are not read as nullable (A/B)
+    private static final boolean STAR_SLOTS_OFF = System.getenv("NOSTARSLOTS") != null;
+
     private static boolean uncheckedConversion(ParameterizedType p0, ParameterizedType p1) {
         return p0.wildcard() == null && p1.wildcard() == null && p0.typeParameter() == null
                && p1.typeParameter() == null && p0.typeInfo() != null && p1.typeInfo() != null
@@ -2606,6 +2629,21 @@ public final class NullabilityPass {
                                                            || bv.variable() instanceof ParameterInfo));
     }
 
+    /*
+     Kotlin: guava's '@ParametricNullness T get()' returns T as each instantiation has it, which the printer keeps
+     ('Supplier<T>.get(): T'). An implementation's own null ('return uncheckedCastNullableTToT(value)' from a
+     '@Nullable T value' cache, Suppliers.ExpiringMemoizingSupplier) belongs to a nullable instantiation only: it does
+     not reach the result of 'factory.get()' on a Supplier<Map<C, V>> (StandardTable.backingMap's and
+     AbstractMapBasedMultimap.map's values, guava 2026-10-17).
+     */
+    private static boolean parametricNullness(MethodInfo mi) {
+        return !PARAMETRIC_OFF && mi.annotations().stream().anyMatch(a -> a.typeInfo() != null
+                && a.typeInfo().simpleName().equals("ParametricNullness"));
+    }
+
+    // gate NOPARAMETRIC: a '@ParametricNullness' type-variable return's own null reaches every call (A/B)
+    private static final boolean PARAMETRIC_OFF = System.getenv("NOPARAMETRIC") != null;
+
     // '@NullSource' / '@NullAndEmptySource' (org.junit.jupiter.params.provider) on a parameterized test
     private static boolean junitNullSource(MethodInfo mi) {
         return mi.annotations().stream().anyMatch(a -> a.typeInfo() != null
@@ -2691,6 +2729,7 @@ public final class NullabilityPass {
                     ValueImpl.NullabilityImpl.UNSPECIFIED), MethodInfo::returnType);
             for (ParameterInfo pi : mi.parameters()) {
                 int index = pi.index();
+                starSlots(pi);
                 libraryNullableContent(pi, pi.parameterizedType(), m -> index < m.parameters().size()
                         ? m.parameters().get(index).analysis().getOrDefault(PropertyImpl.NULLABILITY_PARAMETER,
                         ValueImpl.NullabilityImpl.UNSPECIFIED) : ValueImpl.NullabilityImpl.UNSPECIFIED,
@@ -3961,7 +4000,7 @@ public final class NullabilityPass {
                               && (!rt.typeParameter().isMethodTypeParameter()
                                   || callee.parameters().stream().noneMatch(pi ->
                                          rt.typeParameter().equals(pi.parameterizedType().typeParameter())));
-            if (policy.callResults() && (!isTypeVariable(rt) || ownNull)) {
+            if (policy.callResults() && (!isTypeVariable(rt) || ownNull && !parametricNullness(callee))) {
                 if (GAP9_OFF || callee.parameters().isEmpty()) addEdge(callee, target);
                 else gatedSites.add(new GatedSite(callee, target, callId(mc, callee)));
             }

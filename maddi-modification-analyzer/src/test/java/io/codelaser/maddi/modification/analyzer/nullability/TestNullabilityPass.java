@@ -2012,6 +2012,75 @@ public class TestNullabilityPass extends CommonTest {
      collection sharing EMPTY. A '?' slot only receives, as '? extends' does; an unchecked conversion from Object
      type arguments starts a new instantiation, not one slot.
      */
+    @DisplayName("Kotlin: a @ParametricNullness return's own null stays with nullable instantiations")
+    @Test
+    public void parametricNullnessReturn() {
+        NullabilityPass.Report report = run("a.b.PN", """
+                package a.b;
+                import java.lang.annotation.Retention;
+                import java.lang.annotation.RetentionPolicy;
+                import java.util.HashMap;
+                import java.util.Map;
+                class PN {
+                    @Retention(RetentionPolicy.CLASS) @interface ParametricNullness {}
+                    interface Supplier<T> { @ParametricNullness T get(); }
+                    static class Memo<T> implements Supplier<T> {
+                        T value;
+                        @Override @ParametricNullness public T get() { return value; }
+                    }
+                    static class Table<R, C, V> {
+                        final Map<R, Map<C, V>> backingMap;
+                        final Supplier<? extends Map<C, V>> factory;
+                        Table(Map<R, Map<C, V>> backingMap, Supplier<? extends Map<C, V>> factory) {
+                            this.backingMap = backingMap;
+                            this.factory = factory;
+                        }
+                        Map<C, V> getOrCreate(R rowKey) {
+                            Map<C, V> map = backingMap.get(rowKey);
+                            if (map == null) {
+                                map = factory.get();
+                                backingMap.put(rowKey, map);
+                            }
+                            return map;
+                        }
+                        Map<C, V> create() { return factory.get(); }
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("Map<C!, V!>", s.get("a.b.PN.Table.create()"), s + "\n" + explain(report));
+        assertEquals("T?", s.get("a.b.PN.Supplier.get()"), "the declaration keeps it; the printer prints T");
+    }
+
+    @DisplayName("Kotlin: what is read from a '?' argument is Any?")
+    @Test
+    public void starSlotRead() {
+        NullabilityPass.Report report = run("a.b.SR", """
+                package a.b;
+                import java.util.ArrayList;
+                import java.util.List;
+                class SR {
+                    String getIfPresent(Object key) { return key.toString(); }
+                    void all(Iterable<?> keys) {
+                        for (Object key : keys) getIfPresent(key);
+                    }
+                    void some(Iterable<? extends Object> keys) {
+                        for (Object key : keys) getIfPresent(key);
+                    }
+                    void use() {
+                        List<String> names = new ArrayList<>();
+                        names.add("x");
+                        all(names);
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("Object?", s.get("a.b.SR.getIfPresent(Object):0:key"), s.toString());
+        assertTrue(locals(report).contains("use.names: List<String>"), "nothing flows back to the caller: " + locals(report));
+    }
+
     @DisplayName("Kotlin: a lazily initialised field's cached value is non-null at the return")
     @Test
     public void lazyInitReturn() {
