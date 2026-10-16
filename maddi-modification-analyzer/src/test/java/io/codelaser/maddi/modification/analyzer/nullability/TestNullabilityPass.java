@@ -2012,6 +2012,40 @@ public class TestNullabilityPass extends CommonTest {
      collection sharing EMPTY. A '?' slot only receives, as '? extends' does; an unchecked conversion from Object
      type arguments starts a new instantiation, not one slot.
      */
+    @DisplayName("Kotlin: an override of a type-variable parameter keeps the overridden state")
+    @Test
+    public void typeVariableParameterOverride() {
+        NullabilityPass.Report report = run("a.b.TO", """
+                package a.b;
+                import java.lang.annotation.ElementType;
+                import java.lang.annotation.Target;
+                import java.util.function.BiPredicate;
+                class TO {
+                    @Target(ElementType.TYPE_USE) @interface Nullable {}
+                    interface Function<F, T> extends java.util.function.Function<F, T> {
+                        T apply(F input);
+                    }
+                    static final class Cut implements Comparable<Cut> {
+                        @Override public int compareTo(Cut that) { return that == null ? 1 : 0; }
+                    }
+                    abstract static class Eq<T> implements BiPredicate<@Nullable T, @Nullable T> {
+                        @Override public boolean test(@Nullable T t, @Nullable T u) { return t == u; }
+                    }
+                    static String call(Function<String, String> f, Cut c) {
+                        c.compareTo(null);
+                        return f.apply(null);
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("F!", s.get("a.b.TO.Function.apply(Object):0:input"), s.toString());
+        assertEquals("Cut", s.get("a.b.TO.Cut.compareTo(a.b.TO.Cut):0:that"), s.toString());
+        assertEquals("T?", s.get("a.b.TO.Eq.test(Object,Object):0:t"), s.toString());
+        assertEquals("Function<String?, String>", s.get("a.b.TO.call(a.b.TO.Function,a.b.TO.Cut):0:f"),
+                "the null belongs to the instantiation");
+    }
+
     @DisplayName("Kotlin: a call on this ties its result's slots to the target, the instantiation being the caller's")
     @Test
     public void sameInstantiationSlots() {

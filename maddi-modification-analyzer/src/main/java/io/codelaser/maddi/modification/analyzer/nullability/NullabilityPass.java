@@ -1338,7 +1338,10 @@ public final class NullabilityPass {
                 verdicts.put(mi, contracted(mi, verdict(mi.returnType(), mi, deg)));
             }
         }
-        if (policy.callResults()) clampTestOverrides(methods, verdicts);
+        if (policy.callResults()) {
+            clampTestOverrides(methods, verdicts);
+            clampTypeVariableOverrides(methods, verdicts);
+        }
         NonNullFacts smartCasts = facts.kotlinSmartCasts();
         methods.forEach(smartCasts::walk);
         Set<Expression> nonNullCallResults = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
@@ -1518,6 +1521,55 @@ public final class NullabilityPass {
             }
         }
     }
+
+    /*
+     Kotlin: an override's parameter has the overridden parameter's type, which for a type variable is the
+     instantiation's: 'apply(input: F)' over java.util.function.Function's 'apply(p0: F)', 'compareTo(that: Cut<C>)'
+     over Comparable's 'compareTo(other: T)'. A null passed to the override belongs to that instantiation, not to the
+     override's own parameter, or kotlinc finds it overrides nothing (guava, worktree-maddi-all 2026-10-17: 14
+     errors). Not where the override says @Nullable itself ('Equivalence.test(@Nullable T t, ...)' over
+     BiPredicate<@Nullable T, @Nullable T>): the supertype's argument carries that. Overridden analysed parameters
+     first, so a chain settles (a few passes).
+     */
+    private void clampTypeVariableOverrides(List<MethodInfo> methods, Map<Info, ParameterizedType> verdicts) {
+        if (TYPE_VARIABLE_OVERRIDES_OFF) return;
+        for (int pass = 0; pass < 3; pass++) {
+            boolean changed = false;
+            for (MethodInfo mi : methods) {
+                if (mi.isConstructor()) continue;
+                for (MethodInfo overridden : mi.overrides()) {
+                    int n = Math.min(mi.parameters().size(), overridden.parameters().size());
+                    for (int i = 0; i < n; i++) {
+                        ParameterInfo ours = mi.parameters().get(i);
+                        ParameterInfo their = overridden.parameters().get(i);
+                        if (!isTypeVariable(their.parameterizedType()) || !verdicts.containsKey(ours)
+                            || NullAnnotations.explicitState(ours) == NullableState.NULLABLE) {
+                            continue;
+                        }
+                        ParameterizedType theirs;
+                        if (analysed.contains(overridden)) {
+                            theirs = verdicts.get(their);
+                        } else {
+                            NullableState state = libraryParameterState(their);
+                            if (state == NullableState.NULLABLE) continue;
+                            theirs = their.parameterizedType().withNullable(state);
+                        }
+                        if (theirs == null) continue;
+                        ParameterizedType before = verdicts.get(ours);
+                        ParameterizedType after = clamped(before, theirs);
+                        if (!after.equals(before)) {
+                            verdicts.put(ours, after);
+                            changed = true;
+                        }
+                    }
+                }
+            }
+            if (!changed) return;
+        }
+    }
+
+    // gate NOTYPEVAROVERRIDES: an override keeps its own parameter state over a type-variable parameter (A/B)
+    private static final boolean TYPE_VARIABLE_OVERRIDES_OFF = System.getenv("NOTYPEVAROVERRIDES") != null;
 
     // 'ours' with the overridden type's states, type arguments included
     static ParameterizedType clamped(ParameterizedType ours, ParameterizedType theirs) {
