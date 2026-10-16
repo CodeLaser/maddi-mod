@@ -60,10 +60,14 @@
 # 2026-10-16, maddi 2bd7eb703, 957dc731d, 8892a682e: an interface extending two iterable interfaces redeclares
 # Iterator(); java.util.EventListener a marker, out of the bases and constraints; a method reference of a nullable
 # result a lambda with ! where the receiver is a type, this or the lambda's parameter: nullable warnings 24 -> 19.
+# 2026-10-16, maddi a42af1bb2, baada3a61, 0b33335c5, 32d01b41e, dc527276e: a TreeMap's or TreeSet's Comparator in
+# Comparer.Create; an unbound wildcard of a program type, TupleLifecycle<?>, Node<?, ?, ?>, is the type's wildcard
+# interface (ITupleLifecycle) where it declares every member the code reaches through it, as a self-bounded type's is: 289 ->
+# 295 compiling files, nullable warnings stay 19.
 types	346
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	346
-compilingFiles	289
+compilingFiles	295
 unmappedJdkUses	153
 nullableWarnings	19
