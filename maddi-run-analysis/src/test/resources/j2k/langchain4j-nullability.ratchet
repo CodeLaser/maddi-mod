@@ -81,6 +81,16 @@
 # 2026-10-16, devel with maddi 762d07e16 (maddi-mod#38: new TypeReference<>() {} takes the field's type arguments,
 # states included), 8020895a5/03e46cd72 (maddi-mod#25: read-only results for abstract methods and overrides) and
 # ac6bb4d49 (maddi-mod#50): all 346 files compile, 346 to class files, 0 type errors.
+# EXPECTED, not work to do (Bart, 2026-10-16): 1,111 tests pass on the original classes, 1,106 with the Kotlin classes
+# and with the translated tests. The 5 that fail do so by design of the translation:
+# - DocumentSplitterTest#split_all_varargs, TextSegmentTransformerTest#transform_all_varargs_null_input_returns_empty_list,
+#   ChatMemoryTest#add_varargs_should_ignore_null_array and #set_varargs_should_fail_on_null pass a null array into a
+#   varargs method whose body handles it. Kotlin checks the array behind a vararg parameter for null on entry ("Parameter
+#   specified as non-null is null") and has no nullable vararg; printing Array<out X>? instead would break every Java
+#   caller that passes separate arguments.
+# - BatchItemResultTest#failure_shouldRejectNullError: the record's constructor rejects null with its own
+#   IllegalArgumentException; the Kotlin call asserts first (NullPointerException). maddi-mod#28 keeps such parameters
+#   non-null by default (NULL_REJECTION_REPLACED); Policy.withRejectionsNullable() is the opt-in.
 types	346
 printerCrashes	0
 syntaxErrors	0
