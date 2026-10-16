@@ -107,10 +107,14 @@
 # 2026-10-15, maddi 194d43906, ad15ab18e: an abstract class redeclares the compatibility interface's methods it leaves
 # abstract (IJavaIterator's HasNext, Next); a method's result is nullable where an override's may be null
 # (FamilyFacts): 1168 -> 1172 compiling files, nullable warnings 467 -> 429 (CS8764 54 -> 5).
+# 2026-10-16, maddi 2bd7eb703, 957dc731d, 8892a682e: an interface extending two iterable interfaces redeclares
+# Iterator(); java.util.EventListener a marker, out of the bases and constraints; a method reference of a nullable
+# result a lambda with ! where the receiver is a type, this or the lambda's parameter: 1172 -> 1185 compiling files,
+# 379 -> 376 unmapped JDK uses, nullable warnings 429 -> 373 (CS8603 56 -> 24, CS8621 23 -> 8).
 types	1583
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	1565
-compilingFiles	1172
-unmappedJdkUses	379
-nullableWarnings	429
+compilingFiles	1185
+unmappedJdkUses	376
+nullableWarnings	373

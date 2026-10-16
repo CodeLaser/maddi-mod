@@ -67,10 +67,13 @@
 # fits), cast where C# has the value type; a companion's protected member internal; a record header's nested types
 # qualified; an annotation's nested types printed; Class.getName()'s FullName a string?: 183 -> 184 compiling files,
 # nullable warnings 32 -> 28.
+# 2026-10-16, maddi 2bd7eb703, 957dc731d, 8892a682e: an interface extending two iterable interfaces redeclares
+# Iterator(); java.util.EventListener a marker, out of the bases and constraints; a method reference of a nullable
+# result a lambda with ! where the receiver is a type, this or the lambda's parameter: nullable warnings 28 -> 26.
 types	199
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	199
 compilingFiles	184
 unmappedJdkUses	15
-nullableWarnings	28
+nullableWarnings	26
