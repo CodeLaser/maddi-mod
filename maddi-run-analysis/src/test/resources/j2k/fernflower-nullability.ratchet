@@ -81,6 +81,9 @@
 # JavaCompilerArgumentsProvider does not: JUnit 6 is @NullMarked, and its override's parameters print nullable.
 # 2026-10-09, a @NullMarked library declares its unannotated parameters non-null (maddi 29745e935, maddi-mod
 # 2931ea1a): JavaCompilerArgumentsProvider compiles, all 28 test files do.
+# EXPECTED, not work to do (Bart, 2026-10-16): fernflower's tests pass 264 of 265 with the Kotlin classes and with the
+# translated tests, as on the original classes. The one failing is the Groovy test, which fails on the original Java
+# classes too.
 types	199
 printerCrashes	0
 syntaxErrors	0
