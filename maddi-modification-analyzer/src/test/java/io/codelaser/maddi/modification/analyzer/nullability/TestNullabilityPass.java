@@ -2004,6 +2004,86 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("Pair<String?, String>", s.get("a.b.TV.concrete(String)"), s.toString());
     }
 
+    /*
+     Kotlin: guava's slot hubs (worktree-maddi-all 2026-10-17, ~150 mismatches: Multiset.entrySet():
+     MutableSet<Entry<E>?>?, Table.rowMap(), Multimap.asMap() type arguments). JoinerTest's map with null values
+     reached Joiner.MapJoiner.join(Map<?, ?>)'s slots, flowed back from that unbound wildcard into another caller's
+     argument, 'ImmutableMap.of()', and through '(ImmutableMap<K, V>) RegularImmutableMap.EMPTY' into every
+     collection sharing EMPTY. A '?' slot only receives, as '? extends' does; an unchecked conversion from Object
+     type arguments starts a new instantiation, not one slot.
+     */
+    @DisplayName("Kotlin: a lazily initialised field's cached value is non-null at the return")
+    @Test
+    public void lazyInitReturn() {
+        NullabilityPass.Report report = run("a.b.LZ", """
+                package a.b;
+                import java.util.Collections;
+                import java.util.HashMap;
+                import java.util.Map;
+                class LZ {
+                    final Map<String, String> source = new HashMap<>();
+                    transient Map<String, String> map;
+                    transient Map<String, String> other;
+                    Map<String, String> chained() {
+                        Map<String, String> result = map;
+                        if (result == null) {
+                            result = map = Collections.unmodifiableMap(source);
+                        }
+                        return result;
+                    }
+                    Map<String, String> separate() {
+                        Map<String, String> result = other;
+                        if (result == null) {
+                            result = Collections.unmodifiableMap(source);
+                            other = result;
+                        }
+                        return result;
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("Map<String, String>", s.get("a.b.LZ.chained()"), s + "\n" + explain(report));
+        assertEquals("Map<String, String>", s.get("a.b.LZ.separate()"), s + "\n" + explain(report));
+    }
+
+    @DisplayName("Kotlin: no slot flows back out of an unbound wildcard, nor through an unchecked cast of an Object slot")
+    @Test
+    public void wildcardAndUncheckedSlots() {
+        NullabilityPass.Report report = run("a.b.WS", """
+                package a.b;
+                import java.util.HashMap;
+                import java.util.Map;
+                class WS {
+                    static final Map<Object, Object> EMPTY = new HashMap<>();
+                    @SuppressWarnings("unchecked")
+                    static <K, V> Map<K, V> empty() { return (Map<K, V>) EMPTY; }
+                    static int join(Map<?, ?> map) { return map.size(); }
+                    static int nulls() {
+                        Map<String, String> withNull = new HashMap<>();
+                        withNull.put("a", null);
+                        return join(withNull);
+                    }
+                    static int plain() {
+                        Map<String, String> plain = new HashMap<>();
+                        plain.put("a", "b");
+                        return join(plain) + join(empty());
+                    }
+                    static Map<String, String> names() { return empty(); }
+                    static void poison() {
+                        Map<String, String> m = empty();
+                        m.put("x", null);
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        String l = locals(report);
+        assertTrue(l.contains("nulls.withNull: Map<String, String?>"), l);
+        assertTrue(l.contains("plain.plain: Map<String, String>"), "nothing flows back out of join's Map<?, ?>: " + l);
+        assertEquals("Map<String, String>", s.get("a.b.WS.names()"), "poison's null stays in its own map: " + s);
+    }
+
     @DisplayName("a null returned by a method that may return its argument does not flow back into the argument")
     @Test
     public void identityReturn() {

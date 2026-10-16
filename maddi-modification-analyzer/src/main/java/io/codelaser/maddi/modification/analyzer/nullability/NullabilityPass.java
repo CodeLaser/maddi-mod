@@ -1645,10 +1645,31 @@ public final class NullabilityPass {
     }
 
     private NullableState returnContract(MethodInfo mi) {
-        if (!analysed.contains(mi)) return stateOf(mi, PropertyImpl.NULLABILITY_METHOD);
+        if (!analysed.contains(mi)) {
+            NullableState hint = stateOf(mi, PropertyImpl.NULLABILITY_METHOD);
+            if (hint == NullableState.UNSPECIFIED && policy.callResults() && collectionsFactory(mi)) {
+                return NullableState.NONNULL;
+            }
+            return hint;
+        }
         if (trustedReturns.contains(mi)) return NullableState.NONNULL;
         return policy.contracts() ? NullAnnotations.explicitState(mi) : null;
     }
+
+    /*
+     Kotlin: java.util.Collections' static methods return a new or wrapping object ('unmodifiableMap', 'emptyList',
+     'synchronizedSet'), never null, unless they return an element ('max(Collection<T>)'). Without it guava's lazy
+     caches, 'result = map; if (result == null) { result = map = Collections.unmodifiableMap(...); } return result',
+     made Multimap.asMap() and values() nullable across their override families (2026-10-17).
+     */
+    private static boolean collectionsFactory(MethodInfo mi) {
+        return !COLLECTIONS_FACTORIES_OFF && mi.isStatic() && !isTypeVariable(mi.returnType())
+               && !mi.returnType().isPrimitiveExcludingVoid() && !mi.returnType().isVoid()
+               && "java.util.Collections".equals(mi.typeInfo().fullyQualifiedName());
+    }
+
+    // gate NOCOLLECTIONSFACTORIES: a Collections factory's return is unknown, as any unhinted library return (A/B)
+    private static final boolean COLLECTIONS_FACTORIES_OFF = System.getenv("NOCOLLECTIONSFACTORIES") != null;
 
     /**
      * The methods {@code mi} overrides; for a lambda's synthetic method (which overrides nothing in the model) the
@@ -2009,6 +2030,10 @@ public final class NullabilityPass {
     private final Map<Object, Boolean> boundedSlots = new HashMap<>();
     // gate NOBOUNDEDSLOTS: a bounded type parameter's slot takes null as any other (A/B)
     private static final boolean BOUNDED_SLOTS_OFF = System.getenv("NOBOUNDEDSLOTS") != null;
+    // gate NOWILDCARDSLOTS: a slot flows back out of an unbound '?' parameter (A/B)
+    private static final boolean WILDCARD_SLOTS_OFF = System.getenv("NOWILDCARDSLOTS") != null;
+    // gate NOUNCHECKEDSLOTS: slots of different concrete type arguments are tied as any other (A/B)
+    private static final boolean UNCHECKED_SLOTS_OFF = System.getenv("NOUNCHECKEDSLOTS") != null;
     // gate NOTYPEVARSLOTS: a slot holding a type variable takes null as any other (A/B)
     private static final boolean TYPE_VARIABLE_SLOTS_OFF = System.getenv("NOTYPEVARSLOTS") != null;
 
@@ -2305,6 +2330,10 @@ public final class NullabilityPass {
                     // not through a generic method's own type variable: each call instantiates it anew
                     // ('ImmutableMap.copyOf(Map<? extends K, ? extends V>)' would tie the maps of all its callers)
                     if (isMethodTypeVariable(p0) || isMethodTypeVariable(p1)) continue;
+                    // Kotlin: nor between two different concrete arguments, which only an unchecked conversion
+                    // relates ('(ImmutableMap<K, V>) RegularImmutableMap.EMPTY', an ImmutableMap<Object, Object> the
+                    // links see as every caller's map): each conversion starts an instantiation of its own
+                    if (policy.callResults() && !UNCHECKED_SLOTS_OFF && uncheckedConversion(p0, p1)) continue;
                     // A slot typed by a CLASS type variable ('FastFixedSet<E> spawnEmptySet()' in Factory<E>,
                     // 'union(FastFixedSet<E> set)', 'Factory(Collection<E> set)') is parametric: it receives nothing
                     // from one instantiation's slot ('FastFixedSet<Statement?> tmpSet'), or Kotlin would see 'E?'
@@ -2316,7 +2345,12 @@ public final class NullabilityPass {
                     Arg a0 = new Arg(flow.get(0), i);
                     Arg a1 = new Arg(flow.get(1), i);
                     if (!class1 || class0) successors.computeIfAbsent(a0, _ -> new LinkedHashSet<>()).add(a1);
-                    if (!isExtendsWildcard(p1) && (!class0 || class1)) {
+                    // Kotlin: nor out of an unbound '?' ('Joiner.MapJoiner.join(Map<?, ?>)'): Kotlin's '*' only
+                    // receives too. Back out, JoinerTest's null reached every map passed to join, and through
+                    // ImmutableMap.of()'s RegularImmutableMap.EMPTY all of guava's empty maps (2026-10-17)
+                    boolean unbound = policy.callResults() && !WILDCARD_SLOTS_OFF && p1.wildcard() != null
+                                      && p1.wildcard().isUnbound();
+                    if (!isExtendsWildcard(p1) && !unbound && (!class0 || class1)) {
                         successors.computeIfAbsent(a1, _ -> new LinkedHashSet<>()).add(a0);
                     }
                     queue.add(List.of(a0, a1));
@@ -2374,6 +2408,12 @@ public final class NullabilityPass {
     // a type variable of a class ('E' in Factory<E>), also as the bound of a wildcard ('? extends E')
     private static boolean isClassTypeVariable(ParameterizedType pt) {
         return pt.typeParameter() != null && pt.arrays() == 0 && !pt.typeParameter().isMethodTypeParameter();
+    }
+
+    private static boolean uncheckedConversion(ParameterizedType p0, ParameterizedType p1) {
+        return p0.wildcard() == null && p1.wildcard() == null && p0.typeParameter() == null
+               && p1.typeParameter() == null && p0.typeInfo() != null && p1.typeInfo() != null
+               && p0.arrays() == p1.arrays() && p0.typeInfo() != p1.typeInfo();
     }
 
     private static boolean isExtendsWildcard(ParameterizedType pt) {
