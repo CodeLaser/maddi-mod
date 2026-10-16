@@ -1908,8 +1908,9 @@ public class TestNullabilityPass extends CommonTest {
 
     /*
      Kotlin, a test's override of a main member (guava's tests, worktree-maddi-all 2026-10-16): its parameter takes
-     main's states exactly, type arguments included; its return is no wider than main's. A main type variable's own
-     state ('F', unreached) stands for the instantiation, non-null. The boundary itself needs a test source set, which
+     main's states exactly, type arguments included. A main type variable's own
+     state ('F', unreached) stands for the instantiation, non-null. Its return is not clamped: a test implementation's
+     null widens main's (langchain4j's DocumentTransformerTest). The boundary itself needs a test source set, which
      this harness does not parse into: the guava J2K ratchet's test files check it.
      */
     @DisplayName("Kotlin: a test override's types clamped to main's")
@@ -1933,19 +1934,14 @@ public class TestNullabilityPass extends CommonTest {
         ParameterizedType nullableDeque = deque.withNullable(NullableState.NULLABLE);
         // a parameter: exactly main's
         assertEquals("Deque<String>", k(NullabilityPass.clamped(nullableDeque,
-                f.withNullable(NullableState.UNSPECIFIED), true)));
+                f.withNullable(NullableState.UNSPECIFIED))));
         assertEquals("Deque<String>?", k(NullabilityPass.clamped(deque.withNullable(NullableState.NONNULL),
-                f.withNullable(NullableState.NULLABLE), true)));
+                f.withNullable(NullableState.NULLABLE))));
         ParameterizedType nullableElements = list.withNullable(NullableState.NONNULL)
                 .withParameters(List.of(list.parameters().getFirst().withNullable(NullableState.NULLABLE)));
         ParameterizedType plainElements = list.withNullable(NullableState.NONNULL)
                 .withParameters(List.of(list.parameters().getFirst().withNullable(NullableState.NONNULL)));
-        assertEquals("List<String>", k(NullabilityPass.clamped(nullableElements, plainElements, true)));
-        // a return: no wider than main's, narrower stays
-        assertEquals("Deque<String>", k(NullabilityPass.clamped(nullableDeque,
-                deque.withNullable(NullableState.NONNULL), false)));
-        assertEquals("Deque<String>", k(NullabilityPass.clamped(deque.withNullable(NullableState.NONNULL),
-                nullableDeque, false)));
+        assertEquals("List<String>", k(NullabilityPass.clamped(nullableElements, plainElements)));
     }
 
     /*
