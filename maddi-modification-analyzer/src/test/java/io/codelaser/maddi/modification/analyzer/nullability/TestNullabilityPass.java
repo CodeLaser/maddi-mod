@@ -1946,6 +1946,38 @@ public class TestNullabilityPass extends CommonTest {
                 nullableDeque, false)));
     }
 
+    /*
+     Kotlin: a type parameter with a bound other than Object ('C extends Comparable<C>', 'E extends Enum<E>') takes no
+     nullable argument (guava, worktree-maddi-all 2026-10-16: 'Range<C?>', 'EnumSet<E?>', most of 129 "type argument
+     is not within its bounds"). Its slots stay non-null; a null written into one is asserted. An unbounded one
+     ('Holder<T>') takes the null.
+     */
+    @DisplayName("Kotlin: a bounded type parameter's slot is non-null")
+    @Test
+    public void boundedTypeParameterSlot() {
+        Map<String, String> s = new java.util.TreeMap<>();
+        run("a.b.BS", """
+                package a.b;
+                class BS {
+                    static final class Box<C extends Comparable<C>> {
+                        private final C c;
+                        Box(C c) { this.c = c; }
+                        C get() { return c; }
+                    }
+                    static final class Holder<T> {
+                        private final T t;
+                        Holder(T t) { this.t = t; }
+                        T get() { return t; }
+                    }
+                    static Box<String> box() { return new Box<>(null); }
+                    static Holder<String> holder() { return new Holder<>(null); }
+                }
+                """, NullabilityPass.Policy.KOTLIN).verdicts()
+                .forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("Box<String>", s.get("a.b.BS.box()"), s.toString());
+        assertEquals("Holder<String?>", s.get("a.b.BS.holder()"), s.toString());
+    }
+
     @DisplayName("a null returned by a method that may return its argument does not flow back into the argument")
     @Test
     public void identityReturn() {

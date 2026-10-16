@@ -1986,19 +1986,44 @@ public final class NullabilityPass {
         return node instanceof Content c && c.of() instanceof ParameterInfo pi && pi.isVarArgs();
     }
 
+    /*
+     Kotlin: the slot of a type parameter bounded by something other than Object ('Range<C extends Comparable>',
+     'EnumSet<E extends Enum<E>>') cannot hold a nullable argument, so null stops there as at a non-null contract; a
+     write of a value that may be null is asserted (guava, worktree-maddi-all 2026-10-16: 'DiscreteDomain<C?>',
+     'TreeRangeMap<K?, ...>', 'EnumSet<E?>', most of 129 "type argument is not within its bounds").
+     */
+    private boolean boundedSlot(Object node) {
+        if (!policy.callResults() || BOUNDED_SLOTS_OFF || !(node instanceof Arg a)) return false;
+        Boolean known = boundedSlots.get(node);
+        if (known != null) return known;
+        ParameterizedType outer = typeOf(a.of());
+        TypeInfo ti = outer == null || outer.arrays() > 0 ? null : outer.typeInfo();
+        boolean bounded = ti != null && a.index() < ti.typeParameters().size()
+                          && ti.typeParameters().get(a.index()).typeBounds().stream()
+                                  .anyMatch(b -> b.typeParameter() == null && b.typeInfo() != null
+                                                 && !b.typeInfo().isJavaLangObject());
+        boundedSlots.put(node, bounded);
+        return bounded;
+    }
+
+    private final Map<Object, Boolean> boundedSlots = new HashMap<>();
+    // gate NOBOUNDEDSLOTS: a bounded type parameter's slot takes null as any other (A/B)
+    private static final boolean BOUNDED_SLOTS_OFF = System.getenv("NOBOUNDEDSLOTS") != null;
+
     // strict: when not null, an edge from a value into a slot is followed only from a node in it
     private Set<Object> closure(Map<Object, Object> cause, Set<Object> seeds, Set<Object> strict) {
         // a seed on a non-null contract is the caller's error (an M5 finding), not a source of null
         Set<Object> reached = new LinkedHashSet<>(seeds);
         reached.removeAll(nonNullContracts);
         reached.removeIf(this::optionalValue);
+        reached.removeIf(this::boundedSlot);
         Deque<Object> queue = new ArrayDeque<>(reached);
         while (true) {
             while (!queue.isEmpty()) {
                 Object n = queue.removeFirst();
                 for (Object s : successors.getOrDefault(n, Set.of())) {
                     if (strict != null && isSlot(s) && !isSlot(n) && !strict.contains(n) && !isVarargElements(s)) continue;
-                    if (optionalValue(s)) continue;
+                    if (optionalValue(s) || boundedSlot(s)) continue;
                     if (!nonNullContracts.contains(s) && reached.add(s)) {
                         cause.put(s, n);
                         queue.addLast(s);
