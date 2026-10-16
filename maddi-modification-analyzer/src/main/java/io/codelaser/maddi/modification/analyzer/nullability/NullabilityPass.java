@@ -2433,6 +2433,34 @@ public final class NullabilityPass {
     // gate NOSTARSLOTS: a '?' argument's values are not read as nullable (A/B)
     private static final boolean STAR_SLOTS_OFF = System.getenv("NOSTARSLOTS") != null;
 
+    /*
+     Kotlin: a call on this object to a method of its own class instantiates the class's type variables as the
+     caller has them, so the result's slots are the target's ('table = newEntryArray(n)' in guava's
+     LocalCache.Segment: the null elements of AtomicReferenceArray<ReferenceEntry<K, V>?> table belong to
+     newEntryArray's result too; Striped.SmallLazyStriped likewise). Not with a method type variable in the result,
+     which each call instantiates anew.
+     */
+    private static boolean sameInstantiation(MethodCall mc, MethodInfo caller) {
+        MethodInfo callee = mc.methodInfo();
+        if (SAME_INSTANTIATION_OFF || callee.isStatic() || callee.typeInfo() != caller.typeInfo()
+            || caller.isStatic() || hasMethodTypeVariable(callee.returnType())) {
+            return false;
+        }
+        Expression object = mc.object() == null ? null : NonNullFacts.unwrap(mc.object());
+        return object == null || object.isEmpty()
+               || object instanceof VariableExpression ve && ve.variable() instanceof This;
+    }
+
+    private static boolean hasMethodTypeVariable(ParameterizedType pt) {
+        if (isMethodTypeVariable(pt)) return true;
+        if (pt.arrays() > 0 && pt.componentType() != null && hasMethodTypeVariable(pt.componentType())) return true;
+        for (ParameterizedType a : pt.parameters()) if (hasMethodTypeVariable(a)) return true;
+        return false;
+    }
+
+    // gate NOSAMEINSTANTIATION: a call on this does not tie its result's slots to the target's (A/B)
+    private static final boolean SAME_INSTANTIATION_OFF = System.getenv("NOSAMEINSTANTIATION") != null;
+
     private static boolean uncheckedConversion(ParameterizedType p0, ParameterizedType p1) {
         return p0.wildcard() == null && p1.wildcard() == null && p0.typeParameter() == null
                && p1.typeParameter() == null && p0.typeInfo() != null && p1.typeInfo() != null
@@ -3990,7 +4018,8 @@ public final class NullabilityPass {
             // component's type arguments ('Node<K, V>[] createTable(int n) { return new Node[n]; }': guava
             // HashBiMap.hashTableVToK, ImmutableMapEntry.createEntryArray), unless the component is the callee's own
             // type variable ('<T> T[] toArray(T[] a)'), which would tie the arrays of all its callers
-            if (concreteArguments(rt) || rt.arrays() > 0 && !isMethodTypeVariable(rt.componentType())) {
+            if (concreteArguments(rt) || rt.arrays() > 0 && !isMethodTypeVariable(rt.componentType())
+                || policy.callResults() && readScope != null && sameInstantiation(mc, readScope.mi())) {
                 flows.add(List.of(callee, target));
             }
             // a class type variable's own null ('E getWithKey(K k) { ... return null; }', E?) holds for every

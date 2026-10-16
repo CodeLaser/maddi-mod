@@ -2012,6 +2012,31 @@ public class TestNullabilityPass extends CommonTest {
      collection sharing EMPTY. A '?' slot only receives, as '? extends' does; an unchecked conversion from Object
      type arguments starts a new instantiation, not one slot.
      */
+    @DisplayName("Kotlin: a call on this ties its result's slots to the target, the instantiation being the caller's")
+    @Test
+    public void sameInstantiationSlots() {
+        NullabilityPass.Report report = run("a.b.SI", """
+                package a.b;
+                import java.util.concurrent.atomic.AtomicReferenceArray;
+                class SI<K, V> {
+                    static class Entry<K, V> { }
+                    AtomicReferenceArray<Entry<K, V>> table;
+                    AtomicReferenceArray<Entry<K, V>> newEntryArray(int size) { return new AtomicReferenceArray<>(size); }
+                    void init(int n) {
+                        AtomicReferenceArray<Entry<K, V>> newTable = newEntryArray(n);
+                        newTable.set(0, null);
+                        table = newTable;
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        String field = s.get("a.b.SI.table");
+        assertTrue(field != null && field.contains("?>"), s.toString());
+        assertEquals("AtomicReferenceArray<Entry<K!, V!>?>?", field, s.toString());
+        assertEquals("AtomicReferenceArray<Entry<K!, V!>?>", s.get("a.b.SI.newEntryArray(int)"), s.toString());
+    }
+
     @DisplayName("Kotlin: a @ParametricNullness return's own null stays with nullable instantiations")
     @Test
     public void parametricNullnessReturn() {
