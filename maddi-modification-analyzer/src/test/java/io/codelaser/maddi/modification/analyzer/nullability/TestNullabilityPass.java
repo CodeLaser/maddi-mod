@@ -5,6 +5,7 @@ import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.type.NullableState;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.modification.analyzer.CommonTest;
 import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
@@ -1901,6 +1902,48 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("String", s.get("caught(0:s)"), s.toString());
         assertEquals("String?", s.get("cleared(0:s)"), s.toString());
         assertEquals("String?", s.get("clearedInTry(0:s)"), "clear(body) in the try: " + s);
+    }
+
+    /*
+     Kotlin, a test's override of a main member (guava's tests, worktree-maddi-all 2026-10-16): its parameter takes
+     main's states exactly, type arguments included; its return is no wider than main's. A main type variable's own
+     state ('F', unreached) stands for the instantiation, non-null. The boundary itself needs a test source set, which
+     this harness does not parse into: the guava J2K ratchet's test files check it.
+     */
+    @DisplayName("Kotlin: a test override's types clamped to main's")
+    @Test
+    public void testOverrideClamped() {
+        run("a.b.CL", """
+                package a.b;
+                import java.util.Deque;
+                import java.util.List;
+                class CL<F> {
+                    Deque<String> deque;
+                    List<String> list;
+                    F f;
+                }
+                """);
+        ParameterizedType declared = parsed.getFieldByName("deque", true).type();
+        ParameterizedType deque = declared.withParameters(
+                List.of(declared.parameters().getFirst().withNullable(NullableState.NONNULL)));
+        ParameterizedType list = parsed.getFieldByName("list", true).type();
+        ParameterizedType f = parsed.getFieldByName("f", true).type();
+        ParameterizedType nullableDeque = deque.withNullable(NullableState.NULLABLE);
+        // a parameter: exactly main's
+        assertEquals("Deque<String>", k(NullabilityPass.clamped(nullableDeque,
+                f.withNullable(NullableState.UNSPECIFIED), true)));
+        assertEquals("Deque<String>?", k(NullabilityPass.clamped(deque.withNullable(NullableState.NONNULL),
+                f.withNullable(NullableState.NULLABLE), true)));
+        ParameterizedType nullableElements = list.withNullable(NullableState.NONNULL)
+                .withParameters(List.of(list.parameters().getFirst().withNullable(NullableState.NULLABLE)));
+        ParameterizedType plainElements = list.withNullable(NullableState.NONNULL)
+                .withParameters(List.of(list.parameters().getFirst().withNullable(NullableState.NONNULL)));
+        assertEquals("List<String>", k(NullabilityPass.clamped(nullableElements, plainElements, true)));
+        // a return: no wider than main's, narrower stays
+        assertEquals("Deque<String>", k(NullabilityPass.clamped(nullableDeque,
+                deque.withNullable(NullableState.NONNULL), false)));
+        assertEquals("Deque<String>", k(NullabilityPass.clamped(deque.withNullable(NullableState.NONNULL),
+                nullableDeque, false)));
     }
 
     @DisplayName("a null returned by a method that may return its argument does not flow back into the argument")

@@ -1338,6 +1338,7 @@ public final class NullabilityPass {
                 verdicts.put(mi, contracted(mi, verdict(mi.returnType(), mi, deg)));
             }
         }
+        if (policy.callResults()) clampTestOverrides(methods, verdicts);
         NonNullFacts smartCasts = facts.kotlinSmartCasts();
         methods.forEach(smartCasts::walk);
         Set<Expression> nonNullCallResults = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
@@ -1485,13 +1486,60 @@ public final class NullabilityPass {
      analysed overridden member's, where both declare the same class ('List<String>' over 'List<E>'): edges both ways
      (guava: AbstractMapBasedMultimap's remove, MutableCollection<V?>? over MutableCollection<V>?).
      */
-    private void invariantSlots(ParameterizedType ours, Object node, ParameterizedType theirs, Object theirNode) {
+    private void invariantSlots(ParameterizedType ours, Object node, ParameterizedType theirs, Object theirNode,
+                                boolean upward) {
         if (ours == null || theirs == null || ours.arrays() != 0 || theirs.arrays() != 0 || ours.typeInfo() == null
             || ours.typeInfo() != theirs.typeInfo() || ours.parameters().size() != theirs.parameters().size()) return;
         for (int j = 0; j < ours.parameters().size(); j++) {
-            addEdge(new Arg(node, j), new Arg(theirNode, j));
+            if (upward) addEdge(new Arg(node, j), new Arg(theirNode, j));
             addEdge(new Arg(theirNode, j), new Arg(node, j));
         }
+    }
+
+    /*
+     Kotlin, a test's override of a main member (guava's tests, worktree-maddi-all 2026-10-16: ForwardingDequeTest's
+     anonymous Function, DiscreteDomainTest.MyIntegerDomain.next): its parameters, type arguments included, take
+     main's states exactly, and its return is no wider than main's, as an override of a library member does. What
+     the tests pass is asserted at their calls; a null the override returns, at its return. Main's verdicts are the
+     translation's API: the tests do not change them (no upward edges, buildForMethod).
+     */
+    private void clampTestOverrides(List<MethodInfo> methods, Map<Info, ParameterizedType> verdicts) {
+        for (MethodInfo mi : methods) {
+            if (mi.isConstructor() || !testCode(mi)) continue;
+            for (MethodInfo overridden : overrides(mi)) {
+                if (!analysed.contains(overridden) || testCode(overridden)) continue;
+                int n = Math.min(mi.parameters().size(), overridden.parameters().size());
+                for (int i = 0; i < n; i++) {
+                    ParameterInfo ours = mi.parameters().get(i);
+                    ParameterizedType theirs = verdicts.get(overridden.parameters().get(i));
+                    if (verdicts.containsKey(ours) && theirs != null) {
+                        verdicts.put(ours, clamped(verdicts.get(ours), theirs, true));
+                    }
+                }
+                ParameterizedType theirs = verdicts.get(overridden);
+                if (verdicts.containsKey(mi) && theirs != null) verdicts.put(mi, clamped(verdicts.get(mi), theirs, false));
+            }
+        }
+    }
+
+    // 'ours' with the overridden type's states: exactly (a parameter, any type argument), or no wider (a return)
+    static ParameterizedType clamped(ParameterizedType ours, ParameterizedType theirs, boolean exact) {
+        if (ours.isPrimitiveExcludingVoid() && ours.arrays() == 0) return ours;
+        NullableState top = theirs.nullable();
+        // a type variable's own state stands for the instantiation's type, non-null as written ('F' as 'Deque<*>')
+        if (top == NullableState.UNSPECIFIED && !isTypeVariable(ours)) top = NullableState.NONNULL;
+        NullableState state = exact || ours.nullable() == NullableState.NULLABLE && top != NullableState.NULLABLE
+                ? top : ours.nullable();
+        ParameterizedType result = ours.withNullable(state);
+        if (ours.arrays() == 0 && theirs.arrays() == 0 && ours.typeInfo() != null && ours.typeInfo() == theirs.typeInfo()
+            && ours.parameters().size() == theirs.parameters().size() && !ours.parameters().isEmpty()) {
+            List<ParameterizedType> arguments = new ArrayList<>();
+            for (int j = 0; j < ours.parameters().size(); j++) {
+                arguments.add(clamped(ours.parameters().get(j), theirs.parameters().get(j), true));
+            }
+            result = result.withParameters(arguments);
+        }
+        return result;
     }
 
     private static boolean boundedTypeVariableOverride(MethodInfo mi) {
@@ -2527,17 +2575,22 @@ public final class NullabilityPass {
         // ToStringFunction.apply to a Map.remove key).
         if (!mi.isConstructor()) {
             for (MethodInfo overridden : overrides(mi)) {
+                // Kotlin: a test's override of a main member takes main's types as they are, as for a library's
+                // (clampTestOverrides): no null of the tests widens main
+                boolean upward = !(policy.callResults() && testCode(mi) && !testCode(overridden));
                 // Kotlin: an override's return may not be wider than its overridden member's, so a null returned
                 // by an implementation makes an analysed type-variable return nullable too ('Holder<T>.get(): T?')
-                if (!isTypeVariable(overridden.returnType()) || policy.callResults() && analysed.contains(overridden)) {
+                if (upward && (!isTypeVariable(overridden.returnType())
+                               || policy.callResults() && analysed.contains(overridden))) {
                     addEdge(mi, overridden);
                 }
                 if (policy.callResults() && analysed.contains(overridden)) {
-                    invariantSlots(mi.returnType(), mi, overridden.returnType(), overridden);
+                    invariantSlots(mi.returnType(), mi, overridden.returnType(), overridden, upward);
                     int m = Math.min(mi.parameters().size(), overridden.parameters().size());
                     for (int i = 0; i < m; i++) {
                         invariantSlots(mi.parameters().get(i).parameterizedType(), mi.parameters().get(i),
-                                overridden.parameters().get(i).parameterizedType(), overridden.parameters().get(i));
+                                overridden.parameters().get(i).parameterizedType(), overridden.parameters().get(i),
+                                upward);
                     }
                 }
                 int n = Math.min(mi.parameters().size(), overridden.parameters().size());
@@ -2557,7 +2610,7 @@ public final class NullabilityPass {
                            && implementationType.typeInfo().isJavaLangObject()) {
                         addEdge(overridden.parameters().get(i), mi.parameters().get(i));
                     }
-                    if (!isTypeVariable(overridden.parameters().get(i).parameterizedType())) {
+                    if (upward && !isTypeVariable(overridden.parameters().get(i).parameterizedType())) {
                         addEdge(mi.parameters().get(i), overridden.parameters().get(i));
                     }
                 }
