@@ -2012,6 +2012,66 @@ public class TestNullabilityPass extends CommonTest {
      collection sharing EMPTY. A '?' slot only receives, as '? extends' does; an unchecked conversion from Object
      type arguments starts a new instantiation, not one slot.
      */
+    @DisplayName("Kotlin: a local assigned a nullable value inside a loop condition is nullable; an anonymous class's super arguments flow")
+    @Test
+    public void conditionAssignmentAndAnonymousSuper() {
+        NullabilityPass.Report report = run("a.b.CA", """
+                package a.b;
+                class CA {
+                    Runnable nextTask;
+                    void drain() {
+                        Runnable queuedTask;
+                        while ((queuedTask = nextTask) != null) {
+                            nextTask = null;
+                            queuedTask.run();
+                        }
+                    }
+                    abstract static class Base {
+                        final CharSequence toSplit;
+                        Base(CharSequence toSplit) { this.toSplit = toSplit; }
+                        abstract int next();
+                    }
+                    static Base make(CharSequence s) {
+                        return new Base(s) { int next() { return 0; } };
+                    }
+                    static Base nothing() { return make(null); }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        String l = locals(report);
+        assertTrue(l.contains("drain.queuedTask: Runnable?"), l);
+        assertEquals("CharSequence?", s.get("a.b.CA.Base.<init>(CharSequence):0:toSplit"), s.toString());
+    }
+
+    @DisplayName("Kotlin: an explicitly @Nullable type-variable return over a JDK default stays nullable")
+    @Test
+    public void nullableJdkDefaultOverride() {
+        NullabilityPass.Report report = run("a.b.JD", """
+                package a.b;
+                import java.lang.annotation.ElementType;
+                import java.lang.annotation.Target;
+                import java.util.AbstractMap;
+                import java.util.Map;
+                import java.util.Set;
+                import java.util.concurrent.ConcurrentMap;
+                abstract class JD {
+                    @Target(ElementType.TYPE_USE) @interface Nullable {}
+                    abstract static class Fwd<K, V> implements ConcurrentMap<K, V> {
+                        abstract ConcurrentMap<K, V> delegate();
+                        @Override public @Nullable V replace(K key, V value) { return delegate().replace(key, value); }
+                    }
+                    abstract static class View<K, V> extends AbstractMap<K, V> {
+                        @Override public @Nullable V get(@Nullable Object key) { return getOrDefault(key, null); }
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("V?", s.get("a.b.JD.Fwd.replace(Object,Object)"), s.toString());
+        assertEquals("V?", s.get("a.b.JD.View.get(Object)"), s.toString());
+    }
+
     @DisplayName("Kotlin: an Object-typed singleton's slots hold nothing")
     @Test
     public void erasedSingletonSlots() {

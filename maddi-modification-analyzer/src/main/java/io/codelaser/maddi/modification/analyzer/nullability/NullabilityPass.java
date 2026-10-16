@@ -3171,6 +3171,9 @@ public final class NullabilityPass {
         return values;
     }
 
+    // gate NONESTEDASSIGNMENTS: a link into a variable assigned inside an expression is not counted (A/B)
+    private static final boolean NESTED_ASSIGNMENTS_OFF = System.getenv("NONESTEDASSIGNMENTS") != null;
+
     // the value 'recipient' gets in this statement: 'recipient = v;', 'T recipient = v;', 'return v;'; else null
     private static Expression assignedValue(Statement statement, Variable recipient) {
         return switch (statement) {
@@ -3340,6 +3343,7 @@ public final class NullabilityPass {
                 } else if (e instanceof ConstructorCall cc && cc.constructor() != null) {
                     callSite(mi, own, statement, cc, cc.constructor(), cc.analysis(), cc.parameterExpressions());
                 }
+                if (e instanceof ConstructorCall cc) anonymousSuperArguments(mi, own, statement, cc);
                 return true;
             });
             syntacticSeeds(mi, own, statement);
@@ -3578,9 +3582,24 @@ public final class NullabilityPass {
                 if (a.value() instanceof NullConstant) seed(target, "assigned null in " + mi.fullyQualifiedName(), mi.typeInfo());
                 callResult(target, a.value());
                 seedCreated(target, a.value(), mi);
+                nestedCopy(mi, scope, statement, target, a.value());
             }
             return true;
         });
+    }
+
+    /*
+     Kotlin: a variable copied by an assignment inside an expression ('while ((queuedTask = nextTask) != null)', guava
+     ExecutionSequencer) takes the value as it is; the null test comes after. The links leave that copy out, and the
+     local printed 'Runnable' (worktree-maddi-all 2026-10-17).
+     */
+    private void nestedCopy(MethodInfo mi, Scope scope, Statement statement, Object target, Expression value) {
+        if (!policy.callResults() || NESTED_ASSIGNMENTS_OFF || target == null
+            || !(NonNullFacts.unwrap(value) instanceof VariableExpression ve)) return;
+        Object source = node(mi, scope, ve.variable());
+        if (source == null) return;
+        if (facts.nonNull(value, facts.before(statement))) flows.add(List.of(source, target));
+        else addEdge(source, target);
     }
 
     /*
@@ -4664,6 +4683,45 @@ public final class NullabilityPass {
             }
         });
     }
+
+    /*
+     Kotlin: 'new SplittingIterator(splitter, toSplit) { ... }' passes its arguments to the superclass's constructor;
+     the anonymous class's own has none to take them (guava Splitter.kt:137: a nullable 'toSplit' into
+     SplittingIterator's non-null parameter, worktree-maddi-all 2026-10-17). The one superclass constructor of that
+     arity, when there is exactly one.
+     */
+    private void anonymousSuperArguments(MethodInfo mi, Scope scope, Statement statement, ConstructorCall cc) {
+        TypeInfo anonymous = cc.anonymousClass();
+        if (!policy.callResults() || ANONYMOUS_SUPER_OFF || anonymous == null || anonymous.parentClass() == null
+            || anonymous.parentClass().typeInfo() == null) {
+            return;
+        }
+        List<Expression> arguments = cc.parameterExpressions();
+        int n = arguments.size();
+        List<MethodInfo> candidates = anonymous.parentClass().typeInfo().constructors().stream()
+                .filter(c -> c.parameters().size() == n && c.parameters().stream().noneMatch(ParameterInfo::isVarArgs))
+                .toList();
+        if (candidates.size() != 1 || !analysed.contains(candidates.getFirst())) return;
+        MethodInfo constructor = candidates.getFirst();
+        for (int i = 0; i < n; i++) {
+            ParameterInfo pi = constructor.parameters().get(i);
+            Expression argument = NonNullFacts.unwrap(arguments.get(i));
+            if (argument instanceof NullConstant) {
+                seed(pi, NULL_ARGUMENT + mi.fullyQualifiedName(), mi.typeInfo());
+            } else if (argument instanceof VariableExpression ve) {
+                Object source = node(mi, scope, ve.variable());
+                if (source == null) continue;
+                if (facts.nonNullWhenCalled(cc, ve.variable()) || facts.nonNullAt(statement, ve.variable())) {
+                    flows.add(List.of(source, pi));
+                } else {
+                    addEdge(source, pi);
+                }
+            }
+        }
+    }
+
+    // gate NOANONYMOUSSUPER: an anonymous class's arguments do not reach its superclass's constructor (A/B)
+    private static final boolean ANONYMOUS_SUPER_OFF = System.getenv("NOANONYMOUSSUPER") != null;
 
     private void callSite(MethodInfo mi, Scope scope, Statement statement, Expression call, MethodInfo callee,
                           io.codelaser.maddi.cst.api.analysis.PropertyValueMap analysis, List<Expression> arguments) {
