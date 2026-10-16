@@ -126,10 +126,13 @@
 # 2026-10-16, maddi 5a264dae4, e8082ad87: a SequencedCollection is an ICollection, which a LinkedHashSet's HashSet is;
 # List.listIterator(index) and WeakHashMap mapped: 1216 -> 1232 compiling files, nullable
 # warnings stay 290.
+# 2026-10-16, maddi f8701687b, 19081f381: a wildcard interface declares the fields read through it, as properties;
+# none for a wildcard passed where its type is declared with arguments (getAttribute(Key<T>)): 1232 -> 1234
+# compiling files, nullable warnings stay 290.
 types	1583
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	1565
-compilingFiles	1232
+compilingFiles	1234
 unmappedJdkUses	375
 nullableWarnings	290
