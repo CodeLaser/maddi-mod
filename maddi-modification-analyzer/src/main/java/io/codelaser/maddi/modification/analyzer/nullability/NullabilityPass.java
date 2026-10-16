@@ -2105,10 +2105,28 @@ public final class NullabilityPass {
                           // 'Converter<A?, B>'): it already ranges over nullable instantiations, and Kotlin's
                           // invariant generics make the two incompatible (guava's Converter, Maps, TreeRangeSet, ...)
                           || !TYPE_VARIABLE_SLOTS_OFF && outer != null && a.index() < outer.parameters().size()
-                             && isTypeVariable(outer.parameters().get(a.index()));
+                             && isTypeVariable(outer.parameters().get(a.index()))
+                          || erasedSingleton(a, outer);
         boundedSlots.put(node, bounded);
         return bounded;
     }
+
+    /*
+     Kotlin: a static final singleton with Object type arguments ('RegularImmutableMap.EMPTY', an
+     ImmutableMap<Object, Object>) is cast to each instantiation at its use; its slots hold nothing. Tied to every
+     Object-keyed map that the links see as it, it carried a test's null ('read from *' in
+     ImmutableMapFloodingTest) into ImmutableListMultimap.readObject's tmpMap (guava 2026-10-17, after 594f20b7).
+     */
+    private static boolean erasedSingleton(Arg a, ParameterizedType outer) {
+        return !ERASED_SINGLETONS_OFF && a.of() instanceof FieldInfo fi && fi.isStatic() && fi.isFinal()
+               && outer != null && outer.arrays() == 0 && !outer.parameters().isEmpty()
+               && outer.parameters().stream().allMatch(p -> p.wildcard() == null && p.typeParameter() == null
+                                                            && p.arrays() == 0 && p.typeInfo() != null
+                                                            && p.typeInfo().isJavaLangObject());
+    }
+
+    // gate NOERASEDSINGLETONS: an Object-typed singleton's slots take null as any other (A/B)
+    private static final boolean ERASED_SINGLETONS_OFF = System.getenv("NOERASEDSINGLETONS") != null;
 
     private final Map<Object, Boolean> boundedSlots = new HashMap<>();
     // gate NOBOUNDEDSLOTS: a bounded type parameter's slot takes null as any other (A/B)

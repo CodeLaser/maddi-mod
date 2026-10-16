@@ -2012,6 +2012,32 @@ public class TestNullabilityPass extends CommonTest {
      collection sharing EMPTY. A '?' slot only receives, as '? extends' does; an unchecked conversion from Object
      type arguments starts a new instantiation, not one slot.
      */
+    @DisplayName("Kotlin: an Object-typed singleton's slots hold nothing")
+    @Test
+    public void erasedSingletonSlots() {
+        NullabilityPass.Report report = run("a.b.ES", """
+                package a.b;
+                import java.util.HashMap;
+                import java.util.Map;
+                class ES {
+                    static final Map<Object, Object> EMPTY = new HashMap<>();
+                    static Map<Object, Object> nulls() {
+                        Map<Object, Object> m = EMPTY;
+                        m.put(null, "x");
+                        return m;
+                    }
+                    static Map<Object, Object> other() {
+                        Map<Object, Object> o = EMPTY;
+                        return o;
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("Map<Object, Object>", s.get("a.b.ES.EMPTY"), s.toString());
+        assertEquals("Map<Object, Object>", s.get("a.b.ES.other()"), s + "\n" + locals(report));
+    }
+
     @DisplayName("Kotlin: a null passed inside assertThrows(NullPointerException.class, ...) is no evidence")
     @Test
     public void rejectedNullArgument() {
