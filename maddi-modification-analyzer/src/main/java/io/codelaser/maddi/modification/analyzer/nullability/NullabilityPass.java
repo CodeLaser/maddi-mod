@@ -1993,15 +1993,20 @@ public final class NullabilityPass {
      'TreeRangeMap<K?, ...>', 'EnumSet<E?>', most of 129 "type argument is not within its bounds").
      */
     private boolean boundedSlot(Object node) {
-        if (!policy.callResults() || BOUNDED_SLOTS_OFF || !(node instanceof Arg a)) return false;
+        if (!policy.callResults() || !(node instanceof Arg a)) return false;
         Boolean known = boundedSlots.get(node);
         if (known != null) return known;
         ParameterizedType outer = typeOf(a.of());
         TypeInfo ti = outer == null || outer.arrays() > 0 ? null : outer.typeInfo();
-        boolean bounded = ti != null && a.index() < ti.typeParameters().size()
+        boolean bounded = !BOUNDED_SLOTS_OFF && ti != null && a.index() < ti.typeParameters().size()
                           && ti.typeParameters().get(a.index()).typeBounds().stream()
                                   .anyMatch(b -> b.typeParameter() == null && b.typeInfo() != null
-                                                 && !b.typeInfo().isJavaLangObject());
+                                                 && !b.typeInfo().isJavaLangObject())
+                          // a slot holding a type variable stays that variable ('Converter<A, B>', never
+                          // 'Converter<A?, B>'): it already ranges over nullable instantiations, and Kotlin's
+                          // invariant generics make the two incompatible (guava's Converter, Maps, TreeRangeSet, ...)
+                          || !TYPE_VARIABLE_SLOTS_OFF && outer != null && a.index() < outer.parameters().size()
+                             && isTypeVariable(outer.parameters().get(a.index()));
         boundedSlots.put(node, bounded);
         return bounded;
     }
@@ -2009,6 +2014,8 @@ public final class NullabilityPass {
     private final Map<Object, Boolean> boundedSlots = new HashMap<>();
     // gate NOBOUNDEDSLOTS: a bounded type parameter's slot takes null as any other (A/B)
     private static final boolean BOUNDED_SLOTS_OFF = System.getenv("NOBOUNDEDSLOTS") != null;
+    // gate NOTYPEVARSLOTS: a slot holding a type variable takes null as any other (A/B)
+    private static final boolean TYPE_VARIABLE_SLOTS_OFF = System.getenv("NOTYPEVARSLOTS") != null;
 
     // strict: when not null, an edge from a value into a slot is followed only from a node in it
     private Set<Object> closure(Map<Object, Object> cause, Set<Object> seeds, Set<Object> strict) {

@@ -1829,9 +1829,11 @@ public class TestNullabilityPass extends CommonTest {
                 }
                 """, NullabilityPass.Policy.KOTLIN).verdicts()
                 .forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
-        assertEquals("List<E?>", s.get("a.b.SL.Source.items()"), s.toString());
+        // the overridden slot holds a type variable, which stays that variable (typeVariableSlot): Strings, which
+        // holds a null, would need 'Source<String?>', a supertype's type argument; Plain no longer follows it
+        assertEquals("List<E!>", s.get("a.b.SL.Source.items()"), s.toString());
         assertEquals("List<String?>", s.get("a.b.SL.Strings.items()"), s.toString());
-        assertEquals("List<String?>", s.get("a.b.SL.Plain.items()"), s.toString());
+        assertEquals("List<String>", s.get("a.b.SL.Plain.items()"), s.toString());
         assertEquals("Iterator<String?>", s.get("a.b.SL.Keys.iterator()"), s.toString());
     }
 
@@ -1976,6 +1978,34 @@ public class TestNullabilityPass extends CommonTest {
                 .forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Box<String>", s.get("a.b.BS.box()"), s.toString());
         assertEquals("Holder<String?>", s.get("a.b.BS.holder()"), s.toString());
+    }
+
+    /*
+     Kotlin: a type-argument slot whose argument is a type variable stays that variable ('Converter<A, B>', never
+     'Converter<A?, B>'): the variable already ranges over nullable instantiations, and Kotlin's invariant generics
+     make the two incompatible (guava, worktree-maddi-all 2026-10-16: Converter's composition and reverse paths, Maps,
+     TreeRangeSet, LocalCache, Sets: about 419 argument and return mismatches). A null written into one is the
+     printer's unchecked cast. A concrete argument still takes the null.
+     */
+    @DisplayName("Kotlin: a type-argument slot holding a type variable is not made nullable")
+    @Test
+    public void typeVariableSlot() {
+        Map<String, String> s = new java.util.TreeMap<>();
+        run("a.b.TV", """
+                package a.b;
+                class TV {
+                    static final class Pair<A, B> {
+                        private final A a;
+                        private final B b;
+                        Pair(A a, B b) { this.a = a; this.b = b; }
+                    }
+                    static <A> Pair<A, String> generic(String b) { return new Pair<>(null, b); }
+                    static Pair<String, String> concrete(String b) { return new Pair<>(null, b); }
+                }
+                """, NullabilityPass.Policy.KOTLIN).verdicts()
+                .forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("Pair<A!, String>", s.get("a.b.TV.generic(String)"), s.toString());
+        assertEquals("Pair<String?, String>", s.get("a.b.TV.concrete(String)"), s.toString());
     }
 
     @DisplayName("a null returned by a method that may return its argument does not flow back into the argument")
@@ -2786,9 +2816,11 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("Collection<E!>", byName.get("a.b.CI.Factory.<init>(java.util.Collection):0:set"));
         assertEquals("FSet<E!>", byName.get("a.b.CI.FSet.union(a.b.CI.FSet):0:other"));
         assertEquals("FSet<E!>", byName.get("a.b.CI.FSet.copy()"));
-        // the class's own null does reach every instantiation
-        assertEquals("List<E?>", byName.get("a.b.CI.Factory.all()"));
-        assertTrue(locals.contains("dom.withHole: List<Node?>"), locals);
+        // the class's own null into its E slot is the printer's unchecked cast: a slot holding a type variable stays
+        // that variable in Kotlin (typeVariableSlot; it was 'List<E?>' before guava's invariance mismatches,
+        // 2026-10-16)
+        assertEquals("List<E!>", byName.get("a.b.CI.Factory.all()"));
+        assertTrue(locals.contains("dom.withHole: List<Node?>"), locals); // its factory is a Factory<Node?>
         // the null added to 'flags' belongs to the factory's instantiation, and so to every set it spawns (Kotlin)
         assertTrue(locals.contains("dom.flags: FSet<Node?>"), locals);
         assertTrue(locals.contains("dom.factory: Factory<Node?>"), locals);
