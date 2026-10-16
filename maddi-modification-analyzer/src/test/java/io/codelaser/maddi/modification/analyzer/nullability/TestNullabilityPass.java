@@ -2012,6 +2012,29 @@ public class TestNullabilityPass extends CommonTest {
      collection sharing EMPTY. A '?' slot only receives, as '? extends' does; an unchecked conversion from Object
      type arguments starts a new instantiation, not one slot.
      */
+    @DisplayName("Kotlin: a null passed inside assertThrows(NullPointerException.class, ...) is no evidence")
+    @Test
+    public void rejectedNullArgument() {
+        NullabilityPass.Report report = run("a.b.RN", """
+                package a.b;
+                import java.util.Objects;
+                class RN {
+                    interface Executable { void execute() throws Throwable; }
+                    static <T extends Throwable> T assertThrows(Class<T> type, Executable e) { return null; }
+                    static String put(String key) { return Objects.requireNonNull(key).trim(); }
+                    static int size(String s) { return s == null ? 0 : s.length(); }
+                    void test() {
+                        assertThrows(NullPointerException.class, () -> put(null));
+                        assertThrows(IllegalStateException.class, () -> size(null));
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("String", s.get("a.b.RN.put(String):0:key"), s.toString());
+        assertEquals("String?", s.get("a.b.RN.size(String):0:s"), "another exception: still evidence");
+    }
+
     @DisplayName("Kotlin: an override of a type-variable parameter keeps the overridden state")
     @Test
     public void typeVariableParameterOverride() {

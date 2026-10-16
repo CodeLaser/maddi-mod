@@ -451,6 +451,8 @@ public final class NullabilityPass {
     // reference hands to whoever calls the function; the parameters a call passes the literal null to; per
     // precondition parameter, the calls and the node of what each passes
     private final Set<MethodInfo> lambdaMethods = new HashSet<>();
+    // Kotlin: the bodies of 'assertThrows(NullPointerException.class, () -> ...)' (rejectsNull)
+    private final Set<String> nullRejectingBodies = new HashSet<>();
     private final Set<MethodInfo> referencedSams = new HashSet<>();
     private final Set<MethodInfo> referencedMethods = new HashSet<>();
     private final Set<ParameterInfo> nullLiteralParameters = new HashSet<>();
@@ -988,10 +990,36 @@ public final class NullabilityPass {
         }
     }
 
+    /*
+     Kotlin: 'assertThrows(NullPointerException.class, () -> map.putInstance(null, 1))' tests that the callee rejects
+     null: its null argument is no evidence that the parameter takes one. guava (2026-10-17): 1371 cause lines began
+     at a null in such a body (MutableTypeToInstanceMapTest's made the backing map's key 'TypeToken<out B>?', against
+     ForwardingMap<TypeToken<out B>, B>.delegate(); PredicatesTest's made subtypeOf's 'Predicate<Class<*>?>'). The
+     printer asserts such a test null at its call, and the NullPointerException still comes.
+     */
+    private void rejectsNull(MethodCall mc) {
+        if (mc.methodInfo() == null || mc.parameterExpressions().size() < 2) return;
+        String name = mc.methodInfo().name();
+        if (!"assertThrows".equals(name) && !"expectThrows".equals(name)) return;
+        if (!(NonNullFacts.unwrap(mc.parameterExpressions().get(0)) instanceof ClassExpression ce)
+            || ce.type() == null || ce.type().typeInfo() == null
+            || !"java.lang.NullPointerException".equals(ce.type().typeInfo().fullyQualifiedName())) {
+            return;
+        }
+        if (NonNullFacts.unwrap(mc.parameterExpressions().get(1)) instanceof Lambda lambda && lambda.methodInfo() != null) {
+            nullRejectingBodies.add(lambda.methodInfo().fullyQualifiedName());
+        }
+    }
+
+    private static final String NULL_ARGUMENT = "null argument in ";
+    // gate NOREJECTEDNULLS: a null passed inside assertThrows(NullPointerException.class, ...) seeds as any (A/B)
+    private static final boolean REJECTED_NULLS_OFF = System.getenv("NOREJECTEDNULLS") != null;
+
     private void indexFunctionals(List<MethodInfo> methods) {
         for (MethodInfo mi : methods) {
             if (mi.methodBody() == null) continue;
             mi.methodBody().visit(e -> {
+                if (e instanceof MethodCall mc && policy.callResults() && !REJECTED_NULLS_OFF) rejectsNull(mc);
                 if (e instanceof Lambda lambda && lambda.methodInfo() != null) {
                     lambdaMethods.add(lambda.methodInfo());
                 } else if (e instanceof MethodReference mr && mr.methodInfo() != null) {
@@ -1959,6 +1987,9 @@ public final class NullabilityPass {
 
     // writer: the type whose code writes the null; null when the seed has none (an annotation, a contract)
     private void seed(Object node, String origin, TypeInfo writer) {
+        if (origin.startsWith(NULL_ARGUMENT) && nullRejectingBodies.contains(origin.substring(NULL_ARGUMENT.length()))) {
+            return;
+        }
         if (node != null) {
             seedOrigin.putIfAbsent(node, origin);
             strictSeeds.add(node);
