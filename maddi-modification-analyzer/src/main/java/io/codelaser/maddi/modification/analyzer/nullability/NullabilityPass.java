@@ -5026,6 +5026,37 @@ public final class NullabilityPass {
     }
 
     /*
+     Kotlin: a lambda's parameters are values of the type arguments its interface method takes, in the parameter it
+     is passed to: 's -> Json.fromJson(s, type)' for a 'ThrowingFunction<String?, T>' has 's: String?'. Since a
+     caller's null into 'parser.apply(text)' goes to the receiver's instantiation (6494045c), it reaches the lambda
+     only this way (langchain4j JsonParsingUtils.kt:9, worktree-maddi-all 2026-10-17). Not from a type variable
+     argument, which each call instantiates anew. Gate NOLAMBDAPARAMETERS.
+     */
+    private void lambdaParameters(Lambda lambda, Object pi) {
+        MethodInfo body = lambda.methodInfo();
+        if (LAMBDA_PARAMETERS_OFF || body == null || !(pi instanceof ParameterInfo parameter)
+            || !analysed.contains(parameter.methodInfo())) {
+            return;
+        }
+        ParameterizedType formal = parameter.parameterizedType();
+        if (formal.arrays() > 0 || formal.typeInfo() == null || formal.parameters().isEmpty()) return;
+        MethodInfo sam = formal.typeInfo().singleAbstractMethod();
+        if (sam == null || sam.typeInfo() != formal.typeInfo() || body.parameters().size() != sam.parameters().size()) {
+            return;
+        }
+        for (ParameterInfo samParameter : sam.parameters()) {
+            ParameterizedType t = samParameter.parameterizedType();
+            if (!isClassTypeVariable(t) || t.wildcard() != null) continue;
+            int j = formal.typeInfo().typeParameters().indexOf(t.typeParameter());
+            if (j >= 0 && j < formal.parameters().size() && formal.parameters().get(j).typeParameter() == null) {
+                addEdge(new Arg(parameter, j), body.parameters().get(samParameter.index()));
+            }
+        }
+    }
+
+    private static final boolean LAMBDA_PARAMETERS_OFF = System.getenv("NOLAMBDAPARAMETERS") != null;
+
+    /*
      A lambda handed to a library parameter whose functional type has a nullable type argument (the hints'
      nullableArguments, from JSpecify): the library calls the lambda with null in each SAM parameter typed by that type
      argument. 'map.compute(k, (key, old) -> ...)' ('BiFunction<? super K, ? super @Nullable V, ? extends @Nullable
@@ -5074,7 +5105,10 @@ public final class NullabilityPass {
         }
         seedCreated(pi, arguments.get(i), mi);
         Expression unwrappedArgument = NonNullFacts.unwrap(arguments.get(i));
-        if (policy.callResults() && unwrappedArgument instanceof Lambda lambda) lambdaResult(lambda, pi);
+        if (policy.callResults() && unwrappedArgument instanceof Lambda lambda) {
+            lambdaResult(lambda, pi);
+            lambdaParameters(lambda, pi);
+        }
         if (unwrappedArgument instanceof Lambda lambda) libraryCallback(lambda, pi);
         // 'getUniqueNext(graph, new HashSet<>(mapNext.values()))': a library copy constructor as the argument copies
         // its argument's content into the parameter's slots (fernflower FinallyProcessor)

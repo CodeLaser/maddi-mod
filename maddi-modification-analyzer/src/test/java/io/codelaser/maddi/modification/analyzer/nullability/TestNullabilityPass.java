@@ -2012,6 +2012,28 @@ public class TestNullabilityPass extends CommonTest {
      collection sharing EMPTY. A '?' slot only receives, as '? extends' does; an unchecked conversion from Object
      type arguments starts a new instantiation, not one slot.
      */
+    @DisplayName("Kotlin: a lambda's parameter is a value of its target's type argument")
+    @Test
+    public void lambdaParameterFromTarget() {
+        NullabilityPass.Report report = run("a.b.LP", """
+                package a.b;
+                class LP {
+                    interface ThrowingFunction<T, R> { R apply(T t) throws Exception; }
+                    static Integer fromJson(String json) { return json.length(); }
+                    static <T> T extract(String text, ThrowingFunction<String, T> parser) {
+                        try { return parser.apply(text); } catch (Exception e) { return null; }
+                    }
+                    static Integer parse(String text) { return extract(text, s -> fromJson(s)); }
+                    static Integer none() { return parse(null); }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("ThrowingFunction<String?, T!>", s.get("a.b.LP.extract(String,a.b.LP.ThrowingFunction):1:parser"),
+                s.toString());
+        assertEquals("String?", s.get("a.b.LP.fromJson(String):0:json"), s + "\n" + explain(report));
+    }
+
     @DisplayName("Kotlin: a library null the next statement exits on does not seed the local")
     @Test
     public void deadLibraryNull() {
