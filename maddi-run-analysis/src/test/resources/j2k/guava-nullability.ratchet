@@ -7,12 +7,20 @@
 # hanging on guava (maddi ac6bb4d49, maddi-mod#50): 610 types, 313 files compiling (3,623 errors in compile 1, in 297
 # files; the 30 worst files, guava's own collection implementations, hold 55% of them), 247 to class files. Without
 # verdicts (maddi-run-openjdk's guava.ratchet, recorded at an older maddi) 355 files compile.
+# 2026-10-16, devel at maddi 522dc2f2f / maddi-mod f5d1bf79: the printer's guava work of the day (an enclosing type's
+# type variable in concrete supertypes, Kotlin's signatures for mapped collection and Map-default overrides, fields
+# renamed off mapped properties, java.lang.reflect.Array qualified, inner classes of generic classes by simple name,
+# class headers qualifying their own nested types, abstract equals/hashCode left out of interfaces, …) and
+# maddi-null's override-family, test-override, bounded-slot and type-variable-slot verdicts (maddi-mod#50 follow-ups):
+# 389 files compiling (1,342 type errors), 280 to class files, 246 test files to class files; syntax-clean, all 610.
+# First record of guava's tests, now that the vintage engine runs them (772b7835): 865,124 pass on the original classes
+# (5 fail there), 862,912 with the Kotlin classes in front, 862,910 with the translated tests too.
 types	610
 printerCrashes	0
-syntaxErrors	14
-syntaxCleanFiles	609
-compilingFiles	313
-bytecodeFiles	247
-testsPassing	0
-testBytecodeFiles	224
-translatedTestsPassing	0
+syntaxErrors	0
+syntaxCleanFiles	610
+compilingFiles	389
+bytecodeFiles	280
+testsPassing	862912
+testBytecodeFiles	246
+translatedTestsPassing	862910
