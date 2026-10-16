@@ -1,0 +1,18 @@
+# TestJavaToKotlinGuavaNullability: guava printed as Kotlin with NullabilityPass (KOTLIN) verdicts, judged by kotlinc
+# 2.4.0 (see maddi-run-openjdk's JavaToKotlinRatchet). Lower is better for printerCrashes and syntaxErrors, higher for
+# syntaxCleanFiles, compilingFiles, bytecodeFiles, testsPassing, testBytecodeFiles and translatedTestsPassing; `types`
+# must not move. Write a better value here in the commit that earns it.
+#
+# 2026-10-16, first record, devel at maddi 344ea20f5 / maddi-mod c5b27893, after the printer's read-only pass stopped
+# hanging on guava (maddi ac6bb4d49, maddi-mod#50): 610 types, 313 files compiling (3,623 errors in compile 1, in 297
+# files; the 30 worst files, guava's own collection implementations, hold 55% of them), 247 to class files. Without
+# verdicts (maddi-run-openjdk's guava.ratchet, recorded at an older maddi) 355 files compile.
+types	610
+printerCrashes	0
+syntaxErrors	14
+syntaxCleanFiles	609
+compilingFiles	313
+bytecodeFiles	247
+testsPassing	0
+testBytecodeFiles	224
+translatedTestsPassing	0
