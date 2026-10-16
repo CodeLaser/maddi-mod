@@ -528,8 +528,13 @@ public final class NonNullFacts {
      */
     private void forget(Set<Variable> facts, Statement statement) {
         Set<Variable> assigned = assignedIn(statement);
-        if (!kotlinSmartCasts && changesReachedMap(statement)) {
-            facts.removeIf(v -> v instanceof KeyPresence kp && kp.map() instanceof PureCall);
+        if (!kotlinSmartCasts && facts.stream().anyMatch(v -> v instanceof KeyPresence)) {
+            List<Expression> calls = new ArrayList<>();
+            statement.visit(e -> {
+                if (e instanceof MethodCall || e instanceof ConstructorCall) calls.add((Expression) e);
+                return true;
+            });
+            facts.removeIf(v -> v instanceof KeyPresence kp && calls.stream().anyMatch(c -> keyPresenceLost(kp, c)));
         }
         boolean coarse = kotlinSmartCasts || ENTRY_FIELDS_OFF;
         facts.removeAll(coarse ? assigned : mayAssignNull(statement));
@@ -890,14 +895,31 @@ public final class NonNullFacts {
         boolean modifying = call instanceof MethodCall mc ? mc.methodInfo() == null || mc.methodInfo().isModifying()
                 : call instanceof ConstructorCall;
         boolean keepsThis = !reachesThis(call);
+        MethodInfo callee = callee(call);
         facts.removeIf(v -> isNonFinalField(v) && !(keepsThis && v instanceof FieldReference fr && fr.scopeIsThis())
                             || v instanceof DependentVariable
-                            || v instanceof KeyPresence kp && kp.map() instanceof PureCall && changesReachedMap(call)
-                            || v instanceof KeyPresence kp && (touches(kp.map(), receiver, read, arguments)
-                                                               || !NAV_KEYS_OFF && (changesAtCall(kp.key(), keepsThis)
-                                                                                    || changesAtCall(kp.map(), keepsThis)))
+                            || v instanceof KeyPresence kp && keyPresenceLost(kp, call)
                             || v instanceof PureCall pc && modifying
-                               && (isNonFinalField(pc.receiver()) || touches(pc.receiver(), receiver, false, arguments)));
+                               && (isNonFinalField(pc.receiver())
+                                   || touches(pc.receiver(), receiver, false, arguments, callee)));
+    }
+
+    private static MethodInfo callee(Expression call) {
+        return call instanceof MethodCall mc ? mc.methodInfo() : call instanceof ConstructorCall cc ? cc.constructor() : null;
+    }
+
+    // may the call remove the key: one on the map itself other than a read, or one handed the map (callMade)
+    private static boolean keyPresenceLost(KeyPresence kp, Expression call) {
+        if (kp.map() instanceof PureCall) return changesReachedMap(call);
+        Variable receiver = call instanceof MethodCall mc && mc.object() != null
+                            && unwrap(mc.object()) instanceof VariableExpression ve ? ve.variable() : null;
+        boolean read = call instanceof MethodCall mc && mc.methodInfo() != null
+                       && MAP_READS.contains(mc.methodInfo().name());
+        List<Expression> arguments = call instanceof MethodCall mc ? mc.parameterExpressions()
+                : call instanceof ConstructorCall cc ? cc.parameterExpressions() : List.of();
+        boolean keepsThis = !reachesThis(call);
+        return touches(kp.map(), receiver, read, arguments, callee(call))
+               || !NAV_KEYS_OFF && (changesAtCall(kp.key(), keepsThis) || changesAtCall(kp.map(), keepsThis));
     }
 
     /*
@@ -1005,9 +1027,32 @@ public final class NonNullFacts {
         return cu != null && (cu.externalLibrary() || cu.partOfJdk());
     }
 
-    private static boolean touches(Variable map, Variable receiver, boolean read, List<Expression> arguments) {
+    /*
+     Does the call change the variable's object: run on it (unless a read), or be handed it, unless the parameter that
+     receives it is one the modification analysis finds unmodified (CodeLaser/maddi-mod#48 B6, nacos HttpLoginProcessor:
+     'postForm(url, header, query, bodyMap, String.class)' keeps 'bodyMap.put(PASSWORD, ...)'s key).
+     */
+    private static boolean touches(Variable map, Variable receiver, boolean read, List<Expression> arguments,
+                                   MethodInfo callee) {
         if (map.equals(receiver) && !read) return true;
-        return arguments.stream().anyMatch(a -> unwrap(a) instanceof VariableExpression ve && map.equals(ve.variable()));
+        for (int i = 0; i < arguments.size(); i++) {
+            if (unwrap(arguments.get(i)) instanceof VariableExpression ve && map.equals(ve.variable())
+                && !unmodifiedParameter(callee, i)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // gate NOUNMODIFIEDARGS: a call handed a map forgets its keys whatever the parameter (A/B for #48 B6)
+    private static final boolean UNMODIFIED_ARGS_OFF = System.getenv("NOUNMODIFIEDARGS") != null;
+
+    private static boolean unmodifiedParameter(MethodInfo callee, int index) {
+        if (UNMODIFIED_ARGS_OFF || callee == null || callee.parameters().isEmpty()) return false;
+        List<ParameterInfo> parameters = callee.parameters();
+        ParameterInfo pi = index < parameters.size() ? parameters.get(index) : parameters.getLast();
+        if (index >= parameters.size() - 1 && pi.isVarArgs()) return false;
+        return pi.isUnmodified();
     }
 
     // ------------------------------------------------------------------ narrowed reads (CodeLaser/maddi-mod#22 gap 3)

@@ -461,6 +461,13 @@ public final class NullabilityPass {
     // method the fields of this; and this round's, for the next (fieldsAtEntry)
     private final Map<MethodInfo, Set<Variable>> fieldsAtEntry;
     private Map<MethodInfo, Set<Variable>> nextFieldsAtEntry = Map.of();
+    // CodeLaser/maddi-mod#48 B6: the lookups an earlier round's report knew the key of present (useSites), which the
+    // graph's walk cannot know itself: its put's value is non-null by a library call only the closure clears
+    private final Set<Expression> presentLookups;
+    private Set<Expression> nextPresentLookups = Set.of();
+    private final Set<MethodCall> lookups = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+    // gate NOROUNDKEYS: no key presence from an earlier round (A/B for #48 B6)
+    private static final boolean ROUND_KEYS_OFF = System.getenv("NOROUNDKEYS") != null;
     // gate NOENTRYFIELDS: no field of this is non-null at a private method's entry by its calls (A/B for #48 A5)
     private static final boolean ENTRY_FIELDS_OFF = System.getenv("NOENTRYFIELDS") != null;
     private List<FieldInfo> analysedFields = List.of();
@@ -539,16 +546,18 @@ public final class NullabilityPass {
     private final Map<MethodInfo, Map<String, List<Local>>> declaredByName = new HashMap<>();
 
     public NullabilityPass(Policy policy) {
-        this(policy, Set.of(), Set.of(), NarrowedReads.NONE, Map.of());
+        this(policy, Set.of(), Set.of(), NarrowedReads.NONE, Map.of(), Set.of());
     }
 
     private NullabilityPass(Policy policy, Set<MethodInfo> trustedReturns, Set<ParameterInfo> preconditions,
-                            NarrowedReads narrowed, Map<MethodInfo, Set<Variable>> fieldsAtEntry) {
+                            NarrowedReads narrowed, Map<MethodInfo, Set<Variable>> fieldsAtEntry,
+                            Set<Expression> presentLookups) {
         this.policy = policy;
         this.trustedReturns = trustedReturns;
         this.preconditions = preconditions;
         this.narrowed = narrowed;
         this.fieldsAtEntry = fieldsAtEntry;
+        this.presentLookups = presentLookups;
     }
 
     private static final int MAX_ROUNDS = 5;
@@ -567,21 +576,24 @@ public final class NullabilityPass {
         Set<ParameterInfo> nonNullAtExit = Set.of();
         NarrowedReads narrowedReads = NarrowedReads.NONE;
         Map<MethodInfo, Set<Variable>> atEntry = Map.of();
+        Set<Expression> present = Set.of();
         for (int round = 1; ; round++) {
-            NullabilityPass pass = new NullabilityPass(policy, trusted, nonNullAtExit, narrowedReads, atEntry);
+            NullabilityPass pass = new NullabilityPass(policy, trusted, nonNullAtExit, narrowedReads, atEntry, present);
             Report report = pass.once(analysisOrder);
             Set<MethodInfo> next = pass.unreachedReturns();
             Set<ParameterInfo> nextPreconditions = pass.preconditions();
             NarrowedReads nextNarrowed = pass.narrowedReads();
             Map<MethodInfo, Set<Variable>> nextAtEntry = pass.nextFieldsAtEntry;
+            Set<Expression> nextPresent = pass.nextPresentLookups;
             if (next.equals(trusted) && nextPreconditions.equals(nonNullAtExit) && nextNarrowed.equals(narrowedReads)
-                && nextAtEntry.equals(atEntry) || round == MAX_ROUNDS) {
+                && nextAtEntry.equals(atEntry) && nextPresent.equals(present) || round == MAX_ROUNDS) {
                 return report;
             }
             trusted = next;
             nonNullAtExit = nextPreconditions;
             narrowedReads = nextNarrowed;
             atEntry = nextAtEntry;
+            present = nextPresent;
         }
     }
 
@@ -1326,6 +1338,7 @@ public final class NullabilityPass {
                 verdicts.put(mi, contracted(mi, verdict(mi.returnType(), mi, deg)));
             }
         }
+        if (policy.callResults()) clampTestOverrides(methods, verdicts);
         NonNullFacts smartCasts = facts.kotlinSmartCasts();
         methods.forEach(smartCasts::walk);
         Set<Expression> nonNullCallResults = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
@@ -1347,6 +1360,11 @@ public final class NullabilityPass {
                 .withFieldsAtEntry(fieldsAtEntry);
         methods.forEach(useSites::walk);
         nextFieldsAtEntry = fieldsAtEntry(useSites, methods, fields);
+        if (!ROUND_KEYS_OFF) {
+            Set<Expression> present = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+            for (MethodCall lookup : lookups) if (useSites.keyPresentWhenCalled(lookup)) present.add(lookup);
+            nextPresentLookups = present;
+        }
         return new Report(verdicts, locals, cause, seedOrigin, useSites, smartCasts, Set.copyOf(asserted),
                 Set.copyOf(unobservedCandidates), nonNullCallResults, preconditions, nullArguments, preconditionsNonNull,
                 rejectsNull(), writtenReach);
@@ -1468,13 +1486,60 @@ public final class NullabilityPass {
      analysed overridden member's, where both declare the same class ('List<String>' over 'List<E>'): edges both ways
      (guava: AbstractMapBasedMultimap's remove, MutableCollection<V?>? over MutableCollection<V>?).
      */
-    private void invariantSlots(ParameterizedType ours, Object node, ParameterizedType theirs, Object theirNode) {
+    private void invariantSlots(ParameterizedType ours, Object node, ParameterizedType theirs, Object theirNode,
+                                boolean upward) {
         if (ours == null || theirs == null || ours.arrays() != 0 || theirs.arrays() != 0 || ours.typeInfo() == null
             || ours.typeInfo() != theirs.typeInfo() || ours.parameters().size() != theirs.parameters().size()) return;
         for (int j = 0; j < ours.parameters().size(); j++) {
-            addEdge(new Arg(node, j), new Arg(theirNode, j));
+            if (upward) addEdge(new Arg(node, j), new Arg(theirNode, j));
             addEdge(new Arg(theirNode, j), new Arg(node, j));
         }
+    }
+
+    /*
+     Kotlin, a test's override of a main member (guava's tests, worktree-maddi-all 2026-10-16: ForwardingDequeTest's
+     anonymous Function, DiscreteDomainTest.MyIntegerDomain.next): its parameters, type arguments included, take
+     main's states exactly, and its return is no wider than main's, as an override of a library member does. What
+     the tests pass is asserted at their calls; a null the override returns, at its return. Main's verdicts are the
+     translation's API: the tests do not change them (no upward edges, buildForMethod).
+     */
+    private void clampTestOverrides(List<MethodInfo> methods, Map<Info, ParameterizedType> verdicts) {
+        for (MethodInfo mi : methods) {
+            if (mi.isConstructor() || !testCode(mi)) continue;
+            for (MethodInfo overridden : overrides(mi)) {
+                if (!analysed.contains(overridden) || testCode(overridden)) continue;
+                int n = Math.min(mi.parameters().size(), overridden.parameters().size());
+                for (int i = 0; i < n; i++) {
+                    ParameterInfo ours = mi.parameters().get(i);
+                    ParameterizedType theirs = verdicts.get(overridden.parameters().get(i));
+                    if (verdicts.containsKey(ours) && theirs != null) {
+                        verdicts.put(ours, clamped(verdicts.get(ours), theirs, true));
+                    }
+                }
+                ParameterizedType theirs = verdicts.get(overridden);
+                if (verdicts.containsKey(mi) && theirs != null) verdicts.put(mi, clamped(verdicts.get(mi), theirs, false));
+            }
+        }
+    }
+
+    // 'ours' with the overridden type's states: exactly (a parameter, any type argument), or no wider (a return)
+    static ParameterizedType clamped(ParameterizedType ours, ParameterizedType theirs, boolean exact) {
+        if (ours.isPrimitiveExcludingVoid() && ours.arrays() == 0) return ours;
+        NullableState top = theirs.nullable();
+        // a type variable's own state stands for the instantiation's type, non-null as written ('F' as 'Deque<*>')
+        if (top == NullableState.UNSPECIFIED && !isTypeVariable(ours)) top = NullableState.NONNULL;
+        NullableState state = exact || ours.nullable() == NullableState.NULLABLE && top != NullableState.NULLABLE
+                ? top : ours.nullable();
+        ParameterizedType result = ours.withNullable(state);
+        if (ours.arrays() == 0 && theirs.arrays() == 0 && ours.typeInfo() != null && ours.typeInfo() == theirs.typeInfo()
+            && ours.parameters().size() == theirs.parameters().size() && !ours.parameters().isEmpty()) {
+            List<ParameterizedType> arguments = new ArrayList<>();
+            for (int j = 0; j < ours.parameters().size(); j++) {
+                arguments.add(clamped(ours.parameters().get(j), theirs.parameters().get(j), true));
+            }
+            result = result.withParameters(arguments);
+        }
+        return result;
     }
 
     private static boolean boundedTypeVariableOverride(MethodInfo mi) {
@@ -1921,19 +1986,44 @@ public final class NullabilityPass {
         return node instanceof Content c && c.of() instanceof ParameterInfo pi && pi.isVarArgs();
     }
 
+    /*
+     Kotlin: the slot of a type parameter bounded by something other than Object ('Range<C extends Comparable>',
+     'EnumSet<E extends Enum<E>>') cannot hold a nullable argument, so null stops there as at a non-null contract; a
+     write of a value that may be null is asserted (guava, worktree-maddi-all 2026-10-16: 'DiscreteDomain<C?>',
+     'TreeRangeMap<K?, ...>', 'EnumSet<E?>', most of 129 "type argument is not within its bounds").
+     */
+    private boolean boundedSlot(Object node) {
+        if (!policy.callResults() || BOUNDED_SLOTS_OFF || !(node instanceof Arg a)) return false;
+        Boolean known = boundedSlots.get(node);
+        if (known != null) return known;
+        ParameterizedType outer = typeOf(a.of());
+        TypeInfo ti = outer == null || outer.arrays() > 0 ? null : outer.typeInfo();
+        boolean bounded = ti != null && a.index() < ti.typeParameters().size()
+                          && ti.typeParameters().get(a.index()).typeBounds().stream()
+                                  .anyMatch(b -> b.typeParameter() == null && b.typeInfo() != null
+                                                 && !b.typeInfo().isJavaLangObject());
+        boundedSlots.put(node, bounded);
+        return bounded;
+    }
+
+    private final Map<Object, Boolean> boundedSlots = new HashMap<>();
+    // gate NOBOUNDEDSLOTS: a bounded type parameter's slot takes null as any other (A/B)
+    private static final boolean BOUNDED_SLOTS_OFF = System.getenv("NOBOUNDEDSLOTS") != null;
+
     // strict: when not null, an edge from a value into a slot is followed only from a node in it
     private Set<Object> closure(Map<Object, Object> cause, Set<Object> seeds, Set<Object> strict) {
         // a seed on a non-null contract is the caller's error (an M5 finding), not a source of null
         Set<Object> reached = new LinkedHashSet<>(seeds);
         reached.removeAll(nonNullContracts);
         reached.removeIf(this::optionalValue);
+        reached.removeIf(this::boundedSlot);
         Deque<Object> queue = new ArrayDeque<>(reached);
         while (true) {
             while (!queue.isEmpty()) {
                 Object n = queue.removeFirst();
                 for (Object s : successors.getOrDefault(n, Set.of())) {
                     if (strict != null && isSlot(s) && !isSlot(n) && !strict.contains(n) && !isVarargElements(s)) continue;
-                    if (optionalValue(s)) continue;
+                    if (optionalValue(s) || boundedSlot(s)) continue;
                     if (!nonNullContracts.contains(s) && reached.add(s)) {
                         cause.put(s, n);
                         queue.addLast(s);
@@ -2510,17 +2600,22 @@ public final class NullabilityPass {
         // ToStringFunction.apply to a Map.remove key).
         if (!mi.isConstructor()) {
             for (MethodInfo overridden : overrides(mi)) {
+                // Kotlin: a test's override of a main member takes main's types as they are, as for a library's
+                // (clampTestOverrides): no null of the tests widens main
+                boolean upward = !(policy.callResults() && testCode(mi) && !testCode(overridden));
                 // Kotlin: an override's return may not be wider than its overridden member's, so a null returned
                 // by an implementation makes an analysed type-variable return nullable too ('Holder<T>.get(): T?')
-                if (!isTypeVariable(overridden.returnType()) || policy.callResults() && analysed.contains(overridden)) {
+                if (upward && (!isTypeVariable(overridden.returnType())
+                               || policy.callResults() && analysed.contains(overridden))) {
                     addEdge(mi, overridden);
                 }
                 if (policy.callResults() && analysed.contains(overridden)) {
-                    invariantSlots(mi.returnType(), mi, overridden.returnType(), overridden);
+                    invariantSlots(mi.returnType(), mi, overridden.returnType(), overridden, upward);
                     int m = Math.min(mi.parameters().size(), overridden.parameters().size());
                     for (int i = 0; i < m; i++) {
                         invariantSlots(mi.parameters().get(i).parameterizedType(), mi.parameters().get(i),
-                                overridden.parameters().get(i).parameterizedType(), overridden.parameters().get(i));
+                                overridden.parameters().get(i).parameterizedType(), overridden.parameters().get(i),
+                                upward);
                     }
                 }
                 int n = Math.min(mi.parameters().size(), overridden.parameters().size());
@@ -2540,7 +2635,7 @@ public final class NullabilityPass {
                            && implementationType.typeInfo().isJavaLangObject()) {
                         addEdge(overridden.parameters().get(i), mi.parameters().get(i));
                     }
-                    if (!isTypeVariable(overridden.parameters().get(i).parameterizedType())) {
+                    if (upward && !isTypeVariable(overridden.parameters().get(i).parameterizedType())) {
                         addEdge(mi.parameters().get(i), overridden.parameters().get(i));
                     }
                 }
@@ -4031,7 +4126,9 @@ public final class NullabilityPass {
      bootstrap loader never loads ('getClass().getClassLoader()', 'X.class.getClassLoader()'; nacos 2026-10-10).
      */
     private String libraryNullableCall(MethodCall mc) {
-        if (mc.methodInfo() == null || facts.keyPresentWhenCalled(mc) || facts.pureCallNonNullWhenCalled(mc)
+        if (mc.methodInfo() != null && !analysed.contains(mc.methodInfo())) lookups.add(mc);
+        if (mc.methodInfo() == null || facts.keyPresentWhenCalled(mc) || presentLookups.contains(mc)
+            || facts.pureCallNonNullWhenCalled(mc)
             || NonNullFacts.computedNonNull(mc) || NonNullFacts.initialThreadLocal(mc)
             || applicationClassLoader(mc) || standardSystemProperty(mc)) return null;
         return libraryNullableReturn(mc.methodInfo());

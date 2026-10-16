@@ -5,6 +5,7 @@ import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.type.NullableState;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.modification.analyzer.CommonTest;
 import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
@@ -1832,6 +1833,149 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("List<String?>", s.get("a.b.SL.Strings.items()"), s.toString());
         assertEquals("List<String?>", s.get("a.b.SL.Plain.items()"), s.toString());
         assertEquals("Iterator<String?>", s.get("a.b.SL.Keys.iterator()"), s.toString());
+    }
+
+    /*
+     CodeLaser/maddi-mod#48 B6, nacos HttpLoginProcessor: 'bodyMap.put(PASSWORD, properties.getProperty(PASSWORD, ""));
+     try { postForm(url, ..., bodyMap, ...); ... } catch (Exception e) { desensitise(bodyMap.get(PASSWORD)); }'. A
+     call handed the map to a parameter the modification analysis finds unmodified cannot remove the key. One that
+     modifies it can, in the try as on the straight path.
+     */
+    @DisplayName("key presence: a call handed the map to an unmodified parameter keeps it, in a try's catch too")
+    @Test
+    public void keyPresenceAcrossUnmodifiedCall() {
+        Map<String, String> s = new java.util.TreeMap<>();
+        run("a.b.KU", """
+                package a.b;
+                import java.util.HashMap;
+                import java.util.Map;
+                import java.util.Properties;
+                class KU {
+                    static final String PASSWORD = "password";
+                    static int post(Map<String, String> body) { return body.size(); }
+                    static void clear(Map<String, String> body) { body.clear(); }
+                    static int kept(String s) { return s.length(); }
+                    static int caught(String s) { return s.length(); }
+                    static int cleared(String s) { return s == null ? 0 : s.length(); }
+                    static int clearedInTry(String s) { return s == null ? 0 : s.length(); }
+                    static int login(Properties p) {
+                        Map<String, String> body = new HashMap<>();
+                        body.put(PASSWORD, p.getProperty(PASSWORD, ""));
+                        post(body);
+                        int n = kept(body.get(PASSWORD));
+                        try {
+                            n += post(body);
+                        } catch (RuntimeException e) {
+                            n += caught(body.get(PASSWORD));
+                        }
+                        return n;
+                    }
+                    static int direct(String s) { return s.length(); }
+                    static int directKey(String s) { return s.length(); }
+                    static int noCall(Properties p, String k) {
+                        Map<String, String> body = new HashMap<>();
+                        body.put(PASSWORD, p.getProperty(PASSWORD, ""));
+                        Map<String, String> other = new HashMap<>();
+                        other.put(k, p.getProperty(k, ""));
+                        return direct(body.get(PASSWORD)) + directKey(other.get(k));
+                    }
+                    static int logout(Properties p) {
+                        Map<String, String> body = new HashMap<>();
+                        body.put(PASSWORD, p.getProperty(PASSWORD, ""));
+                        clear(body);
+                        int n = cleared(body.get(PASSWORD));
+                        body.put(PASSWORD, "x");
+                        try {
+                            clear(body);
+                        } catch (RuntimeException e) {
+                            n += clearedInTry(body.get(PASSWORD));
+                        }
+                        return n;
+                    }
+                }
+                """, NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY.withoutContracts()
+                        .withWorld(NullabilityPass.World.CLOSED)).verdicts()
+                .forEach((info, pt) -> s.put(label(info), k(pt)));
+        assertEquals("String", s.get("direct(0:s)"), s.toString());
+        assertEquals("String", s.get("directKey(0:s)"), s.toString());
+        assertEquals("String", s.get("kept(0:s)"), s.toString());
+        assertEquals("String", s.get("caught(0:s)"), s.toString());
+        assertEquals("String?", s.get("cleared(0:s)"), s.toString());
+        assertEquals("String?", s.get("clearedInTry(0:s)"), "clear(body) in the try: " + s);
+    }
+
+    /*
+     Kotlin, a test's override of a main member (guava's tests, worktree-maddi-all 2026-10-16): its parameter takes
+     main's states exactly, type arguments included; its return is no wider than main's. A main type variable's own
+     state ('F', unreached) stands for the instantiation, non-null. The boundary itself needs a test source set, which
+     this harness does not parse into: the guava J2K ratchet's test files check it.
+     */
+    @DisplayName("Kotlin: a test override's types clamped to main's")
+    @Test
+    public void testOverrideClamped() {
+        run("a.b.CL", """
+                package a.b;
+                import java.util.Deque;
+                import java.util.List;
+                class CL<F> {
+                    Deque<String> deque;
+                    List<String> list;
+                    F f;
+                }
+                """);
+        ParameterizedType declared = parsed.getFieldByName("deque", true).type();
+        ParameterizedType deque = declared.withParameters(
+                List.of(declared.parameters().getFirst().withNullable(NullableState.NONNULL)));
+        ParameterizedType list = parsed.getFieldByName("list", true).type();
+        ParameterizedType f = parsed.getFieldByName("f", true).type();
+        ParameterizedType nullableDeque = deque.withNullable(NullableState.NULLABLE);
+        // a parameter: exactly main's
+        assertEquals("Deque<String>", k(NullabilityPass.clamped(nullableDeque,
+                f.withNullable(NullableState.UNSPECIFIED), true)));
+        assertEquals("Deque<String>?", k(NullabilityPass.clamped(deque.withNullable(NullableState.NONNULL),
+                f.withNullable(NullableState.NULLABLE), true)));
+        ParameterizedType nullableElements = list.withNullable(NullableState.NONNULL)
+                .withParameters(List.of(list.parameters().getFirst().withNullable(NullableState.NULLABLE)));
+        ParameterizedType plainElements = list.withNullable(NullableState.NONNULL)
+                .withParameters(List.of(list.parameters().getFirst().withNullable(NullableState.NONNULL)));
+        assertEquals("List<String>", k(NullabilityPass.clamped(nullableElements, plainElements, true)));
+        // a return: no wider than main's, narrower stays
+        assertEquals("Deque<String>", k(NullabilityPass.clamped(nullableDeque,
+                deque.withNullable(NullableState.NONNULL), false)));
+        assertEquals("Deque<String>", k(NullabilityPass.clamped(deque.withNullable(NullableState.NONNULL),
+                nullableDeque, false)));
+    }
+
+    /*
+     Kotlin: a type parameter with a bound other than Object ('C extends Comparable<C>', 'E extends Enum<E>') takes no
+     nullable argument (guava, worktree-maddi-all 2026-10-16: 'Range<C?>', 'EnumSet<E?>', most of 129 "type argument
+     is not within its bounds"). Its slots stay non-null; a null written into one is asserted. An unbounded one
+     ('Holder<T>') takes the null.
+     */
+    @DisplayName("Kotlin: a bounded type parameter's slot is non-null")
+    @Test
+    public void boundedTypeParameterSlot() {
+        Map<String, String> s = new java.util.TreeMap<>();
+        run("a.b.BS", """
+                package a.b;
+                class BS {
+                    static final class Box<C extends Comparable<C>> {
+                        private final C c;
+                        Box(C c) { this.c = c; }
+                        C get() { return c; }
+                    }
+                    static final class Holder<T> {
+                        private final T t;
+                        Holder(T t) { this.t = t; }
+                        T get() { return t; }
+                    }
+                    static Box<String> box() { return new Box<>(null); }
+                    static Holder<String> holder() { return new Holder<>(null); }
+                }
+                """, NullabilityPass.Policy.KOTLIN).verdicts()
+                .forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("Box<String>", s.get("a.b.BS.box()"), s.toString());
+        assertEquals("Holder<String?>", s.get("a.b.BS.holder()"), s.toString());
     }
 
     @DisplayName("a null returned by a method that may return its argument does not flow back into the argument")
