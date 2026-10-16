@@ -1703,6 +1703,137 @@ public class TestNullabilityPass extends CommonTest {
                 s.toString());
     }
 
+    /*
+     Kotlin: an override's parameter types equal the overridden member's, nullability included (guava, the printer
+     session 2026-10-16: 63 "overrides nothing"). 'abstract B doForward(A a)' receives null from 'convert'; the
+     override 'doForward(String s)' of 'Converter<String, String>' must take 'String?'. The diagnostics' policies keep
+     the type-variable heuristic: a null through the generic method need not reach a concrete instantiation.
+     */
+    @DisplayName("Kotlin: an override's parameter is nullable where the overridden type-variable parameter is")
+    @Test
+    public void overrideOfTypeVariableParameter() {
+        String src = """
+                package a.b;
+                class CV {
+                    static abstract class Converter<A, B> {
+                        abstract B doForward(A a);
+                        B convert(A a, boolean b) { return doForward(b ? null : a); }
+                    }
+                    static final class Upper extends Converter<String, String> {
+                        String doForward(String s) { return s == null ? "" : s.toUpperCase(); }
+                    }
+                    static final class Length extends Converter<String, Integer> {
+                        Integer doForward(String s) { return 3; }
+                    }
+                    static String use(Upper u) { return u.convert("x", true); }
+                }
+                """;
+        Map<String, String> kotlin = new java.util.TreeMap<>();
+        run("a.b.CV", src, NullabilityPass.Policy.KOTLIN).verdicts()
+                .forEach((info, pt) -> kotlin.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("A?", kotlin.get("a.b.CV.Converter.doForward(Object):0:a"), kotlin.toString());
+        assertEquals("String?", kotlin.get("a.b.CV.Upper.doForward(String):0:s"), kotlin.toString());
+        assertEquals("String?", kotlin.get("a.b.CV.Length.doForward(String):0:s"), kotlin.toString());
+
+        Map<String, String> flow = new java.util.TreeMap<>();
+        run("a.b.CV2", src.replace("CV", "CV2"), NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY).verdicts()
+                .forEach((info, pt) -> flow.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("String", flow.get("a.b.CV2.Length.doForward(String):0:s"), flow.toString());
+    }
+
+    /*
+     Kotlin: an override's return may narrow the overridden member's, never widen it (guava: LocalCache.EntryIterator
+     .next(): Entry? over HashIterator<T>.next(): T, itself over Iterator.next()). Over an analysed type-variable
+     return the overridden member becomes nullable ('Holder<T>.get(): T?'); over a Kotlin collection member that
+     returns its type variable non-null ('Iterator.next(): E'), the override and every analysed override below it
+     are non-null, a null value asserted. Map.get, nullable in Kotlin too, is left alone.
+     */
+    @DisplayName("Kotlin: an override's return is no wider than the overridden member's")
+    @Test
+    public void overrideOfTypeVariableReturn() {
+        Map<String, String> s = new java.util.TreeMap<>();
+        run("a.b.OR", """
+                package a.b;
+                import java.util.AbstractMap;
+                import java.util.Iterator;
+                import java.util.Map;
+                import java.util.Set;
+                class OR {
+                    static abstract class Base<T> implements Iterator<T> {
+                        public abstract T next();
+                        public boolean hasNext() { return true; }
+                    }
+                    static final class Entries extends Base<String> {
+                        private String current;
+                        public String next() { return current; }
+                    }
+                    static abstract class Holder<T> {
+                        abstract T get();
+                    }
+                    static final class Empty extends Holder<String> {
+                        String get() { return null; }
+                    }
+                    static final class Lookup extends AbstractMap<String, String> {
+                        public Set<Map.Entry<String, String>> entrySet() { return Set.of(); }
+                        public String get(Object key) { return null; }
+                    }
+                    static String use(Holder<String> h) { return h.get(); }
+                }
+                """, NullabilityPass.Policy.KOTLIN).verdicts()
+                .forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("T!", s.get("a.b.OR.Base.next()"), s.toString()); // unreached, its type variable's own
+        assertEquals("String", s.get("a.b.OR.Entries.next()"), s.toString());
+        assertEquals("T?", s.get("a.b.OR.Holder.get()"), s.toString());
+        assertEquals("String?", s.get("a.b.OR.Empty.get()"), s.toString());
+        assertEquals("String?", s.get("a.b.OR.Lookup.get(Object)"), s.toString());
+    }
+
+    /*
+     Kotlin: type arguments are invariant, so an override's type-argument slots equal the overridden member's (guava:
+     AbstractBiMap.KeySet.iterator(): MutableIterator<K?> over MutableIterator<K>; AbstractMapBasedMultimap.remove:
+     MutableCollection<V?>? over MutableCollection<V>?). Between analysed members the slots are one. Over a library
+     member they are not touched: 'Keys extends AbstractSet<String>' holding a null needs 'AbstractSet<String?>', a
+     supertype's type argument, which no verdict carries.
+     */
+    @DisplayName("Kotlin: an override's type-argument slots equal the overridden member's")
+    @Test
+    public void overrideTypeArgumentSlots() {
+        Map<String, String> s = new java.util.TreeMap<>();
+        run("a.b.SL", """
+                package a.b;
+                import java.util.AbstractSet;
+                import java.util.ArrayList;
+                import java.util.Iterator;
+                import java.util.List;
+                class SL {
+                    static abstract class Source<E> {
+                        abstract List<E> items();
+                    }
+                    static final class Strings extends Source<String> {
+                        List<String> items() {
+                            List<String> list = new ArrayList<>();
+                            list.add(null);
+                            return list;
+                        }
+                    }
+                    static final class Plain extends Source<String> {
+                        List<String> items() { return new ArrayList<>(); }
+                    }
+                    static final class Keys extends AbstractSet<String> {
+                        private final List<String> keys = new ArrayList<>();
+                        void addNull() { keys.add(null); }
+                        public Iterator<String> iterator() { return keys.iterator(); }
+                        public int size() { return keys.size(); }
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN).verdicts()
+                .forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("List<E?>", s.get("a.b.SL.Source.items()"), s.toString());
+        assertEquals("List<String?>", s.get("a.b.SL.Strings.items()"), s.toString());
+        assertEquals("List<String?>", s.get("a.b.SL.Plain.items()"), s.toString());
+        assertEquals("Iterator<String?>", s.get("a.b.SL.Keys.iterator()"), s.toString());
+    }
+
     @DisplayName("a null returned by a method that may return its argument does not flow back into the argument")
     @Test
     public void identityReturn() {

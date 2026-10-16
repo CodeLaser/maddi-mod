@@ -1236,8 +1236,9 @@ public final class NullabilityPass {
         }
         if (policy.callResults()) {
             for (MethodInfo mi : methods) {
-                if (boundedTypeVariableOverride(mi)) nonNullContracts.add(mi);
+                if (boundedTypeVariableOverride(mi) || overridesKotlinNonNullReturn(mi)) nonNullContracts.add(mi);
             }
+            nonNullOverrides(methods);
         }
         for (MethodInfo mi : methods) {
             owner = mi;
@@ -1425,6 +1426,57 @@ public final class NullabilityPass {
      (langchain4j OutputGuardrailExecutor, whose 'return result' after the retry loop is reached only by the
      'result = null' declaration, the loop running at least once). Its return is non-null; a null value is asserted.
      */
+    /*
+     Kotlin: a member of its own collection interfaces (Iterable, Iterator, Collection, List, Set, Map, Map.Entry, ...)
+     that returns its type variable returns it non-null ('Iterator<E>.next(): E'), unless Kotlin declares it nullable
+     (Map.get, put, remove: the hints say so). An override may not widen it: guava's LocalCache.HashIterator<T>.next(),
+     and EntryIterator.next() below it.
+     */
+    private boolean overridesKotlinNonNullReturn(MethodInfo mi) {
+        if (mi.isConstructor() || mi.returnType().isVoid()) return false;
+        for (MethodInfo overridden : overrides(mi)) {
+            if (!analysed.contains(overridden) && isTypeVariable(overridden.returnType())
+                && KOTLIN_COLLECTIONS.contains(overridden.typeInfo().fullyQualifiedName())
+                && stateOf(overridden, PropertyImpl.NULLABILITY_METHOD) != NullableState.NULLABLE) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static final Set<String> KOTLIN_COLLECTIONS = Set.of("java.lang.Iterable", "java.util.Iterator",
+            "java.util.ListIterator", "java.util.Collection", "java.util.List", "java.util.Set", "java.util.Map",
+            "java.util.Map.Entry");
+
+    /*
+     Kotlin: the analysed overrides of a return the pass holds non-null (nonNullContracts: an annotation, the rules
+     above) are non-null too, a null value asserted: an override may not widen its overridden member's return.
+     */
+    private void nonNullOverrides(List<MethodInfo> methods) {
+        java.util.ArrayDeque<MethodInfo> work = new java.util.ArrayDeque<>();
+        for (MethodInfo mi : methods) if (nonNullContracts.contains(mi)) work.add(mi);
+        while (!work.isEmpty()) {
+            MethodInfo m = work.poll();
+            for (MethodInfo implementation : implementations.getOrDefault(m, List.of())) {
+                if (!implementation.returnType().isVoid() && nonNullContracts.add(implementation)) work.add(implementation);
+            }
+        }
+    }
+
+    /*
+     Kotlin: type arguments are invariant, so the type-argument slots of an override's return or parameter equal the
+     analysed overridden member's, where both declare the same class ('List<String>' over 'List<E>'): edges both ways
+     (guava: AbstractMapBasedMultimap's remove, MutableCollection<V?>? over MutableCollection<V>?).
+     */
+    private void invariantSlots(ParameterizedType ours, Object node, ParameterizedType theirs, Object theirNode) {
+        if (ours == null || theirs == null || ours.arrays() != 0 || theirs.arrays() != 0 || ours.typeInfo() == null
+            || ours.typeInfo() != theirs.typeInfo() || ours.parameters().size() != theirs.parameters().size()) return;
+        for (int j = 0; j < ours.parameters().size(); j++) {
+            addEdge(new Arg(node, j), new Arg(theirNode, j));
+            addEdge(new Arg(theirNode, j), new Arg(node, j));
+        }
+    }
+
     private static boolean boundedTypeVariableOverride(MethodInfo mi) {
         if (mi.isConstructor() || mi.returnType().isVoid() || mi.returnType().typeParameter() != null) return false;
         for (MethodInfo overridden : mi.overrides()) {
@@ -2458,7 +2510,19 @@ public final class NullabilityPass {
         // ToStringFunction.apply to a Map.remove key).
         if (!mi.isConstructor()) {
             for (MethodInfo overridden : overrides(mi)) {
-                if (!isTypeVariable(overridden.returnType())) addEdge(mi, overridden);
+                // Kotlin: an override's return may not be wider than its overridden member's, so a null returned
+                // by an implementation makes an analysed type-variable return nullable too ('Holder<T>.get(): T?')
+                if (!isTypeVariable(overridden.returnType()) || policy.callResults() && analysed.contains(overridden)) {
+                    addEdge(mi, overridden);
+                }
+                if (policy.callResults() && analysed.contains(overridden)) {
+                    invariantSlots(mi.returnType(), mi, overridden.returnType(), overridden);
+                    int m = Math.min(mi.parameters().size(), overridden.parameters().size());
+                    for (int i = 0; i < m; i++) {
+                        invariantSlots(mi.parameters().get(i).parameterizedType(), mi.parameters().get(i),
+                                overridden.parameters().get(i).parameterizedType(), overridden.parameters().get(i));
+                    }
+                }
                 int n = Math.min(mi.parameters().size(), overridden.parameters().size());
                 for (int i = 0; i < n; i++) {
                     // DOWNWARD not from a type-variable parameter into an implementation that instantiates it with a
@@ -2466,9 +2530,11 @@ public final class NullabilityPass {
                     // reaches 'compare(boolean[] ...)' only where T is boolean[], which nothing here tells. Measured
                     // on guava (2026-10-07): -142 noise; keeping Object implementations ('IdentityFunction.apply')
                     // keeps the unsafe count. A heuristic: a null passed to a Comparator<String> does reach a String
-                    // implementation.
+                    // implementation. Not for Kotlin (Policy.callResults), where an override's parameter must be
+                    // nullable when the overridden one is ('doForward(s: String?)' over 'doForward(a: A?)', guava's
+                    // Converter, CharMatcher over Predicate.apply).
                     ParameterizedType implementationType = mi.parameters().get(i).parameterizedType();
-                    if (!isTypeVariable(overridden.parameters().get(i).parameterizedType())
+                    if (policy.callResults() || !isTypeVariable(overridden.parameters().get(i).parameterizedType())
                         || isTypeVariable(implementationType)
                         || implementationType.typeInfo() != null && implementationType.arrays() == 0
                            && implementationType.typeInfo().isJavaLangObject()) {
