@@ -4720,6 +4720,8 @@ public final class NullabilityPass {
         }
     }
 
+    // gate NOCONSUMERSLOTS: a caller's null into an abstract type-variable parameter reaches the implementations (A/B)
+    private static final boolean CONSUMER_SLOTS_OFF = System.getenv("NOCONSUMERSLOTS") != null;
     // gate NOANONYMOUSSUPER: an anonymous class's arguments do not reach its superclass's constructor (A/B)
     private static final boolean ANONYMOUS_SUPER_OFF = System.getenv("NOANONYMOUSSUPER") != null;
 
@@ -4758,11 +4760,17 @@ public final class NullabilityPass {
             // abstract one is not known to store ('Function.apply(F)' is a consumer, and its null must reach the
             // implementations; guava 2026-10-07: +5 unsafe without this). A call on 'this' or a consumer method
             // still makes the parameter nullable.
+            // Kotlin: an abstract one too. An implementation's parameter takes the declaration's state
+            // (clampTypeVariableOverrides), so a caller's null belongs to its receiver's instantiation
+            // ('predicate.apply(null)' on a 'Predicate<in Int?>'): through 'Predicate.apply(T input)' PredicatesTest's
+            // null reached every implementation, AbstractNetwork's 'edge -> incidentNodes(edge)' and from there
+            // Network.incidentNodes()'s return (guava AbstractNetwork.kt:21/155, 2026-10-17).
             if (parameter.parameterizedType().typeParameter() != null
                 && !parameter.parameterizedType().typeParameter().isMethodTypeParameter()
                 && parameter.parameterizedType().arrays() == 0
                 && (!analysed.contains(callee)
-                    || !callee.isAbstract() && !implementations.containsKey(callee)
+                    || (policy.callResults() && !CONSUMER_SLOTS_OFF
+                        || !callee.isAbstract() && !implementations.containsKey(callee))
                        && slotReceiver(mi, scope, call, callee) != null)) {
                 continue;
             }

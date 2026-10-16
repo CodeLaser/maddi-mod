@@ -2012,6 +2012,26 @@ public class TestNullabilityPass extends CommonTest {
      collection sharing EMPTY. A '?' slot only receives, as '? extends' does; an unchecked conversion from Object
      type arguments starts a new instantiation, not one slot.
      */
+    @DisplayName("Kotlin: a caller's null into an abstract type-variable parameter is its receiver's instantiation's")
+    @Test
+    public void consumerReceiverSlot() {
+        NullabilityPass.Report report = run("a.b.CS", """
+                package a.b;
+                class CS {
+                    interface Predicate<T> { boolean apply(T input); }
+                    static final class Edges implements Predicate<String> {
+                        String last = "";
+                        public boolean apply(String edge) { last = edge; return edge.isEmpty(); }
+                    }
+                    static boolean test(Predicate<? super Integer> p) { return p.apply(null); }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("String", s.get("a.b.CS.Edges.apply(String):0:edge"), s.toString());
+        assertEquals("String", s.get("a.b.CS.Edges.last"), s.toString());
+    }
+
     @DisplayName("Kotlin: a local assigned a nullable value inside a loop condition is nullable; an anonymous class's super arguments flow")
     @Test
     public void conditionAssignmentAndAnonymousSuper() {
@@ -2024,6 +2044,22 @@ public class TestNullabilityPass extends CommonTest {
                         while ((queuedTask = nextTask) != null) {
                             nextTask = null;
                             queuedTask.run();
+                        }
+                    }
+                    static final class Queue { Runnable nextTask; java.util.concurrent.Executor nextExecutor; }
+                    void drainOther(Queue executingTaskQueue, Runnable localTask) {
+                        try {
+                            localTask.run();
+                            Runnable queuedTask;
+                            java.util.concurrent.Executor queuedExecutor;
+                            while ((queuedTask = executingTaskQueue.nextTask) != null
+                                && (queuedExecutor = executingTaskQueue.nextExecutor) != null) {
+                                executingTaskQueue.nextTask = null;
+                                executingTaskQueue.nextExecutor = null;
+                                queuedExecutor.execute(queuedTask);
+                            }
+                        } finally {
+                            executingTaskQueue.nextTask = null;
                         }
                     }
                     abstract static class Base {
@@ -2041,6 +2077,8 @@ public class TestNullabilityPass extends CommonTest {
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         String l = locals(report);
         assertTrue(l.contains("drain.queuedTask: Runnable?"), l);
+        assertTrue(l.contains("drainOther.queuedTask: Runnable?"), l);
+        assertTrue(l.contains("drainOther.queuedExecutor: Executor?"), l);
         assertEquals("CharSequence?", s.get("a.b.CA.Base.<init>(CharSequence):0:toSplit"), s.toString());
     }
 
