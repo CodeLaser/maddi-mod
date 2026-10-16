@@ -2012,6 +2012,50 @@ public class TestNullabilityPass extends CommonTest {
      collection sharing EMPTY. A '?' slot only receives, as '? extends' does; an unchecked conversion from Object
      type arguments starts a new instantiation, not one slot.
      */
+    @DisplayName("Kotlin: a library null the next statement exits on does not seed the local")
+    @Test
+    public void deadLibraryNull() {
+        NullabilityPass.Report report = run("a.b.DN", """
+                package a.b;
+                import java.util.NavigableMap;
+                import java.util.NoSuchElementException;
+                class DN {
+                    static final class Range {
+                        final String lowerBound;
+                        Range(String lowerBound) { this.lowerBound = lowerBound; }
+                    }
+                    static Range span(NavigableMap<String, String> map, Range sub, boolean b) {
+                        String lowerBound;
+                        if (b) {
+                            lowerBound = sub.lowerBound;
+                        } else {
+                            lowerBound = map.ceilingKey(sub.lowerBound);
+                            if (lowerBound == null || lowerBound.isEmpty()) {
+                                throw new NoSuchElementException();
+                            }
+                        }
+                        return new Range(lowerBound);
+                    }
+                    static String mapped(NavigableMap<String, String> map, String k) {
+                        String m = map.get(k);
+                        if (m == null) throw new NoSuchElementException();
+                        return m;
+                    }
+                    static String early(NavigableMap<String, String> map, String k) {
+                        String v = map.get(k);
+                        System.out.println(v);
+                        if (v == null) throw new NoSuchElementException();
+                        return v;
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("String", s.get("a.b.DN.Range.lowerBound"), s + "\n" + explain(report));
+        assertTrue(locals(report).contains("early.v: String?"), "read before the test: " + locals(report));
+        assertTrue(locals(report).contains("mapped.m: String?"), "Kotlin's Map.get is V?: " + locals(report));
+    }
+
     @DisplayName("Kotlin: a caller's null into an abstract type-variable parameter is its receiver's instantiation's")
     @Test
     public void consumerReceiverSlot() {

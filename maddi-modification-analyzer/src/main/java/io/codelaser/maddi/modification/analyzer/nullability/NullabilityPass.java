@@ -1280,6 +1280,9 @@ public final class NullabilityPass {
             }
             nonNullOverrides(methods);
         }
+        if (policy.callResults() && !DEAD_NULLS_OFF) {
+            for (MethodInfo mi : methods) if (mi.methodBody() != null) deadNullAssignments(mi.methodBody());
+        }
         for (MethodInfo mi : methods) {
             owner = mi;
             buildForMethod(mi);
@@ -3522,9 +3525,56 @@ public final class NullabilityPass {
     }
 
     private ReadScope readScope;
+    private Statement seedStatement;
+
+    /*
+     Kotlin: 'x = lib(); if (x == null || ...) throw ...;' the library's null never leaves the assignment: the very
+     next statement exits on it. Its seed on the local would reach every use after an if/else merge that loses the
+     fact (guava TreeRangeMap.SubRangeMap.span(): 'lowerBound = entriesByLowerBound.ceilingKey(...)' in one branch,
+     'subRange.lowerBound' in the other, made Range.lowerBound and ImmutableRangeSet's 'Cut<C>?' nullable,
+     2026-10-17). Only an if without else whose block ends in a throw or return.
+     */
+    private final Set<Statement> deadNullAssignments = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+
+    private void deadNullAssignments(Block block) {
+        List<Statement> statements = block.statements();
+        for (int i = 0; i < statements.size(); i++) {
+            Statement statement = statements.get(i);
+            for (Block sub : statement.subBlocks()) deadNullAssignments(sub);
+            if (i + 1 >= statements.size()
+                || !(statements.get(i + 1) instanceof io.codelaser.maddi.cst.api.statement.IfElseStatement ifs)
+                || ifs.elseBlock() != null && !ifs.elseBlock().isEmpty() || !exits(ifs.block())) {
+                continue;
+            }
+            Variable local = assignedLocal(statement);
+            if (local != null && facts.whenFalse(ifs.expression()).contains(local)) deadNullAssignments.add(statement);
+        }
+    }
+
+    private static boolean exits(Block block) {
+        if (block == null || block.statements().isEmpty()) return false;
+        Statement last = block.statements().getLast();
+        return last instanceof ThrowStatement || last instanceof ReturnStatement;
+    }
+
+    private static Variable assignedLocal(Statement statement) {
+        if (statement instanceof LocalVariableCreation lvc && lvc.localVariableStream().count() == 1) {
+            LocalVariable lv = lvc.localVariableStream().findFirst().orElseThrow();
+            return lv.assignmentExpression() == null ? null : lv;
+        }
+        if (statement instanceof ExpressionAsStatement && statement.expression() instanceof Assignment a
+            && a.assignmentOperator() == null && a.variableTarget() instanceof LocalVariable lv) {
+            return lv;
+        }
+        return null;
+    }
+
+    // gate NODEADNULLS: a library null assigned to a local seeds it even when the next statement exits on it (A/B)
+    private static final boolean DEAD_NULLS_OFF = System.getenv("NODEADNULLS") != null;
 
     private void syntacticSeeds(MethodInfo mi, Scope scope, Statement statement) {
         readScope = new ReadScope(mi, scope);
+        seedStatement = statement;
         try {
             syntacticSeedsIn(mi, scope, statement);
         } finally {
@@ -4182,7 +4232,12 @@ public final class NullabilityPass {
         // the map holds for k still flows through its value slot above
         String lib = libraryNullableCall(mc);
         if (lib != null) {
-            seedIndirect(target, "assigned " + lib);
+            // not a member Kotlin itself types nullable ('Map.get(k): V?'): the local must then be declared so
+            if (!(target instanceof Local && seedStatement != null && deadNullAssignments.contains(seedStatement)
+                  && java.util.stream.Stream.concat(java.util.stream.Stream.of(callee), overrides(callee).stream())
+                          .noneMatch(m -> KOTLIN_COLLECTIONS.contains(m.typeInfo().fullyQualifiedName())))) {
+                seedIndirect(target, "assigned " + lib);
+            }
         } else if (policy.contracts() && analysed.contains(callee)
                    && NullAnnotations.explicitState(callee) == NullableState.NULLABLE) {
             seed(target, "assigned " + callee.fullyQualifiedName() + ", annotated nullable");
