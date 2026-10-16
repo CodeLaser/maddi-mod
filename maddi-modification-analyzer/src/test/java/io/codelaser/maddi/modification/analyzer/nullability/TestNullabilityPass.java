@@ -1788,6 +1788,52 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("String?", s.get("a.b.OR.Lookup.get(Object)"), s.toString());
     }
 
+    /*
+     Kotlin: type arguments are invariant, so an override's type-argument slots equal the overridden member's (guava:
+     AbstractBiMap.KeySet.iterator(): MutableIterator<K?> over MutableIterator<K>; AbstractMapBasedMultimap.remove:
+     MutableCollection<V?>? over MutableCollection<V>?). Between analysed members the slots are one. Over a library
+     member they are not touched: 'Keys extends AbstractSet<String>' holding a null needs 'AbstractSet<String?>', a
+     supertype's type argument, which no verdict carries.
+     */
+    @DisplayName("Kotlin: an override's type-argument slots equal the overridden member's")
+    @Test
+    public void overrideTypeArgumentSlots() {
+        Map<String, String> s = new java.util.TreeMap<>();
+        run("a.b.SL", """
+                package a.b;
+                import java.util.AbstractSet;
+                import java.util.ArrayList;
+                import java.util.Iterator;
+                import java.util.List;
+                class SL {
+                    static abstract class Source<E> {
+                        abstract List<E> items();
+                    }
+                    static final class Strings extends Source<String> {
+                        List<String> items() {
+                            List<String> list = new ArrayList<>();
+                            list.add(null);
+                            return list;
+                        }
+                    }
+                    static final class Plain extends Source<String> {
+                        List<String> items() { return new ArrayList<>(); }
+                    }
+                    static final class Keys extends AbstractSet<String> {
+                        private final List<String> keys = new ArrayList<>();
+                        void addNull() { keys.add(null); }
+                        public Iterator<String> iterator() { return keys.iterator(); }
+                        public int size() { return keys.size(); }
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN).verdicts()
+                .forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("List<E?>", s.get("a.b.SL.Source.items()"), s.toString());
+        assertEquals("List<String?>", s.get("a.b.SL.Strings.items()"), s.toString());
+        assertEquals("List<String?>", s.get("a.b.SL.Plain.items()"), s.toString());
+        assertEquals("Iterator<String?>", s.get("a.b.SL.Keys.iterator()"), s.toString());
+    }
+
     @DisplayName("a null returned by a method that may return its argument does not flow back into the argument")
     @Test
     public void identityReturn() {

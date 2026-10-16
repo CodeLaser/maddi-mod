@@ -1463,6 +1463,20 @@ public final class NullabilityPass {
         }
     }
 
+    /*
+     Kotlin: type arguments are invariant, so the type-argument slots of an override's return or parameter equal the
+     analysed overridden member's, where both declare the same class ('List<String>' over 'List<E>'): edges both ways
+     (guava: AbstractMapBasedMultimap's remove, MutableCollection<V?>? over MutableCollection<V>?).
+     */
+    private void invariantSlots(ParameterizedType ours, Object node, ParameterizedType theirs, Object theirNode) {
+        if (ours == null || theirs == null || ours.arrays() != 0 || theirs.arrays() != 0 || ours.typeInfo() == null
+            || ours.typeInfo() != theirs.typeInfo() || ours.parameters().size() != theirs.parameters().size()) return;
+        for (int j = 0; j < ours.parameters().size(); j++) {
+            addEdge(new Arg(node, j), new Arg(theirNode, j));
+            addEdge(new Arg(theirNode, j), new Arg(node, j));
+        }
+    }
+
     private static boolean boundedTypeVariableOverride(MethodInfo mi) {
         if (mi.isConstructor() || mi.returnType().isVoid() || mi.returnType().typeParameter() != null) return false;
         for (MethodInfo overridden : mi.overrides()) {
@@ -2500,6 +2514,14 @@ public final class NullabilityPass {
                 // by an implementation makes an analysed type-variable return nullable too ('Holder<T>.get(): T?')
                 if (!isTypeVariable(overridden.returnType()) || policy.callResults() && analysed.contains(overridden)) {
                     addEdge(mi, overridden);
+                }
+                if (policy.callResults() && analysed.contains(overridden)) {
+                    invariantSlots(mi.returnType(), mi, overridden.returnType(), overridden);
+                    int m = Math.min(mi.parameters().size(), overridden.parameters().size());
+                    for (int i = 0; i < m; i++) {
+                        invariantSlots(mi.parameters().get(i).parameterizedType(), mi.parameters().get(i),
+                                overridden.parameters().get(i).parameterizedType(), overridden.parameters().get(i));
+                    }
                 }
                 int n = Math.min(mi.parameters().size(), overridden.parameters().size());
                 for (int i = 0; i < n; i++) {
