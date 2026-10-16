@@ -81,6 +81,8 @@
 # 2026-10-16, devel with maddi 762d07e16 (maddi-mod#38: new TypeReference<>() {} takes the field's type arguments,
 # states included), 8020895a5/03e46cd72 (maddi-mod#25: read-only results for abstract methods and overrides) and
 # ac6bb4d49 (maddi-mod#50): all 346 files compile, 346 to class files, 0 type errors.
+# 2026-10-16, devel with maddi-mod 838b2b53 (a test override's return widens main's again) and 77674c0c (type-variable
+# slots), maddi f028c4d35 (the casts 77674c0c needs): 139 test files compile to class files.
 # EXPECTED, not work to do (Bart, 2026-10-16): 1,111 tests pass on the original classes, 1,106 with the Kotlin classes
 # and with the translated tests. The 5 that fail do so by design of the translation:
 # - DocumentSplitterTest#split_all_varargs, TextSegmentTransformerTest#transform_all_varargs_null_input_returns_empty_list,
@@ -98,5 +100,5 @@ syntaxCleanFiles	346
 compilingFiles	346
 bytecodeFiles	346
 testsPassing	1106
-testBytecodeFiles	138
+testBytecodeFiles	139
 translatedTestsPassing	1106
