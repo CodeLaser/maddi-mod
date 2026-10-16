@@ -461,6 +461,13 @@ public final class NullabilityPass {
     // method the fields of this; and this round's, for the next (fieldsAtEntry)
     private final Map<MethodInfo, Set<Variable>> fieldsAtEntry;
     private Map<MethodInfo, Set<Variable>> nextFieldsAtEntry = Map.of();
+    // CodeLaser/maddi-mod#48 B6: the lookups an earlier round's report knew the key of present (useSites), which the
+    // graph's walk cannot know itself: its put's value is non-null by a library call only the closure clears
+    private final Set<Expression> presentLookups;
+    private Set<Expression> nextPresentLookups = Set.of();
+    private final Set<MethodCall> lookups = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+    // gate NOROUNDKEYS: no key presence from an earlier round (A/B for #48 B6)
+    private static final boolean ROUND_KEYS_OFF = System.getenv("NOROUNDKEYS") != null;
     // gate NOENTRYFIELDS: no field of this is non-null at a private method's entry by its calls (A/B for #48 A5)
     private static final boolean ENTRY_FIELDS_OFF = System.getenv("NOENTRYFIELDS") != null;
     private List<FieldInfo> analysedFields = List.of();
@@ -539,16 +546,18 @@ public final class NullabilityPass {
     private final Map<MethodInfo, Map<String, List<Local>>> declaredByName = new HashMap<>();
 
     public NullabilityPass(Policy policy) {
-        this(policy, Set.of(), Set.of(), NarrowedReads.NONE, Map.of());
+        this(policy, Set.of(), Set.of(), NarrowedReads.NONE, Map.of(), Set.of());
     }
 
     private NullabilityPass(Policy policy, Set<MethodInfo> trustedReturns, Set<ParameterInfo> preconditions,
-                            NarrowedReads narrowed, Map<MethodInfo, Set<Variable>> fieldsAtEntry) {
+                            NarrowedReads narrowed, Map<MethodInfo, Set<Variable>> fieldsAtEntry,
+                            Set<Expression> presentLookups) {
         this.policy = policy;
         this.trustedReturns = trustedReturns;
         this.preconditions = preconditions;
         this.narrowed = narrowed;
         this.fieldsAtEntry = fieldsAtEntry;
+        this.presentLookups = presentLookups;
     }
 
     private static final int MAX_ROUNDS = 5;
@@ -567,21 +576,24 @@ public final class NullabilityPass {
         Set<ParameterInfo> nonNullAtExit = Set.of();
         NarrowedReads narrowedReads = NarrowedReads.NONE;
         Map<MethodInfo, Set<Variable>> atEntry = Map.of();
+        Set<Expression> present = Set.of();
         for (int round = 1; ; round++) {
-            NullabilityPass pass = new NullabilityPass(policy, trusted, nonNullAtExit, narrowedReads, atEntry);
+            NullabilityPass pass = new NullabilityPass(policy, trusted, nonNullAtExit, narrowedReads, atEntry, present);
             Report report = pass.once(analysisOrder);
             Set<MethodInfo> next = pass.unreachedReturns();
             Set<ParameterInfo> nextPreconditions = pass.preconditions();
             NarrowedReads nextNarrowed = pass.narrowedReads();
             Map<MethodInfo, Set<Variable>> nextAtEntry = pass.nextFieldsAtEntry;
+            Set<Expression> nextPresent = pass.nextPresentLookups;
             if (next.equals(trusted) && nextPreconditions.equals(nonNullAtExit) && nextNarrowed.equals(narrowedReads)
-                && nextAtEntry.equals(atEntry) || round == MAX_ROUNDS) {
+                && nextAtEntry.equals(atEntry) && nextPresent.equals(present) || round == MAX_ROUNDS) {
                 return report;
             }
             trusted = next;
             nonNullAtExit = nextPreconditions;
             narrowedReads = nextNarrowed;
             atEntry = nextAtEntry;
+            present = nextPresent;
         }
     }
 
@@ -1347,6 +1359,11 @@ public final class NullabilityPass {
                 .withFieldsAtEntry(fieldsAtEntry);
         methods.forEach(useSites::walk);
         nextFieldsAtEntry = fieldsAtEntry(useSites, methods, fields);
+        if (!ROUND_KEYS_OFF) {
+            Set<Expression> present = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+            for (MethodCall lookup : lookups) if (useSites.keyPresentWhenCalled(lookup)) present.add(lookup);
+            nextPresentLookups = present;
+        }
         return new Report(verdicts, locals, cause, seedOrigin, useSites, smartCasts, Set.copyOf(asserted),
                 Set.copyOf(unobservedCandidates), nonNullCallResults, preconditions, nullArguments, preconditionsNonNull,
                 rejectsNull(), writtenReach);
@@ -4031,7 +4048,9 @@ public final class NullabilityPass {
      bootstrap loader never loads ('getClass().getClassLoader()', 'X.class.getClassLoader()'; nacos 2026-10-10).
      */
     private String libraryNullableCall(MethodCall mc) {
-        if (mc.methodInfo() == null || facts.keyPresentWhenCalled(mc) || facts.pureCallNonNullWhenCalled(mc)
+        if (mc.methodInfo() != null && !analysed.contains(mc.methodInfo())) lookups.add(mc);
+        if (mc.methodInfo() == null || facts.keyPresentWhenCalled(mc) || presentLookups.contains(mc)
+            || facts.pureCallNonNullWhenCalled(mc)
             || NonNullFacts.computedNonNull(mc) || NonNullFacts.initialThreadLocal(mc)
             || applicationClassLoader(mc) || standardSystemProperty(mc)) return null;
         return libraryNullableReturn(mc.methodInfo());

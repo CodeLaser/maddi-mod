@@ -1834,6 +1834,75 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("Iterator<String?>", s.get("a.b.SL.Keys.iterator()"), s.toString());
     }
 
+    /*
+     CodeLaser/maddi-mod#48 B6, nacos HttpLoginProcessor: 'bodyMap.put(PASSWORD, properties.getProperty(PASSWORD, ""));
+     try { postForm(url, ..., bodyMap, ...); ... } catch (Exception e) { desensitise(bodyMap.get(PASSWORD)); }'. A
+     call handed the map to a parameter the modification analysis finds unmodified cannot remove the key. One that
+     modifies it can, in the try as on the straight path.
+     */
+    @DisplayName("key presence: a call handed the map to an unmodified parameter keeps it, in a try's catch too")
+    @Test
+    public void keyPresenceAcrossUnmodifiedCall() {
+        Map<String, String> s = new java.util.TreeMap<>();
+        run("a.b.KU", """
+                package a.b;
+                import java.util.HashMap;
+                import java.util.Map;
+                import java.util.Properties;
+                class KU {
+                    static final String PASSWORD = "password";
+                    static int post(Map<String, String> body) { return body.size(); }
+                    static void clear(Map<String, String> body) { body.clear(); }
+                    static int kept(String s) { return s.length(); }
+                    static int caught(String s) { return s.length(); }
+                    static int cleared(String s) { return s == null ? 0 : s.length(); }
+                    static int clearedInTry(String s) { return s == null ? 0 : s.length(); }
+                    static int login(Properties p) {
+                        Map<String, String> body = new HashMap<>();
+                        body.put(PASSWORD, p.getProperty(PASSWORD, ""));
+                        post(body);
+                        int n = kept(body.get(PASSWORD));
+                        try {
+                            n += post(body);
+                        } catch (RuntimeException e) {
+                            n += caught(body.get(PASSWORD));
+                        }
+                        return n;
+                    }
+                    static int direct(String s) { return s.length(); }
+                    static int directKey(String s) { return s.length(); }
+                    static int noCall(Properties p, String k) {
+                        Map<String, String> body = new HashMap<>();
+                        body.put(PASSWORD, p.getProperty(PASSWORD, ""));
+                        Map<String, String> other = new HashMap<>();
+                        other.put(k, p.getProperty(k, ""));
+                        return direct(body.get(PASSWORD)) + directKey(other.get(k));
+                    }
+                    static int logout(Properties p) {
+                        Map<String, String> body = new HashMap<>();
+                        body.put(PASSWORD, p.getProperty(PASSWORD, ""));
+                        clear(body);
+                        int n = cleared(body.get(PASSWORD));
+                        body.put(PASSWORD, "x");
+                        try {
+                            clear(body);
+                        } catch (RuntimeException e) {
+                            n += clearedInTry(body.get(PASSWORD));
+                        }
+                        return n;
+                    }
+                }
+                """, NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY.withoutContracts()
+                        .withWorld(NullabilityPass.World.CLOSED)).verdicts()
+                .forEach((info, pt) -> s.put(label(info), k(pt)));
+        assertEquals("String", s.get("direct(0:s)"), s.toString());
+        assertEquals("String", s.get("directKey(0:s)"), s.toString());
+        assertEquals("String", s.get("kept(0:s)"), s.toString());
+        assertEquals("String", s.get("caught(0:s)"), s.toString());
+        assertEquals("String?", s.get("cleared(0:s)"), s.toString());
+        assertEquals("String?", s.get("clearedInTry(0:s)"), "clear(body) in the try: " + s);
+    }
+
     @DisplayName("a null returned by a method that may return its argument does not flow back into the argument")
     @Test
     public void identityReturn() {
