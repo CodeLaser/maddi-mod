@@ -1741,6 +1741,53 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("String", flow.get("a.b.CV2.Length.doForward(String):0:s"), flow.toString());
     }
 
+    /*
+     Kotlin: an override's return may narrow the overridden member's, never widen it (guava: LocalCache.EntryIterator
+     .next(): Entry? over HashIterator<T>.next(): T, itself over Iterator.next()). Over an analysed type-variable
+     return the overridden member becomes nullable ('Holder<T>.get(): T?'); over a Kotlin collection member that
+     returns its type variable non-null ('Iterator.next(): E'), the override and every analysed override below it
+     are non-null, a null value asserted. Map.get, nullable in Kotlin too, is left alone.
+     */
+    @DisplayName("Kotlin: an override's return is no wider than the overridden member's")
+    @Test
+    public void overrideOfTypeVariableReturn() {
+        Map<String, String> s = new java.util.TreeMap<>();
+        run("a.b.OR", """
+                package a.b;
+                import java.util.AbstractMap;
+                import java.util.Iterator;
+                import java.util.Map;
+                import java.util.Set;
+                class OR {
+                    static abstract class Base<T> implements Iterator<T> {
+                        public abstract T next();
+                        public boolean hasNext() { return true; }
+                    }
+                    static final class Entries extends Base<String> {
+                        private String current;
+                        public String next() { return current; }
+                    }
+                    static abstract class Holder<T> {
+                        abstract T get();
+                    }
+                    static final class Empty extends Holder<String> {
+                        String get() { return null; }
+                    }
+                    static final class Lookup extends AbstractMap<String, String> {
+                        public Set<Map.Entry<String, String>> entrySet() { return Set.of(); }
+                        public String get(Object key) { return null; }
+                    }
+                    static String use(Holder<String> h) { return h.get(); }
+                }
+                """, NullabilityPass.Policy.KOTLIN).verdicts()
+                .forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("T!", s.get("a.b.OR.Base.next()"), s.toString()); // unreached, its type variable's own
+        assertEquals("String", s.get("a.b.OR.Entries.next()"), s.toString());
+        assertEquals("T?", s.get("a.b.OR.Holder.get()"), s.toString());
+        assertEquals("String?", s.get("a.b.OR.Empty.get()"), s.toString());
+        assertEquals("String?", s.get("a.b.OR.Lookup.get(Object)"), s.toString());
+    }
+
     @DisplayName("a null returned by a method that may return its argument does not flow back into the argument")
     @Test
     public void identityReturn() {
