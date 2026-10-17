@@ -2055,6 +2055,32 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("String?[]", s.get("a.b.RA.passKept(String[]):0:names"), "returned: invariant, both ways " + s);
     }
 
+    @DisplayName("Kotlin: a varargs parameter takes a copy: its elements do not flow back into the caller's array")
+    @Test
+    public void varargsCopy() {
+        NullabilityPass.Report report = run("a.b.VC", """
+                package a.b;
+                class VC {
+                    @java.lang.annotation.Target(java.lang.annotation.ElementType.TYPE_USE) @interface Nullable {}
+                    static Object construct(@Nullable Object... elements) { return elements.length; }
+                    static Object copyOf(Object[] elements) { return construct(elements.clone()); }
+                    static Object bounds(String[] bounds) { return copyOf(bounds); }
+                    static Object make(String... arguments) { return arguments.length; }
+                    static Object defensive() {
+                        String[] typesIn = {"a", "b"};
+                        Object p = make(typesIn);
+                        typesIn[0] = null;
+                        return p;
+                    }
+                    static Object caller(String[] upper) { return make(upper); }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("String[]", s.get("a.b.VC.bounds(String[]):0:bounds"), s + "\n" + explain(report));
+        assertEquals("String[]", s.get("a.b.VC.caller(String[]):0:upper"), s.toString());
+    }
+
     @DisplayName("Kotlin: guava's Joiner/WildcardCapturer array shape")
     @Test
     public void joinerShape() {

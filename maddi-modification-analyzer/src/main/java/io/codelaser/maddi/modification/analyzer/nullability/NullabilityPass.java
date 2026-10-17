@@ -2432,11 +2432,12 @@ public final class NullabilityPass {
                 // the links run both ways: 'join(upperBounds)' also gives a flow from join's 'parts' to the caller's
                 // array. A read-only parameter flows on only into another or a library's (readOnlyArrayParameters);
                 // anything else is that reversed link
-                if (!readOnlyArrayParameter(flow.get(0), readOnlyArrays)
-                    || readOnlyArrayParameter(flow.get(1), readOnlyArrays)) {
+                if ((!readOnlyArrayParameter(flow.get(0), readOnlyArrays)
+                     || readOnlyArrayParameter(flow.get(1), readOnlyArrays))
+                    && !varargsCopyReversed(flow.get(0), flow.get(1))) {
                     successors.computeIfAbsent(c0, _ -> new LinkedHashSet<>()).add(c1);
                 }
-                if (!readOnlyArrayParameter(flow.get(1), readOnlyArrays)
+                if (!readOnlyArrayParameter(flow.get(1), readOnlyArrays) && varargsParameter(flow.get(1)) == null
                     && (policy.assertContentWrites() || writtenThrough.contains(flow.get(1)))) {
                     successors.computeIfAbsent(c1, _ -> new LinkedHashSet<>()).add(c0);
                 }
@@ -2557,6 +2558,32 @@ public final class NullabilityPass {
         });
         return found[0];
     }
+
+    /*
+     Kotlin: a varargs parameter takes a copy ('newParameterizedType(Map.class, *typesIn)'), so its elements do not
+     flow back into the caller's array, whatever the method or the caller does with either afterwards. TypesTest's
+     'typesIn[0] = null' after the call (testing guava's defensive copy) reached resolveTypes' result through
+     newParameterizedType(Class, Type...); ImmutableList.construct(Object... elements)'s annotated elements reached
+     Types.newTypeVariableImpl's and newArtificialTypeVariable's bounds and captureAsTypeVariable's upperBounds
+     (TypeResolver.kt:234, Types.kt:325). Only under Policy.callResults. Gate NOVARARGCOPIES.
+     */
+    private ParameterInfo varargsParameter(Object node) {
+        if (VARARG_COPIES_OFF || !policy.callResults()) return null;
+        Object root = node;
+        while (root instanceof Content c) root = c.of();
+        return root instanceof ParameterInfo pi && pi.isVarArgs() && analysed.contains(pi.methodInfo())
+               && node == root ? pi : null;
+    }
+
+    // a link reversed: from a varargs parameter to a node of another method (the caller's array)
+    private boolean varargsCopyReversed(Object from, Object to) {
+        ParameterInfo pi = varargsParameter(from);
+        if (pi == null) return false;
+        MethodInfo method = to instanceof Local l ? l.methodInfo() : to instanceof ParameterInfo p ? p.methodInfo() : null;
+        return method != null && method != pi.methodInfo();
+    }
+
+    private static final boolean VARARG_COPIES_OFF = System.getenv("NOVARARGCOPIES") != null;
 
     private static boolean readOnlyArrayParameter(Object node, Set<ParameterInfo> readOnlyArrays) {
         Object root = node;
