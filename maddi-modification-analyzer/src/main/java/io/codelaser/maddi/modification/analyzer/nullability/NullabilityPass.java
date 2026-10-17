@@ -2414,8 +2414,9 @@ public final class NullabilityPass {
      ties their Contents both ways, recursively for nested arrays.
      */
     private void coupleContent() {
-        Set<Object> writtenThrough = writtenThrough();
-        Set<ParameterInfo> readOnlyArrays = readOnlyArrayParameters(writtenThrough);
+        Set<Object> writtenThrough = writtenThrough(true);
+        // an annotation declares what the elements may be; it writes none ('join(@Nullable Object[] parts)')
+        Set<ParameterInfo> readOnlyArrays = readOnlyArrayParameters(writtenThrough(false));
         Deque<List<Object>> queue = new ArrayDeque<>(flows);
         Set<List<Object>> seen = new HashSet<>();
         while (!queue.isEmpty()) {
@@ -2430,8 +2431,8 @@ public final class NullabilityPass {
                 Content c0 = new Content(flow.get(0));
                 Content c1 = new Content(flow.get(1));
                 successors.computeIfAbsent(c0, _ -> new LinkedHashSet<>()).add(c1);
-                if ((policy.assertContentWrites() && !readOnlyArrayParameter(flow.get(1), readOnlyArrays))
-                    || writtenThrough.contains(flow.get(1))) {
+                if (!readOnlyArrayParameter(flow.get(1), readOnlyArrays)
+                    && (policy.assertContentWrites() || writtenThrough.contains(flow.get(1)))) {
                     successors.computeIfAbsent(c1, _ -> new LinkedHashSet<>()).add(c0);
                 }
                 queue.add(List.of(c0, c1));
@@ -2531,14 +2532,15 @@ public final class NullabilityPass {
      invariant, so under Policy.assertContentWrites both ways regardless. Guava 2026-10-07: coupling both ways made
      ImmutableMap.Builder.entries, ImmutableList.array, Joiner.join(Object[]) and TypeToken's Type[] one slot.
      */
-    private Set<Object> writtenThrough() {
+    private Set<Object> writtenThrough(boolean annotations) {
         Set<Object> written = new HashSet<>();
         successors.forEach((from, tos) -> {
             if (from instanceof Content) return;
             for (Object to : tos) if (to instanceof Content c) written.add(c.of());
         });
         seedOrigin.forEach((node, origin) -> {
-            if (node instanceof Content c && !origin.startsWith("array created") && !origin.startsWith("null in an array initializer")) {
+            if (node instanceof Content c && !origin.startsWith("array created") && !origin.startsWith("null in an array initializer")
+                && (annotations || !origin.startsWith("annotated"))) {
                 written.add(c.of());
             }
         });
