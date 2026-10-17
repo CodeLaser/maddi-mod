@@ -2012,6 +2012,45 @@ public class TestNullabilityPass extends CommonTest {
      collection sharing EMPTY. A '?' slot only receives, as '? extends' does; an unchecked conversion from Object
      type arguments starts a new instantiation, not one slot.
      */
+    @DisplayName("Kotlin: an argument to a method's own type variable instantiates it")
+    @Test
+    public void methodTypeVariableArgument() {
+        NullabilityPass.Report report = run("a.b.MT", """
+                package a.b;
+                class MT {
+                    interface Entry<E> { E getElement(); }
+                    static final class ImmutableEntry<E> implements Entry<E> {
+                        private final E element;
+                        ImmutableEntry(E element) { this.element = element; }
+                        public E getElement() { return element; }
+                    }
+                    static <E> Entry<E> immutableEntry(E e) { return new ImmutableEntry<>(e); }
+                    static <T> T id(T t) { return t; }
+                    static Entry<String> nullKey() { return immutableEntry(null); }
+                    static String nothing() { return id(null); }
+                    static <T> T ensureNotNull(T object, String name) {
+                        if (object == null) throw new IllegalArgumentException(name);
+                        return object;
+                    }
+                    static <T> T getOrDefault(T value, T defaultValue) { return value != null ? value : defaultValue; }
+                    static String checked(String x) { return ensureNotNull(x, "x"); }
+                    static String unchecked() { return checked(null); }
+                    static String withDefault() { return getOrDefault(null, "d"); }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("E!", s.get("a.b.MT.Entry.getElement()"), s + "\n" + explain(report));
+        assertEquals("E!", s.get("a.b.MT.ImmutableEntry.element"), s.toString());
+        assertEquals("String?", s.get("a.b.MT.nothing()"), "the call's own result still carries it: " + s);
+        assertEquals("Entry<String?>", s.get("a.b.MT.nullKey()"), "Kotlin infers Entry<String?>: " + s);
+        // a parameter the method checks is declared T?: the null goes there, the result keeps T
+        assertEquals("T?", s.get("a.b.MT.ensureNotNull(Object,String):0:object"), s.toString());
+        assertEquals("String", s.get("a.b.MT.checked(String)"), s.toString());
+        assertEquals("T?", s.get("a.b.MT.getOrDefault(Object,Object):0:value"), s.toString());
+        assertEquals("String", s.get("a.b.MT.withDefault()"), s.toString());
+    }
+
     @DisplayName("Kotlin: a lambda's parameter is a value of its target's type argument")
     @Test
     public void lambdaParameterFromTarget() {

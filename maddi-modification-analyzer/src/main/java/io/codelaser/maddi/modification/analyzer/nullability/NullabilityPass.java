@@ -1305,6 +1305,7 @@ public final class NullabilityPass {
             }
         });
         holderFields(methods, fields);
+        resolveTypeVariableArguments();
         coupleContent();
         if (!invariantTies.isEmpty()) {
             // a class type variable's slot is reached only by the class's own nulls (coupleContent never ties it
@@ -4176,6 +4177,10 @@ public final class NullabilityPass {
                 Object node = argumentNode(readScope.mi(), readScope.scope(), source);
                 if (node != null) flows.add(List.of(node, target)); // Kotlin infers one type: content slots tied
             }
+            if (readScope != null) {
+                callTargets.computeIfAbsent(mc, _ -> new ArrayList<>())
+                        .add(new CallTarget(target, readScope.mi(), readScope.scope()));
+            }
             typeArgumentsPassedThrough(mc).forEach((source, k) -> {
                 Object node = argumentNode(readScope.mi(), readScope.scope(), source);
                 if (node != null) flows.add(List.of(new Arg(node, k), target));
@@ -4241,6 +4246,87 @@ public final class NullabilityPass {
         } else if (policy.contracts() && analysed.contains(callee)
                    && NullAnnotations.explicitState(callee) == NullableState.NULLABLE) {
             seed(target, "assigned " + callee.fullyQualifiedName() + ", annotated nullable");
+        }
+    }
+
+    /*
+     Kotlin: an argument to a method's own type variable ('<E> Entry<E> immutableEntry(E e, int n)'). Kotlin's
+     declaration decides what a null argument does. A parameter the method passes on unchecked, into its result or
+     into another class's type variable ('new ImmutableEntry<>(e)'), is declared 'e: E': a null argument instantiates
+     E for that call, so the call's result (or the result's slot E) is nullable, not the parameter. Through the
+     parameter, MultimapKeysTester's 'immutableEntry(null, 3)' had made ImmutableEntry.element, getElement() and
+     Multiset.Entry.getElement() 'E?' (guava Multisets.kt:547, 2026-10-17). A parameter the method checks
+     ('ensureNotNull(T object, ...)', 'getOrDefault(T value, T defaultValue)'s value) is declared 'T?' and takes the
+     argument as before. Decided once the graph is built, from the edges that leave the parameter.
+     Gate NOMETHODTYPEVARARGS.
+     */
+    private record TypeVariableArgument(ParameterInfo parameter, Expression call, int index, MethodInfo mi,
+                                        Scope scope, Runnable asBefore) {
+    }
+
+    private record CallTarget(Object target, MethodInfo mi, Scope scope) {
+    }
+
+    private final List<TypeVariableArgument> typeVariableArguments = new ArrayList<>();
+    private final Map<Expression, List<CallTarget>> callTargets = new IdentityHashMap<>();
+    private final Map<ParameterInfo, Boolean> passedOnUnchecked = new HashMap<>();
+
+    private void resolveTypeVariableArguments() {
+        for (TypeVariableArgument tva : typeVariableArguments) {
+            if (!passedOnUnchecked.computeIfAbsent(tva.parameter(), this::passedOnUnchecked)) {
+                tva.asBefore().run();
+                continue;
+            }
+            MethodCall mc = (MethodCall) tva.call();
+            ParameterizedType rt = mc.methodInfo().returnType();
+            var typeParameter = tva.parameter().parameterizedType().typeParameter();
+            for (CallTarget ct : callTargets.getOrDefault(mc, List.of())) {
+                if (rt.arrays() == 0 && typeParameter.equals(rt.typeParameter())) {
+                    inferredNull(ct.target(), ct, mc, tva.index());
+                } else if (rt.arrays() == 0) {
+                    for (int k = 0; k < rt.parameters().size(); k++) {
+                        ParameterizedType slot = rt.parameters().get(k);
+                        if (slot.wildcard() == null && typeParameter.equals(slot.typeParameter())) {
+                            inferredNull(new Arg(ct.target(), k), ct, mc, tva.index());
+                        }
+                    }
+                }
+            }
+        }
+        typeVariableArguments.clear();
+    }
+
+    // does the parameter's value leave the method unchecked: into its return, or into another class's type variable
+    private boolean passedOnUnchecked(ParameterInfo pi) {
+        MethodInfo method = pi.methodInfo();
+        Set<Object> seen = new HashSet<>();
+        Deque<Object> todo = new ArrayDeque<>(successors.getOrDefault(pi, Set.of()));
+        while (!todo.isEmpty() && seen.size() < 2000) {
+            Object n = todo.removeFirst();
+            if (!seen.add(n)) continue;
+            if (n.equals(method)) return true;
+            ParameterizedType type = typeOf(n);
+            if (type != null && isClassTypeVariable(type)) return true;
+            if (n instanceof Local || n instanceof ParameterInfo p && p.methodInfo() == method) {
+                todo.addAll(successors.getOrDefault(n, Set.of()));
+            }
+        }
+        return false;
+    }
+
+    private void inferredNull(Object target, CallTarget ct, MethodCall mc, int i) {
+        Expression argument = NonNullFacts.unwrap(mc.parameterExpressions().get(i));
+        if (argument instanceof NullConstant) {
+            seed(target, NULL_ARGUMENT + ct.mi().fullyQualifiedName(), ct.mi().typeInfo());
+        } else if (argument instanceof VariableExpression ve) {
+            if (facts.nonNullWhenCalled(mc, ve.variable())) return;
+            Object node = node(ct.mi(), ct.scope(), ve.variable());
+            if (node != null) addEdge(node, target);
+        } else if (argument instanceof MethodCall inner && inner.methodInfo() != null) {
+            Object node = argumentNode(ct.mi(), ct.scope(), inner);
+            if (node != null) addEdge(node, target);
+            String lib = libraryNullableCall(inner);
+            if (lib != null) seedIndirect(target, "assigned " + lib);
         }
     }
 
@@ -4777,6 +4863,7 @@ public final class NullabilityPass {
 
     // gate NOCONSUMERSLOTS: a caller's null into an abstract type-variable parameter reaches the implementations (A/B)
     private static final boolean CONSUMER_SLOTS_OFF = System.getenv("NOCONSUMERSLOTS") != null;
+    private static final boolean METHOD_TYPE_VARIABLE_ARGUMENTS_OFF = System.getenv("NOMETHODTYPEVARARGS") != null;
     // gate NOANONYMOUSSUPER: an anonymous class's arguments do not reach its superclass's constructor (A/B)
     private static final boolean ANONYMOUS_SUPER_OFF = System.getenv("NOANONYMOUSSUPER") != null;
 
@@ -4827,6 +4914,19 @@ public final class NullabilityPass {
                     || (policy.callResults() && !CONSUMER_SLOTS_OFF
                         || !callee.isAbstract() && !implementations.containsKey(callee))
                        && slotReceiver(mi, scope, call, callee) != null)) {
+                continue;
+            }
+            // Kotlin: an argument to the callee's own type variable is decided once the graph is built
+            // (resolveTypeVariableArguments)
+            if (policy.callResults() && !METHOD_TYPE_VARIABLE_ARGUMENTS_OFF && call instanceof MethodCall
+                && analysed.contains(callee) && isMethodTypeVariable(parameter.parameterizedType())
+                && !parameter.isVarArgs() && NullAnnotations.explicitState(parameter) != NullableState.NULLABLE) {
+                int index = i;
+                typeVariableArguments.add(new TypeVariableArgument(parameter, call, index, mi, scope, () -> {
+                    for (ParameterInfo pi : typedDispatch(call, callee, parameter)) {
+                        argument(mi, scope, statement, call, list, arguments, index, pi);
+                    }
+                }));
                 continue;
             }
             for (ParameterInfo pi : typedDispatch(call, callee, parameter)) {
