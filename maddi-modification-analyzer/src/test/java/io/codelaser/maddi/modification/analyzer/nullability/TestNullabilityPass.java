@@ -2012,6 +2012,45 @@ public class TestNullabilityPass extends CommonTest {
      collection sharing EMPTY. A '?' slot only receives, as '? extends' does; an unchecked conversion from Object
      type arguments starts a new instantiation, not one slot.
      */
+    @DisplayName("Kotlin: a read-only array parameter's element nulls do not flow back into the caller's array")
+    @Test
+    public void readOnlyArrayParameter() {
+        NullabilityPass.Report report = run("a.b.RA", """
+                package a.b;
+                class RA {
+                    static String join(Object[] parts) {
+                        StringBuilder sb = new StringBuilder();
+                        for (Object p : parts) sb.append(p);
+                        return sb.toString();
+                    }
+                    static String nulls() { return join(new Object[]{"a", null}); }
+                    static String bounds(String[] upperBounds) { return join(upperBounds); }
+                    static void fill(Object[] out) { out[0] = null; }
+                    static String[] written() { String[] w = new String[]{"x"}; fill(w); return w; }
+                    static Object[] keep(Object[] held) { join(held); return held; }
+                    static Object[] kept() { return keep(new Object[]{null}); }
+                    static Object[] passKept(String[] names) { return keep(names); }
+                    static String joinIterable(Iterable<?> parts) { return parts.toString(); }
+                    @java.lang.annotation.Target(java.lang.annotation.ElementType.TYPE_USE) @interface Nullable {}
+                    static String joinAnnotated(@Nullable Object[] parts) { return java.util.Arrays.toString(parts); }
+                    static String annotatedBounds(String[] bounds) { return joinAnnotated(bounds); }
+                    static String joinList(Object[] parts) {
+                        java.util.List<?> partsList = java.util.Arrays.<Object>asList(parts);
+                        return joinIterable(partsList);
+                    }
+                    static String listed(String[] upper) { return joinList(upper); }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("Object?[]", s.get("a.b.RA.join(Object[]):0:parts"), s.toString());
+        assertEquals("String[]", s.get("a.b.RA.bounds(String[]):0:upperBounds"), s.toString());
+        assertEquals("String[]", s.get("a.b.RA.listed(String[]):0:upper"), "Arrays.asList reads: " + s);
+        assertEquals("String[]", s.get("a.b.RA.annotatedBounds(String[]):0:bounds"), "Joiner's shape: " + s);
+        assertEquals("String?[]", s.get("a.b.RA.written()"), "written through: still both ways " + s);
+        assertEquals("String?[]", s.get("a.b.RA.passKept(String[]):0:names"), "returned: invariant, both ways " + s);
+    }
+
     @DisplayName("Kotlin: an explicitly @Nullable override of a bounded type-variable return widens the overridden")
     @Test
     public void explicitNullableBoundedOverride() {
