@@ -2073,12 +2073,26 @@ public class TestNullabilityPass extends CommonTest {
                         return p;
                     }
                     static Object caller(String[] upper) { return make(upper); }
+                    static Object inner(String... whitelist) { return whitelist.length; }
+                    static Object outer(String... whitelist) { return inner(whitelist); }
+                    static Object nullOne() { return outer("a", null); }
+                    abstract static class Builder { abstract Builder add(String... elements); }
+                    static final class ListBuilder extends Builder {
+                        @Override Builder add(String... elements) { return this; }
+                    }
+                    static Object useBuilder(Builder b) { return b.add("x", null); }
                 }
                 """, NullabilityPass.Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("String[]", s.get("a.b.VC.bounds(String[]):0:bounds"), s + "\n" + explain(report));
         assertEquals("String[]", s.get("a.b.VC.caller(String[]):0:upper"), s.toString());
+        // forward, the caller's elements are the varargs': fernflower's 'isVarReferenced(obj, *whitelist)'
+        assertEquals("String?[]", s.get("a.b.VC.inner(String[]):0:whitelist"), s.toString());
+        // an override family's varargs stay one state
+        assertEquals(s.get("a.b.VC.Builder.add(String[]):0:elements"),
+                s.get("a.b.VC.ListBuilder.add(String[]):0:elements"), s.toString());
+        assertEquals("String?[]", s.get("a.b.VC.ListBuilder.add(String[]):0:elements"), s.toString());
     }
 
     @DisplayName("Kotlin: guava's Joiner/WildcardCapturer array shape")

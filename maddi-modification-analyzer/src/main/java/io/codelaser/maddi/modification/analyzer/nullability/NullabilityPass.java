@@ -2434,10 +2434,10 @@ public final class NullabilityPass {
                 // anything else is that reversed link
                 if ((!readOnlyArrayParameter(flow.get(0), readOnlyArrays)
                      || readOnlyArrayParameter(flow.get(1), readOnlyArrays))
-                    && !varargsCopyReversed(flow.get(0), flow.get(1))) {
+                    && !varargsPasses.contains(List.of(flow.get(1), flow.get(0)))) {
                     successors.computeIfAbsent(c0, _ -> new LinkedHashSet<>()).add(c1);
                 }
-                if (!readOnlyArrayParameter(flow.get(1), readOnlyArrays) && varargsParameter(flow.get(1)) == null
+                if (!readOnlyArrayParameter(flow.get(1), readOnlyArrays) && !varargsPasses.contains(flow)
                     && (policy.assertContentWrites() || writtenThrough.contains(flow.get(1)))) {
                     successors.computeIfAbsent(c1, _ -> new LinkedHashSet<>()).add(c0);
                 }
@@ -2565,23 +2565,13 @@ public final class NullabilityPass {
      'typesIn[0] = null' after the call (testing guava's defensive copy) reached resolveTypes' result through
      newParameterizedType(Class, Type...); ImmutableList.construct(Object... elements)'s annotated elements reached
      Types.newTypeVariableImpl's and newArtificialTypeVariable's bounds and captureAsTypeVariable's upperBounds
-     (TypeResolver.kt:234, Types.kt:325). Only under Policy.callResults. Gate NOVARARGCOPIES.
+     (TypeResolver.kt:234, Types.kt:325). Exactly the (array, varargs parameter) pairs of such calls: the caller's
+     elements still flow forward into the parameter's ('isVarReferenced(obj, *whitelist)' with a nullable element,
+     fernflower VarExprent.kt:205), only the back edge and the forward edge of the reversed link go. An override
+     family's varargs parameters stay tied as any other (ImmutableCollection.Builder.add(E...)). Only under
+     Policy.callResults. Gate NOVARARGCOPIES.
      */
-    private ParameterInfo varargsParameter(Object node) {
-        if (VARARG_COPIES_OFF || !policy.callResults()) return null;
-        Object root = node;
-        while (root instanceof Content c) root = c.of();
-        return root instanceof ParameterInfo pi && pi.isVarArgs() && analysed.contains(pi.methodInfo())
-               && node == root ? pi : null;
-    }
-
-    // a link reversed: from a varargs parameter to a node of another method (the caller's array)
-    private boolean varargsCopyReversed(Object from, Object to) {
-        ParameterInfo pi = varargsParameter(from);
-        if (pi == null) return false;
-        MethodInfo method = to instanceof Local l ? l.methodInfo() : to instanceof ParameterInfo p ? p.methodInfo() : null;
-        return method != null && method != pi.methodInfo();
-    }
+    private final Set<List<Object>> varargsPasses = new HashSet<>();
 
     private static final boolean VARARG_COPIES_OFF = System.getenv("NOVARARGCOPIES") != null;
 
@@ -5021,6 +5011,11 @@ public final class NullabilityPass {
                 // an element of the array the call creates: the array is never null, the argument is an element
                 argument(mi, scope, statement, call, list, arguments, i, new Content(parameter));
                 continue;
+            }
+            if (parameter.isVarArgs() && policy.callResults() && !VARARG_COPIES_OFF) {
+                // an array spread into varargs ('*array'): the callee holds a copy (varargsCopy)
+                Object source = argumentNode(mi, scope, arguments.get(i));
+                if (source != null) varargsPasses.add(List.of(source, parameter));
             }
             if (preconditions.contains(parameter)) {
                 preconditionArgument(mi, scope, statement, call, parameter, arguments.get(i));
