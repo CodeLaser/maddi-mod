@@ -1576,7 +1576,7 @@ public final class NullabilityPass {
                         ParameterInfo ours = mi.parameters().get(i);
                         ParameterInfo their = overridden.parameters().get(i);
                         if (!isTypeVariable(their.parameterizedType()) || !verdicts.containsKey(ours)
-                            || NullAnnotations.explicitState(ours) == NullableState.NULLABLE) {
+                            || explicitState(ours) == NullableState.NULLABLE) {
                             continue;
                         }
                         ParameterizedType theirs;
@@ -1643,11 +1643,86 @@ public final class NullabilityPass {
         return false;
     }
 
+    /*
+     Kotlin: what a declaration's null annotations say about the declared value itself. The front end puts a type-use
+     annotation written in declaration position on an array's ELEMENT type (JLS 9.7.4: '@Nullable Entry<K, V>[]
+     entries' has nullable elements, a non-null array), but NullAnnotations also reads it from the declaration's own
+     list, as about the array. guava's ImmutableMap.Builder.entries then made the array nullable too, and with it
+     RegularImmutableMap's and RegularImmutableBiMap's entries parameters, 'Array<Entry<K, V>?>?' (RegularImmutableMap.kt:63,
+     RegularImmutableBiMap.kt:113, 2026-10-17). On an array, an annotation the element carries does not count for the
+     array; one written on the array type ('X @Nullable []') and a declaration-only one (JSR-305) still do.
+     Gate NOELEMENTANNOTATIONS.
+     */
+    private NullableState explicitState(Info info) {
+        NullableState state = NullAnnotations.explicitState(info);
+        if (state == null || !policy.callResults() || ELEMENT_ANNOTATIONS_OFF) return state;
+        ParameterizedType type = switch (info) {
+            case FieldInfo fi -> fi.type();
+            case ParameterInfo pi -> pi.parameterizedType();
+            case MethodInfo mi -> mi.returnType();
+            default -> null;
+        };
+        if (type == null || type.arrays() == 0) return state;
+        ParameterizedType element = type;
+        while (element.arrays() > 0 && element.componentType() != null) element = element.componentType();
+        Set<String> onElement = new HashSet<>();
+        for (var ae : element.annotations()) if (ae.typeInfo() != null) onElement.add(ae.typeInfo().fullyQualifiedName());
+        boolean nonNull = false;
+        // the array type's own annotations ('X @Nullable []', guava's RegularImmutableMap.table) are about the array;
+        // the declaration's list holds a parameter's type-use annotation, which the front end also moved to the
+        // element, and a field's, which it did not: there the annotation type's @Target decides
+        List<io.codelaser.maddi.cst.api.expression.AnnotationExpression> own = new ArrayList<>(type.annotations());
+        for (var ae : info.annotations()) {
+            if (ae.typeInfo() != null && !onElement.contains(ae.typeInfo().fullyQualifiedName())
+                && !typeUseOnly(ae.typeInfo())) {
+                own.add(ae);
+            }
+        }
+        for (var ae : own) {
+            if (ae.typeInfo() == null) continue;
+            if ("io.codelaser.maddi.annotation".equals(ae.typeInfo().packageName()) && ae.extractBoolean("absent")) continue;
+            String name = ae.typeInfo().simpleName();
+            if (NullAnnotations.NULLABLE.contains(name)) return NullableState.NULLABLE;
+            if (NullAnnotations.NON_NULL.contains(name)) nonNull = true;
+        }
+        return nonNull ? NullableState.NONNULL : null;
+    }
+
+    // Kotlin: a type-use @Nullable in a field's declaration position, which the front end leaves off the element
+    // type: it is about the elements (explicitState)
+    private boolean nullableElementsByDeclaration(Info info) {
+        if (!policy.callResults() || ELEMENT_ANNOTATIONS_OFF || !(info instanceof FieldInfo fi)) return false;
+        ParameterizedType type = fi.type();
+        // one dimension only: in '@Nullable V[][] values' (guava DenseImmutableTable, ArrayTable) the innermost V is
+        // nullable, not the rows, and the pass has no node for an element's element
+        if (type.arrays() != 1 || type.componentType() == null) return false;
+        if (type.componentType().annotations().stream().anyMatch(NullAnnotations::isNullnessAnnotation)) return false;
+        return info.annotations().stream().anyMatch(ae -> ae.typeInfo() != null && typeUseOnly(ae.typeInfo())
+                && NullAnnotations.NULLABLE.contains(ae.typeInfo().simpleName()));
+    }
+
+    // an annotation type whose @Target is TYPE_USE (or TYPE_PARAMETER) only: JSpecify's, Checker's; not JSR-305's
+    private static boolean typeUseOnly(TypeInfo annotationType) {
+        for (var target : annotationType.annotations()) {
+            if (target.typeInfo() == null
+                || !"java.lang.annotation.Target".equals(target.typeInfo().fullyQualifiedName())) continue;
+            String targets = target.keyValuePairs().stream().map(kv -> String.valueOf(kv.value()))
+                    .collect(java.util.stream.Collectors.joining(","));
+            return targets.contains("TYPE_USE") && !targets.contains("FIELD") && !targets.contains("PARAMETER")
+                   && !targets.contains("METHOD");
+        }
+        return false;
+    }
+
+    // gate NOELEMENTANNOTATIONS: an array's element annotation in declaration position counts for the array (A/B)
+    private static final boolean ELEMENT_ANNOTATIONS_OFF = System.getenv("NOELEMENTANNOTATIONS") != null;
+
     // a source declaration's null annotation, under Policy.contracts: nullable seeds, non-null stops null
     private void contract(Info info, Object node) {
-        NullableState state = NullAnnotations.explicitState(info);
+        NullableState state = explicitState(info);
         if (state == NullableState.NULLABLE) seed(node, "annotated nullable");
         else if (state == NullableState.NONNULL) nonNullContracts.add(node);
+        if (nullableElementsByDeclaration(info)) seed(new Content(node), "annotated nullable elements");
     }
 
     private ParameterizedType contracted(Info info, ParameterizedType verdict) {
@@ -1659,7 +1734,10 @@ public final class NullabilityPass {
             default -> verdict;
         };
         ParameterizedType v = nestedContracted(declared, verdict);
-        NullableState state = NullAnnotations.explicitState(info);
+        if (nullableElementsByDeclaration(info) && v.arrays() == 1 && v.componentType() != null) {
+            v = v.withComponentType(v.componentType().withNullable(NullableState.NULLABLE));
+        }
+        NullableState state = explicitState(info);
         return state == null ? v : v.withNullable(state);
     }
 
@@ -1734,7 +1812,7 @@ public final class NullabilityPass {
     private NullableState parameterContract(ParameterInfo pi) {
         if (!analysed.contains(pi.methodInfo())) return stateOf(pi, PropertyImpl.NULLABILITY_PARAMETER);
         if (preconditions.contains(pi)) return NullableState.NONNULL;
-        return policy.contracts() ? NullAnnotations.explicitState(pi) : null;
+        return policy.contracts() ? explicitState(pi) : null;
     }
 
     /*
@@ -1778,7 +1856,7 @@ public final class NullabilityPass {
             return hint;
         }
         if (trustedReturns.contains(mi)) return NullableState.NONNULL;
-        return policy.contracts() ? NullAnnotations.explicitState(mi) : null;
+        return policy.contracts() ? explicitState(mi) : null;
     }
 
     /*
@@ -4431,7 +4509,7 @@ public final class NullabilityPass {
                 seedIndirect(target, "assigned " + lib);
             }
         } else if (policy.contracts() && analysed.contains(callee)
-                   && NullAnnotations.explicitState(callee) == NullableState.NULLABLE) {
+                   && explicitState(callee) == NullableState.NULLABLE) {
             seed(target, "assigned " + callee.fullyQualifiedName() + ", annotated nullable");
         }
     }
@@ -5145,7 +5223,7 @@ public final class NullabilityPass {
             // (resolveTypeVariableArguments)
             if (policy.callResults() && !METHOD_TYPE_VARIABLE_ARGUMENTS_OFF && call instanceof MethodCall
                 && analysed.contains(callee) && isMethodTypeVariable(parameter.parameterizedType())
-                && !parameter.isVarArgs() && NullAnnotations.explicitState(parameter) != NullableState.NULLABLE) {
+                && !parameter.isVarArgs() && explicitState(parameter) != NullableState.NULLABLE) {
                 int index = i;
                 typeVariableArguments.add(new TypeVariableArgument(parameter, call, index, mi, scope, () -> {
                     for (ParameterInfo pi : typedDispatch(call, callee, parameter)) {

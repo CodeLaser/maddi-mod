@@ -601,6 +601,60 @@ public class TestNullabilityPass extends CommonTest {
             }
             """;
 
+    @DisplayName("smart casts: a captured local is not smart-cast by a correlated check or by requireNonNull's own argument")
+    @Test
+    public void correlatedCapturedLocal() {
+        NullabilityPass.Report report = run("a.b.TF", """
+                package a.b;
+                import java.util.Objects;
+                import java.util.concurrent.atomic.AtomicLong;
+                class TF {
+                    interface Factory { String make(Runnable r); }
+                    static Factory build(String format) {
+                        String nameFormat = format;
+                        AtomicLong count = (nameFormat != null) ? new AtomicLong(0) : null;
+                        return new Factory() {
+                            public String make(Runnable r) {
+                                String name = "t";
+                                if (nameFormat != null) {
+                                    name = String.format(nameFormat, Objects.requireNonNull(count).getAndIncrement());
+                                }
+                                return name;
+                            }
+                        };
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        MethodInfo build = parsed.findUniqueMethod("build", 1);
+        MethodInfo[] make = {null};
+        build.methodBody().visit(e -> {
+            if (e instanceof io.codelaser.maddi.cst.api.expression.ConstructorCall cc && cc.anonymousClass() != null) {
+                make[0] = cc.anonymousClass().findUniqueMethod("make", 1);
+            }
+            return true;
+        });
+        io.codelaser.maddi.cst.api.statement.Statement ifStatement = make[0].methodBody().statements().get(1);
+        io.codelaser.maddi.cst.api.statement.Statement assignment = ifStatement.block().statements().getFirst();
+        io.codelaser.maddi.cst.api.variable.Variable[] count = {null};
+        List<io.codelaser.maddi.cst.api.expression.Expression> calls = new java.util.ArrayList<>();
+        assignment.expression().visit(e -> {
+            if (e instanceof VariableExpression ve && "count".equals(ve.variable().simpleName())) count[0] = ve.variable();
+            if (e instanceof io.codelaser.maddi.cst.api.expression.MethodCall mc) calls.add(mc);
+            return true;
+        });
+        StringBuilder sb = new StringBuilder("statement=" + report.smartCasts().nonNullAt(assignment, count[0]));
+        for (var call : calls) sb.append("; ").append(call).append("=").append(report.smartCasts().nonNullAt(call, count[0]));
+        Map<String, String> l = new java.util.TreeMap<>();
+        report.locals().forEach((local, pt) -> l.put(local.methodInfo().name() + "." + local.name(), k(pt)));
+        assertEquals("AtomicLong?", l.get("build.count"), l + " " + sb);
+        assertEquals(false, report.smartCasts().nonNullAt(assignment, count[0]), sb.toString());
+        for (var call : calls) {
+            if (call.toString().startsWith("Objects.requireNonNull")) {
+                assertEquals(false, report.smartCasts().nonNullAt(call, count[0]), sb.toString());
+            }
+        }
+    }
+
     @DisplayName("smart casts: a final field of a parameter or local is a val property Kotlin smart-casts")
     @Test
     public void propertySmartCasts() {
@@ -2259,6 +2313,35 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("String", s.get("a.b.DN.Range.lowerBound"), s + "\n" + explain(report));
         assertTrue(locals(report).contains("early.v: String?"), "read before the test: " + locals(report));
         assertTrue(locals(report).contains("mapped.m: String?"), "Kotlin's Map.get is V?: " + locals(report));
+    }
+
+    @DisplayName("Kotlin: a type-use @Nullable in an array declaration is about the elements, not the array")
+    @Test
+    public void elementAnnotationOnArray() {
+        NullabilityPass.Report report = run("a.b.EA", """
+                package a.b;
+                class EA {
+                    @java.lang.annotation.Target(java.lang.annotation.ElementType.TYPE_USE) @interface Nullable {}
+                    @Nullable Object[] entries = new Object[2];
+                    @Nullable String[] names = {"a"};
+                    @Nullable String[][] grid = {{"a"}};
+                    String cell() { return java.util.Objects.requireNonNull(grid[0][0]); }
+                    Object[] get() { return entries; }
+                    static Object[] pass(@Nullable String[] p) { return p; }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        String all = s + "\n" + explain(report);
+        assertFalse(s.get("a.b.EA.entries").endsWith("]?"), all);
+        assertTrue(s.get("a.b.EA.entries").contains("?["), all);
+        // the elements by the declaration alone, not by a null written into them
+        assertEquals("String?[]", s.get("a.b.EA.names"), all);
+        // two dimensions: the rows stay non-null
+        assertFalse(s.get("a.b.EA.grid").contains("[]?[]"), all);
+        assertFalse(s.get("a.b.EA.cell()").endsWith("?"), all);
+        assertFalse(s.get("a.b.EA.get()").endsWith("]?"), all);
+        assertFalse(s.get("a.b.EA.pass(String[]):0:p").endsWith("]?"), all);
     }
 
     @DisplayName("Kotlin: a list made from an array with null elements has nullable elements, guava's partitionImpl")
