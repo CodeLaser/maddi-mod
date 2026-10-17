@@ -126,6 +126,10 @@ class WriteLinksAndModification {
         Map<Variable, Set<MethodInfo>> expandedStructurallyModifiedDuringEvaluation = deepOnlyDuringEvaluation.isEmpty()
                 ? expandedModifiedDuringEvaluation
                 : expand(modifiedDuringEvaluation, deepOnlyDuringEvaluation);
+        closeOverModificationGroups(expandedModifiedDuringEvaluation);
+        if (expandedStructurallyModifiedDuringEvaluation != expandedModifiedDuringEvaluation) {
+            closeOverModificationGroups(expandedStructurallyModifiedDuringEvaluation);
+        }
 
         RedundantLinks redundantLinks = new RedundantLinks();
         Map<Link, Variable> flipOwner = new HashMap<>();
@@ -214,6 +218,43 @@ class WriteLinksAndModification {
             }
         }
         return expanded;
+    }
+
+    /*
+    CodeLaser/maddi-mod#54: a modification travels along a CHAIN of §m groups, not one hop. guava's
+    Maps.FilteredEntryMap.removeAllKeys: 'entryItr = map.entrySet().iterator(); ... entryItr.remove()' links
+    'entryItr.§m ☷{remove} $es.§m' and '$es.§m ≡ 0:map.§m'. The per-variable checks (notLinkedToModified*) look one
+    group away, and only the ≡-branch records what it finds, so remove() reached the entry set but never the map:
+    the parameter stayed @NotModified, structurally too. Close the modified set over the groups up front, to a
+    fixpoint: a group whose member is modified by a cause it passes (any cause for ≡, a cause in the pass set for
+    ☷, as notLinkedToModifiedVirtualModification decides) marks every member, with that cause. Gate NOVIEWCHAIN=1
+    restores the one-hop behaviour.
+     */
+    private void closeOverModificationGroups(Map<Variable, Set<MethodInfo>> modified) {
+        if (modified.isEmpty() || Gate.isSet("NOVIEWCHAIN")) return;
+        java.util.ArrayDeque<Variable> work = new java.util.ArrayDeque<>(modified.keySet());
+        while (!work.isEmpty()) {
+            Variable v = work.removeFirst();
+            Set<MethodInfo> causes = modified.get(v);
+            followGraph.graph().eqGroups(v).forEach(group -> {
+                Set<MethodInfo> pass = group.linkNature().pass();
+                if (!pass.isEmpty() && Collections.disjoint(pass, causes)) return;
+                for (Variable member : group.members()) {
+                    Variable real = Util.firstRealVariable(member);
+                    if (real == null || real.equals(v)) continue;
+                    Set<MethodInfo> existing = modified.get(real);
+                    if (existing == null) {
+                        modified.put(real, causes);
+                        work.addLast(real);
+                    } else if (!existing.containsAll(causes)) {
+                        Set<MethodInfo> union = new HashSet<>(existing);
+                        union.addAll(causes);
+                        modified.put(real, Set.copyOf(union));
+                        work.addLast(real);
+                    }
+                }
+            });
+        }
     }
 
     // FIXME should be replaced by real code that goes as far as §m equivalence: anything @Dependent
