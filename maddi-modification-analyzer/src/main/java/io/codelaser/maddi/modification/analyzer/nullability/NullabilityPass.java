@@ -2415,6 +2415,7 @@ public final class NullabilityPass {
      */
     private void coupleContent() {
         Set<Object> writtenThrough = writtenThrough();
+        Set<ParameterInfo> readOnlyArrays = readOnlyArrayParameters(writtenThrough);
         Deque<List<Object>> queue = new ArrayDeque<>(flows);
         Set<List<Object>> seen = new HashSet<>();
         while (!queue.isEmpty()) {
@@ -2429,7 +2430,8 @@ public final class NullabilityPass {
                 Content c0 = new Content(flow.get(0));
                 Content c1 = new Content(flow.get(1));
                 successors.computeIfAbsent(c0, _ -> new LinkedHashSet<>()).add(c1);
-                if (policy.assertContentWrites() || writtenThrough.contains(flow.get(1))) {
+                if ((policy.assertContentWrites() && !readOnlyArrayParameter(flow.get(1), readOnlyArrays))
+                    || writtenThrough.contains(flow.get(1))) {
                     successors.computeIfAbsent(c1, _ -> new LinkedHashSet<>()).add(c0);
                 }
                 queue.add(List.of(c0, c1));
@@ -2471,6 +2473,56 @@ public final class NullabilityPass {
             }
         }
     }
+
+    /*
+     Kotlin: an array parameter the method only reads prints as 'Array<out T>' (the printer, maddi cd8372ee4), which
+     takes the caller's Array<Type> as it is: its elements need not flow back. Joiner.join(@Nullable Object[] parts)
+     had pushed its '?' into every array joined, TypeResolver's upperBounds and from there resolveTypes' result and
+     TypeToken (guava kotlinc-97a.log, 2026-10-17). "Only reads", as the printer decides it: no element written
+     (writtenThrough), and the array flows on only into other such parameters (cycles allowed) or a library's; not
+     returned, assigned, or held. Not a varargs parameter, nor one of an override or an overridden method.
+     Gate NOREADONLYARRAYS.
+     */
+    private Set<ParameterInfo> readOnlyArrayParameters(Set<Object> writtenThrough) {
+        if (READ_ONLY_ARRAYS_OFF || !policy.callResults()) return Set.of();
+        Set<ParameterInfo> candidates = new HashSet<>();
+        Map<ParameterInfo, Set<Object>> out = new HashMap<>();
+        for (List<Object> flow : flows) {
+            if (flow.get(0) instanceof ParameterInfo pi) out.computeIfAbsent(pi, _ -> new HashSet<>()).add(flow.get(1));
+        }
+        for (MethodInfo mi : analysed) {
+            if (!overrides(mi).isEmpty() || implementations.containsKey(mi)) continue;
+            for (ParameterInfo pi : mi.parameters()) {
+                ParameterizedType t = pi.parameterizedType();
+                if (t.arrays() == 1 && !pi.isVarArgs() && !t.copyWithoutArrays().isPrimitiveExcludingVoid()
+                    && !writtenThrough.contains(pi)) {
+                    candidates.add(pi);
+                }
+            }
+        }
+        boolean changed = true;
+        while (changed) {
+            changed = false;
+            for (java.util.Iterator<ParameterInfo> it = candidates.iterator(); it.hasNext(); ) {
+                ParameterInfo pi = it.next();
+                for (Object to : out.getOrDefault(pi, Set.of())) {
+                    if (to instanceof ParameterInfo target && (candidates.contains(target) || library(target))) continue;
+                    it.remove();
+                    changed = true;
+                    break;
+                }
+            }
+        }
+        return candidates;
+    }
+
+    private static boolean readOnlyArrayParameter(Object node, Set<ParameterInfo> readOnlyArrays) {
+        Object root = node;
+        while (root instanceof Content c) root = c.of();
+        return root instanceof ParameterInfo pi && readOnlyArrays.contains(pi);
+    }
+
+    private static final boolean READ_ONLY_ARRAYS_OFF = System.getenv("NOREADONLYARRAYS") != null;
 
     /*
      For Java annotations an array's elements need to flow only forward: Java arrays are covariant, and so is
