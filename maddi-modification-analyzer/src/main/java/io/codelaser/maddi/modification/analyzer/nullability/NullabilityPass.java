@@ -1261,7 +1261,8 @@ public final class NullabilityPass {
                 .withPredicates(predicates)
                 .withNarrowedReads(narrowedReads)
                 .withNarrowedInMethod(narrowedReads == null ? null : this::narrowedInMethod)
-                .withFieldsAtEntry(fieldsAtEntry);
+                .withFieldsAtEntry(fieldsAtEntry)
+                .withSuperCalls(policy.callResults() && !SUPER_CALLS_OFF ? this::ownReturnsNonNull : null);
         if (policy.contracts()) {
             for (FieldInfo fi : fields) contract(fi, fi);
             for (MethodInfo mi : methods) {
@@ -1575,7 +1576,7 @@ public final class NullabilityPass {
                         ParameterInfo ours = mi.parameters().get(i);
                         ParameterInfo their = overridden.parameters().get(i);
                         if (!isTypeVariable(their.parameterizedType()) || !verdicts.containsKey(ours)
-                            || NullAnnotations.explicitState(ours) == NullableState.NULLABLE) {
+                            || explicitState(ours) == NullableState.NULLABLE) {
                             continue;
                         }
                         ParameterizedType theirs;
@@ -1642,11 +1643,86 @@ public final class NullabilityPass {
         return false;
     }
 
+    /*
+     Kotlin: what a declaration's null annotations say about the declared value itself. The front end puts a type-use
+     annotation written in declaration position on an array's ELEMENT type (JLS 9.7.4: '@Nullable Entry<K, V>[]
+     entries' has nullable elements, a non-null array), but NullAnnotations also reads it from the declaration's own
+     list, as about the array. guava's ImmutableMap.Builder.entries then made the array nullable too, and with it
+     RegularImmutableMap's and RegularImmutableBiMap's entries parameters, 'Array<Entry<K, V>?>?' (RegularImmutableMap.kt:63,
+     RegularImmutableBiMap.kt:113, 2026-10-17). On an array, an annotation the element carries does not count for the
+     array; one written on the array type ('X @Nullable []') and a declaration-only one (JSR-305) still do.
+     Gate NOELEMENTANNOTATIONS.
+     */
+    private NullableState explicitState(Info info) {
+        NullableState state = NullAnnotations.explicitState(info);
+        if (state == null || !policy.callResults() || ELEMENT_ANNOTATIONS_OFF) return state;
+        ParameterizedType type = switch (info) {
+            case FieldInfo fi -> fi.type();
+            case ParameterInfo pi -> pi.parameterizedType();
+            case MethodInfo mi -> mi.returnType();
+            default -> null;
+        };
+        if (type == null || type.arrays() == 0) return state;
+        ParameterizedType element = type;
+        while (element.arrays() > 0 && element.componentType() != null) element = element.componentType();
+        Set<String> onElement = new HashSet<>();
+        for (var ae : element.annotations()) if (ae.typeInfo() != null) onElement.add(ae.typeInfo().fullyQualifiedName());
+        boolean nonNull = false;
+        // the array type's own annotations ('X @Nullable []', guava's RegularImmutableMap.table) are about the array;
+        // the declaration's list holds a parameter's type-use annotation, which the front end also moved to the
+        // element, and a field's, which it did not: there the annotation type's @Target decides
+        List<io.codelaser.maddi.cst.api.expression.AnnotationExpression> own = new ArrayList<>(type.annotations());
+        for (var ae : info.annotations()) {
+            if (ae.typeInfo() != null && !onElement.contains(ae.typeInfo().fullyQualifiedName())
+                && !typeUseOnly(ae.typeInfo())) {
+                own.add(ae);
+            }
+        }
+        for (var ae : own) {
+            if (ae.typeInfo() == null) continue;
+            if ("io.codelaser.maddi.annotation".equals(ae.typeInfo().packageName()) && ae.extractBoolean("absent")) continue;
+            String name = ae.typeInfo().simpleName();
+            if (NullAnnotations.NULLABLE.contains(name)) return NullableState.NULLABLE;
+            if (NullAnnotations.NON_NULL.contains(name)) nonNull = true;
+        }
+        return nonNull ? NullableState.NONNULL : null;
+    }
+
+    // Kotlin: a type-use @Nullable in a field's declaration position, which the front end leaves off the element
+    // type: it is about the elements (explicitState)
+    private boolean nullableElementsByDeclaration(Info info) {
+        if (!policy.callResults() || ELEMENT_ANNOTATIONS_OFF || !(info instanceof FieldInfo fi)) return false;
+        ParameterizedType type = fi.type();
+        // one dimension only: in '@Nullable V[][] values' (guava DenseImmutableTable, ArrayTable) the innermost V is
+        // nullable, not the rows, and the pass has no node for an element's element
+        if (type.arrays() != 1 || type.componentType() == null) return false;
+        if (type.componentType().annotations().stream().anyMatch(NullAnnotations::isNullnessAnnotation)) return false;
+        return info.annotations().stream().anyMatch(ae -> ae.typeInfo() != null && typeUseOnly(ae.typeInfo())
+                && NullAnnotations.NULLABLE.contains(ae.typeInfo().simpleName()));
+    }
+
+    // an annotation type whose @Target is TYPE_USE (or TYPE_PARAMETER) only: JSpecify's, Checker's; not JSR-305's
+    private static boolean typeUseOnly(TypeInfo annotationType) {
+        for (var target : annotationType.annotations()) {
+            if (target.typeInfo() == null
+                || !"java.lang.annotation.Target".equals(target.typeInfo().fullyQualifiedName())) continue;
+            String targets = target.keyValuePairs().stream().map(kv -> String.valueOf(kv.value()))
+                    .collect(java.util.stream.Collectors.joining(","));
+            return targets.contains("TYPE_USE") && !targets.contains("FIELD") && !targets.contains("PARAMETER")
+                   && !targets.contains("METHOD");
+        }
+        return false;
+    }
+
+    // gate NOELEMENTANNOTATIONS: an array's element annotation in declaration position counts for the array (A/B)
+    private static final boolean ELEMENT_ANNOTATIONS_OFF = System.getenv("NOELEMENTANNOTATIONS") != null;
+
     // a source declaration's null annotation, under Policy.contracts: nullable seeds, non-null stops null
     private void contract(Info info, Object node) {
-        NullableState state = NullAnnotations.explicitState(info);
+        NullableState state = explicitState(info);
         if (state == NullableState.NULLABLE) seed(node, "annotated nullable");
         else if (state == NullableState.NONNULL) nonNullContracts.add(node);
+        if (nullableElementsByDeclaration(info)) seed(new Content(node), "annotated nullable elements");
     }
 
     private ParameterizedType contracted(Info info, ParameterizedType verdict) {
@@ -1658,7 +1734,10 @@ public final class NullabilityPass {
             default -> verdict;
         };
         ParameterizedType v = nestedContracted(declared, verdict);
-        NullableState state = NullAnnotations.explicitState(info);
+        if (nullableElementsByDeclaration(info) && v.arrays() == 1 && v.componentType() != null) {
+            v = v.withComponentType(v.componentType().withNullable(NullableState.NULLABLE));
+        }
+        NullableState state = explicitState(info);
         return state == null ? v : v.withNullable(state);
     }
 
@@ -1733,8 +1812,40 @@ public final class NullabilityPass {
     private NullableState parameterContract(ParameterInfo pi) {
         if (!analysed.contains(pi.methodInfo())) return stateOf(pi, PropertyImpl.NULLABILITY_PARAMETER);
         if (preconditions.contains(pi)) return NullableState.NONNULL;
-        return policy.contracts() ? NullAnnotations.explicitState(pi) : null;
+        return policy.contracts() ? explicitState(pi) : null;
     }
+
+    /*
+     Kotlin: a call through 'super' runs the method's own body, whatever its overrides return. Non-null when every
+     return of that body is non-null by itself ('return new NullsFirstOrdering<S>(this)'), with no facts. guava's
+     NaturalOrdering caches 'result = nullsFirst = super.<Comparable<?>>nullsFirst()' in an @Nullable field: the
+     override family tied Ordering.nullsFirst()'s return to NaturalOrdering's, so the super call was nullable, the
+     cached 'result' too, and so were nullsFirst(), nullsLast() and reverse() across Ordering's whole family
+     (NaturalOrdering.kt:21, NullsFirstOrdering.kt:14, Ordering.kt:23; 2026-10-17).
+     */
+    private boolean ownReturnsNonNull(MethodInfo mi) {
+        if (!analysed.contains(mi) || mi.methodBody() == null || mi.isAbstract()) return false;
+        Boolean known = ownReturnsNonNull.get(mi);
+        if (known != null) return known;
+        ownReturnsNonNull.put(mi, false); // a cycle (not through super) is not proof
+        boolean[] any = {false};
+        boolean[] all = {true};
+        mi.methodBody().visit(e -> {
+            if (e instanceof Lambda || e instanceof ConstructorCall cc && cc.anonymousClass() != null) return false;
+            if (e instanceof ReturnStatement rs) {
+                any[0] = true;
+                if (rs.expression() == null || !facts.nonNull(rs.expression(), Set.of())) all[0] = false;
+            }
+            return all[0];
+        });
+        boolean result = any[0] && all[0];
+        ownReturnsNonNull.put(mi, result);
+        return result;
+    }
+
+    private final Map<MethodInfo, Boolean> ownReturnsNonNull = new HashMap<>();
+    // gate NOSUPERCALLS: a call through super returns what the method's override family does (A/B)
+    private static final boolean SUPER_CALLS_OFF = System.getenv("NOSUPERCALLS") != null;
 
     private NullableState returnContract(MethodInfo mi) {
         if (!analysed.contains(mi)) {
@@ -1745,7 +1856,7 @@ public final class NullabilityPass {
             return hint;
         }
         if (trustedReturns.contains(mi)) return NullableState.NONNULL;
-        return policy.contracts() ? NullAnnotations.explicitState(mi) : null;
+        return policy.contracts() ? explicitState(mi) : null;
     }
 
     /*
@@ -2118,6 +2229,7 @@ public final class NullabilityPass {
                           // invariant generics make the two incompatible (guava's Converter, Maps, TreeRangeSet, ...)
                           || !TYPE_VARIABLE_SLOTS_OFF && outer != null && a.index() < outer.parameters().size()
                              && isTypeVariable(outer.parameters().get(a.index()))
+                             && !typeVariableElementSlots.contains(a)
                           || erasedSingleton(a, outer);
         boundedSlots.put(node, bounded);
         return bounded;
@@ -2141,6 +2253,9 @@ public final class NullabilityPass {
     private static final boolean ERASED_SINGLETONS_OFF = System.getenv("NOERASEDSINGLETONS") != null;
 
     private final Map<Object, Boolean> boundedSlots = new HashMap<>();
+    // slots holding a type variable that a 'T[]' of the same method fills (arrayElementsPassedThrough): 'List<T?>'
+    // where the array is an 'Array<T?>'
+    private final Set<Arg> typeVariableElementSlots = new HashSet<>();
     // gate NOBOUNDEDSLOTS: a bounded type parameter's slot takes null as any other (A/B)
     private static final boolean BOUNDED_SLOTS_OFF = System.getenv("NOBOUNDEDSLOTS") != null;
     // gate NOWILDCARDSLOTS: a slot flows back out of an unbound '?' parameter (A/B)
@@ -4306,6 +4421,36 @@ public final class NullabilityPass {
                 Object node = argumentNode(readScope.mi(), readScope.scope(), source);
                 if (node != null) flows.add(List.of(new Arg(node, k), target));
             });
+            arrayResultElements(target, mc);
+            if (!ARRAY_ELEMENTS_PASSED_OFF) {
+                List<Expression> calls = new ArrayList<>();
+                calls.add(mc);
+                for (Expression source : passedThrough(mc)) {
+                    if (NonNullFacts.unwrap(source) instanceof MethodCall inner) calls.add(inner);
+                }
+                for (Expression c : calls) {
+                    MethodCall arrayCall = (MethodCall) NonNullFacts.unwrap(c);
+                    // a library method only: an analysed one's parameter elements are tied to every caller's
+                    // array, and its body decides its result ('ImmutableList.copyOf(E[])' had carried the tests'
+                    // nulls into Types.TypeVariableImpl.bounds, Files.FileByteSink.modes; guava 2026-10-17)
+                    if (analysed.contains(arrayCall.methodInfo())) continue;
+                    arrayElementsPassedThrough(arrayCall).forEach((source, k) -> {
+                        Object node = argumentNode(readScope.mi(), readScope.scope(), source);
+                        if (node == null) return;
+                        Arg slot = new Arg(target, k);
+                        addEdge(new Content(node), slot);
+                        // a local array of the method's own type variable: its null is the slot's, not an
+                        // instantiation's. Not a parameter's array, whose elements are each caller's: through
+                        // 'ImmutableSet.copyOf(E[])' and 'Iterators.forArray(T...)' the tests' nulls had made
+                        // their results ImmutableSet<E?> and UnmodifiableIterator<T?> (guava 2026-10-17)
+                        ParameterizedType type = typeOf(node);
+                        if (node instanceof Local && type != null && type.arrays() == 1
+                            && isTypeVariable(type.copyWithOneFewerArrays())) {
+                            typeVariableElementSlots.add(slot);
+                        }
+                    });
+                }
+            }
         }
         if (analysed.contains(callee) && !callee.isConstructor() && !callee.returnType().isVoid()) {
             ParameterizedType rt = callee.returnType();
@@ -4365,7 +4510,7 @@ public final class NullabilityPass {
                 seedIndirect(target, "assigned " + lib);
             }
         } else if (policy.contracts() && analysed.contains(callee)
-                   && NullAnnotations.explicitState(callee) == NullableState.NULLABLE) {
+                   && explicitState(callee) == NullableState.NULLABLE) {
             seed(target, "assigned " + callee.fullyQualifiedName() + ", annotated nullable");
         }
     }
@@ -4508,6 +4653,68 @@ public final class NullabilityPass {
         }
         return out;
     }
+
+    /*
+     Kotlin: a generic method given an array of its type variable ('<T> List<T> asList(T... a)' passed the array
+     itself) infers T from the array's elements: the result's slot of T holds them. guava Iterators.partitionImpl:
+     'List<@Nullable T> list = unmodifiableList(asList(array))' with nulls written into 'array' printed a
+     MutableList<T> (Iterators.kt:397, 2026-10-17). Per array argument, the result's position k.
+     */
+    private static Map<Expression, Integer> arrayElementsPassedThrough(MethodCall mc) {
+        MethodInfo callee = mc.methodInfo();
+        if (callee == null) return Map.of();
+        ParameterizedType rt = callee.returnType();
+        if (rt.arrays() > 0 || rt.parameters().isEmpty()) return Map.of();
+        List<ParameterInfo> parameters = callee.parameters();
+        List<Expression> arguments = mc.parameterExpressions();
+        Map<Expression, Integer> out = new LinkedHashMap<>();
+        for (int i = 0; i < parameters.size() && i < arguments.size(); i++) {
+            ParameterizedType formal = parameters.get(i).parameterizedType();
+            if (formal.arrays() != 1 || !isMethodTypeVariable(formal)) continue;
+            if (parameters.get(i).isVarArgs() && !passesTheArray(arguments, parameters, i)) continue;
+            for (int k = 0; k < rt.parameters().size(); k++) {
+                ParameterizedType a = rt.parameters().get(k);
+                if (a.arrays() == 0 && a.wildcard() == null && formal.typeParameter().equals(a.typeParameter())) {
+                    out.put(arguments.get(i), k);
+                    break;
+                }
+            }
+        }
+        return out;
+    }
+
+    /*
+     Kotlin: a generic method returning its type variable's array, given an array of it (guava's
+     'ObjectArrays.newArray(T[] reference, int length)'), infers T from that array: the
+     result's elements are the argument's. guava ObjectArrays.concat: 'T[] result = newArray(array, n)' with an
+     'array: Array<out T?>' returned an Array<T> (ObjectArrays.kt:30, 2026-10-17). From the caller's own array to its
+     own target only, so no two callers are tied. Gate NOARRAYRESULTS.
+     */
+    private void arrayResultElements(Object target, MethodCall mc) {
+        if (ARRAY_RESULTS_OFF || readScope == null) return;
+        MethodInfo callee = mc.methodInfo();
+        // an analysed callee only: through 'Arrays.copyOf(castBuffer, n)' guava's TopKSelector.topK() returned a
+        // List<T?>, where 'T[] castBuffer = buffer' is guava's own @SuppressWarnings("nullness") assertion. Nor in a
+        // test: OrderingTest's 'newArray(strictlyOrderedElements, 0)' reached Ordering.max's 'E... rest', shared by
+        // every caller, and made the min/max family's results nullable (guava 2026-10-17)
+        if (!analysed.contains(callee) || testCode(readScope.mi())) return;
+        ParameterizedType rt = callee.returnType();
+        if (rt.arrays() != 1 || !isMethodTypeVariable(rt)) return;
+        List<ParameterInfo> parameters = callee.parameters();
+        List<Expression> arguments = mc.parameterExpressions();
+        for (int i = 0; i < parameters.size() && i < arguments.size(); i++) {
+            ParameterizedType formal = parameters.get(i).parameterizedType();
+            if (formal.arrays() != 1 || !rt.typeParameter().equals(formal.typeParameter())) continue;
+            if (parameters.get(i).isVarArgs() && !passesTheArray(arguments, parameters, i)) continue;
+            Object node = argumentNode(readScope.mi(), readScope.scope(), arguments.get(i));
+            if (node != null) addEdge(new Content(node), new Content(target));
+        }
+    }
+
+    private static final boolean ARRAY_RESULTS_OFF = System.getenv("NOARRAYRESULTS") != null;
+
+    // gate NOARRAYELEMENTSPASSED: an array argument's elements do not reach the slot of a generic call's result (A/B)
+    private static final boolean ARRAY_ELEMENTS_PASSED_OFF = System.getenv("NOARRAYELEMENTSPASSED") != null;
 
     // is the return type the parameter's, in the method's own type variables: 'T' and 'T', 'List<T>' and
     // 'List<? extends T>', 'Map<K, V>' and 'Map<K, V>'
@@ -5047,7 +5254,7 @@ public final class NullabilityPass {
             // (resolveTypeVariableArguments)
             if (policy.callResults() && !METHOD_TYPE_VARIABLE_ARGUMENTS_OFF && call instanceof MethodCall
                 && analysed.contains(callee) && isMethodTypeVariable(parameter.parameterizedType())
-                && !parameter.isVarArgs() && NullAnnotations.explicitState(parameter) != NullableState.NULLABLE) {
+                && !parameter.isVarArgs() && explicitState(parameter) != NullableState.NULLABLE) {
                 int index = i;
                 typeVariableArguments.add(new TypeVariableArgument(parameter, call, index, mi, scope, () -> {
                     for (ParameterInfo pi : typedDispatch(call, callee, parameter)) {
