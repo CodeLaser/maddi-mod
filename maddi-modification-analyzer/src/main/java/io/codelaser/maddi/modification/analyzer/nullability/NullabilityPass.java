@@ -1621,8 +1621,16 @@ public final class NullabilityPass {
         return result;
     }
 
+    /*
+     Not where the override declares its return @Nullable (guava MapMakerInternalMap's Helper.copy and
+     Segment.castForTesting over 'E copy(...)', 'abstract E castForTesting(...)', E bounded by InternalEntry<K, V, E>):
+     'E?' is a valid return for a bounded E, so the overridden member takes the null through the upward edge, as for
+     any analysed type-variable return (MapMakerInternalMap.kt, 7 "not a subtype of the overridden member").
+     Gate NOEXPLICITBOUNDED.
+     */
     private static boolean boundedTypeVariableOverride(MethodInfo mi) {
         if (mi.isConstructor() || mi.returnType().isVoid() || mi.returnType().typeParameter() != null) return false;
+        if (!EXPLICIT_BOUNDED_OFF && NullAnnotations.explicitState(mi) == NullableState.NULLABLE) return false;
         for (MethodInfo overridden : mi.overrides()) {
             ParameterizedType rt = overridden.returnType();
             if (isClassTypeVariable(rt) && !rt.typeParameter().typeBounds().isEmpty()
@@ -4864,6 +4872,7 @@ public final class NullabilityPass {
     // gate NOCONSUMERSLOTS: a caller's null into an abstract type-variable parameter reaches the implementations (A/B)
     private static final boolean CONSUMER_SLOTS_OFF = System.getenv("NOCONSUMERSLOTS") != null;
     private static final boolean METHOD_TYPE_VARIABLE_ARGUMENTS_OFF = System.getenv("NOMETHODTYPEVARARGS") != null;
+    private static final boolean EXPLICIT_BOUNDED_OFF = System.getenv("NOEXPLICITBOUNDED") != null;
     // gate NOANONYMOUSSUPER: an anonymous class's arguments do not reach its superclass's constructor (A/B)
     private static final boolean ANONYMOUS_SUPER_OFF = System.getenv("NOANONYMOUSSUPER") != null;
 

@@ -2012,6 +2012,29 @@ public class TestNullabilityPass extends CommonTest {
      collection sharing EMPTY. A '?' slot only receives, as '? extends' does; an unchecked conversion from Object
      type arguments starts a new instantiation, not one slot.
      */
+    @DisplayName("Kotlin: an explicitly @Nullable override of a bounded type-variable return widens the overridden")
+    @Test
+    public void explicitNullableBoundedOverride() {
+        NullabilityPass.Report report = run("a.b.EB", """
+                package a.b;
+                import java.lang.annotation.ElementType;
+                import java.lang.annotation.Target;
+                class EB {
+                    @Target(ElementType.TYPE_USE) @interface Nullable {}
+                    interface Entry<E extends Entry<E>> { }
+                    static final class Strong implements Entry<Strong> { }
+                    interface Helper<E extends Entry<E>> { E copy(E entry); }
+                    static final class StrongHelper implements Helper<Strong> {
+                        @Override public @Nullable Strong copy(Strong entry) { return entry.hashCode() > 0 ? null : entry; }
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("Strong?", s.get("a.b.EB.StrongHelper.copy(a.b.EB.Strong)"), s.toString());
+        assertEquals("E?", s.get("a.b.EB.Helper.copy(a.b.EB.Entry)"), s.toString());
+    }
+
     @DisplayName("Kotlin: an argument to a method's own type variable instantiates it")
     @Test
     public void methodTypeVariableArgument() {
