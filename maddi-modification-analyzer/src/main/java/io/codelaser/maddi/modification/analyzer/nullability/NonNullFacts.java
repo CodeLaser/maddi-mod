@@ -397,6 +397,17 @@ public final class NonNullFacts {
             }
             case SynchronizedStatement ss -> {
                 effects(ss.expression(), facts);
+                if (kotlinSmartCasts) {
+                    // Kotlin's synchronized(lock) { } is a lambda: a check inside smart-casts nothing after it, and
+                    // a variable it assigns is no longer known. guava ListenerCallQueue.PerListenerQueue.run():
+                    // 'synchronized (...) { nextToRun = waitQueue.poll(); if (nextToRun == null) { ...; break; } }
+                    // nextToRun.call(listener)' printed a plain receiver on an 'Event<L>?' (ListenerCallQueue.kt:93,
+                    // 2026-10-17)
+                    Out inside = block(ss.block(), new HashSet<>(facts));
+                    Set<Variable> after = new HashSet<>(facts);
+                    after.removeAll(assignedIn(ss.block()));
+                    return new Out(after, inside.completes());
+                }
                 return block(ss.block(), facts);
             }
             case TryStatement ts -> {

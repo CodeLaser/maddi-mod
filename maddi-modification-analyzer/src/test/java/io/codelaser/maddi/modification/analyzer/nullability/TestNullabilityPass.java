@@ -655,6 +655,41 @@ public class TestNullabilityPass extends CommonTest {
         }
     }
 
+    @DisplayName("smart casts: a null check inside synchronized does not smart-cast after it, guava's ListenerCallQueue")
+    @Test
+    public void synchronizedNoSmartCast() {
+        NullabilityPass.Report report = run("a.b.LQ", """
+                package a.b;
+                import java.util.ArrayDeque;
+                import java.util.Queue;
+                class LQ {
+                    final Queue<Runnable> waitQueue = new ArrayDeque<>();
+                    void run() {
+                        while (true) {
+                            Runnable next;
+                            synchronized (this) {
+                                next = waitQueue.poll();
+                                if (next == null) {
+                                    break;
+                                }
+                            }
+                            next.run();
+                        }
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        MethodInfo run = parsed.findUniqueMethod("run", 0);
+        io.codelaser.maddi.cst.api.statement.Statement loop = run.methodBody().statements().getFirst();
+        io.codelaser.maddi.cst.api.statement.Statement call = loop.block().statements().getLast();
+        io.codelaser.maddi.cst.api.variable.Variable[] next = {null};
+        call.expression().visit(e -> {
+            if (e instanceof VariableExpression ve && "next".equals(ve.variable().simpleName())) next[0] = ve.variable();
+            return true;
+        });
+        assertEquals(false, report.smartCasts().nonNullAt(call, next[0]));
+        assertEquals(true, report.useSites().nonNullAt(call, next[0]));
+    }
+
     @DisplayName("smart casts: a dereference in super(...) does not smart-cast the constructor body, guava's FinalizableWeakReference")
     @Test
     public void superCallArgumentNoSmartCast() {
