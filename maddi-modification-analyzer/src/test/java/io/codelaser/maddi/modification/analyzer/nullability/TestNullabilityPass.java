@@ -2039,6 +2039,9 @@ public class TestNullabilityPass extends CommonTest {
                         return joinIterable(partsList);
                     }
                     static String listed(String[] upper) { return joinList(upper); }
+                    static Runnable capture(Object[] hashers) { return () -> join(hashers); }
+                    static Runnable captured(String[] fns) { return capture(fns); }
+                    static Runnable nullHashers() { return capture(new Object[]{null}); }
                 }
                 """, NullabilityPass.Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
@@ -2047,8 +2050,47 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("String[]", s.get("a.b.RA.bounds(String[]):0:upperBounds"), s.toString());
         assertEquals("String[]", s.get("a.b.RA.listed(String[]):0:upper"), "Arrays.asList reads: " + s);
         assertEquals("String[]", s.get("a.b.RA.annotatedBounds(String[]):0:bounds"), "Joiner's shape: " + s);
+        assertEquals("String?[]", s.get("a.b.RA.captured(String[]):0:fns"), "captured: invariant, both ways " + s);
         assertEquals("String?[]", s.get("a.b.RA.written()"), "written through: still both ways " + s);
         assertEquals("String?[]", s.get("a.b.RA.passKept(String[]):0:names"), "returned: invariant, both ways " + s);
+    }
+
+    @DisplayName("Kotlin: guava's Joiner/WildcardCapturer array shape")
+    @Test
+    public void joinerShape() {
+        NullabilityPass.Report report = run("a.b.JS", """
+                package a.b;
+                import java.lang.annotation.ElementType;
+                import java.lang.annotation.Target;
+                import java.util.Arrays;
+                import java.util.Iterator;
+                import java.util.List;
+                class JS {
+                    @Target(ElementType.TYPE_USE) @interface Nullable {}
+                    static class Joiner {
+                        static Joiner on(char c) { return new Joiner(); }
+                        String join(Iterable<? extends @Nullable Object> parts) { return join(parts.iterator()); }
+                        String join(Iterator<? extends @Nullable Object> parts) { return parts.toString(); }
+                        final String join(@Nullable Object[] parts) {
+                            List<?> partsList = Arrays.<@Nullable Object>asList(parts);
+                            return join(partsList);
+                        }
+                        Joiner useForNull(String s) { return new Joiner() { @Override String join(Iterator<? extends @Nullable Object> p) { return s; } }; }
+                    }
+                    static class Capturer {
+                        Object capture(String[] upperBounds) {
+                            String name = "capture#" + Joiner.on('&').join(upperBounds);
+                            return make(name, upperBounds);
+                        }
+                        static Object make(String name, String[] bounds) { return name + bounds.length; }
+                    }
+                    static Capturer sub() { return new Capturer() { @Override Object capture(String[] upperBounds) { return upperBounds; } }; }
+                    static String callerBuilt(Object x, Object y) { return Joiner.on(',').join(new Object[]{x, y}); }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("String[]", s.get("a.b.JS.Capturer.capture(String[]):0:upperBounds"), s + "\n" + explain(report));
     }
 
     @DisplayName("Kotlin: an explicitly @Nullable override of a bounded type-variable return widens the overridden")
