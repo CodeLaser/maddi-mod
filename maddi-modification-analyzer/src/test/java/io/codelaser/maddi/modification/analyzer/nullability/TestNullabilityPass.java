@@ -2012,6 +2012,34 @@ public class TestNullabilityPass extends CommonTest {
      collection sharing EMPTY. A '?' slot only receives, as '? extends' does; an unchecked conversion from Object
      type arguments starts a new instantiation, not one slot.
      */
+    @DisplayName("Kotlin: a read-only array parameter's element nulls do not flow back into the caller's array")
+    @Test
+    public void readOnlyArrayParameter() {
+        NullabilityPass.Report report = run("a.b.RA", """
+                package a.b;
+                class RA {
+                    static String join(Object[] parts) {
+                        StringBuilder sb = new StringBuilder();
+                        for (Object p : parts) sb.append(p);
+                        return sb.toString();
+                    }
+                    static String nulls() { return join(new Object[]{"a", null}); }
+                    static String bounds(String[] upperBounds) { return join(upperBounds); }
+                    static void fill(Object[] out) { out[0] = null; }
+                    static String[] written() { String[] w = new String[]{"x"}; fill(w); return w; }
+                    static Object[] keep(Object[] held) { join(held); return held; }
+                    static Object[] kept() { return keep(new Object[]{null}); }
+                    static Object[] passKept(String[] names) { return keep(names); }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("Object?[]", s.get("a.b.RA.join(Object[]):0:parts"), s.toString());
+        assertEquals("String[]", s.get("a.b.RA.bounds(String[]):0:upperBounds"), s.toString());
+        assertEquals("String?[]", s.get("a.b.RA.written()"), "written through: still both ways " + s);
+        assertEquals("String?[]", s.get("a.b.RA.passKept(String[]):0:names"), "returned: invariant, both ways " + s);
+    }
+
     @DisplayName("Kotlin: an explicitly @Nullable override of a bounded type-variable return widens the overridden")
     @Test
     public void explicitNullableBoundedOverride() {
