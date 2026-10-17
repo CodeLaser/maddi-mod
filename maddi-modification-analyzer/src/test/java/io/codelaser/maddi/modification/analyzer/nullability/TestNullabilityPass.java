@@ -2261,6 +2261,54 @@ public class TestNullabilityPass extends CommonTest {
         assertTrue(locals(report).contains("mapped.m: String?"), "Kotlin's Map.get is V?: " + locals(report));
     }
 
+    @DisplayName("Kotlin: an annotated nullable lazy-init field returned through a cast is non-null, guava's NaturalOrdering")
+    @Test
+    public void lazyInitCastReturn() {
+        NullabilityPass.Report report = run("a.b.NO", """
+                package a.b;
+                import java.util.Comparator;
+                abstract class NO {
+                    @java.lang.annotation.Target(java.lang.annotation.ElementType.TYPE_USE) @interface Nullable {}
+                    static abstract class Ord<T extends @Nullable Object> implements Comparator<T> {
+                        <S extends T> Ord<S> reverse() { return new Rev<S>(this); }
+                        <S extends T> Ord<@Nullable S> nullsFirst() { return new NullsFirst<S>(this); }
+                    }
+                    static final class Rev<T extends @Nullable Object> extends Ord<T> {
+                        final Ord<? super T> forward;
+                        Rev(Ord<? super T> forward) { this.forward = forward; }
+                        public int compare(T a, T b) { return forward.compare(b, a); }
+                    }
+                    static final class NullsFirst<T> extends Ord<@Nullable T> {
+                        final Ord<? super T> ordering;
+                        NullsFirst(Ord<? super T> ordering) { this.ordering = ordering; }
+                        public int compare(@Nullable T a, @Nullable T b) { return a == null ? -1 : b == null ? 1 : ordering.compare(a, b); }
+                        @Override <S extends @Nullable T> Ord<S> reverse() { return ordering.<T>reverse().<S>nullsFirst(); }
+                    }
+                    static final class Natural extends Ord<Comparable<?>> {
+                        private transient @Nullable Ord<@Nullable Comparable<?>> nullsFirst;
+                        @SuppressWarnings("unchecked")
+                        public int compare(Comparable<?> left, Comparable<?> right) { return ((Comparable<Object>) left).compareTo(right); }
+                        @Override
+                        @SuppressWarnings("unchecked")
+                        <S extends Comparable<?>> Ord<@Nullable S> nullsFirst() {
+                            Ord<@Nullable Comparable<?>> result = nullsFirst;
+                            if (result == null) {
+                                result = nullsFirst = super.nullsFirst();
+                            }
+                            return (Ord<@Nullable S>) result;
+                        }
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        String all = s + "\n" + explain(report);
+        assertFalse(s.get("a.b.NO.Natural.nullsFirst()").endsWith("?"), all);
+        assertFalse(s.get("a.b.NO.Ord.nullsFirst()").endsWith("?"), all);
+        assertFalse(s.get("a.b.NO.Ord.reverse()").endsWith("?"), all);
+        assertFalse(s.get("a.b.NO.NullsFirst.reverse()").endsWith("?"), all);
+    }
+
     @DisplayName("Kotlin: a caller's null into an abstract type-variable parameter is its receiver's instantiation's")
     @Test
     public void consumerReceiverSlot() {

@@ -169,6 +169,18 @@ public final class NonNullFacts {
         return this;
     }
 
+    /**
+     * Does a call through {@code super} to this method return non-null? Such a call runs the method's own body, not
+     * an override's: what null its overrides return does not reach it.
+     */
+    public NonNullFacts withSuperCalls(java.util.function.Predicate<MethodInfo> superCallNonNull) {
+        this.superCallNonNull = superCallNonNull;
+        return this;
+    }
+
+    // null when not given (withSuperCalls)
+    private java.util.function.Predicate<MethodInfo> superCallNonNull;
+
     /** The same walk, restricted to what Kotlin's smart cast derives (class comment); walk it before use. */
     public NonNullFacts kotlinSmartCasts() {
         return new NonNullFacts(parameterContract, returnContract, true);
@@ -1275,6 +1287,11 @@ public final class NonNullFacts {
 
     // ------------------------------------------------------------------ expressions
 
+    static boolean superCall(MethodCall mc) {
+        return mc.object() instanceof VariableExpression ve
+               && ve.variable() instanceof io.codelaser.maddi.cst.api.variable.This t && t.writeSuper();
+    }
+
     /** Is the value of {@code e} certainly not null, given the facts? */
     boolean nonNull(Expression e, Set<Variable> facts) {
         Expression x = unwrap(e);
@@ -1292,6 +1309,8 @@ public final class NonNullFacts {
                                          && nonNull(ic.ifFalse(), withCondition(facts, whenFalse(ic.condition())));
             case MethodCall mc -> !kotlinSmartCasts && mc.methodInfo() != null
                                   && (returnContract.apply(mc.methodInfo()) == NullableState.NONNULL
+                                      || superCallNonNull != null && superCall(mc)
+                                         && superCallNonNull.test(mc.methodInfo())
                                       || pureCall(mc) instanceof Variable pc && facts.contains(pc)
                                       || notNullable != null && notNullable.test(mc));
             case Assignment a -> nonNull(a.value(), facts);

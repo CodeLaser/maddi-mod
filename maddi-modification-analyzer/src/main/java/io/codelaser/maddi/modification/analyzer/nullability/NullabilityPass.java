@@ -1261,7 +1261,8 @@ public final class NullabilityPass {
                 .withPredicates(predicates)
                 .withNarrowedReads(narrowedReads)
                 .withNarrowedInMethod(narrowedReads == null ? null : this::narrowedInMethod)
-                .withFieldsAtEntry(fieldsAtEntry);
+                .withFieldsAtEntry(fieldsAtEntry)
+                .withSuperCalls(policy.callResults() && !SUPER_CALLS_OFF ? this::ownReturnsNonNull : null);
         if (policy.contracts()) {
             for (FieldInfo fi : fields) contract(fi, fi);
             for (MethodInfo mi : methods) {
@@ -1735,6 +1736,38 @@ public final class NullabilityPass {
         if (preconditions.contains(pi)) return NullableState.NONNULL;
         return policy.contracts() ? NullAnnotations.explicitState(pi) : null;
     }
+
+    /*
+     Kotlin: a call through 'super' runs the method's own body, whatever its overrides return. Non-null when every
+     return of that body is non-null by itself ('return new NullsFirstOrdering<S>(this)'), with no facts. guava's
+     NaturalOrdering caches 'result = nullsFirst = super.<Comparable<?>>nullsFirst()' in an @Nullable field: the
+     override family tied Ordering.nullsFirst()'s return to NaturalOrdering's, so the super call was nullable, the
+     cached 'result' too, and so were nullsFirst(), nullsLast() and reverse() across Ordering's whole family
+     (NaturalOrdering.kt:21, NullsFirstOrdering.kt:14, Ordering.kt:23; 2026-10-17).
+     */
+    private boolean ownReturnsNonNull(MethodInfo mi) {
+        if (!analysed.contains(mi) || mi.methodBody() == null || mi.isAbstract()) return false;
+        Boolean known = ownReturnsNonNull.get(mi);
+        if (known != null) return known;
+        ownReturnsNonNull.put(mi, false); // a cycle (not through super) is not proof
+        boolean[] any = {false};
+        boolean[] all = {true};
+        mi.methodBody().visit(e -> {
+            if (e instanceof Lambda || e instanceof ConstructorCall cc && cc.anonymousClass() != null) return false;
+            if (e instanceof ReturnStatement rs) {
+                any[0] = true;
+                if (rs.expression() == null || !facts.nonNull(rs.expression(), Set.of())) all[0] = false;
+            }
+            return all[0];
+        });
+        boolean result = any[0] && all[0];
+        ownReturnsNonNull.put(mi, result);
+        return result;
+    }
+
+    private final Map<MethodInfo, Boolean> ownReturnsNonNull = new HashMap<>();
+    // gate NOSUPERCALLS: a call through super returns what the method's override family does (A/B)
+    private static final boolean SUPER_CALLS_OFF = System.getenv("NOSUPERCALLS") != null;
 
     private NullableState returnContract(MethodInfo mi) {
         if (!analysed.contains(mi)) {
