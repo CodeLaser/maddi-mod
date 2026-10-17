@@ -564,6 +564,53 @@ public final class NullabilityPass {
 
     private static final int MAX_ROUNDS = 5;
 
+    /*
+     Kotlin: the calls that fill a lazily cached field of this ('return (result == null) ? keySet = createKeySet() :
+     result'), trusted in round 1. Each later round keeps only what that round found unreached, so a null that really
+     reaches one still wins; what goes is the cycle that justifies itself. guava's keySet() was nullable because
+     createKeySet() might be, and createKeySet() because some members return another map's keySet()
+     ('ImmutableMap.this.keySet()', 'fromMultimap.keySet()'): the whole family printed 'createKeySet(): ImmutableSet<K>?'
+     (ImmutableMap.kt:105/107, AbstractMultimap.kt:76, 2026-10-17). Gate NOLAZYCACHES.
+     */
+    private Set<MethodInfo> lazyCacheCalls(List<Info> analysisOrder) {
+        if (!policy.callResults() || LAZY_CACHES_OFF) return Set.of();
+        Set<MethodInfo> out = new HashSet<>();
+        for (Info info : analysisOrder) {
+            if (!(info instanceof MethodInfo mi) || mi.methodBody() == null) continue;
+            boolean[] nullTest = {false};
+            List<MethodInfo> calls = new ArrayList<>();
+            mi.methodBody().visit(e -> {
+                if (e instanceof Lambda || e instanceof ConstructorCall cc && cc.anonymousClass() != null) return false;
+                if (e instanceof BinaryOperator bo && (NonNullFacts.unwrap(bo.lhs()) instanceof NullConstant
+                                                       || NonNullFacts.unwrap(bo.rhs()) instanceof NullConstant)) {
+                    nullTest[0] = true;
+                }
+                if (e instanceof Assignment a && a.assignmentOperator() == null
+                    && a.variableTarget() instanceof FieldReference fr && fr.scopeIsRecursivelyThis()
+                    && NonNullFacts.unwrap(a.value()) instanceof MethodCall mc && mc.methodInfo() != null
+                    && !mc.methodInfo().isStatic() && !mc.methodInfo().returnType().isPrimitiveExcludingVoid()
+                    && (mc.object() == null || mc.object().isEmpty()
+                        || NonNullFacts.unwrap(mc.object()) instanceof VariableExpression ve
+                           && ve.variable() instanceof io.codelaser.maddi.cst.api.variable.This)) {
+                    calls.add(mc.methodInfo());
+                }
+                return true;
+            });
+            if (nullTest[0] && !calls.isEmpty()) {
+                out.addAll(calls);
+                // and the cache's getter itself: 'return from.keySet()' in another member is a call the guard does
+                // not see through, unless keySet() is trusted too
+                if (!mi.isConstructor() && !mi.returnType().isVoid() && !mi.returnType().isPrimitiveExcludingVoid()) {
+                    out.add(mi);
+                }
+            }
+        }
+        return Set.copyOf(out);
+    }
+
+    // gate NOLAZYCACHES: round 1 trusts no analysed method's return (A/B)
+    private static final boolean LAZY_CACHES_OFF = System.getenv("NOLAZYCACHES") != null;
+
     /**
      * Runs the pass in rounds. Round 1 trusts no analysed method's return. Each later round takes the analysed
      * methods whose return the previous round found unreached by null (sound: that round's reachability
@@ -574,7 +621,7 @@ public final class NullabilityPass {
      * every call of a private method ({@link NonNullFacts#fieldsAtCalls}): non-null when its body starts.
      */
     public Report go(List<Info> analysisOrder) {
-        Set<MethodInfo> trusted = Set.of();
+        Set<MethodInfo> trusted = lazyCacheCalls(analysisOrder);
         Set<ParameterInfo> nonNullAtExit = Set.of();
         NarrowedReads narrowedReads = NarrowedReads.NONE;
         Map<MethodInfo, Set<Variable>> atEntry = Map.of();

@@ -2424,6 +2424,50 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("List<String>", s.get("a.b.PT.Holder.modes"), s + "\n" + explain(report));
     }
 
+    @DisplayName("Kotlin: a lazily cached view whose factory family returns another map's view is non-null, guava's createKeySet")
+    @Test
+    public void lazyCacheCycle() {
+        NullabilityPass.Report report = run("a.b.LC", """
+                package a.b;
+                import java.util.HashSet;
+                import java.util.Set;
+                abstract class LC {
+                    @java.lang.annotation.Target(java.lang.annotation.ElementType.TYPE_USE) @interface Nullable {}
+                    private transient @Nullable Set<String> keySet;
+                    Set<String> keySet() {
+                        Set<String> result = keySet;
+                        return (result == null) ? keySet = createKeySet() : result;
+                    }
+                    abstract Set<String> createKeySet();
+                    static final class Plain extends LC {
+                        Set<String> createKeySet() { return new HashSet<>(); }
+                    }
+                    static final class View extends LC {
+                        final LC from;
+                        View(LC from) { this.from = from; }
+                        Set<String> createKeySet() { return from.keySet(); }
+                    }
+                    static final class Nulls extends LC {
+                        private transient @Nullable Set<String> cached;
+                        Set<String> cached() {
+                            Set<String> result = cached;
+                            return (result == null) ? cached = make() : result;
+                        }
+                        @Nullable Set<String> make() { return null; }
+                        Set<String> createKeySet() { return new HashSet<>(); }
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        String all = s + "\n" + explain(report);
+        assertFalse(s.get("a.b.LC.keySet()").endsWith("?"), all);
+        assertFalse(s.get("a.b.LC.createKeySet()").endsWith("?"), all);
+        assertFalse(s.get("a.b.LC.View.createKeySet()").endsWith("?"), all);
+        // a real null still wins
+        assertTrue(s.get("a.b.LC.Nulls.cached()").endsWith("?"), all);
+    }
+
     @DisplayName("Kotlin: an annotated nullable lazy-init field returned through a cast is non-null, guava's NaturalOrdering")
     @Test
     public void lazyInitCastReturn() {
