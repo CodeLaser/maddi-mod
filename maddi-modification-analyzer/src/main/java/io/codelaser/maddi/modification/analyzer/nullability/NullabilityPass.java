@@ -2415,8 +2415,7 @@ public final class NullabilityPass {
      */
     private void coupleContent() {
         Set<Object> writtenThrough = writtenThrough(true);
-        // an annotation declares what the elements may be; it writes none ('join(@Nullable Object[] parts)')
-        Set<ParameterInfo> readOnlyArrays = readOnlyArrayParameters(writtenThrough(false));
+        Set<ParameterInfo> readOnlyArrays = readOnlyArrayParameters();
         Deque<List<Object>> queue = new ArrayDeque<>(flows);
         Set<List<Object>> seen = new HashSet<>();
         while (!queue.isEmpty()) {
@@ -2430,8 +2429,15 @@ public final class NullabilityPass {
             if (t0.arrays() > 0 && t1.arrays() > 0) {
                 Content c0 = new Content(flow.get(0));
                 Content c1 = new Content(flow.get(1));
-                successors.computeIfAbsent(c0, _ -> new LinkedHashSet<>()).add(c1);
-                if (!readOnlyArrayParameter(flow.get(1), readOnlyArrays)
+                // the links run both ways: 'join(upperBounds)' also gives a flow from join's 'parts' to the caller's
+                // array. A read-only parameter flows on only into another or a library's (readOnlyArrayParameters);
+                // anything else is that reversed link
+                if ((!readOnlyArrayParameter(flow.get(0), readOnlyArrays)
+                     || readOnlyArrayParameter(flow.get(1), readOnlyArrays))
+                    && !varargsPasses.contains(List.of(flow.get(1), flow.get(0)))) {
+                    successors.computeIfAbsent(c0, _ -> new LinkedHashSet<>()).add(c1);
+                }
+                if (!readOnlyArrayParameter(flow.get(1), readOnlyArrays) && !varargsPasses.contains(flow)
                     && (policy.assertContentWrites() || writtenThrough.contains(flow.get(1)))) {
                     successors.computeIfAbsent(c1, _ -> new LinkedHashSet<>()).add(c0);
                 }
@@ -2479,12 +2485,15 @@ public final class NullabilityPass {
      Kotlin: an array parameter the method only reads prints as 'Array<out T>' (the printer, maddi cd8372ee4), which
      takes the caller's Array<Type> as it is: its elements need not flow back. Joiner.join(@Nullable Object[] parts)
      had pushed its '?' into every array joined, TypeResolver's upperBounds and from there resolveTypes' result and
-     TypeToken (guava kotlinc-97a.log, 2026-10-17). "Only reads", as the printer decides it: no element written
-     (writtenThrough), and the array flows on only into other such parameters (cycles allowed) or a library's; not
+     TypeToken (guava kotlinc-97a.log, 2026-10-17). "Only reads", as the printer decides it, from the source: the
+     method assigns no element ('parts[i] = ...'; not writtenThrough, which also counts the elements a caller puts
+     into 'join(new Object[]{x, y})', nor the unmodified verdict, absent where the modification analysis did not
+     run); no lambda or anonymous class captures the array (AbstractCompositeHashFunction's fromHashers hands it on
+     from there); and the array flows on only into other such parameters (cycles allowed) or a library's: not
      returned, assigned, or held. Not a varargs parameter, nor one of an override or an overridden method.
      Gate NOREADONLYARRAYS.
      */
-    private Set<ParameterInfo> readOnlyArrayParameters(Set<Object> writtenThrough) {
+    private Set<ParameterInfo> readOnlyArrayParameters() {
         if (READ_ONLY_ARRAYS_OFF || !policy.callResults()) return Set.of();
         Set<ParameterInfo> candidates = new HashSet<>();
         Map<ParameterInfo, Set<Object>> out = new HashMap<>();
@@ -2496,7 +2505,7 @@ public final class NullabilityPass {
             for (ParameterInfo pi : mi.parameters()) {
                 ParameterizedType t = pi.parameterizedType();
                 if (t.arrays() == 1 && !pi.isVarArgs() && !t.copyWithoutArrays().isPrimitiveExcludingVoid()
-                    && !writtenThrough.contains(pi)) {
+                    && !writesOrCaptures(mi, pi)) {
                     candidates.add(pi);
                 }
             }
@@ -2517,6 +2526,55 @@ public final class NullabilityPass {
         return candidates;
     }
 
+    // does the method's body assign an element of the array parameter, or capture it in a lambda or anonymous class
+    private static boolean writesOrCaptures(MethodInfo mi, ParameterInfo pi) {
+        if (mi.methodBody() == null) return true;
+        boolean[] found = {false};
+        mi.methodBody().visit(e -> {
+            if (found[0]) return false;
+            if (e instanceof Assignment a && a.variableTarget() instanceof DependentVariable dv
+                && pi.equals(dv.arrayVariable())) {
+                found[0] = true;
+            } else if (e instanceof Lambda lambda) {
+                if (lambda.methodBody() != null && mentionsParameter(lambda.methodBody(), pi)) found[0] = true;
+                return false;
+            } else if (e instanceof ConstructorCall cc && cc.anonymousClass() != null) {
+                if (cc.parameterExpressions().stream().anyMatch(x -> mentionsParameter(x, pi))) found[0] = true;
+                for (MethodInfo m : cc.anonymousClass().methods()) {
+                    if (m.methodBody() != null && mentionsParameter(m.methodBody(), pi)) found[0] = true;
+                }
+                return false;
+            }
+            return true;
+        });
+        return found[0];
+    }
+
+    private static boolean mentionsParameter(Element e, ParameterInfo pi) {
+        boolean[] found = {false};
+        e.visit(x -> {
+            if (x instanceof VariableExpression ve && pi.equals(ve.variable())) found[0] = true;
+            return !found[0];
+        });
+        return found[0];
+    }
+
+    /*
+     Kotlin: a varargs parameter takes a copy ('newParameterizedType(Map.class, *typesIn)'), so its elements do not
+     flow back into the caller's array, whatever the method or the caller does with either afterwards. TypesTest's
+     'typesIn[0] = null' after the call (testing guava's defensive copy) reached resolveTypes' result through
+     newParameterizedType(Class, Type...); ImmutableList.construct(Object... elements)'s annotated elements reached
+     Types.newTypeVariableImpl's and newArtificialTypeVariable's bounds and captureAsTypeVariable's upperBounds
+     (TypeResolver.kt:234, Types.kt:325). Exactly the (array, varargs parameter) pairs of such calls: the caller's
+     elements still flow forward into the parameter's ('isVarReferenced(obj, *whitelist)' with a nullable element,
+     fernflower VarExprent.kt:205), only the back edge and the forward edge of the reversed link go. An override
+     family's varargs parameters stay tied as any other (ImmutableCollection.Builder.add(E...)). Only under
+     Policy.callResults. Gate NOVARARGCOPIES.
+     */
+    private final Set<List<Object>> varargsPasses = new HashSet<>();
+
+    private static final boolean VARARG_COPIES_OFF = System.getenv("NOVARARGCOPIES") != null;
+
     private static boolean readOnlyArrayParameter(Object node, Set<ParameterInfo> readOnlyArrays) {
         Object root = node;
         while (root instanceof Content c) root = c.of();
@@ -2533,6 +2591,7 @@ public final class NullabilityPass {
      ImmutableMap.Builder.entries, ImmutableList.array, Joiner.join(Object[]) and TypeToken's Type[] one slot.
      */
     private Set<Object> writtenThrough(boolean annotations) {
+        // 'annotations': whether an element annotation counts ('join(@Nullable Object[] parts)'); always, for now
         Set<Object> written = new HashSet<>();
         successors.forEach((from, tos) -> {
             if (from instanceof Content) return;
@@ -4952,6 +5011,11 @@ public final class NullabilityPass {
                 // an element of the array the call creates: the array is never null, the argument is an element
                 argument(mi, scope, statement, call, list, arguments, i, new Content(parameter));
                 continue;
+            }
+            if (parameter.isVarArgs() && policy.callResults() && !VARARG_COPIES_OFF) {
+                // an array spread into varargs ('*array'): the callee holds a copy (varargsCopy)
+                Object source = argumentNode(mi, scope, arguments.get(i));
+                if (source != null) varargsPasses.add(List.of(source, parameter));
             }
             if (preconditions.contains(parameter)) {
                 preconditionArgument(mi, scope, statement, call, parameter, arguments.get(i));
