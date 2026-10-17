@@ -2315,6 +2315,43 @@ public class TestNullabilityPass extends CommonTest {
         assertTrue(locals(report).contains("mapped.m: String?"), "Kotlin's Map.get is V?: " + locals(report));
     }
 
+    @DisplayName("Kotlin: a generic method's T[] result has the elements of the T[] it is given, guava's ObjectArrays.concat")
+    @Test
+    public void arrayResultElements() {
+        NullabilityPass.Report report = run("a.b.GC", """
+                package a.b;
+                import java.util.Arrays;
+                class GC {
+                    @java.lang.annotation.Target(java.lang.annotation.ElementType.TYPE_USE) @interface Nullable {}
+                    static <T extends @Nullable Object> T[] newArray(T[] reference, int length) {
+                        T[] empty = reference.length == 0 ? reference : Arrays.copyOf(reference, 0);
+                        return Arrays.copyOf(empty, length);
+                    }
+                    static <T extends @Nullable Object> T[] concat(T element, T[] array) {
+                        T[] result = newArray(array, array.length + 1);
+                        result[0] = element;
+                        System.arraycopy(array, 0, result, 1, array.length);
+                        return result;
+                    }
+                    static String[] use() { return concat("a", new String[]{"b", null}); }
+                    static final class Set {
+                        private static final Object[] EMPTY_ARRAY = new Object[0];
+                        static final Set EMPTY = new Set(EMPTY_ARRAY, EMPTY_ARRAY);
+                        final Object[] elements;
+                        final @Nullable Object[] table;
+                        Set(Object[] elements, @Nullable Object[] table) { this.elements = elements; this.table = table; }
+                        static Set of(Object a) { Object[] t = new Object[2]; t[1] = a; return new Set(new Object[]{a}, t); }
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        String all = s + "\n" + explain(report);
+        // the result's elements are the argument array's, as Kotlin infers T from it
+        assertEquals("T?[]", s.get("a.b.GC.concat(Object,Object[]):1:array"), all);
+        assertEquals("T?[]", s.get("a.b.GC.concat(Object,Object[])"), all);
+    }
+
     @DisplayName("Kotlin: a type-use @Nullable in an array declaration is about the elements, not the array")
     @Test
     public void elementAnnotationOnArray() {

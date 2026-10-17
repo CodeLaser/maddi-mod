@@ -4421,6 +4421,7 @@ public final class NullabilityPass {
                 Object node = argumentNode(readScope.mi(), readScope.scope(), source);
                 if (node != null) flows.add(List.of(new Arg(node, k), target));
             });
+            arrayResultElements(target, mc);
             if (!ARRAY_ELEMENTS_PASSED_OFF) {
                 List<Expression> calls = new ArrayList<>();
                 calls.add(mc);
@@ -4681,6 +4682,36 @@ public final class NullabilityPass {
         }
         return out;
     }
+
+    /*
+     Kotlin: a generic method returning its type variable's array, given an array of it (guava's
+     'ObjectArrays.newArray(T[] reference, int length)'), infers T from that array: the
+     result's elements are the argument's. guava ObjectArrays.concat: 'T[] result = newArray(array, n)' with an
+     'array: Array<out T?>' returned an Array<T> (ObjectArrays.kt:30, 2026-10-17). From the caller's own array to its
+     own target only, so no two callers are tied. Gate NOARRAYRESULTS.
+     */
+    private void arrayResultElements(Object target, MethodCall mc) {
+        if (ARRAY_RESULTS_OFF || readScope == null) return;
+        MethodInfo callee = mc.methodInfo();
+        // an analysed callee only: through 'Arrays.copyOf(castBuffer, n)' guava's TopKSelector.topK() returned a
+        // List<T?>, where 'T[] castBuffer = buffer' is guava's own @SuppressWarnings("nullness") assertion. Nor in a
+        // test: OrderingTest's 'newArray(strictlyOrderedElements, 0)' reached Ordering.max's 'E... rest', shared by
+        // every caller, and made the min/max family's results nullable (guava 2026-10-17)
+        if (!analysed.contains(callee) || testCode(readScope.mi())) return;
+        ParameterizedType rt = callee.returnType();
+        if (rt.arrays() != 1 || !isMethodTypeVariable(rt)) return;
+        List<ParameterInfo> parameters = callee.parameters();
+        List<Expression> arguments = mc.parameterExpressions();
+        for (int i = 0; i < parameters.size() && i < arguments.size(); i++) {
+            ParameterizedType formal = parameters.get(i).parameterizedType();
+            if (formal.arrays() != 1 || !rt.typeParameter().equals(formal.typeParameter())) continue;
+            if (parameters.get(i).isVarArgs() && !passesTheArray(arguments, parameters, i)) continue;
+            Object node = argumentNode(readScope.mi(), readScope.scope(), arguments.get(i));
+            if (node != null) addEdge(new Content(node), new Content(target));
+        }
+    }
+
+    private static final boolean ARRAY_RESULTS_OFF = System.getenv("NOARRAYRESULTS") != null;
 
     // gate NOARRAYELEMENTSPASSED: an array argument's elements do not reach the slot of a generic call's result (A/B)
     private static final boolean ARRAY_ELEMENTS_PASSED_OFF = System.getenv("NOARRAYELEMENTSPASSED") != null;
