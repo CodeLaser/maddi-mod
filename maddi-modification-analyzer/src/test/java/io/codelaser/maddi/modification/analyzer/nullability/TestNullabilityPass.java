@@ -2261,6 +2261,49 @@ public class TestNullabilityPass extends CommonTest {
         assertTrue(locals(report).contains("mapped.m: String?"), "Kotlin's Map.get is V?: " + locals(report));
     }
 
+    @DisplayName("Kotlin: a list made from an array with null elements has nullable elements, guava's partitionImpl")
+    @Test
+    public void partitionList() {
+        NullabilityPass.Report report = run("a.b.PT", """
+                package a.b;
+                import java.util.Arrays;
+                import java.util.Collections;
+                import java.util.Iterator;
+                import java.util.List;
+                class PT {
+                    @java.lang.annotation.Target(java.lang.annotation.ElementType.TYPE_USE) @interface Nullable {}
+                    static <T extends @Nullable Object> List<@Nullable T> next(Iterator<T> iterator, int size) {
+                        @SuppressWarnings("unchecked")
+                        @Nullable T[] array = (@Nullable T[]) new Object[size];
+                        int count = 0;
+                        for (; count < size && iterator.hasNext(); count++) {
+                            array[count] = iterator.next();
+                        }
+                        for (int i = count; i < size; i++) {
+                            array[i] = null;
+                        }
+                        List<@Nullable T> list = Collections.unmodifiableList(Arrays.asList(array));
+                        return list;
+                    }
+                    static <E> List<E> copyOf(E[] elements) { return Collections.unmodifiableList(Arrays.asList(elements)); }
+                    static List<String> nulls() { return copyOf(new String[]{"a", null}); }
+                    static final class Holder {
+                        final List<String> modes;
+                        Holder(String... modes) { this.modes = copyOf(modes); }
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        Map<String, String> l = new java.util.TreeMap<>();
+        report.locals().forEach((local, pt) -> l.put(local.name(), k(pt)));
+        assertEquals("List<T?>", l.get("list"), l + "\n" + explain(report));
+        // a parameter's array: the callers' nulls belong to their instantiations
+        assertEquals("List<E!>", s.get("a.b.PT.copyOf(Object[])"), s + "\n" + explain(report));
+        // nor through an analysed generic method, whose elements parameter holds every caller's array
+        assertEquals("List<String>", s.get("a.b.PT.Holder.modes"), s + "\n" + explain(report));
+    }
+
     @DisplayName("Kotlin: an annotated nullable lazy-init field returned through a cast is non-null, guava's NaturalOrdering")
     @Test
     public void lazyInitCastReturn() {

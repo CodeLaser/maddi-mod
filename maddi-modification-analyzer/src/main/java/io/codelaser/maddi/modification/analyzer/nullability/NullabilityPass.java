@@ -2151,6 +2151,7 @@ public final class NullabilityPass {
                           // invariant generics make the two incompatible (guava's Converter, Maps, TreeRangeSet, ...)
                           || !TYPE_VARIABLE_SLOTS_OFF && outer != null && a.index() < outer.parameters().size()
                              && isTypeVariable(outer.parameters().get(a.index()))
+                             && !typeVariableElementSlots.contains(a)
                           || erasedSingleton(a, outer);
         boundedSlots.put(node, bounded);
         return bounded;
@@ -2174,6 +2175,9 @@ public final class NullabilityPass {
     private static final boolean ERASED_SINGLETONS_OFF = System.getenv("NOERASEDSINGLETONS") != null;
 
     private final Map<Object, Boolean> boundedSlots = new HashMap<>();
+    // slots holding a type variable that a 'T[]' of the same method fills (arrayElementsPassedThrough): 'List<T?>'
+    // where the array is an 'Array<T?>'
+    private final Set<Arg> typeVariableElementSlots = new HashSet<>();
     // gate NOBOUNDEDSLOTS: a bounded type parameter's slot takes null as any other (A/B)
     private static final boolean BOUNDED_SLOTS_OFF = System.getenv("NOBOUNDEDSLOTS") != null;
     // gate NOWILDCARDSLOTS: a slot flows back out of an unbound '?' parameter (A/B)
@@ -4339,6 +4343,35 @@ public final class NullabilityPass {
                 Object node = argumentNode(readScope.mi(), readScope.scope(), source);
                 if (node != null) flows.add(List.of(new Arg(node, k), target));
             });
+            if (!ARRAY_ELEMENTS_PASSED_OFF) {
+                List<Expression> calls = new ArrayList<>();
+                calls.add(mc);
+                for (Expression source : passedThrough(mc)) {
+                    if (NonNullFacts.unwrap(source) instanceof MethodCall inner) calls.add(inner);
+                }
+                for (Expression c : calls) {
+                    MethodCall arrayCall = (MethodCall) NonNullFacts.unwrap(c);
+                    // a library method only: an analysed one's parameter elements are tied to every caller's
+                    // array, and its body decides its result ('ImmutableList.copyOf(E[])' had carried the tests'
+                    // nulls into Types.TypeVariableImpl.bounds, Files.FileByteSink.modes; guava 2026-10-17)
+                    if (analysed.contains(arrayCall.methodInfo())) continue;
+                    arrayElementsPassedThrough(arrayCall).forEach((source, k) -> {
+                        Object node = argumentNode(readScope.mi(), readScope.scope(), source);
+                        if (node == null) return;
+                        Arg slot = new Arg(target, k);
+                        addEdge(new Content(node), slot);
+                        // a local array of the method's own type variable: its null is the slot's, not an
+                        // instantiation's. Not a parameter's array, whose elements are each caller's: through
+                        // 'ImmutableSet.copyOf(E[])' and 'Iterators.forArray(T...)' the tests' nulls had made
+                        // their results ImmutableSet<E?> and UnmodifiableIterator<T?> (guava 2026-10-17)
+                        ParameterizedType type = typeOf(node);
+                        if (node instanceof Local && type != null && type.arrays() == 1
+                            && isTypeVariable(type.copyWithOneFewerArrays())) {
+                            typeVariableElementSlots.add(slot);
+                        }
+                    });
+                }
+            }
         }
         if (analysed.contains(callee) && !callee.isConstructor() && !callee.returnType().isVoid()) {
             ParameterizedType rt = callee.returnType();
@@ -4541,6 +4574,38 @@ public final class NullabilityPass {
         }
         return out;
     }
+
+    /*
+     Kotlin: a generic method given an array of its type variable ('<T> List<T> asList(T... a)' passed the array
+     itself) infers T from the array's elements: the result's slot of T holds them. guava Iterators.partitionImpl:
+     'List<@Nullable T> list = unmodifiableList(asList(array))' with nulls written into 'array' printed a
+     MutableList<T> (Iterators.kt:397, 2026-10-17). Per array argument, the result's position k.
+     */
+    private static Map<Expression, Integer> arrayElementsPassedThrough(MethodCall mc) {
+        MethodInfo callee = mc.methodInfo();
+        if (callee == null) return Map.of();
+        ParameterizedType rt = callee.returnType();
+        if (rt.arrays() > 0 || rt.parameters().isEmpty()) return Map.of();
+        List<ParameterInfo> parameters = callee.parameters();
+        List<Expression> arguments = mc.parameterExpressions();
+        Map<Expression, Integer> out = new LinkedHashMap<>();
+        for (int i = 0; i < parameters.size() && i < arguments.size(); i++) {
+            ParameterizedType formal = parameters.get(i).parameterizedType();
+            if (formal.arrays() != 1 || !isMethodTypeVariable(formal)) continue;
+            if (parameters.get(i).isVarArgs() && !passesTheArray(arguments, parameters, i)) continue;
+            for (int k = 0; k < rt.parameters().size(); k++) {
+                ParameterizedType a = rt.parameters().get(k);
+                if (a.arrays() == 0 && a.wildcard() == null && formal.typeParameter().equals(a.typeParameter())) {
+                    out.put(arguments.get(i), k);
+                    break;
+                }
+            }
+        }
+        return out;
+    }
+
+    // gate NOARRAYELEMENTSPASSED: an array argument's elements do not reach the slot of a generic call's result (A/B)
+    private static final boolean ARRAY_ELEMENTS_PASSED_OFF = System.getenv("NOARRAYELEMENTSPASSED") != null;
 
     // is the return type the parameter's, in the method's own type variables: 'T' and 'T', 'List<T>' and
     // 'List<? extends T>', 'Map<K, V>' and 'Map<K, V>'
