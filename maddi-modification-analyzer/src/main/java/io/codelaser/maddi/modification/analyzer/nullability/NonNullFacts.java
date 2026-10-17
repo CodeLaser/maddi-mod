@@ -384,7 +384,12 @@ public final class NonNullFacts {
             case io.codelaser.maddi.cst.api.statement.ExplicitConstructorInvocation eci -> {
                 // 'super(parent.getRetrievalSemantics())' dereferences parent before the body runs (timefold
                 // BavetAbstractConstraintStream: its parameter is non-null whenever the constructor completes)
-                for (Expression argument : eci.parameterExpressions()) effects(argument, facts);
+                // Not for Kotlin's smart casts: the supertype call's arguments are in the class header, and an init
+                // block does not smart-cast from them. guava FinalizableWeakReference: 'super(referent, queue.queue);
+                // queue.cleanUp();' printed 'init { queue.cleanUp() }' on a 'queue: FinalizableReferenceQueue?'
+                // (FinalizableWeakReference.kt:9, 2026-10-17)
+                Set<Variable> target = kotlinSmartCasts ? new HashSet<>(facts) : facts;
+                for (Expression argument : eci.parameterExpressions()) effects(argument, target);
                 return new Out(facts, true);
             }
             case Block b -> {

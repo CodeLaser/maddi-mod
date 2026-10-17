@@ -655,6 +655,33 @@ public class TestNullabilityPass extends CommonTest {
         }
     }
 
+    @DisplayName("smart casts: a dereference in super(...) does not smart-cast the constructor body, guava's FinalizableWeakReference")
+    @Test
+    public void superCallArgumentNoSmartCast() {
+        NullabilityPass.Report report = run("a.b.FW", """
+                package a.b;
+                class FW {
+                    static class Queue { final Object queue = new Object(); void cleanUp() { } }
+                    static class Base { Base(Object referent, Object queue) { } }
+                    static class Ref extends Base {
+                        Ref(Object referent, Queue queue) {
+                            super(referent, queue.queue);
+                            queue.cleanUp();
+                        }
+                    }
+                    static Ref make() { return new Ref("x", null); }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        MethodInfo[] ctor = {null};
+        parsed.subTypes().forEach(st -> {
+            if ("Ref".equals(st.simpleName())) ctor[0] = st.findConstructor(2);
+        });
+        io.codelaser.maddi.cst.api.statement.Statement cleanUp = ctor[0].methodBody().statements().get(1);
+        ParameterInfo queue = ctor[0].parameters().get(1);
+        assertEquals(false, report.smartCasts().nonNullAt(cleanUp, queue));
+        assertEquals(true, report.useSites().nonNullAt(cleanUp, queue));
+    }
+
     @DisplayName("smart casts: a final field of a parameter or local is a val property Kotlin smart-casts")
     @Test
     public void propertySmartCasts() {
