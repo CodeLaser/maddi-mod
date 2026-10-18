@@ -2346,16 +2346,21 @@ public final class NullabilityPass {
         Set<TypeInfo> types = new java.util.LinkedHashSet<>();
         for (MethodInfo mi : methods) types.add(mi.typeInfo());
         for (FieldInfo fi : fields) types.add(fi.owner());
-        // every declared type use: supertypes, fields, parameters and results
-        List<ParameterizedType> uses = new ArrayList<>();
+        // every type use: supertypes, fields, parameters and results, and in the bodies the types of locals, casts,
+        // calls and constructor calls ('new ReverseImmutableList<>(this)' in ImmutableList.reverse())
+        List<TypeUse> uses = new ArrayList<>();
         for (TypeInfo t : types) {
-            if (t.parentClass() != null) uses.add(t.parentClass());
-            uses.addAll(t.interfacesImplemented());
+            if (t.parentClass() != null) uses.add(new TypeUse(t.parentClass(), t));
+            for (ParameterizedType i : t.interfacesImplemented()) uses.add(new TypeUse(i, t));
         }
-        for (FieldInfo fi : fields) uses.add(fi.type());
+        for (FieldInfo fi : fields) {
+            uses.add(new TypeUse(fi.type(), fi));
+            if (fi.initializer() != null) fi.initializer().visit(e -> bodyTypeUse(e, fi, uses));
+        }
         for (MethodInfo mi : methods) {
-            if (!mi.isConstructor()) uses.add(mi.returnType());
-            for (ParameterInfo pi : mi.parameters()) uses.add(pi.parameterizedType());
+            if (!mi.isConstructor()) uses.add(new TypeUse(mi.returnType(), mi));
+            for (ParameterInfo pi : mi.parameters()) uses.add(new TypeUse(pi.parameterizedType(), mi));
+            if (mi.methodBody() != null) mi.methodBody().visit(e -> bodyTypeUse(e, mi, uses));
         }
         /*
          A type variable used in a non-null position ('Response<T>' in 'interface StreamingResponseHandler<T>', or
@@ -2377,38 +2382,83 @@ public final class NullabilityPass {
             boolean changed = true;
             while (changed) {
                 changed = false;
-                for (ParameterizedType use : uses) changed |= carryNonNull(use, types, blocked, conflicts);
+                for (TypeUse use : uses) changed |= carryNonNull(use.type(), use.where(), types, blocked, conflicts);
             }
-            if (conflicts.isEmpty() || !blocked.addAll(conflicts)) return;
+            if (conflicts.isEmpty() || !blocked.addAll(conflicts)) {
+                if (NULL_MARKED_DEBUG != null) debugNullMarked(types, blocked);
+                return;
+            }
         }
     }
 
     private final Map<String, List<io.codelaser.maddi.cst.api.expression.AnnotationExpression>> packageInfoAnnotations
             = new HashMap<>();
 
-    private boolean carryNonNull(ParameterizedType use, Set<TypeInfo> types,
+    private record TypeUse(ParameterizedType type, Info where) {
+    }
+
+    private static boolean bodyTypeUse(Element e, Info where, List<TypeUse> uses) {
+        switch (e) {
+            case ConstructorCall cc -> uses.add(new TypeUse(cc.parameterizedType(), where));
+            case MethodCall mc -> uses.add(new TypeUse(mc.concreteReturnType(), where));
+            case Cast c -> uses.add(new TypeUse(c.parameterizedType(), where));
+            case LocalVariableCreation lvc -> lvc.localVariableStream()
+                    .forEach(lv -> uses.add(new TypeUse(lv.parameterizedType(), where)));
+            default -> {
+            }
+        }
+        return true;
+    }
+
+    private boolean carryNonNull(ParameterizedType use, Info where, Set<TypeInfo> types,
                                  Set<io.codelaser.maddi.cst.api.info.TypeParameter> blocked,
                                  Set<io.codelaser.maddi.cst.api.info.TypeParameter> conflicts) {
+        if (use == null) return false;
         boolean changed = false;
         TypeInfo sup = use.typeInfo();
         for (int i = 0; i < use.parameters().size(); i++) {
             ParameterizedType a = use.parameters().get(i);
-            changed |= carryNonNull(a, types, blocked, conflicts);
+            changed |= carryNonNull(a, where, types, blocked, conflicts);
             var tp = a.typeParameter();
             if (tp == null || a.wildcard() != null || sup == null || i >= sup.typeParameters().size()) continue;
             var position = sup.typeParameters().get(i);
-            if (!nonNullTypeParameters.contains(position) || nonNullTypeParameters.contains(tp)) continue;
+            // 'ImmutableList<@NonNull E>' of a nullable-bounded E (FluentIterable.toList()): Kotlin's 'E & Any'
+            if (!nonNullTypeParameters.contains(position) || nonNullTypeParameters.contains(tp)
+                || explicit(a.annotations()) == NullableState.NONNULL) continue;
             boolean ours = tp.getOwner().isLeft() ? types.contains(tp.getOwner().getLeft())
                     : analysed.contains(tp.getOwner().getRight());
             if (ours && !blocked.contains(tp) && !nullableBound(tp)
                 && explicit(a.annotations()) != NullableState.NULLABLE) {
                 nonNullTypeParameters.add(tp);
                 changed = true;
-            } else {
-                conflicts.add(position);
+            } else if (conflicts.add(position) && NULL_MARKED_DEBUG != null) {
+                debugConflicts.add(position + " of " + sup.fullyQualifiedName() + " <- " + tp + " ("
+                                   + (tp.getOwner().isLeft() ? tp.getOwner().getLeft().fullyQualifiedName()
+                        : tp.getOwner().getRight().fullyQualifiedName()) + ", ours " + ours + ", bound "
+                                   + nullableBound(tp) + ") in " + where.fullyQualifiedName());
             }
         }
         return changed;
+    }
+
+    // NULLMARKEDDEBUG=<file>: why each null-marked position was left unbounded, and the bounds kept (diagnostics)
+    private static final String NULL_MARKED_DEBUG = System.getenv("NULLMARKEDDEBUG");
+    private final List<String> debugConflicts = new ArrayList<>();
+
+    private void debugNullMarked(Set<TypeInfo> types, Set<io.codelaser.maddi.cst.api.info.TypeParameter> blocked) {
+        List<String> lines = new ArrayList<>(debugConflicts);
+        lines.add("blocked " + blocked.size() + ", non-null " + nonNullTypeParameters.size() + ", package-infos "
+                  + packageInfoAnnotations.size());
+        for (TypeInfo t : types) {
+            for (var tp : t.typeParameters()) {
+                lines.add((nonNullTypeParameters.contains(tp) ? "NONNULL " : "free ") + t.fullyQualifiedName() + "."
+                          + tp.simpleName());
+            }
+        }
+        try {
+            java.nio.file.Files.write(java.nio.file.Path.of(NULL_MARKED_DEBUG), lines);
+        } catch (java.io.IOException ignored) {
+        }
     }
 
     // '<T extends @Nullable Object>' (or any @Nullable bound)

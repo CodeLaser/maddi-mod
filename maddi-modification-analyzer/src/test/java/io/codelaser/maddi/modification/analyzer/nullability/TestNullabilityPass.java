@@ -2534,6 +2534,11 @@ public class TestNullabilityPass extends CommonTest {
                     interface Handler<X> { void onComplete(Response<X> response); }
                     @NullMarked static class Pair<A> { }
                     interface Lenient<Y extends @Nullable Object> { Pair<Y> get(); }
+                    @java.lang.annotation.Target(java.lang.annotation.ElementType.TYPE_USE) @interface NonNull {}
+                    interface Fluent<Z extends @Nullable Object> { Response<@NonNull Z> toResponse(); }
+                    static class Maker<M> {
+                        Object make(M m) { return new Response<M>(m); }
+                    }
                 }
                 """, NullabilityPass.Policy.KOTLIN);
         Map<String, io.codelaser.maddi.cst.api.info.TypeParameter> tps = new java.util.TreeMap<>();
@@ -2545,6 +2550,8 @@ public class TestNullabilityPass extends CommonTest {
         assertTrue(report.nonNullTypeParameter(tps.get("from.U")), "a method's type variable in the position");
         assertFalse(report.nonNullTypeParameter(tps.get("Pair.A")), "a @Nullable-bounded variable uses it");
         assertFalse(report.nonNullTypeParameter(tps.get("Lenient.Y")));
+        assertFalse(report.nonNullTypeParameter(tps.get("Fluent.Z")), "'@NonNull Z' is Kotlin's 'Z & Any'");
+        assertTrue(report.nonNullTypeParameter(tps.get("Maker.M")), "a constructor call in a body uses the position");
     }
 
     @DisplayName("Kotlin: a @ParametricNullness type-variable parameter is a plain V, guava's TrustedListenableFutureTask.create")
