@@ -2147,9 +2147,20 @@ public final class NullabilityPass {
     private void addEdge(Object from, Object to) {
         if (from == null || to == null || from.equals(to)) return;
         if (!policy.testNulls() && testCode(from) && !testCode(to)) return;
+        // Kotlin: a primitive value carries no null on: unboxing into it already threw. guava's
+        // 'Boolean apply(T t) { return predicate.apply(t); }' over 'boolean Predicate.apply' was 'Boolean?' through a
+        // test's MockEquivalence.doEquivalent and the boolean equivalent()/doEquivalent() family (Functions.kt:103,
+        // 2026-10-18). Gate NOPRIMITIVECUTS.
+        if (policy.callResults() && !PRIMITIVE_CUTS_OFF && !(from instanceof Content) && primitive(typeOf(from))) return;
         flows.add(List.of(from, to));
         successors.computeIfAbsent(from, _ -> new LinkedHashSet<>()).add(to);
     }
+
+    private static boolean primitive(ParameterizedType type) {
+        return type != null && type.arrays() == 0 && type.isPrimitiveExcludingVoid();
+    }
+
+    private static final boolean PRIMITIVE_CUTS_OFF = System.getenv("NOPRIMITIVECUTS") != null;
 
     private void seed(Object node, String origin) {
         seed(node, origin, null);
@@ -2823,6 +2834,9 @@ public final class NullabilityPass {
             }
         }
     }
+
+    // gate NOSTARRESULTS: a generic call given a '?' argument does not read its result from that slot (A/B)
+    private static final boolean STAR_RESULTS_OFF = System.getenv("NOSTARRESULTS") != null;
 
     // gate NOSTARSLOTS: a '?' argument's values are not read as nullable (A/B)
     private static final boolean STAR_SLOTS_OFF = System.getenv("NOSTARSLOTS") != null;
@@ -4479,6 +4493,14 @@ public final class NullabilityPass {
             typeArgumentsPassedThrough(mc).forEach((source, k) -> {
                 Object node = argumentNode(readScope.mi(), readScope.scope(), source);
                 if (node != null) flows.add(List.of(new Arg(node, k), target));
+                // Kotlin: from a '?' argument the result is the star projection's value, Any? ('Object v =
+                // getUninterruptibly(future)' on a ListenableFuture<?>: guava AbstractFuture.getFutureValue then tests
+                // 'v == null', AbstractFuture.kt:346, 2026-10-18). Gate NOSTARRESULTS.
+                ParameterizedType st = node == null ? null : typeOf(node);
+                if (!STAR_RESULTS_OFF && st != null && k < st.parameters().size()
+                    && st.parameters().get(k).wildcard() != null) {
+                    addEdge(new Arg(node, k), target);
+                }
             });
             arrayResultElements(target, mc);
             if (!ARRAY_ELEMENTS_PASSED_OFF) {

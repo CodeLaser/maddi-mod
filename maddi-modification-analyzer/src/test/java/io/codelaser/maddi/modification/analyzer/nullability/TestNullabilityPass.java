@@ -2486,6 +2486,40 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("List<String>", s.get("a.b.PT.Holder.modes"), s + "\n" + explain(report));
     }
 
+    @DisplayName("Kotlin: no null through a primitive return; a '?' argument's generic result is nullable, guava's Functions/AbstractFuture")
+    @Test
+    public void primitiveCutAndStarResult() {
+        NullabilityPass.Report report = run("a.b.PC", """
+                package a.b;
+                import java.util.concurrent.Future;
+                class PC {
+                    interface Predicate<T> { boolean apply(T t); }
+                    interface Function<F, T> { T apply(F f); }
+                    static final class Mock implements Predicate<String> {
+                        java.util.Map<String, Boolean> expected = new java.util.HashMap<>();
+                        public boolean apply(String s) { return expected.get(s); }
+                    }
+                    static final class PredicateFunction<T> implements Function<T, Boolean> {
+                        final Predicate<T> predicate;
+                        PredicateFunction(Predicate<T> predicate) { this.predicate = predicate; }
+                        public Boolean apply(T t) { return predicate.apply(t); }
+                    }
+                    static <V> V get(Future<V> future) throws Exception { return future.get(); }
+                    static Object value(Future<?> future) throws Exception {
+                        Object v = get(future);
+                        return v == null ? "NULL" : v;
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        String all = s + "\n" + explain(report);
+        assertFalse(s.get("a.b.PC.PredicateFunction.apply(Object)").endsWith("?"), all);
+        Map<String, String> l = new java.util.TreeMap<>();
+        report.locals().forEach((local, pt) -> l.put(local.name(), k(pt)));
+        assertTrue(l.get("v").endsWith("?"), l + "\n" + all);
+    }
+
     @DisplayName("Kotlin: a null into a parameter declared nullable leaves the receiver's type argument, guava's Converter")
     @Test
     public void nullableParameterReceiverSlot() {
