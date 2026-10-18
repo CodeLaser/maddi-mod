@@ -2486,6 +2486,48 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("List<String>", s.get("a.b.PT.Holder.modes"), s + "\n" + explain(report));
     }
 
+    @DisplayName("Kotlin: a null into a parameter declared nullable leaves the receiver's type argument, guava's Converter")
+    @Test
+    public void nullableParameterReceiverSlot() {
+        NullabilityPass.Report report = run("a.b.CV", """
+                package a.b;
+                class CV {
+                    @java.lang.annotation.Target(java.lang.annotation.ElementType.TYPE_USE) @interface Nullable {}
+                    abstract static class Converter<A, B> {
+                        abstract B doForward(A a);
+                        final @Nullable B convert(@Nullable A a) { return a == null ? null : doForward(a); }
+                    }
+                    static final class IntConverter extends Converter<String, Integer> {
+                        static final Converter<String, Integer> INSTANCE = new IntConverter();
+                        Integer doForward(String s) { return Integer.valueOf(s); }
+                    }
+                    static Converter<String, Integer> stringConverter() { return IntConverter.INSTANCE; }
+                    static Integer nulls() { return stringConverter().convert(null); }
+                    interface Predicate<T> { boolean apply(T input); }
+                    abstract static class Equivalence<T> {
+                        abstract boolean doEquivalent(T a, T b);
+                        final Predicate<@Nullable T> equivalentTo(@Nullable T target) { return input -> target == input; }
+                    }
+                    static final class Equals extends Equivalence<Object> {
+                        static final Equals INSTANCE = new Equals();
+                        boolean doEquivalent(Object a, Object b) { return a.equals(b); }
+                    }
+                    static Equivalence<Object> equals() { return Equals.INSTANCE; }
+                    static boolean test() {
+                        Predicate<@Nullable Object> equalTo1 = equals().equivalentTo("1");
+                        return equalTo1.apply(null);
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        String all = s + "\n" + explain(report);
+        assertFalse(s.get("a.b.CV.IntConverter.INSTANCE").contains("String?"), all);
+        assertFalse(s.get("a.b.CV.stringConverter()").contains("String?"), all);
+        // a result position declared nullable ties nothing back into the receiver
+        assertFalse(s.get("a.b.CV.equals()").contains("Object?"), all);
+    }
+
     @DisplayName("Kotlin: a lazily cached view whose factory family returns another map's view is non-null, guava's createKeySet")
     @Test
     public void lazyCacheCycle() {

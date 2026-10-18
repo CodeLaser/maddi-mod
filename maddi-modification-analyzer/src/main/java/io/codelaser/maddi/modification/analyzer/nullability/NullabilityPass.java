@@ -4087,7 +4087,13 @@ public final class NullabilityPass {
                 int j = slotIndex(receiverType, owner, f.typeParameter().getIndex());
                 if (j < 0) continue;
                 Arg receiverSlot = new Arg(receiver, j);
-                boolean receivesOnly = isExtendsWildcard(f);
+                // Kotlin: a position declared nullable ('Predicate<@Nullable T> equivalentTo(...)') is 'T?' for any
+                // instantiation: it ties nothing back into the receiver's slot. EquivalenceTest's 'equalTo1.apply(null)'
+                // on a Predicate<@Nullable Object> had made Equivalence.equals() an Equivalence<Any?>, which
+                // Equals (an Equivalence<Object>) is not (Equivalence.kt:98/99, 2026-10-18)
+                boolean declaredNullable = policy.callResults() && !NULLABLE_PARAMETER_SLOTS_OFF
+                                           && explicit(f.annotations()) == NullableState.NULLABLE;
+                boolean receivesOnly = isExtendsWildcard(f) || declaredNullable;
                 boolean consumes = f.wildcard() != null && f.wildcard().isSuper(); // 'sort(Comparator<? super E>)'
                 // Kotlin (Policy.callResults): the class's own null in that position ('List<E> all() { ...;
                 // l.add(null); return l; }') reaches this instantiation, and the receiver's slot flows into a result
@@ -5332,11 +5338,20 @@ public final class NullabilityPass {
         for (int i = 0; i < arguments.size() && i < parameters.size(); i++) {
             ParameterizedType pt = parameters.get(i).parameterizedType();
             if (pt.arrays() > 0 || pt.typeParameter() == null || pt.typeParameter().isMethodTypeParameter()) continue;
+            // Kotlin: a parameter declared nullable takes the null itself ('convert(a: A?)'); the receiver's
+            // instantiation stays. guava's tests' 'Ints.stringConverter().convert(null)' had made
+            // IntConverter.INSTANCE a Converter<String?, Int>, which an IntConverter (a Converter<String, Int>) is
+            // not; likewise 'Equivalence.equals().equivalentTo(null)' (Ints.kt:101, Equivalence.kt:98, 2026-10-18)
+            if (policy.callResults() && !NULLABLE_PARAMETER_SLOTS_OFF
+                && explicitState(parameters.get(i)) == NullableState.NULLABLE) continue;
             int index = slotIndex(type, callee.typeInfo(), pt.typeParameter().getIndex());
             if (index >= 0) argument(mi, scope, statement, call, list, arguments, i, new Arg(receiver, index));
         }
         contentCopies(mi, scope, receiver, callee, arguments);
     }
+
+    // gate NONULLABLEPARAMETERSLOTS: a null into a parameter declared nullable writes the receiver's slot too (A/B)
+    private static final boolean NULLABLE_PARAMETER_SLOTS_OFF = System.getenv("NONULLABLEPARAMETERSLOTS") != null;
 
     // the receiver whose slots a call writes: a variable of the callee's generic class, with as many type arguments;
     // or an analysed method's result, whose slots are those of what it returns ('wrapper.getInits().addWithKey(v, k)'
