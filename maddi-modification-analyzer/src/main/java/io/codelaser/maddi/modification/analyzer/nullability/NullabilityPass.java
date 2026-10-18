@@ -294,8 +294,15 @@ public final class NullabilityPass {
                          NonNullFacts smartCasts, Set<Local> asserted, Set<Local> unobserved,
                          Set<Expression> nonNullCallResults, Set<ParameterInfo> preconditions,
                          List<NullArgument> nullArguments, Set<ParameterInfo> preconditionsNonNull,
-                         Set<ParameterInfo> rejectsNull, Set<Object> writtenReach)
+                         Set<ParameterInfo> rejectsNull, Set<Object> writtenReach,
+                         Set<io.codelaser.maddi.cst.api.info.TypeParameter> nonNullTypeParameters)
             implements NullabilityFacts {
+
+        /** Kotlin: a class type parameter the verdicts hold non-null ({@link #nonNullBounds}): the printer bounds it by Any. */
+        @Override
+        public boolean nonNullTypeParameter(io.codelaser.maddi.cst.api.info.TypeParameter typeParameter) {
+            return nonNullTypeParameters.contains(typeParameter);
+        }
 
         /**
          * A written null reaches this node: a literal, an argument, an initializer, an annotation, a default value
@@ -1293,6 +1300,7 @@ public final class NullabilityPass {
                 .filter(i -> i instanceof FieldInfo).map(i -> (FieldInfo) i).toList();
         analysed.addAll(methods);
         analysedFields = fields;
+        nonNullBounds(methods, fields);
         methods.forEach(this::indexNullLiterals);
         for (MethodInfo mi : methods) if (mi.methodBody() != null) indexFills(mi.methodBody());
         for (MethodInfo mi : methods) {
@@ -1450,7 +1458,7 @@ public final class NullabilityPass {
         }
         return new Report(verdicts, locals, cause, seedOrigin, useSites, smartCasts, Set.copyOf(asserted),
                 Set.copyOf(unobservedCandidates), nonNullCallResults, preconditions, nullArguments, preconditionsNonNull,
-                rejectsNull(), writtenReach);
+                rejectsNull(), writtenReach, Set.copyOf(nonNullTypeParameters));
     }
 
     /*
@@ -2288,7 +2296,9 @@ public final class NullabilityPass {
                           || !TYPE_VARIABLE_SLOTS_OFF && outer != null && a.index() < outer.parameters().size()
                              && isTypeVariable(outer.parameters().get(a.index()))
                              && !typeVariableElementSlots.contains(a)
-                          || erasedSingleton(a, outer);
+                          || erasedSingleton(a, outer)
+                          || ti != null && a.index() < ti.typeParameters().size()
+                             && nonNullTypeParameters.contains(ti.typeParameters().get(a.index()));
         boundedSlots.put(node, bounded);
         return bounded;
     }
@@ -2311,6 +2321,81 @@ public final class NullabilityPass {
     private static final boolean ERASED_SINGLETONS_OFF = System.getenv("NOERASEDSINGLETONS") != null;
 
     private final Map<Object, Boolean> boundedSlots = new HashMap<>();
+
+    /*
+     Kotlin: a class type parameter of a @NullMarked class without a @Nullable bound ('class LocalCache<K, V>' in
+     guava) is non-null: the printer bounds it by Any (NullabilityFacts.nonNullTypeParameter), and null stops at its
+     slots as at a bounded one, so no verdict instantiates it as 'X?'. Carried over to a subclass's type parameter
+     passed into such a position ('X<E> extends ImmutableList<E>' in a test outside the null-marked scope), which Kotlin
+     would otherwise reject. guava LocalCache.kt:1102/1020, CollectCollectors.kt:24 (2026-10-18). Gate
+     NONULLMARKEDBOUNDS.
+     */
+    private final Set<io.codelaser.maddi.cst.api.info.TypeParameter> nonNullTypeParameters = new HashSet<>();
+
+    private static final boolean NULL_MARKED_BOUNDS_OFF = System.getenv("NONULLMARKEDBOUNDS") != null;
+
+    private void nonNullBounds(List<MethodInfo> methods, List<FieldInfo> fields) {
+        if (!policy.callResults() || NULL_MARKED_BOUNDS_OFF) return;
+        Set<TypeInfo> types = new java.util.LinkedHashSet<>();
+        for (MethodInfo mi : methods) types.add(mi.typeInfo());
+        for (FieldInfo fi : fields) types.add(fi.owner());
+        for (TypeInfo t : types) {
+            if (!nullMarked(t)) continue;
+            for (var tp : t.typeParameters()) if (!nullableBound(tp)) nonNullTypeParameters.add(tp);
+        }
+        boolean changed = true;
+        while (changed) {
+            changed = false;
+            for (TypeInfo t : types) {
+                List<ParameterizedType> supers = new ArrayList<>();
+                if (t.parentClass() != null) supers.add(t.parentClass());
+                supers.addAll(t.interfacesImplemented());
+                for (ParameterizedType st : supers) {
+                    TypeInfo sup = st.typeInfo();
+                    if (sup == null) continue;
+                    for (int i = 0; i < st.parameters().size() && i < sup.typeParameters().size(); i++) {
+                        ParameterizedType a = st.parameters().get(i);
+                        var tp = a.typeParameter();
+                        if (tp == null || tp.isMethodTypeParameter() || !tp.getOwner().isLeft()
+                            || tp.getOwner().getLeft() != t || nullableBound(tp)
+                            || explicit(a.annotations()) == NullableState.NULLABLE) continue;
+                        if (nonNullTypeParameters.contains(sup.typeParameters().get(i))
+                            && nonNullTypeParameters.add(tp)) changed = true;
+                    }
+                }
+            }
+        }
+    }
+
+    // '<T extends @Nullable Object>' (or any @Nullable bound)
+    private static boolean nullableBound(io.codelaser.maddi.cst.api.info.TypeParameter tp) {
+        return tp.typeBounds().stream().anyMatch(b -> explicit(b.annotations()) == NullableState.NULLABLE);
+    }
+
+    // the type, an enclosing type, its package or its module is @NullMarked, the nearest @NullUnmarked winning
+    private static boolean nullMarked(TypeInfo type) {
+        TypeInfo t = type;
+        while (t != null) {
+            Boolean marked = markedBy(t.annotations());
+            if (marked != null) return marked;
+            t = t.compilationUnitOrEnclosingType().isRight() ? t.compilationUnitOrEnclosingType().getRight() : null;
+        }
+        var cu = type.primaryType().compilationUnit();
+        if (cu == null) return false;
+        Boolean marked = markedBy(cu.packageAnnotations());
+        if (marked == null) marked = markedBy(cu.moduleAnnotations());
+        return Boolean.TRUE.equals(marked);
+    }
+
+    private static Boolean markedBy(List<io.codelaser.maddi.cst.api.expression.AnnotationExpression> annotations) {
+        if (annotations.stream().anyMatch(a -> a.typeInfo() != null && "NullUnmarked".equals(a.typeInfo().simpleName()))) {
+            return false;
+        }
+        if (annotations.stream().anyMatch(a -> a.typeInfo() != null && "NullMarked".equals(a.typeInfo().simpleName()))) {
+            return true;
+        }
+        return null;
+    }
     // slots holding a type variable that a 'T[]' of the same method fills (arrayElementsPassedThrough): 'List<T?>'
     // where the array is an 'Array<T?>'
     private final Set<Arg> typeVariableElementSlots = new HashSet<>();

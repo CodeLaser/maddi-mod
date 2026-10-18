@@ -2486,6 +2486,38 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("List<String>", s.get("a.b.PT.Holder.modes"), s + "\n" + explain(report));
     }
 
+    @DisplayName("Kotlin: a null-marked class's type parameter without a @Nullable bound is non-null, and so are its slots")
+    @Test
+    public void nullMarkedBounds() {
+        NullabilityPass.Report report = run("a.b.NM", """
+                package a.b;
+                import java.util.HashMap;
+                import java.util.Map;
+                class NM {
+                    @java.lang.annotation.Target(java.lang.annotation.ElementType.TYPE_USE) @interface Nullable {}
+                    @interface NullMarked {}
+                    @NullMarked static class Box<K, V> {
+                        final Map<K, V> m = new HashMap<>();
+                        void put(K k, V v) { m.put(k, v); }
+                    }
+                    @NullMarked static class Lenient<T extends @Nullable Object> { }
+                    static class Sub<E> extends Box<E, String> { }
+                    static class Free<F> { }
+                    static void use(Box<String, String> b) { b.put("a", null); }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, io.codelaser.maddi.cst.api.info.TypeParameter> tps = new java.util.TreeMap<>();
+        parsed.subTypes().forEach(st -> st.typeParameters().forEach(tp -> tps.put(st.simpleName() + "." + tp.simpleName(), tp)));
+        assertTrue(report.nonNullTypeParameter(tps.get("Box.K")), tps.toString());
+        assertTrue(report.nonNullTypeParameter(tps.get("Box.V")));
+        assertFalse(report.nonNullTypeParameter(tps.get("Lenient.T")));
+        assertTrue(report.nonNullTypeParameter(tps.get("Sub.E")), "carried over through the supertype");
+        assertFalse(report.nonNullTypeParameter(tps.get("Free.F")));
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertFalse(s.get("a.b.NM.use(a.b.NM.Box):0:b").contains("?"), s + "\n" + explain(report));
+    }
+
     @DisplayName("Kotlin: a @ParametricNullness type-variable parameter is a plain V, guava's TrustedListenableFutureTask.create")
     @Test
     public void parametricParameter() {
