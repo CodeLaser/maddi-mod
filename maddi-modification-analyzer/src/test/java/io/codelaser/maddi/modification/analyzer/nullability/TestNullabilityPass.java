@@ -2513,14 +2513,6 @@ public class TestNullabilityPass extends CommonTest {
                         boolean doEquivalent(Object a, Object b) { return a.equals(b); }
                     }
                     static Equivalence<Object> equals() { return Equals.INSTANCE; }
-                    static final class Maker {
-                        @Nullable Equivalence<Object> keyEquivalence;
-                        Maker keyEquivalence(Equivalence<Object> equivalence) { keyEquivalence = equivalence; return this; }
-                    }
-                    static boolean hub() {
-                        Maker m = new Maker().keyEquivalence(equals());
-                        return m.keyEquivalence != null && m.keyEquivalence.doEquivalent(null, null);
-                    }
                     static boolean test() {
                         Predicate<@Nullable Object> equalTo1 = equals().equivalentTo("1");
                         return equalTo1.apply(null);
@@ -2534,7 +2526,6 @@ public class TestNullabilityPass extends CommonTest {
         assertFalse(s.get("a.b.CV.stringConverter()").contains("String?"), all);
         // a result position declared nullable ties nothing back into the receiver
         assertFalse(s.get("a.b.CV.equals()").contains("Object?"), all);
-        assertFalse(s.get("a.b.CV.Equals.INSTANCE").contains("Object?"), all);
     }
 
     @DisplayName("Kotlin: a lazily cached view whose factory family returns another map's view is non-null, guava's createKeySet")

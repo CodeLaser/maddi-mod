@@ -1293,7 +1293,6 @@ public final class NullabilityPass {
                 .filter(i -> i instanceof FieldInfo).map(i -> (FieldInfo) i).toList();
         analysed.addAll(methods);
         analysedFields = fields;
-        fixedInstantiations(methods, fields);
         methods.forEach(this::indexNullLiterals);
         for (MethodInfo mi : methods) if (mi.methodBody() != null) indexFills(mi.methodBody());
         for (MethodInfo mi : methods) {
@@ -2278,8 +2277,7 @@ public final class NullabilityPass {
                           || !TYPE_VARIABLE_SLOTS_OFF && outer != null && a.index() < outer.parameters().size()
                              && isTypeVariable(outer.parameters().get(a.index()))
                              && !typeVariableElementSlots.contains(a)
-                          || erasedSingleton(a, outer)
-                          || fixedSlots.contains(a);
+                          || erasedSingleton(a, outer);
         boundedSlots.put(node, bounded);
         return bounded;
     }
@@ -2302,86 +2300,6 @@ public final class NullabilityPass {
     private static final boolean ERASED_SINGLETONS_OFF = System.getenv("NOERASEDSINGLETONS") != null;
 
     private final Map<Object, Boolean> boundedSlots = new HashMap<>();
-
-    /*
-     Kotlin: a type argument fixed by the supertype of the class a value is constructed from. 'static final
-     Equivalence<Object> INSTANCE = new Equals()' with 'Equals extends Equivalence<Object>' is an Equivalence<Any>
-     whatever reaches its slot, and so is 'equals()', which only returns it: generics are invariant, so an Equals is
-     no Equivalence<Any?>. guava's tests' nulls reached Equivalence.equals()'s slot through MapMaker.keyEquivalence
-     (Equivalence.kt:98/99, 2026-10-18). Null stops there, as at a bounded slot. Gate NOFIXEDSLOTS.
-     */
-    private final Set<Arg> fixedSlots = new HashSet<>();
-
-    private static final boolean FIXED_SLOTS_OFF = System.getenv("NOFIXEDSLOTS") != null;
-
-    private void fixedInstantiations(List<MethodInfo> methods, List<FieldInfo> fields) {
-        if (!policy.callResults() || FIXED_SLOTS_OFF) return;
-        Map<FieldInfo, ParameterizedType> fixedFields = new HashMap<>();
-        Set<FieldInfo> constants = new HashSet<>();
-        for (FieldInfo fi : fields) {
-            if (!fi.isStatic() || !fi.isFinal() || fi.initializer() == null) continue;
-            if (NonNullFacts.unwrap(fi.initializer()) instanceof ConstructorCall cc && cc.anonymousClass() == null
-                && cc.constructor() != null) constants.add(fi);
-            ParameterizedType fixed = fixedBy(fi.initializer(), fi.type());
-            if (fixed == null) continue;
-            fixedFields.put(fi, fixed);
-            addFixed(fi, fixed);
-        }
-        if (constants.isEmpty()) return;
-        for (MethodInfo mi : methods) {
-            if (mi.methodBody() == null || mi.isConstructor() || mi.returnType().arrays() > 0
-                || mi.returnType().parameters().isEmpty()) continue;
-            ParameterizedType[] fixed = {null};
-            boolean[] all = {true};
-            mi.methodBody().visit(e -> {
-                if (e instanceof Lambda || e instanceof ConstructorCall cc && cc.anonymousClass() != null) return false;
-                if (e instanceof ReturnStatement rs) {
-                    // a constant of the return's class with fixed arguments, or of a subclass whose supertype
-                    // fixes them ('static final Equals INSTANCE = new Equals()' returned as an Equivalence<Object>)
-                    ParameterizedType f = null;
-                    if (NonNullFacts.unwrap(rs.expression()) instanceof VariableExpression ve
-                        && ve.variable() instanceof FieldReference fr && constants.contains(fr.fieldInfo())) {
-                        TypeInfo rt = mi.returnType().typeInfo();
-                        TypeInfo ft = fr.fieldInfo().type().typeInfo();
-                        f = ft == rt ? fixedFields.get(fr.fieldInfo()) : supertypeAs(ft, rt, 0);
-                    }
-                    if (f == null || f.typeInfo() != mi.returnType().typeInfo()) all[0] = false;
-                    else fixed[0] = f;
-                }
-                return all[0];
-            });
-            if (all[0] && fixed[0] != null) addFixed(mi, fixed[0]);
-        }
-    }
-
-    private void addFixed(Object node, ParameterizedType fixed) {
-        for (int k = 0; k < fixed.parameters().size(); k++) {
-            ParameterizedType a = fixed.parameters().get(k);
-            if (a.typeParameter() == null && a.wildcard() == null && a.typeInfo() != null) fixedSlots.add(new Arg(node, k));
-        }
-    }
-
-    // the declared type's class as the constructed class's supertype ('new Equals()' as an Equivalence<Object>)
-    private static ParameterizedType fixedBy(Expression initializer, ParameterizedType declared) {
-        if (declared.arrays() > 0 || declared.typeInfo() == null || declared.parameters().isEmpty()) return null;
-        if (!(NonNullFacts.unwrap(initializer) instanceof ConstructorCall cc) || cc.anonymousClass() != null
-            || cc.constructor() == null) return null;
-        return supertypeAs(cc.constructor().typeInfo(), declared.typeInfo(), 0);
-    }
-
-    private static ParameterizedType supertypeAs(TypeInfo type, TypeInfo target, int depth) {
-        if (type == null || depth > 8) return null;
-        List<ParameterizedType> supers = new ArrayList<>();
-        if (type.parentClass() != null) supers.add(type.parentClass());
-        supers.addAll(type.interfacesImplemented());
-        for (ParameterizedType st : supers) {
-            if (st.typeInfo() == target) return st;
-            ParameterizedType up = supertypeAs(st.typeInfo(), target, depth + 1);
-            // only arguments that are concrete on the way up are known; a type variable in between is not resolved
-            if (up != null) return up.parameters().stream().allMatch(p -> p.typeParameter() == null) ? up : null;
-        }
-        return null;
-    }
     // slots holding a type variable that a 'T[]' of the same method fills (arrayElementsPassedThrough): 'List<T?>'
     // where the array is an 'Array<T?>'
     private final Set<Arg> typeVariableElementSlots = new HashSet<>();
