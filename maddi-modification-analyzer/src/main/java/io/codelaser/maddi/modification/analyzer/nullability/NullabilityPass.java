@@ -298,7 +298,7 @@ public final class NullabilityPass {
                          Set<io.codelaser.maddi.cst.api.info.TypeParameter> nonNullTypeParameters)
             implements NullabilityFacts {
 
-        /** Kotlin: a class type parameter the verdicts hold non-null ({@link #nonNullBounds}): the printer bounds it by Any. */
+        /** Kotlin: a class or method type parameter the verdicts hold non-null ({@link #nonNullBounds}): the printer bounds it by Any. */
         @Override
         public boolean nonNullTypeParameter(io.codelaser.maddi.cst.api.info.TypeParameter typeParameter) {
             return nonNullTypeParameters.contains(typeParameter);
@@ -1300,7 +1300,7 @@ public final class NullabilityPass {
                 .filter(i -> i instanceof FieldInfo).map(i -> (FieldInfo) i).toList();
         analysed.addAll(methods);
         analysedFields = fields;
-        nonNullBounds(methods, fields);
+        nonNullBounds(analysisOrder, methods, fields);
         methods.forEach(this::indexNullLiterals);
         for (MethodInfo mi : methods) if (mi.methodBody() != null) indexFills(mi.methodBody());
         for (MethodInfo mi : methods) {
@@ -2327,44 +2327,88 @@ public final class NullabilityPass {
      guava) is non-null: the printer bounds it by Any (NullabilityFacts.nonNullTypeParameter), and null stops at its
      slots as at a bounded one, so no verdict instantiates it as 'X?'. Carried over to a subclass's type parameter
      passed into such a position ('X<E> extends ImmutableList<E>' in a test outside the null-marked scope), which Kotlin
-     would otherwise reject. guava LocalCache.kt:1102/1020, CollectCollectors.kt:24 (2026-10-18). Gate
-     NONULLMARKEDBOUNDS.
+     would otherwise reject, and to any type variable used in such a position. guava LocalCache.kt:1102/1020,
+     CollectCollectors.kt:24 (2026-10-18). Gate NONULLMARKEDBOUNDS.
      */
     private final Set<io.codelaser.maddi.cst.api.info.TypeParameter> nonNullTypeParameters = new HashSet<>();
 
     private static final boolean NULL_MARKED_BOUNDS_OFF = System.getenv("NONULLMARKEDBOUNDS") != null;
 
-    private void nonNullBounds(List<MethodInfo> methods, List<FieldInfo> fields) {
+    private void nonNullBounds(List<Info> analysisOrder, List<MethodInfo> methods, List<FieldInfo> fields) {
         if (!policy.callResults() || NULL_MARKED_BOUNDS_OFF) return;
+        // a source package's annotations sit on its package-info type, not on the compilation units of its classes
+        // (guava's com.google.common.cache, 2026-10-18)
+        for (Info info : analysisOrder) {
+            if (info instanceof TypeInfo t && t.typeNature().isPackageInfo()) {
+                packageInfoAnnotations.put(t.packageName(), t.annotations());
+            }
+        }
         Set<TypeInfo> types = new java.util.LinkedHashSet<>();
         for (MethodInfo mi : methods) types.add(mi.typeInfo());
         for (FieldInfo fi : fields) types.add(fi.owner());
+        // every declared type use: supertypes, fields, parameters and results
+        List<ParameterizedType> uses = new ArrayList<>();
         for (TypeInfo t : types) {
-            if (!nullMarked(t)) continue;
-            for (var tp : t.typeParameters()) if (!nullableBound(tp)) nonNullTypeParameters.add(tp);
+            if (t.parentClass() != null) uses.add(t.parentClass());
+            uses.addAll(t.interfacesImplemented());
         }
-        boolean changed = true;
-        while (changed) {
-            changed = false;
+        for (FieldInfo fi : fields) uses.add(fi.type());
+        for (MethodInfo mi : methods) {
+            if (!mi.isConstructor()) uses.add(mi.returnType());
+            for (ParameterInfo pi : mi.parameters()) uses.add(pi.parameterizedType());
+        }
+        /*
+         A type variable used in a non-null position ('Response<T>' in 'interface StreamingResponseHandler<T>', or
+         in '<T> Response<T> from(T content)') must be non-null too, or Kotlin rejects the use ("type argument is
+         not within its bounds", langchain4j, 2026-10-18): carried over to it, class or method type variable alike.
+         Where it cannot be (a @Nullable bound or use, a library's type variable), the position is left unbounded,
+         and everything is worked out again without it.
+         */
+        Set<io.codelaser.maddi.cst.api.info.TypeParameter> blocked = new HashSet<>();
+        while (true) {
+            nonNullTypeParameters.clear();
             for (TypeInfo t : types) {
-                List<ParameterizedType> supers = new ArrayList<>();
-                if (t.parentClass() != null) supers.add(t.parentClass());
-                supers.addAll(t.interfacesImplemented());
-                for (ParameterizedType st : supers) {
-                    TypeInfo sup = st.typeInfo();
-                    if (sup == null) continue;
-                    for (int i = 0; i < st.parameters().size() && i < sup.typeParameters().size(); i++) {
-                        ParameterizedType a = st.parameters().get(i);
-                        var tp = a.typeParameter();
-                        if (tp == null || tp.isMethodTypeParameter() || !tp.getOwner().isLeft()
-                            || tp.getOwner().getLeft() != t || nullableBound(tp)
-                            || explicit(a.annotations()) == NullableState.NULLABLE) continue;
-                        if (nonNullTypeParameters.contains(sup.typeParameters().get(i))
-                            && nonNullTypeParameters.add(tp)) changed = true;
-                    }
+                if (!nullMarked(t)) continue;
+                for (var tp : t.typeParameters()) {
+                    if (!nullableBound(tp) && !blocked.contains(tp)) nonNullTypeParameters.add(tp);
                 }
             }
+            Set<io.codelaser.maddi.cst.api.info.TypeParameter> conflicts = new HashSet<>();
+            boolean changed = true;
+            while (changed) {
+                changed = false;
+                for (ParameterizedType use : uses) changed |= carryNonNull(use, types, blocked, conflicts);
+            }
+            if (conflicts.isEmpty() || !blocked.addAll(conflicts)) return;
         }
+    }
+
+    private final Map<String, List<io.codelaser.maddi.cst.api.expression.AnnotationExpression>> packageInfoAnnotations
+            = new HashMap<>();
+
+    private boolean carryNonNull(ParameterizedType use, Set<TypeInfo> types,
+                                 Set<io.codelaser.maddi.cst.api.info.TypeParameter> blocked,
+                                 Set<io.codelaser.maddi.cst.api.info.TypeParameter> conflicts) {
+        boolean changed = false;
+        TypeInfo sup = use.typeInfo();
+        for (int i = 0; i < use.parameters().size(); i++) {
+            ParameterizedType a = use.parameters().get(i);
+            changed |= carryNonNull(a, types, blocked, conflicts);
+            var tp = a.typeParameter();
+            if (tp == null || a.wildcard() != null || sup == null || i >= sup.typeParameters().size()) continue;
+            var position = sup.typeParameters().get(i);
+            if (!nonNullTypeParameters.contains(position) || nonNullTypeParameters.contains(tp)) continue;
+            boolean ours = tp.getOwner().isLeft() ? types.contains(tp.getOwner().getLeft())
+                    : analysed.contains(tp.getOwner().getRight());
+            if (ours && !blocked.contains(tp) && !nullableBound(tp)
+                && explicit(a.annotations()) != NullableState.NULLABLE) {
+                nonNullTypeParameters.add(tp);
+                changed = true;
+            } else {
+                conflicts.add(position);
+            }
+        }
+        return changed;
     }
 
     // '<T extends @Nullable Object>' (or any @Nullable bound)
@@ -2373,16 +2417,17 @@ public final class NullabilityPass {
     }
 
     // the type, an enclosing type, its package or its module is @NullMarked, the nearest @NullUnmarked winning
-    private static boolean nullMarked(TypeInfo type) {
+    private boolean nullMarked(TypeInfo type) {
         TypeInfo t = type;
         while (t != null) {
             Boolean marked = markedBy(t.annotations());
             if (marked != null) return marked;
             t = t.compilationUnitOrEnclosingType().isRight() ? t.compilationUnitOrEnclosingType().getRight() : null;
         }
+        Boolean marked = markedBy(packageInfoAnnotations.getOrDefault(type.packageName(), List.of()));
         var cu = type.primaryType().compilationUnit();
-        if (cu == null) return false;
-        Boolean marked = markedBy(cu.packageAnnotations());
+        if (cu == null) return Boolean.TRUE.equals(marked);
+        if (marked == null) marked = markedBy(cu.packageAnnotations());
         if (marked == null) marked = markedBy(cu.moduleAnnotations());
         return Boolean.TRUE.equals(marked);
     }

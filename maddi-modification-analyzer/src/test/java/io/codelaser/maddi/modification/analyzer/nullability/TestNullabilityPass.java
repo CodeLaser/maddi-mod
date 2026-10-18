@@ -2518,6 +2518,35 @@ public class TestNullabilityPass extends CommonTest {
         assertFalse(s.get("a.b.NM.use(a.b.NM.Box):0:b").contains("?"), s + "\n" + explain(report));
     }
 
+    @DisplayName("Kotlin: a type variable used in a null-marked position is non-null too, or the position is left unbounded")
+    @Test
+    public void nullMarkedBoundsCarried() {
+        NullabilityPass.Report report = run("a.b.NC", """
+                package a.b;
+                class NC {
+                    @java.lang.annotation.Target(java.lang.annotation.ElementType.TYPE_USE) @interface Nullable {}
+                    @interface NullMarked {}
+                    @NullMarked static class Response<T> {
+                        final T content;
+                        Response(T content) { this.content = content; }
+                        static <U> Response<U> from(U content) { return new Response<>(content); }
+                    }
+                    interface Handler<X> { void onComplete(Response<X> response); }
+                    @NullMarked static class Pair<A> { }
+                    interface Lenient<Y extends @Nullable Object> { Pair<Y> get(); }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, io.codelaser.maddi.cst.api.info.TypeParameter> tps = new java.util.TreeMap<>();
+        parsed.subTypes().forEach(st -> st.typeParameters().forEach(tp -> tps.put(st.simpleName() + "." + tp.simpleName(), tp)));
+        parsed.subTypes().forEach(st -> st.methods().forEach(m -> m.typeParameters()
+                .forEach(tp -> tps.put(m.name() + "." + tp.simpleName(), tp))));
+        assertTrue(report.nonNullTypeParameter(tps.get("Response.T")), tps.toString());
+        assertTrue(report.nonNullTypeParameter(tps.get("Handler.X")), "an interface's type variable in the position");
+        assertTrue(report.nonNullTypeParameter(tps.get("from.U")), "a method's type variable in the position");
+        assertFalse(report.nonNullTypeParameter(tps.get("Pair.A")), "a @Nullable-bounded variable uses it");
+        assertFalse(report.nonNullTypeParameter(tps.get("Lenient.Y")));
+    }
+
     @DisplayName("Kotlin: a @ParametricNullness type-variable parameter is a plain V, guava's TrustedListenableFutureTask.create")
     @Test
     public void parametricParameter() {
