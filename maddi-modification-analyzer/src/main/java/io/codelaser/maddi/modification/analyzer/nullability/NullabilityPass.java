@@ -3501,6 +3501,8 @@ public final class NullabilityPass {
      */
     private enum Guard {ABSENT, GUARDED, UNGUARDED, OPAQUE}
 
+    private static final boolean KNOWN_ARGUMENTS_OFF = System.getenv("NOKNOWNARGUMENTS") != null;
+
     private Guard guard(Expression value, Variable source, Set<Variable> known) {
         // a value known non-null as a whole carries no null, whatever flows into it ('return requireNonNull(f)')
         if (facts.nonNull(value, known)) return Guard.GUARDED;
@@ -3533,6 +3535,14 @@ public final class NullabilityPass {
             case MethodCall mc when !mentions(mc, source) -> {
                 // a call that is not given the source cannot return it ('a == null ? Collections.emptyList() : a')
                 return Guard.ABSENT;
+            }
+            case MethodCall _ when policy.callResults() && !KNOWN_ARGUMENTS_OFF && known.contains(source) -> {
+                // Kotlin: a call given the source where it is known non-null returns no null of it. guava
+                // TypeResolver.TypeTable.resolveInternal: 'type = map.get(key); if (type == null) { ...; return ...; }
+                // return new TypeResolver(...).resolveType(type)' carried ImmutableMap.get's null into the return,
+                // TypeToken.runtimeType and MutableClassToInstanceMap.getInstance's parameter
+                // (MutableClassToInstanceMap.kt:57, 2026-10-18). Gate NOKNOWNARGUMENTS.
+                return Guard.GUARDED;
             }
             default -> {
                 return Guard.OPAQUE;
@@ -4620,7 +4630,8 @@ public final class NullabilityPass {
 
     private void resolveTypeVariableArguments() {
         for (TypeVariableArgument tva : typeVariableArguments) {
-            if (!passedOnUnchecked.computeIfAbsent(tva.parameter(), this::passedOnUnchecked)) {
+            if (!passedOnUnchecked.computeIfAbsent(tva.parameter(), this::passedOnUnchecked)
+                && !parametricParameter(tva.parameter())) {
                 tva.asBefore().run();
                 continue;
             }
@@ -4642,6 +4653,19 @@ public final class NullabilityPass {
         }
         typeVariableArguments.clear();
     }
+
+    /*
+     Kotlin: a '@ParametricNullness V' parameter is a plain 'V': a caller's null instantiates V, as for a parameter passed
+     on unchecked. guava's TrustedListenableFutureTask.create(Runnable, @ParametricNullness V result), given null by
+     Futures.submit(Runnable, Executor), printed 'result: V?', and 'Executors.callable(runnable, result)' then inferred
+     a Callable<V?> (TrustedListenableFutureTask.kt:68, 2026-10-18). Gate NOPARAMETRICPARAMETERS.
+     */
+    private static boolean parametricParameter(ParameterInfo pi) {
+        return !PARAMETRIC_PARAMETERS_OFF && pi.annotations().stream().anyMatch(a -> a.typeInfo() != null
+                && a.typeInfo().simpleName().equals("ParametricNullness"));
+    }
+
+    private static final boolean PARAMETRIC_PARAMETERS_OFF = System.getenv("NOPARAMETRICPARAMETERS") != null;
 
     // does the parameter's value leave the method unchecked: into its return, or into another class's type variable
     private boolean passedOnUnchecked(ParameterInfo pi) {

@@ -2486,6 +2486,59 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("List<String>", s.get("a.b.PT.Holder.modes"), s + "\n" + explain(report));
     }
 
+    @DisplayName("Kotlin: a @ParametricNullness type-variable parameter is a plain V, guava's TrustedListenableFutureTask.create")
+    @Test
+    public void parametricParameter() {
+        NullabilityPass.Report report = run("a.b.PP", """
+                package a.b;
+                import java.util.concurrent.Callable;
+                import java.util.concurrent.Executors;
+                class PP {
+                    @java.lang.annotation.Retention(java.lang.annotation.RetentionPolicy.CLASS) @interface ParametricNullness {}
+                    static final class Task<V> {
+                        final Callable<V> callable;
+                        Task(Callable<V> callable) { this.callable = callable; }
+                        static <V> Task<V> create(Runnable runnable, @ParametricNullness V result) {
+                            return new Task<V>(Executors.callable(runnable, result));
+                        }
+                    }
+                    static Task<Void> submit(Runnable r) { return Task.create(r, null); }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        String all = s + "\n" + explain(report);
+        assertFalse(s.get("a.b.PP.Task.create(Runnable,Object):1:result").endsWith("?"), all);
+    }
+
+    @DisplayName("Kotlin: a call given a variable known non-null returns no null of it, guava's TypeResolver.resolveInternal")
+    @Test
+    public void knownNonNullArgument() {
+        NullabilityPass.Report report = run("a.b.KA", """
+                package a.b;
+                import java.util.HashMap;
+                import java.util.Map;
+                class KA {
+                    final Map<String, Object> map = new HashMap<>();
+                    Object resolve(Object type) {
+                        if (type instanceof String s) return s.trim();
+                        return type;
+                    }
+                    Object resolveInternal(String key) {
+                        Object type = map.get(key);
+                        if (type == null) {
+                            return key;
+                        }
+                        return new KA().resolve(type);
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        String all = s + "\n" + explain(report);
+        assertFalse(s.get("a.b.KA.resolveInternal(String)").endsWith("?"), all);
+    }
+
     @DisplayName("Kotlin: no null through a primitive return; a '?' argument's generic result is nullable, guava's Functions/AbstractFuture")
     @Test
     public void primitiveCutAndStarResult() {
