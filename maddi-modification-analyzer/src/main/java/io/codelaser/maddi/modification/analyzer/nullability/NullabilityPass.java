@@ -2634,7 +2634,13 @@ public final class NullabilityPass {
                     // ImmutableMap.of()'s RegularImmutableMap.EMPTY all of guava's empty maps (2026-10-17)
                     boolean unbound = policy.callResults() && !WILDCARD_SLOTS_OFF && p1.wildcard() != null
                                       && p1.wildcard().isUnbound();
-                    if (!isExtendsWildcard(p1) && !unbound && (!class0 || class1)) {
+                    // Kotlin: nor out of a position declared nullable ('Predicate<@Nullable Object> equalTo1 =
+                    // Equivalence.equals().equivalentTo("1")'): it is 'T?' whatever flows in, and its null is not the
+                    // source's (EquivalenceTest's 'equalTo1.apply(null)' made Equivalence.equals() an
+                    // Equivalence<Any?>, Equivalence.kt:98/99, 2026-10-18)
+                    boolean declaredNullable = policy.callResults() && !NULLABLE_PARAMETER_SLOTS_OFF
+                                               && explicit(p1.annotations()) == NullableState.NULLABLE;
+                    if (!isExtendsWildcard(p1) && !unbound && !declaredNullable && (!class0 || class1)) {
                         successors.computeIfAbsent(a1, _ -> new LinkedHashSet<>()).add(a0);
                     }
                     queue.add(List.of(a0, a1));
