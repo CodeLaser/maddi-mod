@@ -2534,6 +2534,8 @@ public class TestNullabilityPass extends CommonTest {
                     interface Handler<X> { void onComplete(Response<X> response); }
                     @NullMarked static class Pair<A> { }
                     interface Lenient<Y extends @Nullable Object> { Pair<Y> get(); }
+                    @NullMarked static class Single<S> { }
+                    interface Explicit<W> { Single<@Nullable W> get(); }
                     @java.lang.annotation.Target(java.lang.annotation.ElementType.TYPE_USE) @interface NonNull {}
                     interface Fluent<Z extends @Nullable Object> { Response<@NonNull Z> toResponse(); }
                     static class Maker<M> {
@@ -2548,8 +2550,9 @@ public class TestNullabilityPass extends CommonTest {
         assertTrue(report.nonNullTypeParameter(tps.get("Response.T")), tps.toString());
         assertTrue(report.nonNullTypeParameter(tps.get("Handler.X")), "an interface's type variable in the position");
         assertTrue(report.nonNullTypeParameter(tps.get("from.U")), "a method's type variable in the position");
-        assertFalse(report.nonNullTypeParameter(tps.get("Pair.A")), "a @Nullable-bounded variable uses it");
+        assertTrue(report.nonNullTypeParameter(tps.get("Pair.A")), "a @Nullable-bounded variable is not a conflict");
         assertFalse(report.nonNullTypeParameter(tps.get("Lenient.Y")));
+        assertFalse(report.nonNullTypeParameter(tps.get("Single.S")), "a @Nullable use");
         assertFalse(report.nonNullTypeParameter(tps.get("Fluent.Z")), "'@NonNull Z' is Kotlin's 'Z & Any'");
         assertTrue(report.nonNullTypeParameter(tps.get("Maker.M")), "a constructor call in a body uses the position");
     }

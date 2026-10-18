@@ -2366,7 +2366,7 @@ public final class NullabilityPass {
          A type variable used in a non-null position ('Response<T>' in 'interface StreamingResponseHandler<T>', or
          in '<T> Response<T> from(T content)') must be non-null too, or Kotlin rejects the use ("type argument is
          not within its bounds", langchain4j, 2026-10-18): carried over to it, class or method type variable alike.
-         Where it cannot be (a @Nullable bound or use, a library's type variable), the position is left unbounded,
+         Where it cannot be (a @Nullable use, a library's type variable), the position is left unbounded,
          and everything is worked out again without it.
          */
         Set<io.codelaser.maddi.cst.api.info.TypeParameter> blocked = new HashSet<>();
@@ -2422,13 +2422,18 @@ public final class NullabilityPass {
             var tp = a.typeParameter();
             if (tp == null || a.wildcard() != null || sup == null || i >= sup.typeParameters().size()) continue;
             var position = sup.typeParameters().get(i);
-            // 'ImmutableList<@NonNull E>' of a nullable-bounded E (FluentIterable.toList()): Kotlin's 'E & Any'
+            /*
+             'ImmutableList<@NonNull E>' (FluentIterable.toList()): Kotlin's 'E & Any'. A @Nullable-bounded variable
+             is neither carried nor a conflict: the null-marked code that passes one on has made it non-null there
+             (JSpecify-checked), though an inferred call type in its body ('ImmutableList.copyOf(...)') no longer
+             says so; as a conflict, FluentIterable's E dropped ImmutableList's, and with it, through every class
+             ImmutableList's E is passed to, the bounds of 57 more guava classes (2026-10-19).
+             */
             if (!nonNullTypeParameters.contains(position) || nonNullTypeParameters.contains(tp)
-                || explicit(a.annotations()) == NullableState.NONNULL) continue;
+                || explicit(a.annotations()) == NullableState.NONNULL || nullableBound(tp)) continue;
             boolean ours = tp.getOwner().isLeft() ? types.contains(tp.getOwner().getLeft())
                     : analysed.contains(tp.getOwner().getRight());
-            if (ours && !blocked.contains(tp) && !nullableBound(tp)
-                && explicit(a.annotations()) != NullableState.NULLABLE) {
+            if (ours && !blocked.contains(tp) && explicit(a.annotations()) != NullableState.NULLABLE) {
                 nonNullTypeParameters.add(tp);
                 changed = true;
             } else if (conflicts.add(position) && NULL_MARKED_DEBUG != null) {
