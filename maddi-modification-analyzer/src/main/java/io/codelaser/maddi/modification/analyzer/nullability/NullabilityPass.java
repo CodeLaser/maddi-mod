@@ -2907,7 +2907,10 @@ public final class NullabilityPass {
                         : ((ConstructorCall) e).parameterExpressions();
                 for (int i = 0; i < args.size() && i < callee.parameters().size(); i++) {
                     ParameterInfo pi = callee.parameters().get(i);
-                    if (!pi.isVarArgs() && NonNullFacts.unwrap(args.get(i)) instanceof NullConstant) {
+                    // not a type-variable parameter: the null instantiates the variable for that call, as at any call
+                    // site ('static final ImmediateFuture<?> NULL = new ImmediateFuture<>(null)', guava)
+                    if (!pi.isVarArgs() && !isTypeVariable(pi.parameterizedType())
+                        && NonNullFacts.unwrap(args.get(i)) instanceof NullConstant) {
                         seed(pi, NULL_ARGUMENT + fi.fullyQualifiedName(), fi.owner());
                     }
                 }
