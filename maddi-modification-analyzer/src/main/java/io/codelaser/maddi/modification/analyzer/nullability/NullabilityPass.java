@@ -2318,28 +2318,21 @@ public final class NullabilityPass {
     }
 
     /*
-     Kotlin's generics are invariant, and an 'out' projection of a non-null bound is non-null too: a slot whose values
-     reach a null-marked slot ('LinkedHashMultiset<Object> multiset' given to '<E : Any> copyOf(Iterable<out E>)') is
-     bounded as well, so null stops there and its writes are asserted ('multiset.add(elements[i]!!, ...)').
-     ImmutableMultiset.kt:182 had 'LinkedHashMultiset<Any?>' (2026-10-19). Not through a '? super' slot. Computed once,
+     Kotlin's generics are invariant, and an 'out' projection of a non-null bound is non-null too: a container given
+     to a null-marked slot ('LinkedHashMultiset<Object> multiset' given to '<E : Any> copyOf(Iterable<out E>)')
+     is bounded as well, so null stops there and its writes are asserted ('multiset.add(elements[i]!!, ...)').
+     ImmutableMultiset.kt:182 had 'LinkedHashMultiset<Any?>' (2026-10-19). Not into a '? super' slot. Computed once,
      when the graph is complete. Gate NOTIEDBOUNDS.
      */
     private Set<Arg> tiedToNonNullSlots() {
         if (tiedToNonNull != null) return tiedToNonNull;
         tiedToNonNull = new HashSet<>();
         if (TIED_BOUNDS_OFF || nonNullTypeParameters.isEmpty()) return tiedToNonNull;
-        Map<Arg, List<Arg>> predecessors = new HashMap<>();
-        Deque<Arg> queue = new ArrayDeque<>();
-        Set<Arg> seen = new HashSet<>();
-        successors.forEach((n, succs) -> {
-            if (!(n instanceof Arg from)) return;
-            for (Object t : succs) {
-                if (t instanceof Arg to) predecessors.computeIfAbsent(to, _ -> new ArrayList<>()).add(from);
-            }
-        });
-        Map<Arg, Object> why = NULL_MARKED_DEBUG == null ? null : new HashMap<>();
-        for (Arg to : predecessors.keySet()) if (nonNullSlot(to) && seen.add(to)) queue.add(to);
-        // a value given to a null-marked slot that the graph does not tie, a method type variable's: 'copyOf(list)'
+        List<String> why = NULL_MARKED_DEBUG == null ? null : new ArrayList<>();
+        // the container itself given to a null-marked slot that the graph does not tie, a method type variable's:
+        // 'copyOf(multiset)'. Not along the slot edges: those carry values ('accessQueue.add(table.get(i))'), which
+        // Kotlin asserts at the write, and had made Segment.table's elements non-null through
+        // ImmutableList.copyOf(accessQueue), where Segment.clear() writes null (guava, 2026-10-19)
         for (List<Object> flow : flows) {
             ParameterizedType t0 = typeOf(flow.get(0));
             ParameterizedType t1 = typeOf(flow.get(1));
@@ -2347,28 +2340,14 @@ public final class NullabilityPass {
                 || t0.parameters().size() != t1.parameters().size()) continue;
             for (int i = 0; i < t0.parameters().size(); i++) {
                 Arg from = new Arg(flow.get(0), i);
-                if (nonNullSlot(new Arg(flow.get(1), i)) && seen.add(from)) {
-                    if (why != null) why.put(from, new Arg(flow.get(1), i));
-                    tiedToNonNull.add(from);
-                    queue.add(from);
-                }
-            }
-        }
-        while (!queue.isEmpty()) {
-            Arg to = queue.removeFirst();
-            for (Arg from : predecessors.getOrDefault(to, List.of())) {
-                if (seen.add(from)) {
-                    if (why != null) why.put(from, to);
-                    tiedToNonNull.add(from);
-                    queue.addLast(from);
+                if (nonNullSlot(new Arg(flow.get(1), i)) && tiedToNonNull.add(from) && why != null) {
+                    why.add(from + " <- " + flow.get(1));
                 }
             }
         }
         if (why != null) {
-            List<String> lines = new ArrayList<>();
-            why.forEach((from, to) -> lines.add(from + " <- " + to));
             try {
-                java.nio.file.Files.write(java.nio.file.Path.of(NULL_MARKED_DEBUG + ".tied"), lines);
+                java.nio.file.Files.write(java.nio.file.Path.of(NULL_MARKED_DEBUG + ".tied"), why);
             } catch (java.io.IOException ignored) {
             }
         }
