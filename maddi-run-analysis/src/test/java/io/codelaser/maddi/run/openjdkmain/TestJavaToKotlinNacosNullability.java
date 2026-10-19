@@ -13,7 +13,7 @@ import org.slf4j.LoggerFactory;
  * Why nacos: Spring-style service code without JSpecify annotations, where guava is annotated, null-marked and
  * generics-heavy; it shows whether the translation generalizes. A multi-module corpus of 35 main source sets and no
  * test source sets: {@code J2K_NACOS_MAIN} names the one translated ({@code api/main} by default, the client API of
- * builders and value objects); the others are parsed, and their classes are on the class path.
+ * builders and value objects); the others are parsed, and their class directories are on kotlinc's class path.
  */
 @Tag("slow")
 public class TestJavaToKotlinNacosNullability {
@@ -29,7 +29,7 @@ public class TestJavaToKotlinNacosNullability {
     public void test() throws Exception {
         String main = System.getenv("J2K_NACOS_MAIN");
         if (main == null || main.isBlank()) main = "api/main";
-        JavaToKotlinRatchet.Corpus corpus = JavaToKotlinRatchet.parse("nacos", main, null, false);
+        JavaToKotlinRatchet.Corpus corpus = JavaToKotlinRatchet.parse("nacos", main, null, false, true);
         JavaToKotlinRatchet.measureOnly("nacos-nullability").run(corpus, CorpusNullability.kotlinOptions(corpus));
     }
 }
