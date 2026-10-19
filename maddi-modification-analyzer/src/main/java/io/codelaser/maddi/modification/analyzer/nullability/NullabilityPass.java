@@ -2475,6 +2475,18 @@ public final class NullabilityPass {
     private static boolean bodyTypeUse(Element e, Info where, List<TypeUse> uses, List<Instantiation> instantiations) {
         switch (e) {
             case ConstructorCall cc -> uses.add(new TypeUse(cc.parameterizedType(), where, false));
+            // a constructor reference ('transform(entries, UnmodifiableEntry::new)' as a Function<Entry<K, V>, ...>)
+            // instantiates the class with what its functional type passes: matched against each type argument
+            // (MutableTypeToInstanceMap.kt:58, 2026-10-19)
+            case MethodReference mr when mr.methodInfo() != null && mr.methodInfo().isConstructor()
+                                         && !mr.methodInfo().typeInfo().typeParameters().isEmpty()
+                                         && mr.parameterizedType() != null -> {
+                for (ParameterInfo pi : mr.methodInfo().parameters()) {
+                    for (ParameterizedType fa : mr.parameterizedType().parameters()) {
+                        instantiations.add(new Instantiation(pi.parameterizedType(), fa, mr.methodInfo(), where));
+                    }
+                }
+            }
             case MethodCall mc -> {
                 uses.add(new TypeUse(mc.concreteReturnType(), where, false));
                 MethodInfo callee = mc.methodInfo();
@@ -2551,8 +2563,11 @@ public final class NullabilityPass {
         var position = declared.typeParameter();
         if (position != null) {
             var tp = concrete.typeParameter();
-            if (tp == null || !position.isMethodTypeParameter() || !position.getOwner().isRight()
-                || position.getOwner().getRight() != callee || !nonNullTypeParameters.contains(position)
+            boolean callees = position.isMethodTypeParameter()
+                    ? position.getOwner().isRight() && position.getOwner().getRight() == callee
+                    : callee.isConstructor() && position.getOwner().isLeft()
+                      && position.getOwner().getLeft() == callee.typeInfo();
+            if (tp == null || !callees || !nonNullTypeParameters.contains(position)
                 || nonNullTypeParameters.contains(tp) || nullableBound(tp)
                 || explicit(concrete.annotations()) == NullableState.NONNULL) return false;
             boolean ours = tp.getOwner().isLeft() ? types.contains(tp.getOwner().getLeft())

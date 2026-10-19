@@ -2556,6 +2556,12 @@ public class TestNullabilityPass extends CommonTest {
                     static <V2> Object explicitVar(V2 first) {
                         return explicitList(java.util.Collections.singletonList(first));
                     }
+                    static <K3> java.util.function.Function<java.util.List<K3>, Object> wrapper() {
+                        return Wrap::new;
+                    }
+                    @NullMarked static class Wrap<W> {
+                        Wrap(java.util.List<W> list) { }
+                    }
                 }
                 """, NullabilityPass.Policy.KOTLIN);
         Map<String, io.codelaser.maddi.cst.api.info.TypeParameter> tps = new java.util.TreeMap<>();
@@ -2575,6 +2581,7 @@ public class TestNullabilityPass extends CommonTest {
         assertFalse(report.nonNullTypeParameter(tps.get("Token.Q")), "'? extends @NonNull B' in a supertype");
         assertTrue(report.nonNullTypeParameter(tps.get("product.P")), "what the call to create instantiates E with");
         assertTrue(report.nonNullTypeParameter(tps.get("explicitVar.V2")), "through the argument's inferred type");
+        assertTrue(report.nonNullTypeParameter(tps.get("wrapper.K3")), "a constructor reference");
     }
 
     @DisplayName("Kotlin: a slot whose values reach a null-marked slot is non-null too, ImmutableMultiset.SerializedForm")
