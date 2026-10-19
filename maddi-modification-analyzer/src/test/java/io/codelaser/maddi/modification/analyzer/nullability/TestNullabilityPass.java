@@ -2713,6 +2713,54 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("Task?", s.get("a.b.RT.Impl.removeTask(Object)"), s + "\n" + explain(report));
     }
 
+    @DisplayName("Kotlin: a field replaced by a parameter shares its nested slots, nacos NamingMetadataManager:207")
+    @Test
+    public void fieldReplacedByParameter() {
+        NullabilityPass.Report report = run("a.b.FR", """
+                package a.b;
+                import java.util.concurrent.ConcurrentHashMap;
+                import java.util.concurrent.ConcurrentMap;
+                class FR {
+                    private ConcurrentMap<String, ConcurrentMap<String, Object>> map = new ConcurrentHashMap<>();
+                    void update(String service, String key, Object value) {
+                        map.computeIfAbsent(service, k -> new ConcurrentHashMap<>()).put(key, value);
+                    }
+                    void load(ConcurrentMap<String, ConcurrentMap<String, Object>> snapshot) {
+                        ConcurrentMap<String, ConcurrentMap<String, Object>> old = map;
+                        map = snapshot;
+                        old.clear();
+                    }
+                    static void use(FR fr) { fr.update("s", null, "v"); }
+                    static void loader(FR fr) { fr.load(new ConcurrentHashMap<>()); }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        String field = s.get("a.b.FR.map");
+        String parameter = s.get("a.b.FR.load(java.util.concurrent.ConcurrentMap):0:snapshot");
+        assertEquals(field, parameter, s + "\n" + explain(report));
+    }
+
+    @DisplayName("Kotlin: an enum's valueOf takes a String, nacos ServerStatusManager.java:64")
+    @Test
+    public void enumValueOf() {
+        NullabilityPass.Report report = run("a.b.EV", """
+                package a.b;
+                class EV {
+                    enum Status { UP, DOWN }
+                    private String overridden = null;
+                    String getOverridden() { return overridden; }
+                    Status status() {
+                        if (overridden != null && !overridden.isEmpty()) return Status.valueOf(getOverridden());
+                        return Status.UP;
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("String", s.get("a.b.EV.Status.valueOf(String):0:name"), s + "\n" + explain(report));
+    }
+
     @DisplayName("Kotlin: a @ParametricNullness type-variable parameter is a plain V, guava's TrustedListenableFutureTask.create")
     @Test
     public void parametricParameter() {

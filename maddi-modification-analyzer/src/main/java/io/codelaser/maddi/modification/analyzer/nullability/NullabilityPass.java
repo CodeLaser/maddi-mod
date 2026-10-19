@@ -1362,6 +1362,8 @@ public final class NullabilityPass {
         });
         holderFields(methods, fields);
         fieldInitializerNullArguments(fields);
+        assignedParameterSlots(methods);
+        enumValueOfContracts(methods);
         resolveTypeVariableArguments();
         coupleContent();
         if (!invariantTies.isEmpty()) {
@@ -2896,6 +2898,51 @@ public final class NullabilityPass {
     }
 
     private static final boolean FIELD_INIT_NULLS_OFF = System.getenv("NOFIELDINITNULLS") != null;
+
+    /*
+     Kotlin: 'this.f = p' of a generic type makes p's slots f's (invariant), also where the link engine does not say so:
+     'old = instanceMetadataMap; instanceMetadataMap = snapshot; old.clear();' links the field to 'old' only, and the
+     field's 'String?' keys never reached the parameter's (nacos NamingMetadataManager.java:207, 2026-10-19). A flow
+     only: coupleContent ties the slots; the value itself is the links' to decide. Gate NOASSIGNEDSLOTS.
+     */
+    private void assignedParameterSlots(List<MethodInfo> methods) {
+        if (ASSIGNED_SLOTS_OFF || !policy.callResults()) return;
+        for (MethodInfo mi : methods) {
+            if (mi.methodBody() == null) continue;
+            mi.methodBody().visit(e -> {
+                if (e instanceof Lambda || e instanceof ConstructorCall cc && cc.anonymousClass() != null) return false;
+                if (e instanceof Assignment a && a.assignmentOperator() == null
+                    && a.variableTarget() instanceof FieldReference fr && (fr.scopeIsThis() || fr.fieldInfo().isStatic())
+                    && NonNullFacts.unwrap(a.value()) instanceof VariableExpression ve
+                    && ve.variable() instanceof ParameterInfo pi && !reassigned.contains(pi)
+                    && pi.methodInfo() == mi && !pi.parameterizedType().parameters().isEmpty()
+                    && pi.parameterizedType().arrays() == 0) {
+                    flows.add(List.of(pi, fr.fieldInfo()));
+                }
+                return true;
+            });
+        }
+    }
+
+    private static final boolean ASSIGNED_SLOTS_OFF = System.getenv("NOASSIGNEDSLOTS") != null;
+
+    /*
+     Kotlin: an enum's 'valueOf(String)' is Kotlin's own, which takes a 'String': its parameter is a non-null contract,
+     so a nullable argument is asserted at the call instead of turning the generated method's parameter nullable
+     (nacos ServerStatusManager.java:64, 'ServerStatus.valueOf(switchDomain.getOverriddenServerStatus())',
+     2026-10-19). Gate NOENUMVALUEOF.
+     */
+    private void enumValueOfContracts(List<MethodInfo> methods) {
+        if (ENUM_VALUE_OF_OFF || !policy.callResults()) return;
+        for (MethodInfo mi : methods) {
+            if (mi.isStatic() && "valueOf".equals(mi.name()) && mi.typeInfo().typeNature().isEnum()
+                && mi.parameters().size() == 1 && mi.parameters().getFirst().parameterizedType().isJavaLangString()) {
+                nonNullContracts.add(mi.parameters().getFirst());
+            }
+        }
+    }
+
+    private static final boolean ENUM_VALUE_OF_OFF = System.getenv("NOENUMVALUEOF") != null;
 
     /*
      A field typed by its class's type variable ('T t' in 'Box<T>') holds, in each box, a value of that box's type
