@@ -2337,6 +2337,7 @@ public final class NullabilityPass {
                 if (t instanceof Arg to) predecessors.computeIfAbsent(to, _ -> new ArrayList<>()).add(from);
             }
         });
+        Map<Arg, Object> why = NULL_MARKED_DEBUG == null ? null : new HashMap<>();
         for (Arg to : predecessors.keySet()) if (nonNullSlot(to) && seen.add(to)) queue.add(to);
         // a value given to a null-marked slot that the graph does not tie, a method type variable's: 'copyOf(list)'
         for (List<Object> flow : flows) {
@@ -2347,6 +2348,7 @@ public final class NullabilityPass {
             for (int i = 0; i < t0.parameters().size(); i++) {
                 Arg from = new Arg(flow.get(0), i);
                 if (nonNullSlot(new Arg(flow.get(1), i)) && seen.add(from)) {
+                    if (why != null) why.put(from, new Arg(flow.get(1), i));
                     tiedToNonNull.add(from);
                     queue.add(from);
                 }
@@ -2356,9 +2358,18 @@ public final class NullabilityPass {
             Arg to = queue.removeFirst();
             for (Arg from : predecessors.getOrDefault(to, List.of())) {
                 if (seen.add(from)) {
+                    if (why != null) why.put(from, to);
                     tiedToNonNull.add(from);
                     queue.addLast(from);
                 }
+            }
+        }
+        if (why != null) {
+            List<String> lines = new ArrayList<>();
+            why.forEach((from, to) -> lines.add(from + " <- " + to));
+            try {
+                java.nio.file.Files.write(java.nio.file.Path.of(NULL_MARKED_DEBUG + ".tied"), lines);
+            } catch (java.io.IOException ignored) {
             }
         }
         return tiedToNonNull;
