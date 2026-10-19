@@ -2545,6 +2545,17 @@ public class TestNullabilityPass extends CommonTest {
                     @NullMarked static class Token<Q> { }
                     abstract static class Holder<B extends @Nullable Object>
                             implements java.util.function.Supplier<Token<? extends @NonNull B>> { }
+                    static <E> java.util.List<E> create(java.util.List<? extends java.util.List<? extends E>> lists) {
+                        Response<E> r = null;
+                        return null;
+                    }
+                    static <P> Object product(java.util.List<? extends java.util.List<? extends P>> lists) {
+                        return create(lists);
+                    }
+                    static <T> Object explicitList(java.util.List<T> values) { return new Response<T>(values.get(0)); }
+                    static <V2> Object explicitVar(V2 first) {
+                        return explicitList(java.util.Collections.singletonList(first));
+                    }
                 }
                 """, NullabilityPass.Policy.KOTLIN);
         Map<String, io.codelaser.maddi.cst.api.info.TypeParameter> tps = new java.util.TreeMap<>();
@@ -2562,6 +2573,8 @@ public class TestNullabilityPass extends CommonTest {
         assertTrue(report.nonNullTypeParameter(tps.get("Maker.M")), "a constructor call in a body uses the position");
         assertTrue(report.nonNullTypeParameter(tps.get("wild.V")), "a nested wildcard's bound");
         assertFalse(report.nonNullTypeParameter(tps.get("Token.Q")), "'? extends @NonNull B' in a supertype");
+        assertTrue(report.nonNullTypeParameter(tps.get("product.P")), "what the call to create instantiates E with");
+        assertTrue(report.nonNullTypeParameter(tps.get("explicitVar.V2")), "through the argument's inferred type");
     }
 
     @DisplayName("Kotlin: a slot whose values reach a null-marked slot is non-null too, ImmutableMultiset.SerializedForm")

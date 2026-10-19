@@ -2403,13 +2403,14 @@ public final class NullabilityPass {
         // every type use: supertypes, fields, parameters and results, and in the bodies the types of locals, casts,
         // calls and constructor calls ('new ReverseImmutableList<>(this)' in ImmutableList.reverse())
         List<TypeUse> uses = new ArrayList<>();
+        List<Instantiation> instantiations = new ArrayList<>();
         for (TypeInfo t : types) {
             if (t.parentClass() != null) uses.add(new TypeUse(t.parentClass(), t, true));
             for (ParameterizedType i : t.interfacesImplemented()) uses.add(new TypeUse(i, t, true));
         }
         for (FieldInfo fi : fields) {
             uses.add(new TypeUse(fi.type(), fi, false));
-            if (fi.initializer() != null) fi.initializer().visit(e -> bodyTypeUse(e, fi, uses));
+            if (fi.initializer() != null) fi.initializer().visit(e -> bodyTypeUse(e, fi, uses, instantiations));
         }
         for (MethodInfo mi : methods) {
             if (!mi.isConstructor()) uses.add(new TypeUse(mi.returnType(), mi, false));
@@ -2417,7 +2418,7 @@ public final class NullabilityPass {
             boolean repeated = !mi.isConstructor() && (!mi.overrides().isEmpty() || !mi.isStatic()
                     && !mi.access().isPrivate() && !mi.isFinal() && !mi.typeInfo().isFinal());
             for (ParameterInfo pi : mi.parameters()) uses.add(new TypeUse(pi.parameterizedType(), mi, repeated));
-            if (mi.methodBody() != null) mi.methodBody().visit(e -> bodyTypeUse(e, mi, uses));
+            if (mi.methodBody() != null) mi.methodBody().visit(e -> bodyTypeUse(e, mi, uses, instantiations));
         }
         /*
          A type variable used in a non-null position ('Response<T>' in 'interface StreamingResponseHandler<T>', or
@@ -2442,6 +2443,10 @@ public final class NullabilityPass {
                 for (TypeUse use : uses) {
                     changed |= carryNonNull(use.type(), use.where(), use.strict(), types, blocked, conflicts);
                 }
+                for (Instantiation in : instantiations) {
+                    changed |= carryInstantiation(in.declared(), in.concrete(), in.callee(), in.where(), types,
+                            blocked, conflicts);
+                }
             }
             if (conflicts.isEmpty() || !blocked.addAll(conflicts)) {
                 if (NULL_MARKED_DEBUG != null) debugNullMarked(types, blocked);
@@ -2457,10 +2462,31 @@ public final class NullabilityPass {
     private record TypeUse(ParameterizedType type, Info where, boolean strict) {
     }
 
-    private static boolean bodyTypeUse(Element e, Info where, List<TypeUse> uses) {
+    /*
+     what a call instantiates its method's own type variables with, read off its declared parameter and result types
+     against its arguments and result: 'CartesianList.create(lists)' instantiates E with cartesianProduct's B
+     (Lists.kt:309, Sets.kt:707), 'explicit(Lists.asList(leastValue, rest))' explicit(List)'s T with the varargs
+     overload's T (Ordering.kt:212, 2026-10-19)
+     */
+    private record Instantiation(ParameterizedType declared, ParameterizedType concrete, MethodInfo callee,
+                                 Info where) {
+    }
+
+    private static boolean bodyTypeUse(Element e, Info where, List<TypeUse> uses, List<Instantiation> instantiations) {
         switch (e) {
             case ConstructorCall cc -> uses.add(new TypeUse(cc.parameterizedType(), where, false));
-            case MethodCall mc -> uses.add(new TypeUse(mc.concreteReturnType(), where, false));
+            case MethodCall mc -> {
+                uses.add(new TypeUse(mc.concreteReturnType(), where, false));
+                MethodInfo callee = mc.methodInfo();
+                if (callee != null && !callee.typeParameters().isEmpty()) {
+                    instantiations.add(new Instantiation(callee.returnType(), mc.concreteReturnType(), callee, where));
+                    List<Expression> args = mc.parameterExpressions();
+                    for (int i = 0; i < args.size() && i < callee.parameters().size(); i++) {
+                        instantiations.add(new Instantiation(callee.parameters().get(i).parameterizedType(),
+                                args.get(i).parameterizedType(), callee, where));
+                    }
+                }
+            }
             case Cast c -> uses.add(new TypeUse(c.parameterizedType(), where, false));
             case LocalVariableCreation lvc -> lvc.localVariableStream()
                     .forEach(lv -> uses.add(new TypeUse(lv.parameterizedType(), where, false)));
@@ -2513,6 +2539,41 @@ public final class NullabilityPass {
                         : tp.getOwner().getRight().fullyQualifiedName()) + ", ours " + ours + ", bound "
                                    + nullableBound(tp) + ") in " + where.fullyQualifiedName());
             }
+        }
+        return changed;
+    }
+
+    private boolean carryInstantiation(ParameterizedType declared, ParameterizedType concrete, MethodInfo callee,
+                                       Info where, Set<TypeInfo> types,
+                                       Set<io.codelaser.maddi.cst.api.info.TypeParameter> blocked,
+                                       Set<io.codelaser.maddi.cst.api.info.TypeParameter> conflicts) {
+        if (declared == null || concrete == null || declared.arrays() != concrete.arrays()) return false;
+        var position = declared.typeParameter();
+        if (position != null) {
+            var tp = concrete.typeParameter();
+            if (tp == null || !position.isMethodTypeParameter() || !position.getOwner().isRight()
+                || position.getOwner().getRight() != callee || !nonNullTypeParameters.contains(position)
+                || nonNullTypeParameters.contains(tp) || nullableBound(tp)
+                || explicit(concrete.annotations()) == NullableState.NONNULL) return false;
+            boolean ours = tp.getOwner().isLeft() ? types.contains(tp.getOwner().getLeft())
+                    : analysed.contains(tp.getOwner().getRight());
+            if (ours && !blocked.contains(tp) && explicit(concrete.annotations()) != NullableState.NULLABLE) {
+                nonNullTypeParameters.add(tp);
+                return true;
+            }
+            if (conflicts.add(position) && NULL_MARKED_DEBUG != null) {
+                debugConflicts.add(position + " of " + callee.fullyQualifiedName() + " <- " + tp + " in "
+                                   + where.fullyQualifiedName());
+            }
+            return false;
+        }
+        // within one generic type only: a 'Collection<? extends E>' given an 'ArrayList<X>' is not matched
+        if (declared.typeInfo() == null || declared.typeInfo() != concrete.typeInfo()
+            || declared.parameters().size() != concrete.parameters().size()) return false;
+        boolean changed = false;
+        for (int i = 0; i < declared.parameters().size(); i++) {
+            changed |= carryInstantiation(declared.parameters().get(i), concrete.parameters().get(i), callee, where,
+                    types, blocked, conflicts);
         }
         return changed;
     }
