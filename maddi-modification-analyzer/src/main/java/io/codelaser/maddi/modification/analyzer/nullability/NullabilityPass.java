@@ -2350,16 +2350,19 @@ public final class NullabilityPass {
         // calls and constructor calls ('new ReverseImmutableList<>(this)' in ImmutableList.reverse())
         List<TypeUse> uses = new ArrayList<>();
         for (TypeInfo t : types) {
-            if (t.parentClass() != null) uses.add(new TypeUse(t.parentClass(), t));
-            for (ParameterizedType i : t.interfacesImplemented()) uses.add(new TypeUse(i, t));
+            if (t.parentClass() != null) uses.add(new TypeUse(t.parentClass(), t, true));
+            for (ParameterizedType i : t.interfacesImplemented()) uses.add(new TypeUse(i, t, true));
         }
         for (FieldInfo fi : fields) {
-            uses.add(new TypeUse(fi.type(), fi));
+            uses.add(new TypeUse(fi.type(), fi, false));
             if (fi.initializer() != null) fi.initializer().visit(e -> bodyTypeUse(e, fi, uses));
         }
         for (MethodInfo mi : methods) {
-            if (!mi.isConstructor()) uses.add(new TypeUse(mi.returnType(), mi));
-            for (ParameterInfo pi : mi.parameters()) uses.add(new TypeUse(pi.parameterizedType(), mi));
+            if (!mi.isConstructor()) uses.add(new TypeUse(mi.returnType(), mi, false));
+            // an override repeats its parameters exactly: the printer keeps them as declared, without '& Any'
+            boolean repeated = !mi.isConstructor() && (!mi.overrides().isEmpty() || !mi.isStatic()
+                    && !mi.access().isPrivate() && !mi.isFinal() && !mi.typeInfo().isFinal());
+            for (ParameterInfo pi : mi.parameters()) uses.add(new TypeUse(pi.parameterizedType(), mi, repeated));
             if (mi.methodBody() != null) mi.methodBody().visit(e -> bodyTypeUse(e, mi, uses));
         }
         /*
@@ -2382,7 +2385,9 @@ public final class NullabilityPass {
             boolean changed = true;
             while (changed) {
                 changed = false;
-                for (TypeUse use : uses) changed |= carryNonNull(use.type(), use.where(), types, blocked, conflicts);
+                for (TypeUse use : uses) {
+                    changed |= carryNonNull(use.type(), use.where(), use.strict(), types, blocked, conflicts);
+                }
             }
             if (conflicts.isEmpty() || !blocked.addAll(conflicts)) {
                 if (NULL_MARKED_DEBUG != null) debugNullMarked(types, blocked);
@@ -2394,23 +2399,24 @@ public final class NullabilityPass {
     private final Map<String, List<io.codelaser.maddi.cst.api.expression.AnnotationExpression>> packageInfoAnnotations
             = new HashMap<>();
 
-    private record TypeUse(ParameterizedType type, Info where) {
+    // strict: a supertype, or a parameter an override repeats, where the printer cannot write 'B & Any'
+    private record TypeUse(ParameterizedType type, Info where, boolean strict) {
     }
 
     private static boolean bodyTypeUse(Element e, Info where, List<TypeUse> uses) {
         switch (e) {
-            case ConstructorCall cc -> uses.add(new TypeUse(cc.parameterizedType(), where));
-            case MethodCall mc -> uses.add(new TypeUse(mc.concreteReturnType(), where));
-            case Cast c -> uses.add(new TypeUse(c.parameterizedType(), where));
+            case ConstructorCall cc -> uses.add(new TypeUse(cc.parameterizedType(), where, false));
+            case MethodCall mc -> uses.add(new TypeUse(mc.concreteReturnType(), where, false));
+            case Cast c -> uses.add(new TypeUse(c.parameterizedType(), where, false));
             case LocalVariableCreation lvc -> lvc.localVariableStream()
-                    .forEach(lv -> uses.add(new TypeUse(lv.parameterizedType(), where)));
+                    .forEach(lv -> uses.add(new TypeUse(lv.parameterizedType(), where, false)));
             default -> {
             }
         }
         return true;
     }
 
-    private boolean carryNonNull(ParameterizedType use, Info where, Set<TypeInfo> types,
+    private boolean carryNonNull(ParameterizedType use, Info where, boolean strict, Set<TypeInfo> types,
                                  Set<io.codelaser.maddi.cst.api.info.TypeParameter> blocked,
                                  Set<io.codelaser.maddi.cst.api.info.TypeParameter> conflicts) {
         if (use == null) return false;
@@ -2418,9 +2424,10 @@ public final class NullabilityPass {
         TypeInfo sup = use.typeInfo();
         for (int i = 0; i < use.parameters().size(); i++) {
             ParameterizedType a = use.parameters().get(i);
-            changed |= carryNonNull(a, where, types, blocked, conflicts);
+            changed |= carryNonNull(a, where, strict, types, blocked, conflicts);
+            // a wildcard's bound too: 'List<? extends List<? extends B>>' into CartesianList.create's E (Lists.kt:309)
             var tp = a.typeParameter();
-            if (tp == null || a.wildcard() != null || sup == null || i >= sup.typeParameters().size()) continue;
+            if (tp == null || sup == null || i >= sup.typeParameters().size()) continue;
             var position = sup.typeParameters().get(i);
             /*
              'ImmutableList<@NonNull E>' (FluentIterable.toList()): Kotlin's 'E & Any'. A @Nullable-bounded variable
@@ -2429,8 +2436,18 @@ public final class NullabilityPass {
              says so; as a conflict, FluentIterable's E dropped ImmutableList's, and with it, through every class
              ImmutableList's E is passed to, the bounds of 57 more guava classes (2026-10-19).
              */
+            boolean nullable = nullableBound(tp);
             if (!nonNullTypeParameters.contains(position) || nonNullTypeParameters.contains(tp)
-                || explicit(a.annotations()) == NullableState.NONNULL || nullableBound(tp)) continue;
+                || !strict && (nullable || explicit(a.annotations()) == NullableState.NONNULL)) continue;
+            /*
+             in a strict use a @Nullable-bounded variable, '@NonNull' or not, leaves the position unbounded:
+             'MutableTypeToInstanceMap<B extends @Nullable Object> extends ForwardingMap<TypeToken<? extends
+             @NonNull B>, B>' (TypeToInstanceMap.kt:6, 2026-10-19)
+             */
+            if (nullable) {
+                conflicts.add(position);
+                continue;
+            }
             boolean ours = tp.getOwner().isLeft() ? types.contains(tp.getOwner().getLeft())
                     : analysed.contains(tp.getOwner().getRight());
             if (ours && !blocked.contains(tp) && explicit(a.annotations()) != NullableState.NULLABLE) {

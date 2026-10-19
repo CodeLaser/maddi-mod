@@ -2541,12 +2541,17 @@ public class TestNullabilityPass extends CommonTest {
                     static class Maker<M> {
                         Object make(M m) { return new Response<M>(m); }
                     }
+                    static <V> Object wild(java.util.List<? extends Response<? extends V>> list) { return list; }
+                    @NullMarked static class Token<Q> { }
+                    abstract static class Holder<B extends @Nullable Object>
+                            implements java.util.function.Supplier<Token<? extends @NonNull B>> { }
                 }
                 """, NullabilityPass.Policy.KOTLIN);
         Map<String, io.codelaser.maddi.cst.api.info.TypeParameter> tps = new java.util.TreeMap<>();
         parsed.subTypes().forEach(st -> st.typeParameters().forEach(tp -> tps.put(st.simpleName() + "." + tp.simpleName(), tp)));
-        parsed.subTypes().forEach(st -> st.methods().forEach(m -> m.typeParameters()
-                .forEach(tp -> tps.put(m.name() + "." + tp.simpleName(), tp))));
+        java.util.stream.Stream.concat(java.util.stream.Stream.of(parsed), parsed.subTypes().stream())
+                .forEach(st -> st.methods().forEach(m -> m.typeParameters()
+                        .forEach(tp -> tps.put(m.name() + "." + tp.simpleName(), tp))));
         assertTrue(report.nonNullTypeParameter(tps.get("Response.T")), tps.toString());
         assertTrue(report.nonNullTypeParameter(tps.get("Handler.X")), "an interface's type variable in the position");
         assertTrue(report.nonNullTypeParameter(tps.get("from.U")), "a method's type variable in the position");
@@ -2555,6 +2560,8 @@ public class TestNullabilityPass extends CommonTest {
         assertFalse(report.nonNullTypeParameter(tps.get("Single.S")), "a @Nullable use");
         assertFalse(report.nonNullTypeParameter(tps.get("Fluent.Z")), "'@NonNull Z' is Kotlin's 'Z & Any'");
         assertTrue(report.nonNullTypeParameter(tps.get("Maker.M")), "a constructor call in a body uses the position");
+        assertTrue(report.nonNullTypeParameter(tps.get("wild.V")), "a nested wildcard's bound");
+        assertFalse(report.nonNullTypeParameter(tps.get("Token.Q")), "'? extends @NonNull B' in a supertype");
     }
 
     @DisplayName("Kotlin: a @ParametricNullness type-variable parameter is a plain V, guava's TrustedListenableFutureTask.create")
