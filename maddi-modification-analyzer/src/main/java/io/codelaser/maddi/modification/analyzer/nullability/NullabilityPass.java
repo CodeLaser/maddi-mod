@@ -2854,6 +2854,7 @@ public final class NullabilityPass {
             }
             case Keyed k -> typeOf(k.slot());
             case AnonymousThis at -> at.type().parentClass();
+            case CallResult cr -> cr.call().concreteReturnType();
             case ParameterInfo pi -> pi.parameterizedType();
             case FieldInfo fi -> fi.type();
             case MethodInfo mi -> mi.returnType();
@@ -4949,6 +4950,7 @@ public final class NullabilityPass {
                 }
             });
             arrayResultElements(target, mc);
+            libraryView(target, mc, 0);
             if (!ARRAY_ELEMENTS_PASSED_OFF) {
                 List<Expression> calls = new ArrayList<>();
                 calls.add(mc);
@@ -5768,6 +5770,78 @@ public final class NullabilityPass {
         if (target == null) return;
         AnonymousThis at = new AnonymousThis(anonymous);
         for (int i = 0; i < anonymous.parentClass().parameters().size(); i++) addEdge(new Arg(at, i), new Arg(target, i));
+    }
+
+    /*
+     Kotlin: a library view of a generic receiver holds the receiver's values: 'namespaceSingletonMaps.keySet()' is a
+     Set of the map's keys, 'header.entrySet().iterator()' an Iterator of its entries. The result's slots are the
+     receiver's where the callee's declared result uses its class's type variables, lifted to the target's class
+     ('KeySetView<K, V>' as a 'Set<K>'), nested too ('Entry<K, V>'); both ways, a view being the same data. A library
+     call in between ('header.entrySet()') is a node of its own, typed by its inferred type (nacos
+     ServiceManager.java:92, Header.java:85, 2026-10-19). Gate NOLIBRARYVIEWS.
+     */
+    public record CallResult(MethodCall call) {
+        @Override
+        public boolean equals(Object o) {
+            return o instanceof CallResult(MethodCall c) && c == call;
+        }
+
+        @Override
+        public int hashCode() {
+            return System.identityHashCode(call);
+        }
+
+        @Override
+        public String toString() {
+            return "result of " + call;
+        }
+    }
+
+    private static final boolean LIBRARY_VIEWS_OFF = System.getenv("NOLIBRARYVIEWS") != null;
+
+    private void libraryView(Object target, MethodCall mc, int depth) {
+        if (LIBRARY_VIEWS_OFF || readScope == null || depth > 3) return;
+        MethodInfo callee = mc.methodInfo();
+        ParameterizedType tt = typeOf(target);
+        if (callee == null || analysed.contains(callee) || callee.isStatic() || mc.object() == null || tt == null
+            || tt.arrays() > 0 || tt.parameters().isEmpty() || tt.typeInfo() == null) return;
+        ParameterizedType rt = callee.returnType();
+        if (rt.arrays() > 0 || rt.parameters().isEmpty() || rt.typeInfo() == null) return;
+        ParameterizedType lifted = rt.typeInfo() == tt.typeInfo() ? rt
+                : rt.concreteSuperType(tt.typeInfo().asParameterizedType());
+        if (lifted == null || lifted.parameters().size() != tt.parameters().size()) return;
+        Expression object = NonNullFacts.unwrap(mc.object());
+        Object receiver;
+        if (object instanceof MethodCall inner && inner.methodInfo() != null && !analysed.contains(inner.methodInfo())
+            && !inner.methodInfo().isStatic() && inner.concreteReturnType() != null) {
+            receiver = new CallResult(inner);
+            libraryView(receiver, inner, depth + 1);
+        } else {
+            receiver = receiverNode(readScope.mi(), readScope.scope(), mc);
+        }
+        ParameterizedType receiverType = receiver == null ? null : typeOf(receiver);
+        if (receiverType == null || receiverType.arrays() > 0) return;
+        for (int j = 0; j < lifted.parameters().size(); j++) {
+            viewSlot(new Arg(target, j), lifted.parameters().get(j), receiver, receiverType, callee.typeInfo());
+        }
+    }
+
+    private void viewSlot(Arg slot, ParameterizedType formal, Object receiver, ParameterizedType receiverType,
+                          TypeInfo calleeClass) {
+        if (formal.arrays() > 0 || formal.wildcard() != null) return;
+        var tp = formal.typeParameter();
+        if (tp != null) {
+            if (tp.isMethodTypeParameter() || !tp.getOwner().isLeft() || tp.getOwner().getLeft() != calleeClass) return;
+            int index = slotIndex(receiverType, calleeClass, tp.getIndex());
+            if (index < 0) return;
+            Arg own = new Arg(receiver, index);
+            addEdge(own, slot);
+            addEdge(slot, own);
+            return;
+        }
+        for (int m = 0; m < formal.parameters().size(); m++) {
+            viewSlot(new Arg(slot, m), formal.parameters().get(m), receiver, receiverType, calleeClass);
+        }
     }
 
     // gate NOCONSUMERSLOTS: a caller's null into an abstract type-variable parameter reaches the implementations (A/B)

@@ -2761,6 +2761,34 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("String", s.get("a.b.EV.Status.valueOf(String):0:name"), s + "\n" + explain(report));
     }
 
+    @DisplayName("Kotlin: a map's views share its slots, nacos ServiceManager.getAllNamespaces, Header.iterator")
+    @Test
+    public void mapViews() {
+        NullabilityPass.Report report = run("a.b.MV", """
+                package a.b;
+                import java.util.Iterator;
+                import java.util.Map;
+                import java.util.Set;
+                import java.util.TreeMap;
+                import java.util.concurrent.ConcurrentHashMap;
+                class MV {
+                    private final ConcurrentHashMap<String, Object> byNamespace = new ConcurrentHashMap<>();
+                    private final Map<String, String> header = new TreeMap<>();
+                    void add(String namespace, String key, String value) {
+                        byNamespace.put(namespace, value);
+                        header.put(key, value);
+                    }
+                    Set<String> namespaces() { return byNamespace.keySet(); }
+                    Iterator<Map.Entry<String, String>> iterator() { return header.entrySet().iterator(); }
+                    static void use(MV mv) { mv.add(null, null, "v"); }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("Set<String?>", s.get("a.b.MV.namespaces()"), s + "\n" + explain(report));
+        assertEquals("Iterator<Entry<String?, String>>", s.get("a.b.MV.iterator()"), s + "\n" + explain(report));
+    }
+
     @DisplayName("Kotlin: a @ParametricNullness type-variable parameter is a plain V, guava's TrustedListenableFutureTask.create")
     @Test
     public void parametricParameter() {
