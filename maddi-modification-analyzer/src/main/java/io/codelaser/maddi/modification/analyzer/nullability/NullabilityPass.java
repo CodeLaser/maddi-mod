@@ -1687,9 +1687,27 @@ public final class NullabilityPass {
      any analysed type-variable return (MapMakerInternalMap.kt, 7 "not a subtype of the overridden member").
      Gate NOEXPLICITBOUNDED.
      */
+    private static final boolean RETURNS_NULL_BOUNDED_OFF = System.getenv("NORETURNSNULLBOUNDED") != null;
+
+    private static boolean returnsNullLiteral(MethodInfo mi) {
+        if (mi.methodBody() == null) return false;
+        boolean[] found = {false};
+        mi.methodBody().visit(e -> {
+            if (e instanceof Lambda || e instanceof ConstructorCall cc && cc.anonymousClass() != null) return false;
+            if (e instanceof ReturnStatement rs && rs.expression() != null
+                && NonNullFacts.unwrap(rs.expression()) instanceof NullConstant) found[0] = true;
+            return !found[0];
+        });
+        return found[0];
+    }
+
     private static boolean boundedTypeVariableOverride(MethodInfo mi) {
         if (mi.isConstructor() || mi.returnType().isVoid() || mi.returnType().typeParameter() != null) return false;
         if (!EXPLICIT_BOUNDED_OFF && NullAnnotations.explicitState(mi) == NullableState.NULLABLE) return false;
+        // nor where the override returns a null literal itself ('else { return null; }' in nacos
+        // NacosDelayTaskExecuteEngine.removeTask over 'T removeTask(Object)', T bounded by NacosTask: Kotlin had
+        // 'return null' in a non-null function, NacosDelayTaskExecuteEngine.java:90, 2026-10-19). Gate NORETURNSNULLBOUNDED.
+        if (!RETURNS_NULL_BOUNDED_OFF && returnsNullLiteral(mi)) return false;
         for (MethodInfo overridden : mi.overrides()) {
             ParameterizedType rt = overridden.returnType();
             if (isClassTypeVariable(rt) && !rt.typeParameter().typeBounds().isEmpty()

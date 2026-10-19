@@ -2686,9 +2686,9 @@ public class TestNullabilityPass extends CommonTest {
                 import java.util.concurrent.ConcurrentHashMap;
                 import java.util.concurrent.locks.ReentrantLock;
                 class RT {
-                    interface Engine { Task removeTask(Object key); }
+                    interface Engine<T extends Task> { T removeTask(Object key); }
                     static class Task { boolean shouldProcess() { return true; } }
-                    static class Impl implements Engine {
+                    static class Impl implements Engine<Task> {
                         private final Map<Object, Task> tasks = new ConcurrentHashMap<>();
                         private final ReentrantLock lock = new ReentrantLock();
                         @Override
