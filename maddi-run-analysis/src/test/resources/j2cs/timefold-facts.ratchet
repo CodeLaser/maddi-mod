@@ -148,10 +148,16 @@
 # a raw creation's raw arrays; delegates widened for a generic constructor; the formatter's split points move with
 # an overflow split; a widened delegate's result asserted: 1263 -> 1264 compiling files,
 # nullable warnings 221 -> 209.
+# 2026-10-19, maddi 0bfc63eae, 4da793adf: spliterators as sequences, Stream.generate, IntStream.of, predicate
+# combinators, Map.computeIfPresent and smaller JDK members: 1264 -> 1271 compiling files,
+# unmapped JDK uses 292 -> 215, nullable warnings stay 209.
+# 2026-10-19, maddi 455a86b39, bbc287e92, a91105b7a, b9602da04: an erasure adapter converts a concrete collector
+# into Java's unbound wildcard of it (Erased_); an override returning an interface that extends a delegate is the
+# delegate's method group: 1271 -> 1280 compiling files, 1042 -> 938 errors, nullable warnings stay 209.
 types	1583
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	1565
-compilingFiles	1264
-unmappedJdkUses	292
+compilingFiles	1280
+unmappedJdkUses	215
 nullableWarnings	209
