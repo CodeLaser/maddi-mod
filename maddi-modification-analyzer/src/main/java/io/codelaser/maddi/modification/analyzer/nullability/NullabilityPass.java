@@ -2297,11 +2297,75 @@ public final class NullabilityPass {
                              && isTypeVariable(outer.parameters().get(a.index()))
                              && !typeVariableElementSlots.contains(a)
                           || erasedSingleton(a, outer)
-                          || ti != null && a.index() < ti.typeParameters().size()
-                             && nonNullTypeParameters.contains(ti.typeParameters().get(a.index()));
+                          || nonNullSlot(a)
+                          || tiedToNonNullSlots().contains(a);
         boundedSlots.put(node, bounded);
         return bounded;
     }
+
+    // the slot of a null-marked type parameter, or one holding a type variable the null-marked bounds hold non-null
+    private boolean nonNullSlot(Arg a) {
+        if (nonNullTypeParameters.isEmpty()) return false;
+        ParameterizedType outer = typeOf(a.of());
+        if (outer == null || outer.arrays() > 0) return false;
+        TypeInfo ti = outer.typeInfo();
+        if (ti != null && a.index() < ti.typeParameters().size()
+            && nonNullTypeParameters.contains(ti.typeParameters().get(a.index()))) return true;
+        if (a.index() >= outer.parameters().size()) return false;
+        ParameterizedType p = outer.parameters().get(a.index());
+        return p.typeParameter() != null && (p.wildcard() == null || !p.wildcard().isSuper())
+               && nonNullTypeParameters.contains(p.typeParameter());
+    }
+
+    /*
+     Kotlin's generics are invariant, and an 'out' projection of a non-null bound is non-null too: a slot whose values
+     reach a null-marked slot ('LinkedHashMultiset<Object> multiset' given to '<E : Any> copyOf(Iterable<out E>)') is
+     bounded as well, so null stops there and its writes are asserted ('multiset.add(elements[i]!!, ...)').
+     ImmutableMultiset.kt:182 had 'LinkedHashMultiset<Any?>' (2026-10-19). Not through a '? super' slot. Computed once,
+     when the graph is complete. Gate NOTIEDBOUNDS.
+     */
+    private Set<Arg> tiedToNonNullSlots() {
+        if (tiedToNonNull != null) return tiedToNonNull;
+        tiedToNonNull = new HashSet<>();
+        if (TIED_BOUNDS_OFF || nonNullTypeParameters.isEmpty()) return tiedToNonNull;
+        Map<Arg, List<Arg>> predecessors = new HashMap<>();
+        Deque<Arg> queue = new ArrayDeque<>();
+        Set<Arg> seen = new HashSet<>();
+        successors.forEach((n, succs) -> {
+            if (!(n instanceof Arg from)) return;
+            for (Object t : succs) {
+                if (t instanceof Arg to) predecessors.computeIfAbsent(to, _ -> new ArrayList<>()).add(from);
+            }
+        });
+        for (Arg to : predecessors.keySet()) if (nonNullSlot(to) && seen.add(to)) queue.add(to);
+        // a value given to a null-marked slot that the graph does not tie, a method type variable's: 'copyOf(list)'
+        for (List<Object> flow : flows) {
+            ParameterizedType t0 = typeOf(flow.get(0));
+            ParameterizedType t1 = typeOf(flow.get(1));
+            if (t0 == null || t1 == null || t0.arrays() > 0 || t1.arrays() > 0
+                || t0.parameters().size() != t1.parameters().size()) continue;
+            for (int i = 0; i < t0.parameters().size(); i++) {
+                Arg from = new Arg(flow.get(0), i);
+                if (nonNullSlot(new Arg(flow.get(1), i)) && seen.add(from)) {
+                    tiedToNonNull.add(from);
+                    queue.add(from);
+                }
+            }
+        }
+        while (!queue.isEmpty()) {
+            Arg to = queue.removeFirst();
+            for (Arg from : predecessors.getOrDefault(to, List.of())) {
+                if (seen.add(from)) {
+                    tiedToNonNull.add(from);
+                    queue.addLast(from);
+                }
+            }
+        }
+        return tiedToNonNull;
+    }
+
+    private Set<Arg> tiedToNonNull;
+    private static final boolean TIED_BOUNDS_OFF = System.getenv("NOTIEDBOUNDS") != null;
 
     /*
      Kotlin: a static final singleton with Object type arguments ('RegularImmutableMap.EMPTY', an

@@ -2564,6 +2564,37 @@ public class TestNullabilityPass extends CommonTest {
         assertFalse(report.nonNullTypeParameter(tps.get("Token.Q")), "'? extends @NonNull B' in a supertype");
     }
 
+    @DisplayName("Kotlin: a slot whose values reach a null-marked slot is non-null too, ImmutableMultiset.SerializedForm")
+    @Test
+    public void tiedToNullMarkedSlot() {
+        NullabilityPass.Report report = run("a.b.NT", """
+                package a.b;
+                import java.util.ArrayList;
+                import java.util.List;
+                class NT {
+                    @interface NullMarked {}
+                    @NullMarked static class Bag<G> {
+                        static <H> Bag<H> copyOf(Iterable<? extends H> items) { return new Bag<>(); }
+                    }
+                    static Object restore(Object[] elements) {
+                        List<Object> list = new ArrayList<>();
+                        for (int i = 0; i < elements.length; i++) list.add(elements[i]);
+                        return Bag.copyOf(list);
+                    }
+                    static Object other(Object[] elements) {
+                        List<Object> free = new ArrayList<>();
+                        for (int i = 0; i < elements.length; i++) free.add(elements[i]);
+                        return free;
+                    }
+                    static Object call() { Object[] holes = new Object[3]; restore(holes); return other(holes); }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> l = new java.util.TreeMap<>();
+        report.locals().forEach((local, pt) -> l.put(local.name(), k(pt)));
+        assertTrue(l.get("free").contains("?"), l + "\n" + explain(report));
+        assertFalse(l.get("list").contains("?"), l + "\n" + explain(report));
+    }
+
     @DisplayName("Kotlin: a @ParametricNullness type-variable parameter is a plain V, guava's TrustedListenableFutureTask.create")
     @Test
     public void parametricParameter() {
