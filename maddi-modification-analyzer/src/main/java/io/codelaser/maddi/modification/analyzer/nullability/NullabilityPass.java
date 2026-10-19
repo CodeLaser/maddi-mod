@@ -2337,7 +2337,7 @@ public final class NullabilityPass {
             ParameterizedType t0 = typeOf(flow.get(0));
             ParameterizedType t1 = typeOf(flow.get(1));
             if (t0 == null || t1 == null || t0.arrays() > 0 || t1.arrays() > 0
-                || t0.parameters().size() != t1.parameters().size()) continue;
+                || t0.parameters().size() != t1.parameters().size() || fedByUnboundWildcard(flow.get(0))) continue;
             for (int i = 0; i < t0.parameters().size(); i++) {
                 Arg from = new Arg(flow.get(0), i);
                 if (nonNullSlot(new Arg(flow.get(1), i)) && tiedToNonNull.add(from) && why != null) {
@@ -2352,6 +2352,26 @@ public final class NullabilityPass {
             }
         }
         return tiedToNonNull;
+    }
+
+    /*
+     a local made from a '?' argument ('List<Object> result = newArrayList(keys)' of an 'Iterable<? extends Object>'):
+     Kotlin infers its initializer's elements as 'Any?' from the '*', so it cannot be declared non-null. The model
+     does not tell '? extends Object' from '?' (Striped.kt:34, 2026-10-19)
+     */
+    private static boolean fedByUnboundWildcard(Object node) {
+        if (!(node instanceof Local l) || !(l.declaration() instanceof LocalVariableCreation lvc)) return false;
+        return lvc.localVariableStream().filter(lv -> lv.simpleName().equals(l.name()))
+                .map(lv -> lv.assignmentExpression() == null ? null : NonNullFacts.unwrap(lv.assignmentExpression()))
+                .anyMatch(init -> {
+                    List<Expression> args = switch (init) {
+                        case MethodCall mc -> mc.parameterExpressions();
+                        case ConstructorCall cc -> cc.parameterExpressions();
+                        case null, default -> List.of();
+                    };
+                    return args.stream().map(Expression::parameterizedType).anyMatch(t -> t != null
+                            && t.parameters().stream().anyMatch(p -> p.wildcard() != null && p.wildcard().isUnbound()));
+                });
     }
 
     private Set<Arg> tiedToNonNull;

@@ -2607,12 +2607,21 @@ public class TestNullabilityPass extends CommonTest {
                         return free;
                     }
                     static Object call() { Object[] holes = new Object[3]; restore(holes); return other(holes); }
+                    static Object keys(Iterable<?> keys) {
+                        List<Object> fromWildcard = new ArrayList<>();
+                        for (Object k : keys) fromWildcard.add(k);
+                        List<Object> copied = copy(keys);
+                        copied.add(null);
+                        return Bag.copyOf(copied);
+                    }
+                    static List<Object> copy(Iterable<?> it) { return new ArrayList<>(); }
                 }
                 """, NullabilityPass.Policy.KOTLIN);
         Map<String, String> l = new java.util.TreeMap<>();
         report.locals().forEach((local, pt) -> l.put(local.name(), k(pt)));
         assertTrue(l.get("free").contains("?"), l + "\n" + explain(report));
         assertFalse(l.get("list").contains("?"), l + "\n" + explain(report));
+        assertTrue(l.get("copied").contains("?"), "made from a '?' argument: " + l + "\n" + explain(report));
     }
 
     @DisplayName("Kotlin: a @ParametricNullness type-variable parameter is a plain V, guava's TrustedListenableFutureTask.create")
