@@ -1361,6 +1361,7 @@ public final class NullabilityPass {
             }
         });
         holderFields(methods, fields);
+        fieldInitializerNullArguments(fields);
         resolveTypeVariableArguments();
         coupleContent();
         if (!invariantTies.isEmpty()) {
@@ -2850,6 +2851,7 @@ public final class NullabilityPass {
                         : outer.parameters().get(a.index());
             }
             case Keyed k -> typeOf(k.slot());
+            case AnonymousThis at -> at.type().parentClass();
             case ParameterInfo pi -> pi.parameterizedType();
             case FieldInfo fi -> fi.type();
             case MethodInfo mi -> mi.returnType();
@@ -2862,6 +2864,38 @@ public final class NullabilityPass {
             default -> null;
         };
     }
+
+    /*
+     A null literal given to a call in a field initializer ('private final RecAbilityContext recAbilityContext = new
+     RecAbilityContext(null)'): the initializers are not method bodies, so the call sites never saw it (nacos
+     GrpcClient.java:91, 2026-10-19). Gate NOFIELDINITNULLS.
+     */
+    private void fieldInitializerNullArguments(List<FieldInfo> fields) {
+        if (FIELD_INIT_NULLS_OFF) return;
+        for (FieldInfo fi : fields) {
+            if (fi.initializer() == null || fi.initializer().isEmpty()) continue;
+            fi.initializer().visit(e -> {
+                if (e instanceof Lambda || e instanceof ConstructorCall cc && cc.anonymousClass() != null) return false;
+                MethodInfo callee = switch (e) {
+                    case MethodCall mc -> mc.methodInfo();
+                    case ConstructorCall cc -> cc.constructor();
+                    default -> null;
+                };
+                if (callee == null || !analysed.contains(callee)) return true;
+                List<Expression> args = e instanceof MethodCall mc ? mc.parameterExpressions()
+                        : ((ConstructorCall) e).parameterExpressions();
+                for (int i = 0; i < args.size() && i < callee.parameters().size(); i++) {
+                    ParameterInfo pi = callee.parameters().get(i);
+                    if (!pi.isVarArgs() && NonNullFacts.unwrap(args.get(i)) instanceof NullConstant) {
+                        seed(pi, NULL_ARGUMENT + fi.fullyQualifiedName(), fi.owner());
+                    }
+                }
+                return true;
+            });
+        }
+    }
+
+    private static final boolean FIELD_INIT_NULLS_OFF = System.getenv("NOFIELDINITNULLS") != null;
 
     /*
      A field typed by its class's type variable ('T t' in 'Box<T>') holds, in each box, a value of that box's type
@@ -4012,7 +4046,10 @@ public final class NullabilityPass {
                 } else if (e instanceof ConstructorCall cc && cc.constructor() != null) {
                     callSite(mi, own, statement, cc, cc.constructor(), cc.analysis(), cc.parameterExpressions());
                 }
-                if (e instanceof ConstructorCall cc) anonymousSuperArguments(mi, own, statement, cc);
+                if (e instanceof ConstructorCall cc) {
+                    anonymousSuperArguments(mi, own, statement, cc);
+                    anonymousThisTarget(mi, own, statement, cc);
+                }
                 return true;
             });
             syntacticSeeds(mi, own, statement);
@@ -5646,6 +5683,46 @@ public final class NullabilityPass {
         }
     }
 
+    /*
+     Kotlin: a double-brace initialization ('new HashMap<String, String>(8) {{ put(APPNAME, labels.get(APPNAME)); }}')
+     writes the new object's slots through its implicit 'this': the anonymous class's 'this' is a node typed by its
+     generic superclass, whose slots flow into what the creation is assigned to (nacos RequestMeta.java:103,
+     ConnectionMeta.java:164, 2026-10-19: a HashMap<String, String> given nulls). Gate NOANONYMOUSTHIS.
+     */
+    public record AnonymousThis(TypeInfo type) {
+        @Override
+        public String toString() {
+            return "this of " + type.fullyQualifiedName();
+        }
+    }
+
+    private static final boolean ANONYMOUS_THIS_OFF = System.getenv("NOANONYMOUSTHIS") != null;
+
+    private AnonymousThis anonymousThis(Variable v) {
+        if (ANONYMOUS_THIS_OFF || !policy.callResults() || !(v instanceof This t)) return null;
+        TypeInfo type = t.typeInfo();
+        return type != null && type.isAnonymous() && type.parentClass() != null
+               && !type.parentClass().parameters().isEmpty() ? new AnonymousThis(type) : null;
+    }
+
+    private void anonymousThisTarget(MethodInfo mi, Scope scope, Statement statement, ConstructorCall cc) {
+        TypeInfo anonymous = cc.anonymousClass();
+        if (ANONYMOUS_THIS_OFF || !policy.callResults() || anonymous == null || anonymous.parentClass() == null
+            || anonymous.parentClass().parameters().isEmpty()) return;
+        Object target = switch (statement) {
+            case LocalVariableCreation lvc -> lvc.localVariableStream()
+                    .filter(lv -> lv.assignmentExpression() != null && NonNullFacts.unwrap(lv.assignmentExpression()) == cc)
+                    .map(lv -> (Object) local(mi, scope, lv.simpleName())).findFirst().orElse(null);
+            case ExpressionAsStatement eas when NonNullFacts.unwrap(eas.expression()) instanceof Assignment a
+                                                && NonNullFacts.unwrap(a.value()) == cc -> node(mi, scope, a.variableTarget());
+            case ReturnStatement rs when rs.expression() != null && NonNullFacts.unwrap(rs.expression()) == cc -> mi;
+            default -> null;
+        };
+        if (target == null) return;
+        AnonymousThis at = new AnonymousThis(anonymous);
+        for (int i = 0; i < anonymous.parentClass().parameters().size(); i++) addEdge(new Arg(at, i), new Arg(target, i));
+    }
+
     // gate NOCONSUMERSLOTS: a caller's null into an abstract type-variable parameter reaches the implementations (A/B)
     private static final boolean CONSUMER_SLOTS_OFF = System.getenv("NOCONSUMERSLOTS") != null;
     private static final boolean METHOD_TYPE_VARIABLE_ARGUMENTS_OFF = System.getenv("NOMETHODTYPEVARARGS") != null;
@@ -5764,7 +5841,9 @@ public final class NullabilityPass {
         if (!(call instanceof MethodCall mc) || mc.object() == null || callee.isStatic()) return null;
         Expression object = NonNullFacts.unwrap(mc.object());
         Object receiver;
-        if (object instanceof VariableExpression ve) {
+        if (object instanceof VariableExpression ve && anonymousThis(ve.variable()) instanceof AnonymousThis at) {
+            receiver = at;
+        } else if (object instanceof VariableExpression ve) {
             receiver = node(mi, scope, ve.variable());
         } else if (object instanceof MethodCall getter && getter.methodInfo() != null
                    && analysed.contains(getter.methodInfo()) && !getter.methodInfo().isConstructor()

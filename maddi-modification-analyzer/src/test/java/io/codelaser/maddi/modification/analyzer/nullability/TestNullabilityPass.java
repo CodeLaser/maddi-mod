@@ -2624,6 +2624,95 @@ public class TestNullabilityPass extends CommonTest {
         assertTrue(l.get("copied").contains("?"), "made from a '?' argument: " + l + "\n" + explain(report));
     }
 
+    @DisplayName("Kotlin: a double-brace map's puts are the new map's values, nacos RequestMeta.extractAppLabels")
+    @Test
+    public void doubleBraceMap() {
+        NullabilityPass.Report report = run("a.b.DB", """
+                package a.b;
+                import java.util.HashMap;
+                import java.util.Map;
+                class DB {
+                    private Map<String, String> labels = new HashMap<>();
+                    private String clientVersion;
+                    private Map<String, String> appLabels = new HashMap<>();
+                    void setClientVersion(String v) { clientVersion = v; }
+                    void extract() {
+                        HashMap<String, String> map = new HashMap<String, String>(8) {
+                            {
+                                put("app", labels.get("app"));
+                                put("version", clientVersion);
+                            }
+                        };
+                        this.appLabels = map;
+                    }
+                    Map<String, String> getAppLabels() { return appLabels; }
+                    static void use(DB db) { db.setClientVersion(null); }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        Map<String, String> l = new java.util.TreeMap<>();
+        report.locals().forEach((local, pt) -> l.put(local.name(), k(pt)));
+        assertTrue(l.get("map").endsWith("String?>"), l + "\n" + s + "\n" + explain(report));
+        assertTrue(s.get("a.b.DB.appLabels").endsWith("String?>"), s + "\n" + explain(report));
+    }
+
+    @DisplayName("Kotlin: a null argument in a field initializer, nacos GrpcClient.recAbilityContext")
+    @Test
+    public void nullArgumentInFieldInitializer() {
+        NullabilityPass.Report report = run("a.b.FI", """
+                package a.b;
+                class FI {
+                    private final Context context = new Context(null);
+                    static class Context {
+                        private Object connection;
+                        Context(Object connection) { this.connection = connection; }
+                        void reset(Object connection) { this.connection = connection; }
+                    }
+                    void ready(Object c) { context.reset(c); }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("Object?", s.get("a.b.FI.Context.<init>(Object):0:connection"), s + "\n" + explain(report));
+    }
+
+    @DisplayName("Kotlin: 'return null' in an else branch inside try/finally, nacos NacosDelayTaskExecuteEngine.removeTask")
+    @Test
+    public void returnNullInTryFinally() {
+        NullabilityPass.Report report = run("a.b.RT", """
+                package a.b;
+                import java.util.Map;
+                import java.util.concurrent.ConcurrentHashMap;
+                import java.util.concurrent.locks.ReentrantLock;
+                class RT {
+                    interface Engine { Task removeTask(Object key); }
+                    static class Task { boolean shouldProcess() { return true; } }
+                    static class Impl implements Engine {
+                        private final Map<Object, Task> tasks = new ConcurrentHashMap<>();
+                        private final ReentrantLock lock = new ReentrantLock();
+                        @Override
+                        public Task removeTask(Object key) {
+                            lock.lock();
+                            try {
+                                Task task = tasks.get(key);
+                                if (null != task && task.shouldProcess()) {
+                                    return tasks.remove(key);
+                                } else {
+                                    return null;
+                                }
+                            } finally {
+                                lock.unlock();
+                            }
+                        }
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("Task?", s.get("a.b.RT.Impl.removeTask(Object)"), s + "\n" + explain(report));
+    }
+
     @DisplayName("Kotlin: a @ParametricNullness type-variable parameter is a plain V, guava's TrustedListenableFutureTask.create")
     @Test
     public void parametricParameter() {
