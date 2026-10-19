@@ -2486,6 +2486,197 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("List<String>", s.get("a.b.PT.Holder.modes"), s + "\n" + explain(report));
     }
 
+    @DisplayName("Kotlin: a null-marked class's type parameter without a @Nullable bound is non-null, and so are its slots")
+    @Test
+    public void nullMarkedBounds() {
+        NullabilityPass.Report report = run("a.b.NM", """
+                package a.b;
+                import java.util.HashMap;
+                import java.util.Map;
+                class NM {
+                    @java.lang.annotation.Target(java.lang.annotation.ElementType.TYPE_USE) @interface Nullable {}
+                    @interface NullMarked {}
+                    @NullMarked static class Box<K, V> {
+                        final Map<K, V> m = new HashMap<>();
+                        void put(K k, V v) { m.put(k, v); }
+                    }
+                    @NullMarked static class Lenient<T extends @Nullable Object> { }
+                    static class Sub<E> extends Box<E, String> { }
+                    static class Free<F> { }
+                    static void use(Box<String, String> b) { b.put("a", null); }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, io.codelaser.maddi.cst.api.info.TypeParameter> tps = new java.util.TreeMap<>();
+        parsed.subTypes().forEach(st -> st.typeParameters().forEach(tp -> tps.put(st.simpleName() + "." + tp.simpleName(), tp)));
+        assertTrue(report.nonNullTypeParameter(tps.get("Box.K")), tps.toString());
+        assertTrue(report.nonNullTypeParameter(tps.get("Box.V")));
+        assertFalse(report.nonNullTypeParameter(tps.get("Lenient.T")));
+        assertTrue(report.nonNullTypeParameter(tps.get("Sub.E")), "carried over through the supertype");
+        assertFalse(report.nonNullTypeParameter(tps.get("Free.F")));
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertFalse(s.get("a.b.NM.use(a.b.NM.Box):0:b").contains("?"), s + "\n" + explain(report));
+    }
+
+    @DisplayName("Kotlin: a type variable used in a null-marked position is non-null too, or the position is left unbounded")
+    @Test
+    public void nullMarkedBoundsCarried() {
+        NullabilityPass.Report report = run("a.b.NC", """
+                package a.b;
+                class NC {
+                    @java.lang.annotation.Target(java.lang.annotation.ElementType.TYPE_USE) @interface Nullable {}
+                    @interface NullMarked {}
+                    @NullMarked static class Response<T> {
+                        final T content;
+                        Response(T content) { this.content = content; }
+                        static <U> Response<U> from(U content) { return new Response<>(content); }
+                    }
+                    interface Handler<X> { void onComplete(Response<X> response); }
+                    @NullMarked static class Pair<A> { }
+                    interface Lenient<Y extends @Nullable Object> { Pair<Y> get(); }
+                    @NullMarked static class Single<S> { }
+                    interface Explicit<W> { Single<@Nullable W> get(); }
+                    @java.lang.annotation.Target(java.lang.annotation.ElementType.TYPE_USE) @interface NonNull {}
+                    interface Fluent<Z extends @Nullable Object> { Response<@NonNull Z> toResponse(); }
+                    static class Maker<M> {
+                        Object make(M m) { return new Response<M>(m); }
+                    }
+                    static <V> Object wild(java.util.List<? extends Response<? extends V>> list) { return list; }
+                    @NullMarked static class Token<Q> { }
+                    abstract static class Holder<B extends @Nullable Object>
+                            implements java.util.function.Supplier<Token<? extends @NonNull B>> { }
+                    static <E> java.util.List<E> create(java.util.List<? extends java.util.List<? extends E>> lists) {
+                        Response<E> r = null;
+                        return null;
+                    }
+                    static <P> Object product(java.util.List<? extends java.util.List<? extends P>> lists) {
+                        return create(lists);
+                    }
+                    static <T> Object explicitList(java.util.List<T> values) { return new Response<T>(values.get(0)); }
+                    static <V2> Object explicitVar(V2 first) {
+                        return explicitList(java.util.Collections.singletonList(first));
+                    }
+                    static <K3> java.util.function.Function<java.util.List<K3>, Object> wrapper() {
+                        return Wrap::new;
+                    }
+                    @NullMarked static class Wrap<W> {
+                        Wrap(java.util.List<W> list) { }
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, io.codelaser.maddi.cst.api.info.TypeParameter> tps = new java.util.TreeMap<>();
+        parsed.subTypes().forEach(st -> st.typeParameters().forEach(tp -> tps.put(st.simpleName() + "." + tp.simpleName(), tp)));
+        java.util.stream.Stream.concat(java.util.stream.Stream.of(parsed), parsed.subTypes().stream())
+                .forEach(st -> st.methods().forEach(m -> m.typeParameters()
+                        .forEach(tp -> tps.put(m.name() + "." + tp.simpleName(), tp))));
+        assertTrue(report.nonNullTypeParameter(tps.get("Response.T")), tps.toString());
+        assertTrue(report.nonNullTypeParameter(tps.get("Handler.X")), "an interface's type variable in the position");
+        assertTrue(report.nonNullTypeParameter(tps.get("from.U")), "a method's type variable in the position");
+        assertTrue(report.nonNullTypeParameter(tps.get("Pair.A")), "a @Nullable-bounded variable is not a conflict");
+        assertFalse(report.nonNullTypeParameter(tps.get("Lenient.Y")));
+        assertFalse(report.nonNullTypeParameter(tps.get("Single.S")), "a @Nullable use");
+        assertFalse(report.nonNullTypeParameter(tps.get("Fluent.Z")), "'@NonNull Z' is Kotlin's 'Z & Any'");
+        assertTrue(report.nonNullTypeParameter(tps.get("Maker.M")), "a constructor call in a body uses the position");
+        assertTrue(report.nonNullTypeParameter(tps.get("wild.V")), "a nested wildcard's bound");
+        assertFalse(report.nonNullTypeParameter(tps.get("Token.Q")), "'? extends @NonNull B' in a supertype");
+        assertTrue(report.nonNullTypeParameter(tps.get("product.P")), "what the call to create instantiates E with");
+        assertTrue(report.nonNullTypeParameter(tps.get("explicitVar.V2")), "through the argument's inferred type");
+        assertTrue(report.nonNullTypeParameter(tps.get("wrapper.K3")), "a constructor reference");
+    }
+
+    @DisplayName("Kotlin: a slot whose values reach a null-marked slot is non-null too, ImmutableMultiset.SerializedForm")
+    @Test
+    public void tiedToNullMarkedSlot() {
+        NullabilityPass.Report report = run("a.b.NT", """
+                package a.b;
+                import java.util.ArrayList;
+                import java.util.List;
+                class NT {
+                    @interface NullMarked {}
+                    @NullMarked static class Bag<G> {
+                        static <H> Bag<H> copyOf(Iterable<? extends H> items) { return new Bag<>(); }
+                    }
+                    static Object restore(Object[] elements) {
+                        List<Object> list = new ArrayList<>();
+                        for (int i = 0; i < elements.length; i++) list.add(elements[i]);
+                        return Bag.copyOf(list);
+                    }
+                    static Object other(Object[] elements) {
+                        List<Object> free = new ArrayList<>();
+                        for (int i = 0; i < elements.length; i++) free.add(elements[i]);
+                        return free;
+                    }
+                    static Object call() { Object[] holes = new Object[3]; restore(holes); return other(holes); }
+                    static Object keys(Iterable<?> keys) {
+                        List<Object> fromWildcard = new ArrayList<>();
+                        for (Object k : keys) fromWildcard.add(k);
+                        List<Object> copied = copy(keys);
+                        copied.add(null);
+                        return Bag.copyOf(copied);
+                    }
+                    static List<Object> copy(Iterable<?> it) { return new ArrayList<>(); }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> l = new java.util.TreeMap<>();
+        report.locals().forEach((local, pt) -> l.put(local.name(), k(pt)));
+        assertTrue(l.get("free").contains("?"), l + "\n" + explain(report));
+        assertFalse(l.get("list").contains("?"), l + "\n" + explain(report));
+        assertTrue(l.get("copied").contains("?"), "made from a '?' argument: " + l + "\n" + explain(report));
+    }
+
+    @DisplayName("Kotlin: a @ParametricNullness type-variable parameter is a plain V, guava's TrustedListenableFutureTask.create")
+    @Test
+    public void parametricParameter() {
+        NullabilityPass.Report report = run("a.b.PP", """
+                package a.b;
+                import java.util.concurrent.Callable;
+                import java.util.concurrent.Executors;
+                class PP {
+                    @java.lang.annotation.Retention(java.lang.annotation.RetentionPolicy.CLASS) @interface ParametricNullness {}
+                    static final class Task<V> {
+                        final Callable<V> callable;
+                        Task(Callable<V> callable) { this.callable = callable; }
+                        static <V> Task<V> create(Runnable runnable, @ParametricNullness V result) {
+                            return new Task<V>(Executors.callable(runnable, result));
+                        }
+                    }
+                    static Task<Void> submit(Runnable r) { return Task.create(r, null); }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        String all = s + "\n" + explain(report);
+        assertFalse(s.get("a.b.PP.Task.create(Runnable,Object):1:result").endsWith("?"), all);
+    }
+
+    @DisplayName("Kotlin: a call given a variable known non-null returns no null of it, guava's TypeResolver.resolveInternal")
+    @Test
+    public void knownNonNullArgument() {
+        NullabilityPass.Report report = run("a.b.KA", """
+                package a.b;
+                import java.util.HashMap;
+                import java.util.Map;
+                class KA {
+                    final Map<String, Object> map = new HashMap<>();
+                    Object resolve(Object type) {
+                        if (type instanceof String s) return s.trim();
+                        return type;
+                    }
+                    Object resolveInternal(String key) {
+                        Object type = map.get(key);
+                        if (type == null) {
+                            return key;
+                        }
+                        return new KA().resolve(type);
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        String all = s + "\n" + explain(report);
+        assertFalse(s.get("a.b.KA.resolveInternal(String)").endsWith("?"), all);
+    }
+
     @DisplayName("Kotlin: no null through a primitive return; a '?' argument's generic result is nullable, guava's Functions/AbstractFuture")
     @Test
     public void primitiveCutAndStarResult() {
