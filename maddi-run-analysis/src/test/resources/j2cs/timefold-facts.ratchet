@@ -170,10 +170,13 @@
 # 1310 -> 1315 compiling files, 745 -> 699 errors, unmapped JDK uses 137 -> 106; nullableWarnings stays 209.
 # 2026-10-20, maddi 7a4675ccd: erased diamonds of typed raw arrays (the joiners), constant lambdas, switch arms
 # converted: 1315 -> 1316 compiling files, 699 -> 656 errors; nullableWarnings stays 209.
+# 2026-10-20, maddi e4f3b7eea, c419cf6ec, c23c8a94d: type arguments C# cannot infer through variable arity, bounds and
+# null arguments, notnull through a call's result: 1316 -> 1317 compiling files, 656 -> 644 errors, nullableWarnings
+# 209 -> 207 (211 before c23c8a94d).
 types	1583
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	1565
-compilingFiles	1316
+compilingFiles	1317
 unmappedJdkUses	106
-nullableWarnings	209
+nullableWarnings	207
