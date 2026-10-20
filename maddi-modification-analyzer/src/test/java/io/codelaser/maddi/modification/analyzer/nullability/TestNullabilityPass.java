@@ -2898,6 +2898,37 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("String?[]", s.get("a.b.FC.plus"), s + "\n" + explain(report));
     }
 
+    @DisplayName("Kotlin: a null into a non-modifying abstract consumer on a Funnel<?> stays with the receiver, guava FunnelsTest")
+    @Test
+    public void nullIntoWildcardConsumer() {
+        NullabilityPass.Report report = run("a.b.WC", """
+                package a.b;
+                class WC {
+                    interface Funnel<T> {
+                        void funnel(T from, StringBuilder into);
+                    }
+                    static final class LongFunnel implements Funnel<Long> {
+                        @Override
+                        public void funnel(Long value, StringBuilder into) {
+                            into.append(value.longValue());
+                        }
+                    }
+                    static void assertNullsThrow(Funnel<?> funnel) {
+                        try {
+                            funnel.funnel(null, new StringBuilder());
+                        } catch (NullPointerException ok) {
+                        }
+                    }
+                    static void use() {
+                        assertNullsThrow(new LongFunnel());
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("Long", s.get("a.b.WC.LongFunnel.funnel(Long,StringBuilder):0:value"), s + "\n" + explain(report));
+    }
+
     @DisplayName("Kotlin: an override of a @NullMarked library method's non-null return stays non-null, jenkins AuthenticationProcessingFilter2")
     @Test
     public void nullMarkedLibraryReturnOverride() {
