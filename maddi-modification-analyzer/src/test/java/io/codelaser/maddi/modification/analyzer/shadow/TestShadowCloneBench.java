@@ -305,7 +305,16 @@ public class TestShadowCloneBench extends CommonTest {
         // File.delete() modifies the file system and not the object; the new ones are the fixpoint's own
         // pessimism, no longer echoed by the pass: recursion over File parameters (compare, deleteDirectory,
         // scanDir, deleteFile) and chainExceptionCause's oldt, stored into a modified exception by initCause.
-        org.junit.jupiter.api.Assertions.assertEquals(272, totalRev,
+        // ⭐ Re-baselined 2026-10-20 for maddi-mod b265dc8f (CodeLaser/maddi-mod#55: a caller's summary no longer
+        // seeds a walkable callee's parameter). devel before it (22f816d0) already measured 328 reverse and 62
+        // divergences, on the Mac and on laser1; that 272 -> 328 drift came in with devel's engine commits after
+        // d85e0c94 (#52's unmodifiable views and #54's §m chains are the candidates) and is NOT classified here.
+        // 5512762c (#55's array-expression guard) is neutral: switched off, the same 328, and no pass failure.
+        // b265dc8f, A/B against 22f816d0: reverse 328 -> 331, three java.io.File jarPath parameters (File is
+        // @Immutable); divergences 62 -> 56, all six the caller-summary channel: two String parameters
+        // (writer__setOutputFolders), Map_Merge(_RV)'s String value, update(URL) charged by its anonymous
+        // Runnable; Map_ComputeIfPresent(_RV)'s map stays a divergence, now through Map.remove.
+        org.junit.jupiter.api.Assertions.assertEquals(331, totalRev,
                 "reverse divergences are expected since design A (110695ece) retired the "
                 + "walkable-summary seed channel; re-baseline deliberately, and reclassify");
         // Re-baselined 2026-09-22 for the RECEIVER-DISCLAIMER rule (@IgnoreModifications on a parameter now
@@ -319,10 +328,12 @@ public class TestShadowCloneBench extends CommonTest {
         // gating only the engine side took this to 814, i.e. MORE disagreement, which is how the missing
         // mirror was found in the first place.
         // Both fixes above apply together, measured on this corpus with both present.
+        // 2026-10-20, maddi-mod b265dc8f (#55): unmodifiedParameter 49 -> 43, {propagated 44 -> 46, seed 18 -> 10};
+        // classified with the reverse re-baseline above.
         org.junit.jupiter.api.Assertions.assertEquals(
-                Map.of("nonModifyingMethod", 1, "unmodifiedField", 12, "unmodifiedParameter", 49),
+                Map.of("nonModifyingMethod", 1, "unmodifiedField", 12, "unmodifiedParameter", 43),
                 byProperty);
-        org.junit.jupiter.api.Assertions.assertEquals(Map.of("propagated", 44, "seed", 18), byClass);
+        org.junit.jupiter.api.Assertions.assertEquals(Map.of("propagated", 46, "seed", 10), byClass);
     }
 
     private volatile int totalMethods, totalSeeds, totalEdges, totalMissingArgLinks, totalUnprojectedReceivers;
