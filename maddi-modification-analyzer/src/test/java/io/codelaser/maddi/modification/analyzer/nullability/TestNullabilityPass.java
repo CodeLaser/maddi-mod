@@ -2796,6 +2796,89 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("Iterator<Entry<String?, String>>", s.get("a.b.MV.iterator()"), s + "\n" + explain(report));
     }
 
+    @DisplayName("Kotlin: a lambda returning null added to a list of functions makes the slot's result nullable")
+    @Test
+    public void lambdaIntoReceiverSlot() {
+        NullabilityPass.Report report = run("a.b.LS", """
+                package a.b;
+                import java.util.ArrayList;
+                import java.util.HashMap;
+                import java.util.List;
+                import java.util.Map;
+                import java.util.function.Function;
+                class LS {
+                    static String next(String current) {
+                        List<Function<String, String>> chain = new ArrayList<>();
+                        chain.add(input -> {
+                            if (input.isEmpty()) return null;
+                            Map<String, String> states = new HashMap<>();
+                            states.put("a", "b");
+                            return states.get(current);
+                        });
+                        return chain.get(0).apply(current) + "";
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> l = new java.util.TreeMap<>();
+        report.locals().forEach((local, pt) -> l.put(local.name(), k(pt)));
+        assertEquals("List<Function<String, String?>>", l.get("chain"), l + "\n" + explain(report));
+    }
+
+    @DisplayName("Kotlin: a list's nullable function slot reaches a generic constructor through iterator(), jenkins InstallUtil")
+    @Test
+    public void lambdaSlotThroughIterator() {
+        NullabilityPass.Report report = run("a.b.LI", """
+                package a.b;
+                import java.util.ArrayList;
+                import java.util.Iterator;
+                import java.util.List;
+                import java.util.function.Function;
+                class LI {
+                    static String next(String current) {
+                        List<Function<String, String>> functions = new ArrayList<>();
+                        functions.add(input -> {
+                            if (input.isEmpty()) return null;
+                            return input + current;
+                        });
+                        Chain<String> chain = new Chain<>(functions.iterator());
+                        return chain.get();
+                    }
+                    static class Chain<T> {
+                        private final Iterator<Function<String, T>> functions;
+                        Chain(Iterator<Function<String, T>> functions) {
+                            this.functions = functions;
+                        }
+                        T get() {
+                            return functions.next().apply("x");
+                        }
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> l = new java.util.TreeMap<>();
+        report.locals().forEach((local, pt) -> l.put(local.name(), k(pt)));
+        assertEquals("List<Function<String, String?>>", l.get("functions"), l + "\n" + explain(report));
+        assertEquals("Chain<String?>", l.get("chain"), l + "\n" + explain(report));
+    }
+
+    @DisplayName("Kotlin: an override of a @NullMarked library method's non-null return stays non-null, jenkins AuthenticationProcessingFilter2")
+    @Test
+    public void nullMarkedLibraryReturnOverride() {
+        NullabilityPass.Report report = run("a.b.NR", """
+                package a.b;
+                import org.junit.jupiter.api.DisplayNameGenerator;
+                class NR extends DisplayNameGenerator.Standard {
+                    @Override
+                    public String generateDisplayNameForClass(Class<?> testClass) {
+                        if (testClass.isInterface()) return null;
+                        return super.generateDisplayNameForClass(testClass);
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("String", s.get("a.b.NR.generateDisplayNameForClass(Class)"), s + "\n" + explain(report));
+    }
+
     @DisplayName("Kotlin: a @ParametricNullness type-variable parameter is a plain V, guava's TrustedListenableFutureTask.create")
     @Test
     public void parametricParameter() {
