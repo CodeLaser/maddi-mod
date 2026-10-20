@@ -2670,11 +2670,18 @@ public class TestNullabilityPass extends CommonTest {
                         void reset(Object connection) { this.connection = connection; }
                     }
                     void ready(Object c) { context.reset(c); }
+                    static final Holder<?> NULL = new Holder<>(null);
+                    static class Holder<V> {
+                        private final V value;
+                        Holder(V value) { this.value = value; }
+                        V get() { return value; }
+                    }
                 }
                 """, NullabilityPass.Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Object?", s.get("a.b.FI.Context.<init>(Object):0:connection"), s + "\n" + explain(report));
+        assertEquals("V!", s.get("a.b.FI.Holder.<init>(Object):0:value"), "a type variable's instantiation: " + s);
     }
 
     @DisplayName("Kotlin: 'return null' in an else branch inside try/finally, nacos NacosDelayTaskExecuteEngine.removeTask")
