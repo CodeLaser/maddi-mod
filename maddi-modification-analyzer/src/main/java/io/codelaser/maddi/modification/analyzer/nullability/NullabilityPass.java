@@ -6453,6 +6453,7 @@ public final class NullabilityPass {
         if (initializer != null) {
             seedCreated(fi, initializer, null);
             factorySlots(fi, initializer, null);
+            initializerContent(fi, initializer);
         }
         if (initializer instanceof NullConstant) {
             seed(fi, "initializer null", fi.owner());
@@ -6471,6 +6472,29 @@ public final class NullabilityPass {
             }
         }
     }
+
+    /*
+     Kotlin: a field initialized with another field or an analysed method's result is that object ('_LITERAL_NAMES =
+     makeLiteralNames()', 'countryCodeTLDsPlus = EMPTY_STRING_ARRAY'): their content slots are tied both ways, as a
+     local's assignment is (nestedCopy, callResult). Arrays are invariant: an Array<String?> initializer needs an
+     Array<String?> field (jenkins CrontabLexer.kt:45, DomainValidator.kt:1714, 2026-10-20). Gate NOFIELDINITCONTENT.
+     */
+    private void initializerContent(FieldInfo fi, Expression initializer) {
+        if (FIELD_INIT_CONTENT_OFF || !policy.callResults() || fi.type().arrays() == 0 && fi.type().parameters().isEmpty()) {
+            return;
+        }
+        Expression e = NonNullFacts.unwrap(initializer);
+        Object source = null;
+        if (e instanceof VariableExpression ve && ve.variable() instanceof FieldReference fr) {
+            source = fr.fieldInfo();
+        } else if (e instanceof MethodCall mc && mc.methodInfo() != null && analysed.contains(mc.methodInfo())
+                   && !mc.methodInfo().returnType().isVoid()) {
+            source = mc.methodInfo();
+        }
+        if (source != null && source != fi) flows.add(List.of(source, fi));
+    }
+
+    private static final boolean FIELD_INIT_CONTENT_OFF = System.getenv("NOFIELDINITCONTENT") != null;
 
     private static boolean assigns(MethodInfo constructor, FieldInfo fi) {
         Block body = constructor.methodBody();

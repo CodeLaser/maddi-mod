@@ -2870,6 +2870,34 @@ public class TestNullabilityPass extends CommonTest {
                 s + "\n" + explain(report));
     }
 
+    @DisplayName("Kotlin: a field initialized with another field or a method's array takes its element nullability, jenkins CrontabLexer, DomainValidator")
+    @Test
+    public void fieldInitializerContent() {
+        NullabilityPass.Report report = run("a.b.FC", """
+                package a.b;
+                class FC {
+                    static final String[] EMPTY = new String[0];
+                    private static final String[] NAMES = makeNames();
+                    private String[] plus = EMPTY;
+                    static String[] makeNames() {
+                        return new String[]{null, "'-'", "'+'"};
+                    }
+                    static String[] intern(String[] input) {
+                        if (input.length == 0) return EMPTY;
+                        input[0] = input[0].isEmpty() ? null : input[0];
+                        return input;
+                    }
+                    int count() {
+                        return NAMES.length + plus.length;
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("String?[]", s.get("a.b.FC.NAMES"), s + "\n" + explain(report));
+        assertEquals("String?[]", s.get("a.b.FC.plus"), s + "\n" + explain(report));
+    }
+
     @DisplayName("Kotlin: an override of a @NullMarked library method's non-null return stays non-null, jenkins AuthenticationProcessingFilter2")
     @Test
     public void nullMarkedLibraryReturnOverride() {
