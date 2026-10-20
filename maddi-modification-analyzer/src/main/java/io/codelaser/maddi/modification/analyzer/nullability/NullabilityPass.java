@@ -4529,12 +4529,30 @@ public final class NullabilityPass {
             ParameterizedType formal = parameters.get(i).parameterizedType();
             if (formal.arrays() > 0 || formal.parameters().isEmpty()) continue;
             Object argument = argumentNode(mi, scope, arguments.get(i));
+            if (argument == null) argument = viewArgument(arguments.get(i));
             if (argument == null) continue;
             ParameterizedType type = typeOf(argument);
             instantiatedSlots(argument, type != null ? type : arguments.get(i).parameterizedType(), parameters.get(i),
                     formal, target, targetType, constructor.typeInfo(), true);
         }
     }
+
+    /*
+     Kotlin: a library view passed as the argument ('new ProviderChain<>(installStateFilterChain.iterator())'): a node of
+     its own (CallResult), its slots tied to the receiver's (libraryView). The list's 'Function<…, InstallState?>' then
+     instantiates the chain's T (jenkins InstallUtil.kt:62, 2026-10-20). Gate NOVIEWARGUMENTS.
+     */
+    private Object viewArgument(Expression argument) {
+        if (VIEW_ARGUMENTS_OFF || !(NonNullFacts.unwrap(argument) instanceof MethodCall mc) || mc.methodInfo() == null
+            || analysed.contains(mc.methodInfo()) || mc.methodInfo().isStatic() || mc.concreteReturnType() == null) {
+            return null;
+        }
+        CallResult result = new CallResult(mc);
+        libraryView(result, mc, 0);
+        return result;
+    }
+
+    private static final boolean VIEW_ARGUMENTS_OFF = System.getenv("NOVIEWARGUMENTS") != null;
 
     /*
      A parameter whose type arguments are the declaring class's type variables ('addAll(Collection<? extends E>)',

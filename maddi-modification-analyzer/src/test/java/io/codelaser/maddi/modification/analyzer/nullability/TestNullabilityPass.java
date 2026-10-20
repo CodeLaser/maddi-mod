@@ -2824,6 +2824,42 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("List<Function<String, String?>>", l.get("chain"), l + "\n" + explain(report));
     }
 
+    @DisplayName("Kotlin: a list's nullable function slot reaches a generic constructor through iterator(), jenkins InstallUtil")
+    @Test
+    public void lambdaSlotThroughIterator() {
+        NullabilityPass.Report report = run("a.b.LI", """
+                package a.b;
+                import java.util.ArrayList;
+                import java.util.Iterator;
+                import java.util.List;
+                import java.util.function.Function;
+                class LI {
+                    static String next(String current) {
+                        List<Function<String, String>> functions = new ArrayList<>();
+                        functions.add(input -> {
+                            if (input.isEmpty()) return null;
+                            return input + current;
+                        });
+                        Chain<String> chain = new Chain<>(functions.iterator());
+                        return chain.get();
+                    }
+                    static class Chain<T> {
+                        private final Iterator<Function<String, T>> functions;
+                        Chain(Iterator<Function<String, T>> functions) {
+                            this.functions = functions;
+                        }
+                        T get() {
+                            return functions.next().apply("x");
+                        }
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> l = new java.util.TreeMap<>();
+        report.locals().forEach((local, pt) -> l.put(local.name(), k(pt)));
+        assertEquals("List<Function<String, String?>>", l.get("functions"), l + "\n" + explain(report));
+        assertEquals("Chain<String?>", l.get("chain"), l + "\n" + explain(report));
+    }
+
     @DisplayName("Kotlin: an override of a @NullMarked library method's non-null return stays non-null, jenkins AuthenticationProcessingFilter2")
     @Test
     public void nullMarkedLibraryReturnOverride() {
