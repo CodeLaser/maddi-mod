@@ -290,7 +290,7 @@ public class ShadowModificationPass {
                 MethodLinkedVariablesImpl.class);
         if (mlv == null) {
             methodsWithoutLinks++;
-            taintUnprojected(mi); // no summary at all: no evidence for this method's own nodes (§10.1)
+            taintUnprojected(mi, "no METHOD_LINKS"); // no summary at all: no evidence for this method's own nodes (§10.1)
             return;
         }
         if (io.codelaser.maddi.modification.prepwork.Util.unionOverImplementations(mi)) {
@@ -778,7 +778,8 @@ public class ShadowModificationPass {
             if (callee.methodBody() != null && !callee.methodBody().isEmpty() && !callee.isAbstract()) {
                 missingArgLinkAnalyzedCallees.merge(callee.fullyQualifiedName(), 1, Integer::sum);
                 for (io.codelaser.maddi.cst.api.expression.Expression arg : argumentExpressions) {
-                    frontierIncomplete.addAll(projectReceiverChain(mi, vd, arg, null));
+                    projectReceiverChain(mi, vd, arg, null).forEach(node ->
+                            taint(node, "call to " + callee + " in " + mi + " without argument links"));
                 }
             } else if (!orderMethods.contains(callee)) {
                 // P3: the summary fold no longer seeds a walkable caller's own nodes, so a boundary
@@ -892,7 +893,7 @@ public class ShadowModificationPass {
                         MethodLinkedVariablesImpl.class);
                 if (mlv == null) {
                     unprojectedReceivers++;
-                    taintUnprojected(mi);
+                    taintUnprojected(mi, "receiver chain through " + callee + ", which has no METHOD_LINKS");
                     return Set.of();
                 }
                 Set<Object> out = new LinkedHashSet<>();
@@ -944,7 +945,7 @@ public class ShadowModificationPass {
                         MethodLinkedVariablesImpl.class);
                 if (mlv == null) {
                     unprojectedReceivers++;
-                    taintUnprojected(mi);
+                    taintUnprojected(mi, "receiver chain through " + ctor + ", which has no METHOD_LINKS");
                     return Set.of();
                 }
                 Set<Object> out = new LinkedHashSet<>();
@@ -1140,9 +1141,22 @@ public class ShadowModificationPass {
      * parameters an incomplete frontier — cheap over-taint at the measured 1-5 occurrences per
      * corpus (post-P2.2a).
      */
-    private void taintUnprojected(MethodInfo mi) {
-        frontierIncomplete.add(mi);
-        frontierIncomplete.addAll(mi.parameters());
+    private void taintUnprojected(MethodInfo mi, String why) {
+        taint(mi, why);
+        mi.parameters().forEach(pi -> taint(pi, why));
+    }
+
+    // MODREACH_TAINT=<substring>[,<substring>...]: print why a node whose FQN contains the substring gets an
+    // incomplete frontier, the reason the cutover keeps its FALSE ("reverse kept (tainted)")
+    private static final String[] TAINT_DEBUG = Optional.ofNullable(System.getenv("MODREACH_TAINT"))
+            .map(s -> s.split(",")).orElse(new String[0]);
+
+    private void taint(Object node, String why) {
+        if (frontierIncomplete.add(node) && TAINT_DEBUG.length > 0 && node instanceof Info info
+            && Arrays.stream(TAINT_DEBUG).anyMatch(part -> !part.isBlank()
+                                                          && info.fullyQualifiedName().contains(part))) {
+            System.out.println("MODREACH_TAINT " + info + ": " + why);
+        }
     }
 
     private void addEdge(Object from, Object to) {
