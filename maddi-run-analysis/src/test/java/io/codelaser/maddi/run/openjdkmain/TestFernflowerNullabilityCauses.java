@@ -43,9 +43,12 @@ public class TestFernflowerNullabilityCauses {
         String corpusName = java.util.Objects.requireNonNullElse(System.getenv("NULLABILITY_CORPUS"), "fernflower");
         // nacos: one module per run, J2K_NACOS_MAIN as TestJavaToKotlinNacosNullability (api/main by default)
         String nacosMain = java.util.Objects.requireNonNullElse(System.getenv("J2K_NACOS_MAIN"), "api/main");
-        JavaToKotlinRatchet.Corpus corpus = "nacos".equals(corpusName)
-                ? JavaToKotlinRatchet.parse("nacos", nacosMain, null, false, true)
-                : JavaToKotlinRatchet.parse(corpusName);
+        // jenkins: its core module, as TestJavaToKotlinJenkinsNullability
+        JavaToKotlinRatchet.Corpus corpus = switch (corpusName) {
+            case "nacos" -> JavaToKotlinRatchet.parse("nacos", nacosMain, null, false, true);
+            case "jenkins" -> JavaToKotlinRatchet.parse("jenkins", "Jenkins core/main", null, false);
+            default -> JavaToKotlinRatchet.parse(corpusName);
+        };
         JavaInspector javaInspector = corpus.javaInspector();
         AnalysisEngineImpl engine = new AnalysisEngineImpl();
         engine.resultsLoader(javaInspector.runtime(), javaInspector.mainSources()).load(List.of(JDK_HINTS));
