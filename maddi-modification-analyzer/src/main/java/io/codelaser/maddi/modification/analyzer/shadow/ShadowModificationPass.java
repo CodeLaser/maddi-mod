@@ -564,6 +564,13 @@ public class ShadowModificationPass {
                 if (e6Rederivable(pi.methodInfo())) return;
                 seed(pi, structural);
             }
+            case DependentVariable dv when dv.arrayVariable() == null -> {
+                // an element of an array that is an expression, not a variable ('values()[0] = 0'): no node to seed.
+                // Keep this method's fixpoint values rather than fail the whole pass (CodeLaser/maddi-mod#55)
+                LOGGER.warn("modreach: {} modifies an element of array expression {}; frontier incomplete", mi,
+                        dv.arrayExpression());
+                taintUnprojected(mi, "modifies an element of array expression " + dv.arrayExpression());
+            }
             case DependentVariable dv -> seedVariable(mi, dv.arrayVariable(), skipReceiverRooted, structural); // a[i] modified => a modified
             case LocalVariable lv -> {
                 // a method's own locals never appear in the mlv summary; a genuine LocalVariable here

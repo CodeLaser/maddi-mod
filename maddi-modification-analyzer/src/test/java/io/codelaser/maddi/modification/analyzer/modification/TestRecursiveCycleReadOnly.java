@@ -153,6 +153,132 @@ public class TestRecursiveCycleReadOnly extends CommonTest {
                      + " Graph=true Transposed=true", s);
     }
 
+    @Language("java")
+    private static final String REMAINING = """
+            package a.b;
+            import java.math.BigInteger;
+            import java.util.ArrayList;
+            import java.util.List;
+            import java.util.ListIterator;
+            import java.util.Properties;
+            class Rem {
+                static class Pps {
+                    private final Properties properties = new Properties();
+                    private Pps parent;
+                    String getProperty(String key) { return getProperty(this, key); }
+                    private String getProperty(Pps pps, String key) {
+                        final String value = pps.properties.getProperty(key);
+                        if (value != null) return value;
+                        final Pps parent = pps.parent;
+                        if (parent == null) return null;
+                        return getProperty(parent, key);
+                    }
+                    boolean containsKey(Pps pps, String key) {
+                        final boolean exist = pps.properties.containsKey(key);
+                        if (exist) return true;
+                        final Pps parent = pps.parent;
+                        if (parent == null) return false;
+                        return containsKey(parent, key);
+                    }
+                    Properties asProperties() {
+                        List<Properties> list = new ArrayList<>(8);
+                        list = lookForProperties(this, list);
+                        Properties ret = new Properties();
+                        final ListIterator<Properties> it = list.listIterator(list.size());
+                        while (it.hasPrevious()) ret.putAll(it.previous());
+                        return ret;
+                    }
+                    List<Properties> lookForProperties(Pps pps, List<Properties> list) {
+                        list.add(pps.properties);
+                        final Pps parent = pps.parent;
+                        if (parent == null) return list;
+                        return lookForProperties(parent, list);
+                    }
+                    synchronized void setProperty(String key, String value) { properties.setProperty(key, value); }
+                }
+                static final class Avl {
+                    private Avl left, right;
+                    private int distinctElements;
+                    private long totalCount;
+                    private int elemCount;
+                    private Avl rebalance() { return this; }
+                    private Avl removeMin(Avl node) {
+                        if (left == null) {
+                            return right;
+                        } else {
+                            left = left.removeMin(node);
+                            distinctElements--;
+                            totalCount -= node.elemCount;
+                            return rebalance();
+                        }
+                    }
+                }
+                static BigInteger listProduct(List<BigInteger> nums, int start, int end) {
+                    switch (end - start) {
+                        case 0: return BigInteger.ONE;
+                        case 1: return nums.get(start);
+                        case 2: return nums.get(start).multiply(nums.get(start + 1));
+                        default:
+                            int m = (end + start) >>> 1;
+                            return listProduct(nums, start, m).multiply(listProduct(nums, m, end));
+                    }
+                }
+            }
+            """;
+
+    // shapes still FALSE on the corpora once the pass completes, nacos' PropertiesPropertySource and guava's
+    @DisplayName("the corpus shapes left after #55's pass failure: reachability")
+    @Test
+    public void remaining() {
+        TypeInfo X = javaInspector.parse("a.b.Rem", REMAINING);
+        List<Info> ao = prepWork(X);
+        new IteratingAnalyzerImpl(javaInspector, new IteratingAnalyzerImpl.ConfigurationBuilder()
+                .setMaxIterations(30)
+                .setModificationViaReachability(true)
+                .build()).analyze(ao);
+        TypeInfo pps = X.findSubType("Pps");
+        String s = "getProperty=" + pps.methods().stream().filter(m -> m.name().equals("getProperty")
+                                                                   && m.parameters().size() == 2).findFirst().orElseThrow()
+                           .parameters().getFirst().isUnmodified()
+                   + " containsKey=" + method(pps, "containsKey").parameters().getFirst().isUnmodified()
+                   + " lookFor=" + method(pps, "lookForProperties").parameters().getFirst().isUnmodified()
+                   + " removeMin=" + method(X.findSubType("Avl"), "removeMin").parameters().getFirst().isUnmodified()
+                   + " listProduct=" + method(X, "listProduct").parameters().getFirst().isUnmodified();
+        // PINS two defects: lookForProperties adds pps.properties to a list asProperties then reads, and the summary
+        // carries that as a modification of the parameter; listProduct's 'nums.get(start).multiply(..)' is a receiver
+        // chain through List.get, which has no METHOD_LINKS when only a RECURSIVE_METHOD calls it (see the class comment)
+        assertEquals("getProperty=true containsKey=true lookFor=false removeMin=true listProduct=false", s);
+    }
+
+    // nacos' ClassUtils.resolveGenericTypeByInterface: a call on an element of an array that a call returns. The summary's
+    // modified variable is that element, a DependentVariable without an array variable, and seeding it failed the whole
+    // pass ("MODREACH pass failed"), so every fixpoint FALSE stayed: depth's parameter here
+    @Language("java")
+    private static final String ARRAY = """
+            package a.b;
+            class Arr {
+                static final class Box { int v; Box bump() { v++; return this; } }
+                private final Box[] boxes = new Box[2];
+                Arr next;
+                static Arr of(Arr a) { return a; }
+                Box[] boxes() { return boxes; }
+                static Box first(Arr a) { return of(a).boxes()[0].bump(); }
+                static int depth(Arr a) { return a.next == null ? 0 : 1 + depth(a.next); }
+            }
+            """;
+
+    @DisplayName("an element of an array expression in a summary does not fail the reachability pass")
+    @Test
+    public void expressionArray() {
+        TypeInfo X = javaInspector.parse("a.b.Arr", ARRAY);
+        List<Info> ao = prepWork(X);
+        new IteratingAnalyzerImpl(javaInspector, new IteratingAnalyzerImpl.ConfigurationBuilder()
+                .setMaxIterations(30)
+                .setModificationViaReachability(true)
+                .build()).analyze(ao);
+        assertEquals("depth=true", "depth=" + method(X, "depth").parameters().getFirst().isUnmodified());
+    }
+
     private static MethodInfo method(TypeInfo typeInfo, String name) {
         return typeInfo.methods().stream().filter(m -> m.name().equals(name)).findFirst().orElseThrow();
     }
