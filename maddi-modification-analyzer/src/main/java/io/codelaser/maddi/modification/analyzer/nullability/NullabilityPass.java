@@ -1332,7 +1332,8 @@ public final class NullabilityPass {
         }
         if (policy.callResults()) {
             for (MethodInfo mi : methods) {
-                if (boundedTypeVariableOverride(mi) || overridesKotlinNonNullReturn(mi)) nonNullContracts.add(mi);
+                if (boundedTypeVariableOverride(mi) || overridesKotlinNonNullReturn(mi)
+                    || overridesLibraryNonNullReturn(mi)) nonNullContracts.add(mi);
             }
             nonNullOverrides(methods);
         }
@@ -1970,23 +1971,63 @@ public final class NullabilityPass {
 
     /** A library method, {@code mi} or one it overrides, whose return may be null; null when there is none. */
     private String libraryNullableReturn(MethodInfo mi) {
-        return java.util.stream.Stream.concat(java.util.stream.Stream.of(mi), overrides(mi).stream())
-                .filter(m -> !analysed.contains(m))
-                .filter(m -> libraryReturnState(m) == NullableState.NULLABLE)
+        List<MethodInfo> nearest = nearestLibraryDeclarations(mi);
+        if (nearest.stream().anyMatch(m -> libraryReturnState(m) == NullableState.NONNULL)) return null;
+        return nearest.stream().filter(m -> libraryReturnState(m) == NullableState.NULLABLE)
                 .map(MethodInfo::fullyQualifiedName).findFirst().orElse(null);
+    }
+
+    /*
+     The library declarations of mi's return that say something, the nearest ones: Spring Security 7's
+     UsernamePasswordAuthenticationFilter.attemptAuthentication (@NullMarked, non-null) over
+     AbstractAuthenticationProcessingFilter's '@Nullable Authentication attemptAuthentication' (jenkins
+     AuthenticationProcessingFilter2.kt:36, 2026-10-20). Gate NONEARESTLIBRARYRETURN: any one that says nullable.
+     */
+    private List<MethodInfo> nearestLibraryDeclarations(MethodInfo mi) {
+        List<MethodInfo> declared = java.util.stream.Stream.concat(java.util.stream.Stream.of(mi), overrides(mi).stream())
+                .filter(m -> !analysed.contains(m))
+                .filter(m -> libraryReturnState(m) != NullableState.UNSPECIFIED)
+                .toList();
+        if (NEAREST_LIBRARY_RETURN_OFF || declared.size() < 2) return declared;
+        return declared.stream()
+                .filter(m -> declared.stream().noneMatch(o -> o != m && o.typeInfo() != m.typeInfo()
+                        && o.typeInfo().superTypesExcludingJavaLangObject().contains(m.typeInfo())))
+                .toList();
+    }
+
+    private static final boolean NEAREST_LIBRARY_RETURN_OFF = System.getenv("NONEARESTLIBRARYRETURN") != null;
+
+    /*
+     Kotlin: an override of a library method whose return is declared non-null may not widen it ('override fun
+     attemptAuthentication(...): Authentication?' over Spring 7's non-null one): its return is non-null, a null value
+     asserted. Gate NONEARESTLIBRARYRETURN.
+     */
+    private boolean overridesLibraryNonNullReturn(MethodInfo mi) {
+        if (NEAREST_LIBRARY_RETURN_OFF || mi.isConstructor() || mi.returnType().isVoid()
+            || mi.returnType().isPrimitiveExcludingVoid() && mi.returnType().arrays() == 0
+            || NullAnnotations.explicitState(mi) == NullableState.NULLABLE) return false;
+        return overrides(mi).stream().anyMatch(m -> !analysed.contains(m)
+                                                    && libraryReturnState(m) == NullableState.NONNULL);
     }
 
     /*
      What a library method's return declares: the hints first, then the class file's own annotations, as for a
      library parameter (libraryParameterState). Without the second, only the JDK hints seeded: io.kubernetes.client's
      model getters, '@jakarta.annotation.Nullable V1EndpointSubset getSubsets()', never did (nacos K8sSyncServer,
-     21 SpotBugs results we missed, 2026-10-10). No @NullMarked default here: a non-null return seeds nothing.
+     21 SpotBugs results we missed, 2026-10-10). A @NullMarked scope makes an unannotated return non-null: it seeds
+     nothing, but it is the nearest declaration (nearestLibraryDeclarations), and an override may not widen it.
      */
     private static NullableState libraryReturnState(MethodInfo mi) {
         NullableState hint = stateOf(mi, PropertyImpl.NULLABILITY_METHOD);
         if (hint != NullableState.UNSPECIFIED) return hint;
         NullableState explicit = NullAnnotations.explicitState(mi);
-        return explicit != null ? explicit : NullableState.UNSPECIFIED;
+        if (explicit != null) return explicit;
+        // a @NullMarked scope's unannotated return that is not a type variable (Spring Security 7)
+        if (!NEAREST_LIBRARY_RETURN_OFF && !mi.isConstructor() && !mi.returnType().isVoid()
+            && !isTypeVariable(mi.returnType()) && NullAnnotations.inNullMarkedScope(mi)) {
+            return NullableState.NONNULL;
+        }
+        return NullableState.UNSPECIFIED;
     }
 
     /*

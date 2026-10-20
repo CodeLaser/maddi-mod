@@ -2824,6 +2824,25 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("List<Function<String, String?>>", l.get("chain"), l + "\n" + explain(report));
     }
 
+    @DisplayName("Kotlin: an override of a @NullMarked library method's non-null return stays non-null, jenkins AuthenticationProcessingFilter2")
+    @Test
+    public void nullMarkedLibraryReturnOverride() {
+        NullabilityPass.Report report = run("a.b.NR", """
+                package a.b;
+                import org.junit.jupiter.api.DisplayNameGenerator;
+                class NR extends DisplayNameGenerator.Standard {
+                    @Override
+                    public String generateDisplayNameForClass(Class<?> testClass) {
+                        if (testClass.isInterface()) return null;
+                        return super.generateDisplayNameForClass(testClass);
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("String", s.get("a.b.NR.generateDisplayNameForClass(Class)"), s + "\n" + explain(report));
+    }
+
     @DisplayName("Kotlin: a @ParametricNullness type-variable parameter is a plain V, guava's TrustedListenableFutureTask.create")
     @Test
     public void parametricParameter() {
