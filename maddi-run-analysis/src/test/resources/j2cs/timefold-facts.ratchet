@@ -173,10 +173,12 @@
 # 2026-10-20, maddi e4f3b7eea, c419cf6ec, c23c8a94d: type arguments C# cannot infer through variable arity, bounds and
 # null arguments, notnull through a call's result: 1316 -> 1317 compiling files, 656 -> 644 errors, nullableWarnings
 # 209 -> 207 (211 before c23c8a94d).
+# 2026-10-20, maddi 07026fe78, a93dae4bf: IJavaIterator covariant, a Func of other type arguments wrapped
+# (JavaDelegates.Cast): 1317 -> 1319 compiling files, 644 -> 633 errors, nullableWarnings 207 -> 206.
 types	1583
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	1565
-compilingFiles	1317
+compilingFiles	1319
 unmappedJdkUses	106
-nullableWarnings	207
+nullableWarnings	206

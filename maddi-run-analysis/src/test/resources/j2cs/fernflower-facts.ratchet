@@ -77,10 +77,12 @@
 # 2026-10-18, maddi 459ff635e, 4b171c277, 929b63000, 8a222b943: a diamond's type arguments through any supertype;
 # a raw creation's raw arrays; delegates widened for a generic constructor; the formatter's split points move with
 # an overflow split: 184 -> 185 compiling files.
+# 2026-10-20, maddi 07026fe78: IJavaIterator covariant, so an iterator of string? is one of string: nullableWarnings
+# 24 -> 17, errors (32) and compiling files unchanged.
 types	199
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	199
 compilingFiles	185
 unmappedJdkUses	15
-nullableWarnings	24
+nullableWarnings	17
