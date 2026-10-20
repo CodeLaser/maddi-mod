@@ -1380,6 +1380,7 @@ public final class NullabilityPass {
             if (added) coupleContent(); // the nested slots of the new flows
         }
 
+        libraryParameterContracts();
         Map<Object, Object> cause = new LinkedHashMap<>();
         reached = closure(cause);
         List<NullArgument> nullArguments = nullArguments(reached);
@@ -2031,6 +2032,7 @@ public final class NullabilityPass {
     private static NullableState libraryParameterState(ParameterInfo pi) {
         NullableState hint = stateOf(pi, PropertyImpl.NULLABILITY_PARAMETER);
         if (hint != NullableState.UNSPECIFIED) return hint;
+        if (containerCallback(pi.methodInfo())) return NullableState.NONNULL;
         NullableState explicit = NullAnnotations.explicitState(pi);
         if (explicit != null) return explicit;
         if (!isTypeVariable(pi.parameterizedType()) && NullAnnotations.inNullMarkedScope(pi.methodInfo())) {
@@ -2038,6 +2040,46 @@ public final class NullabilityPass {
         }
         return NullableState.UNSPECIFIED;
     }
+
+    /*
+     The servlet container's callbacks: it never passes a null request, response, chain or configuration, though the
+     servlet API declares nothing (jenkins: a 'Filter.doFilter' override's 'response' had reached Spring Security's
+     @NullMarked RememberMeServices.loginFail, BasicHeaderProcessor.kt:94, HttpSessionContextIntegrationFilter2.kt:34,
+     2026-10-20). Gate NOCONTAINERCALLBACKS.
+     */
+    private static final List<String> CONTAINER_CALLBACKS = List.of("jakarta.servlet.Filter.", "javax.servlet.Filter.",
+            "jakarta.servlet.Servlet.", "javax.servlet.Servlet.", "jakarta.servlet.FilterChain.doFilter(",
+            "javax.servlet.FilterChain.doFilter(", "jakarta.servlet.http.HttpServlet.", "javax.servlet.http.HttpServlet.",
+            "jakarta.servlet.GenericServlet.", "javax.servlet.GenericServlet.");
+
+    private static final boolean CONTAINER_CALLBACKS_OFF = System.getenv("NOCONTAINERCALLBACKS") != null;
+
+    private static boolean containerCallback(MethodInfo mi) {
+        if (CONTAINER_CALLBACKS_OFF || mi.isConstructor() || mi.isStatic()) return false;
+        String fqn = mi.fullyQualifiedName();
+        return CONTAINER_CALLBACKS.stream().anyMatch(fqn::startsWith);
+    }
+
+    /*
+     Kotlin: a library parameter declared non-null (@NullMarked, a hint) is a contract: a caller's null is asserted
+     at the call, and does not flow on through it into the analysed implementations (Spring Security 7's
+     RememberMeServices.loginFail(request, response) had carried a null into RememberMeServicesProxy's override,
+     jenkins RememberMeServicesProxy.kt:20, 2026-10-20). Gate NOLIBRARYCONTRACTS.
+     */
+    private void libraryParameterContracts() {
+        if (LIBRARY_CONTRACTS_OFF || !policy.callResults()) return;
+        Set<ParameterInfo> seen = new HashSet<>();
+        for (Set<Object> targets : successors.values()) {
+            for (Object t : targets) {
+                if (t instanceof ParameterInfo pi && !analysed.contains(pi.methodInfo()) && seen.add(pi)
+                    && libraryParameterState(pi) == NullableState.NONNULL) {
+                    nonNullContracts.add(pi);
+                }
+            }
+        }
+    }
+
+    private static final boolean LIBRARY_CONTRACTS_OFF = System.getenv("NOLIBRARYCONTRACTS") != null;
 
     /*
      A library method mi overrides (a real override, not a lambda's functional method) whose parameter 'index'
