@@ -6266,11 +6266,19 @@ public final class NullabilityPass {
      */
     private void lambdaParameters(Lambda lambda, Object pi) {
         MethodInfo body = lambda.methodInfo();
-        if (LAMBDA_PARAMETERS_OFF || body == null || !(pi instanceof ParameterInfo parameter)
-            || !analysed.contains(parameter.methodInfo())) {
+        if (LAMBDA_PARAMETERS_OFF || body == null) return;
+        ParameterizedType formal;
+        if (pi instanceof ParameterInfo parameter && analysed.contains(parameter.methodInfo())) {
+            formal = parameter.parameterizedType();
+        } else if (!LAMBDA_PARAMETER_SLOTS_OFF && pi instanceof Arg slot) {
+            // a receiver's slot, as in lambdaResult: 'chain.add(next -> filter.getNextInstallState(current, next))'
+            // on a List<Function<Provider<S?>, S?>> makes 'next' a Provider<S?>, which it passes on (jenkins
+            // InstallUtil.kt:44, 2026-10-20). Gate NOLAMBDAPARAMETERSLOTS.
+            formal = typeOf(slot);
+            if (formal == null) return;
+        } else {
             return;
         }
-        ParameterizedType formal = parameter.parameterizedType();
         if (formal.arrays() > 0 || formal.typeInfo() == null || formal.parameters().isEmpty()) return;
         MethodInfo sam = formal.typeInfo().singleAbstractMethod();
         if (sam == null || sam.typeInfo() != formal.typeInfo() || body.parameters().size() != sam.parameters().size()) {
@@ -6281,10 +6289,17 @@ public final class NullabilityPass {
             if (!isClassTypeVariable(t) || t.wildcard() != null) continue;
             int j = formal.typeInfo().typeParameters().indexOf(t.typeParameter());
             if (j >= 0 && j < formal.parameters().size() && formal.parameters().get(j).typeParameter() == null) {
-                addEdge(new Arg(parameter, j), body.parameters().get(samParameter.index()));
+                Object lambdaParameter = body.parameters().get(samParameter.index());
+                addEdge(new Arg(pi, j), lambdaParameter);
+                // a generic argument ('Provider<S>'): the lambda's parameter is that object, its slots tied both ways
+                if (pi instanceof Arg && !formal.parameters().get(j).parameters().isEmpty()) {
+                    flows.add(List.of(new Arg(pi, j), lambdaParameter));
+                }
             }
         }
     }
+
+    private static final boolean LAMBDA_PARAMETER_SLOTS_OFF = System.getenv("NOLAMBDAPARAMETERSLOTS") != null;
 
     private static final boolean LAMBDA_PARAMETERS_OFF = System.getenv("NOLAMBDAPARAMETERS") != null;
 
@@ -6438,6 +6453,7 @@ public final class NullabilityPass {
         if (initializer != null) {
             seedCreated(fi, initializer, null);
             factorySlots(fi, initializer, null);
+            initializerContent(fi, initializer);
         }
         if (initializer instanceof NullConstant) {
             seed(fi, "initializer null", fi.owner());
@@ -6456,6 +6472,29 @@ public final class NullabilityPass {
             }
         }
     }
+
+    /*
+     Kotlin: a field initialized with another field or an analysed method's result is that object ('_LITERAL_NAMES =
+     makeLiteralNames()', 'countryCodeTLDsPlus = EMPTY_STRING_ARRAY'): their content slots are tied both ways, as a
+     local's assignment is (nestedCopy, callResult). Arrays are invariant: an Array<String?> initializer needs an
+     Array<String?> field (jenkins CrontabLexer.kt:45, DomainValidator.kt:1714, 2026-10-20). Gate NOFIELDINITCONTENT.
+     */
+    private void initializerContent(FieldInfo fi, Expression initializer) {
+        if (FIELD_INIT_CONTENT_OFF || !policy.callResults() || fi.type().arrays() == 0 && fi.type().parameters().isEmpty()) {
+            return;
+        }
+        Expression e = NonNullFacts.unwrap(initializer);
+        Object source = null;
+        if (e instanceof VariableExpression ve && ve.variable() instanceof FieldReference fr) {
+            source = fr.fieldInfo();
+        } else if (e instanceof MethodCall mc && mc.methodInfo() != null && analysed.contains(mc.methodInfo())
+                   && !mc.methodInfo().returnType().isVoid()) {
+            source = mc.methodInfo();
+        }
+        if (source != null && source != fi) flows.add(List.of(source, fi));
+    }
+
+    private static final boolean FIELD_INIT_CONTENT_OFF = System.getenv("NOFIELDINITCONTENT") != null;
 
     private static boolean assigns(MethodInfo constructor, FieldInfo fi) {
         Block body = constructor.methodBody();

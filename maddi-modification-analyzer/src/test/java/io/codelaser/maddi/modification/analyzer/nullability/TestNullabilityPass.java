@@ -2833,31 +2833,69 @@ public class TestNullabilityPass extends CommonTest {
                 import java.util.Iterator;
                 import java.util.List;
                 import java.util.function.Function;
+                import java.util.function.Supplier;
                 class LI {
                     static String next(String current) {
-                        List<Function<String, String>> functions = new ArrayList<>();
+                        List<Function<Supplier<String>, String>> functions = new ArrayList<>();
+                        functions.add(proceed -> step(current, proceed));
                         functions.add(input -> {
-                            if (input.isEmpty()) return null;
-                            return input + current;
+                            if (current.isEmpty()) return null;
+                            return current + "x";
                         });
                         Chain<String> chain = new Chain<>(functions.iterator());
                         return chain.get();
                     }
-                    static class Chain<T> {
-                        private final Iterator<Function<String, T>> functions;
-                        Chain(Iterator<Function<String, T>> functions) {
+                    static String step(String current, Supplier<String> proceed) {
+                        return current.isEmpty() ? proceed.get() : current;
+                    }
+                    static class Chain<T> implements Supplier<T> {
+                        private final Iterator<Function<Supplier<T>, T>> functions;
+                        Chain(Iterator<Function<Supplier<T>, T>> functions) {
                             this.functions = functions;
                         }
-                        T get() {
-                            return functions.next().apply("x");
+                        @Override
+                        public T get() {
+                            return functions.next().apply(this);
                         }
                     }
                 }
                 """, NullabilityPass.Policy.KOTLIN);
         Map<String, String> l = new java.util.TreeMap<>();
         report.locals().forEach((local, pt) -> l.put(local.name(), k(pt)));
-        assertEquals("List<Function<String, String?>>", l.get("functions"), l + "\n" + explain(report));
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("List<Function<Supplier<String?>, String?>>", l.get("functions"), l + "\n" + explain(report));
         assertEquals("Chain<String?>", l.get("chain"), l + "\n" + explain(report));
+        assertEquals("Supplier<String?>", s.get("a.b.LI.step(String,java.util.function.Supplier):1:proceed"),
+                s + "\n" + explain(report));
+    }
+
+    @DisplayName("Kotlin: a field initialized with another field or a method's array takes its element nullability, jenkins CrontabLexer, DomainValidator")
+    @Test
+    public void fieldInitializerContent() {
+        NullabilityPass.Report report = run("a.b.FC", """
+                package a.b;
+                class FC {
+                    static final String[] EMPTY = new String[0];
+                    private static final String[] NAMES = makeNames();
+                    private String[] plus = EMPTY;
+                    static String[] makeNames() {
+                        return new String[]{null, "'-'", "'+'"};
+                    }
+                    static String[] intern(String[] input) {
+                        if (input.length == 0) return EMPTY;
+                        input[0] = input[0].isEmpty() ? null : input[0];
+                        return input;
+                    }
+                    int count() {
+                        return NAMES.length + plus.length;
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("String?[]", s.get("a.b.FC.NAMES"), s + "\n" + explain(report));
+        assertEquals("String?[]", s.get("a.b.FC.plus"), s + "\n" + explain(report));
     }
 
     @DisplayName("Kotlin: an override of a @NullMarked library method's non-null return stays non-null, jenkins AuthenticationProcessingFilter2")
