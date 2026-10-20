@@ -6174,19 +6174,29 @@ public final class NullabilityPass {
      */
     private void lambdaResult(Lambda lambda, Object pi) {
         MethodInfo body = lambda.methodInfo();
-        if (body == null || !(pi instanceof ParameterInfo parameter) || !analysed.contains(parameter.methodInfo())) {
+        if (body == null) return;
+        ParameterizedType formal;
+        if (pi instanceof ParameterInfo parameter && analysed.contains(parameter.methodInfo())) {
+            formal = parameter.parameterizedType();
+        } else if (!LAMBDA_SLOTS_OFF && policy.callResults() && pi instanceof Arg slot) {
+            // a receiver's slot: 'chain.add(input -> states.get(current))' on a List<Function<Provider<S>, S>> makes
+            // it a List<Function<Provider<S>, S?>> (jenkins InstallUtil.kt:48/60, 2026-10-20). Gate NOLAMBDASLOTS.
+            formal = typeOf(slot);
+            if (formal == null) return;
+        } else {
             return;
         }
-        ParameterizedType formal = parameter.parameterizedType();
         if (formal.arrays() > 0 || formal.typeInfo() == null || formal.parameters().isEmpty()) return;
         MethodInfo sam = formal.typeInfo().singleAbstractMethod();
         if (sam == null || !isClassTypeVariable(sam.returnType())) return;
         int j = formal.typeInfo().typeParameters().indexOf(sam.returnType().typeParameter());
         // not into a type variable ('<T> T withRetry(Callable<T> action)'): each call instantiates it anew
         if (j >= 0 && j < formal.parameters().size() && formal.parameters().get(j).typeParameter() == null) {
-            addEdge(body, new Arg(parameter, j));
+            addEdge(body, new Arg(pi, j));
         }
     }
+
+    private static final boolean LAMBDA_SLOTS_OFF = System.getenv("NOLAMBDASLOTS") != null;
 
     /*
      Kotlin: a lambda's parameters are values of the type arguments its interface method takes, in the parameter it

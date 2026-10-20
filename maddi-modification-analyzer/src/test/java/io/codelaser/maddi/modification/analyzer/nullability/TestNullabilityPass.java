@@ -2796,6 +2796,34 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("Iterator<Entry<String?, String>>", s.get("a.b.MV.iterator()"), s + "\n" + explain(report));
     }
 
+    @DisplayName("Kotlin: a lambda returning null added to a list of functions makes the slot's result nullable")
+    @Test
+    public void lambdaIntoReceiverSlot() {
+        NullabilityPass.Report report = run("a.b.LS", """
+                package a.b;
+                import java.util.ArrayList;
+                import java.util.HashMap;
+                import java.util.List;
+                import java.util.Map;
+                import java.util.function.Function;
+                class LS {
+                    static String next(String current) {
+                        List<Function<String, String>> chain = new ArrayList<>();
+                        chain.add(input -> {
+                            if (input.isEmpty()) return null;
+                            Map<String, String> states = new HashMap<>();
+                            states.put("a", "b");
+                            return states.get(current);
+                        });
+                        return chain.get(0).apply(current) + "";
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> l = new java.util.TreeMap<>();
+        report.locals().forEach((local, pt) -> l.put(local.name(), k(pt)));
+        assertEquals("List<Function<String, String?>>", l.get("chain"), l + "\n" + explain(report));
+    }
+
     @DisplayName("Kotlin: a @ParametricNullness type-variable parameter is a plain V, guava's TrustedListenableFutureTask.create")
     @Test
     public void parametricParameter() {
