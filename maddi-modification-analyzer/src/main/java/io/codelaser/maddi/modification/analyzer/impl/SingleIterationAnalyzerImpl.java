@@ -38,6 +38,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -563,10 +564,8 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
     }
 
     private static boolean isLinkCrash(Throwable t) {
-        for (StackTraceElement ste : t.getStackTrace()) {
-            if (ste.getClassName().startsWith("io.codelaser.maddi.modification.link.")) return true;
-        }
-        return false;
+        return Arrays.stream(t.getStackTrace())
+                .anyMatch(ste -> ste.getClassName().startsWith("io.codelaser.maddi.modification.link."));
     }
 
     private void runTypeAnalyzers(boolean activateCycleBreaking, TypeInfo typeInfo) {
