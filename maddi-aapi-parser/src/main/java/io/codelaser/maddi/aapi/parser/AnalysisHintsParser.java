@@ -333,10 +333,8 @@ public class AnalysisHintsParser implements AnnotationProvider {
         if (!candidate.isConstructor()
             && !sameFullType(candidate.returnType(), sourceMethod.returnType())) return false;
         Iterator<ParameterInfo> it = candidate.parameters().iterator();
-        for (ParameterInfo pi : sourceMethod.parameters()) {
-            if (!sameFullType(pi.parameterizedType(), it.next().parameterizedType())) return false;
-        }
-        return true;
+        return sourceMethod.parameters().stream()
+                .allMatch(pi -> sameFullType(pi.parameterizedType(), it.next().parameterizedType()));
     }
 
     // sameType, recursively over type arguments and wildcards. Two type parameters match whatever their owner and
