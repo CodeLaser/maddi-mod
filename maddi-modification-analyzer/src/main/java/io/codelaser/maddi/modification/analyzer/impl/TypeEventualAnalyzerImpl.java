@@ -60,6 +60,7 @@ import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -87,10 +88,8 @@ public class TypeEventualAnalyzerImpl extends CommonAnalyzerImpl implements Type
 
     private static boolean ecTypeDebug(TypeInfo typeInfo) {
         if (EC_TYPE_DEBUG == null) return false;
-        for (String part : EC_TYPE_DEBUG.split(",")) {
-            if (!part.isBlank() && typeInfo.fullyQualifiedName().contains(part)) return true;
-        }
-        return false;
+        return Arrays.stream(EC_TYPE_DEBUG.split(","))
+                .anyMatch(part -> !part.isBlank() && typeInfo.fullyQualifiedName().contains(part));
     }
 
     /** which side of the state transition a call places its caller on; ordered by precedence */
