@@ -6438,8 +6438,8 @@ public final class NullabilityPass {
 
     private static final boolean METHOD_REF_RESULTS_OFF = System.getenv("NOMETHODREFRESULTS") != null;
     /*
-     Kotlin: a lambda given to a library method whose functional parameter returns the callee class's type variable
-     ('computeIfAbsent(K, Function<? super K, ? extends V>)') returns a value of the receiver's slot for it: 'cache
+     Kotlin: a lambda given to 'computeIfAbsent(K, Function<? super K, ? extends V>)', whose functional parameter
+     returns the callee class's type variable, returns a value of the receiver's slot for it: 'cache
      .computeIfAbsent(t, unused -> computeConverter(t))' with a nullable computeConverter makes the cache's values
      nullable (jenkins XStream2.kt:224, 2026-10-21). Gate NORECEIVERLAMBDAS.
      */
@@ -6448,6 +6448,13 @@ public final class NullabilityPass {
             || analysed.contains(parameter.methodInfo()) || !(call instanceof MethodCall mc)) return;
         MethodInfo callee = parameter.methodInfo();
         ParameterizedType formal = parameter.parameterizedType();
+        // only ConcurrentHashMap's own 'computeIfAbsent', whose function Kotlin types '(K) -> V': Map's (and
+        // ConcurrentMap's) is enhanced to 'Function<in K, out V?>', so jenkins AbstractCIBase's
+        // 'computers.computeIfAbsent(n, node -> node.createComputer())' on a ConcurrentMap compiles as it is. For
+        // 'compute', 'computeIfPresent' and 'merge' a null result removes the entry (guava MapsTest, nacos
+        // SelectorManager: their maps' values had become nullable)
+        if (!"computeIfAbsent".equals(callee.name())
+            || !"java.util.concurrent.ConcurrentHashMap".equals(callee.typeInfo().fullyQualifiedName())) return;
         if (callee.isStatic() || formal.arrays() > 0 || formal.typeInfo() == null || formal.parameters().isEmpty()) return;
         MethodInfo sam = formal.typeInfo().singleAbstractMethod();
         if (sam == null || !isClassTypeVariable(sam.returnType())) return;
