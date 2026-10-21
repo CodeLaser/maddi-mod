@@ -3861,6 +3861,10 @@ public final class NullabilityPass {
                     // find(c); if (d == null) throw ...; return d;' the return is linked to find's 'return null'
                     // through d (timefold SolutionDescriptor.findEntityDescriptorOrFail, the diagnose session). The
                     // method's own summary repeats the link (no statement): skipped once a return guarded it.
+                    if (why(mi)) {
+                        whyLog("marker", mi, "from " + from + " to " + link.to() + " statement "
+                                             + (statement == null ? "-" : statement.toString().strip()));
+                    }
                     if (fromVar instanceof ReturnVariable) {
                         List<Object> key = List.of(mi, link.to());
                         if (statement == null) {
@@ -4567,7 +4571,7 @@ public final class NullabilityPass {
             ParameterizedType formal = parameters.get(i).parameterizedType();
             if (formal.arrays() > 0 || formal.parameters().isEmpty()) continue;
             Object argument = argumentNode(mi, scope, arguments.get(i));
-            if (argument == null) argument = viewArgument(arguments.get(i));
+            if (argument == null) argument = viewArgument(mi, scope, arguments.get(i));
             if (argument == null) continue;
             ParameterizedType type = typeOf(argument);
             instantiatedSlots(argument, type != null ? type : arguments.get(i).parameterizedType(), parameters.get(i),
@@ -4580,17 +4584,24 @@ public final class NullabilityPass {
      its own (CallResult), its slots tied to the receiver's (libraryView). The list's 'Function<…, InstallState?>' then
      instantiates the chain's T (jenkins InstallUtil.kt:62, 2026-10-20). Gate NOVIEWARGUMENTS.
      */
-    private Object viewArgument(Expression argument) {
+    private Object viewArgument(MethodInfo mi, Scope scope, Expression argument) {
         if (VIEW_ARGUMENTS_OFF || !(NonNullFacts.unwrap(argument) instanceof MethodCall mc) || mc.methodInfo() == null
             || analysed.contains(mc.methodInfo()) || mc.methodInfo().isStatic() || mc.concreteReturnType() == null) {
             return null;
         }
         CallResult result = new CallResult(mc);
-        libraryView(result, mc, 0);
+        ReadScope outer = readScope;
+        if (outer == null) readScope = new ReadScope(mi, scope); // a call site's argument (callSite has none)
+        try {
+            libraryView(result, mc, 0);
+        } finally {
+            readScope = outer;
+        }
         return result;
     }
 
     private static final boolean VIEW_ARGUMENTS_OFF = System.getenv("NOVIEWARGUMENTS") != null;
+    private static final boolean VIEW_METHOD_ARGUMENTS_OFF = System.getenv("NOVIEWMETHODARGUMENTS") != null;
 
     /*
      A parameter whose type arguments are the declaring class's type variables ('addAll(Collection<? extends E>)',
@@ -4793,6 +4804,9 @@ public final class NullabilityPass {
         String name = callee.name();
         List<Expression> args = mc.parameterExpressions();
         if (isStreamType(callee)) {
+            // Kotlin: 'filter(Objects::nonNull)', 'filter(x -> x != null)' lets no null through (jenkins CspBuilder.kt:52,
+            // Jenkins.kt:619, 2026-10-21). Gate NONULLFILTERS.
+            if ("filter".equals(name) && args.size() == 1 && nullFilter(args.getFirst())) return List.of();
             if (STREAM_PASS_THROUGH.contains(name)) return streamElements(mi, scope, mc.object());
             if (("map".equals(name) || "mapToObj".equals(name)) && args.size() == 1) {
                 return mapped(mi, scope, mc.object(), args.getFirst());
@@ -4823,6 +4837,29 @@ public final class NullabilityPass {
             return array == null ? List.of() : List.of(new Content(array));
         }
         return List.of();
+    }
+
+    private static final boolean NULL_FILTERS_OFF = System.getenv("NONULLFILTERS") != null;
+
+    // a predicate that holds only for a non-null element: 'Objects::nonNull', 'x -> x != null', 'x -> null != x'
+    private boolean nullFilter(Expression predicate) {
+        if (NULL_FILTERS_OFF || !policy.callResults()) return false;
+        Expression p = NonNullFacts.unwrap(predicate);
+        if (p instanceof MethodReference mr && mr.methodInfo() != null) {
+            return "nonNull".equals(mr.methodInfo().name())
+                   && "java.util.Objects".equals(mr.methodInfo().typeInfo().fullyQualifiedName());
+        }
+        if (!(p instanceof Lambda lambda) || lambda.methodInfo() == null || lambda.methodInfo().parameters().size() != 1) {
+            return false;
+        }
+        if (lambda.singleExpression() == null) return false;
+        Expression body = NonNullFacts.unwrap(lambda.singleExpression());
+        if (!(body instanceof BinaryOperator bo) || !NonNullFacts.isOperator(bo, "!=")) return false;
+        ParameterInfo element = lambda.methodInfo().parameters().getFirst();
+        Expression l = NonNullFacts.unwrap(bo.lhs());
+        Expression r = NonNullFacts.unwrap(bo.rhs());
+        return l instanceof NullConstant && r instanceof VariableExpression rv && element.equals(rv.variable())
+               || r instanceof NullConstant && l instanceof VariableExpression lv && element.equals(lv.variable());
     }
 
     // the nodes a mapping function ('map(t -> t.f)', 'map(Foo::bar)') produces from the elements of 'source'
@@ -6430,6 +6467,12 @@ public final class NullabilityPass {
             Object source = argumentNode(mi, scope, unwrappedArgument);
             if (source instanceof Arg || source instanceof MethodInfo m && concreteArguments(m.returnType())) {
                 flows.add(List.of(source, pi)); // the same object: content slots tied (coupleContent)
+            }
+            // Kotlin: a library view ('main(args.subList(1, args.size()))') is the receiver's data: the parameter's
+            // slots are the receiver's (jenkins CLIAction.kt:232, 2026-10-21). Gate NOVIEWMETHODARGUMENTS.
+            if (source == null && policy.callResults() && !VIEW_METHOD_ARGUMENTS_OFF && pi instanceof ParameterInfo) {
+                Object view = viewArgument(mi, scope, unwrappedArgument);
+                if (view != null) flows.add(List.of(view, pi));
             }
             // Kotlin: a slot read passed on ('new Pair(cv.get(i), i)') gives the parameter the slot's value, as
             // callResult does for an assignment; the Java policies leave this to the links

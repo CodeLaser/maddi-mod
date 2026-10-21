@@ -2940,6 +2940,7 @@ public class TestNullabilityPass extends CommonTest {
                     static class Slave extends Node {
                     }
                     Node node;
+                    @io.codelaser.maddi.annotation.Nullable
                     Node getNode(String name) {
                         return node;
                     }
@@ -2949,11 +2950,96 @@ public class TestNullabilityPass extends CommonTest {
                             return (Slave) n;
                         return null;
                     }
+                    @io.codelaser.maddi.annotation.Nullable
+                    Slave getPlugin(String name) {
+                        return node instanceof Slave s ? s : null;
+                    }
+                    boolean isNewer(String v) {
+                        return v.isEmpty();
+                    }
+                    public Slave getUpdateInfo() {
+                        Slave p = getPlugin("x");
+                        if (p != null && isNewer("y")) return p;
+                        return null;
+                    }
                 }
                 """, NullabilityPass.Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Slave?", s.get("a.b.RN.getSlave(String)"), s + "\n" + explain(report));
+        assertEquals("Slave?", s.get("a.b.RN.getUpdateInfo()"), s + "\n" + explain(report));
+    }
+
+    @DisplayName("Kotlin: a stream filtered with Objects::nonNull collects non-null elements, jenkins CspBuilder, Jenkins.getAgentProtocols")
+    @Test
+    public void streamFilterNonNull() {
+        NullabilityPass.Report report = run("a.b.SF", """
+                package a.b;
+                import java.util.ArrayList;
+                import java.util.Arrays;
+                import java.util.List;
+                import java.util.Objects;
+                import java.util.Set;
+                import java.util.TreeSet;
+                import java.util.stream.Collectors;
+                class SF {
+                    static class Protocol {
+                        String name;
+                        String getName() {
+                            return name;
+                        }
+                    }
+                    List<Protocol> protocols = new ArrayList<>();
+                    Set<String> nonNull(String... values) {
+                        final List<String> additions = new ArrayList<>(Arrays.stream(values).toList());
+                        Set<String> nonNullAdditions = additions.stream().filter(Objects::nonNull).collect(Collectors.toSet());
+                        return nonNullAdditions;
+                    }
+                    Set<String> names() {
+                        return protocols.stream().map(Protocol::getName).filter(n -> n != null)
+                                .collect(Collectors.toCollection(TreeSet::new));
+                    }
+                    static void use(SF sf) {
+                        sf.nonNull("a", null);
+                        sf.protocols.add(new Protocol());
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        Map<String, String> l = new java.util.TreeMap<>();
+        report.locals().forEach((local, pt) -> l.put(local.name(), k(pt)));
+        assertEquals("Set<String>", l.get("nonNullAdditions"), l + "\n" + explain(report));
+        assertEquals("Set<String>", s.get("a.b.SF.names()"), s + "\n" + explain(report));
+    }
+
+    @DisplayName("Kotlin: a library view passed to an analysed method shares the receiver's slots, jenkins CLIAction")
+    @Test
+    public void viewArgumentToMethod() {
+        NullabilityPass.Report report = run("a.b.VA", """
+                package a.b;
+                import java.util.ArrayList;
+                import java.util.List;
+                class VA {
+                    private final List<String> args = new ArrayList<>();
+                    void onArg(String text) {
+                        args.add(text);
+                    }
+                    int run() {
+                        return main(args.subList(1, args.size()));
+                    }
+                    int main(List<String> args) {
+                        return args.size();
+                    }
+                    static void use(VA va) {
+                        va.onArg(null);
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("List<String?>", s.get("a.b.VA.args"), s + "\n" + explain(report));
+        assertEquals("List<String?>", s.get("a.b.VA.main(java.util.List):0:args"), s + "\n" + explain(report));
     }
 
     @DisplayName("Kotlin: an override of a @NullMarked library method's non-null return stays non-null, jenkins AuthenticationProcessingFilter2")
