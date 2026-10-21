@@ -390,10 +390,7 @@ public class EventualCluster {
 
     private static boolean assumeDebugMatches(String name) {
         if (EC_ASSUME_DEBUG == null || name == null) return false;
-        for (String s : EC_ASSUME_DEBUG) {
-            if (!s.isBlank() && name.contains(s.trim())) return true;
-        }
-        return false;
+        return Arrays.stream(EC_ASSUME_DEBUG).anyMatch(s -> !s.isBlank() && name.contains(s.trim()));
     }
     // log-only diagnostic: trace commit-walk site decisions and property-write timing for computations whose
     // debug context (or method FQN) matches any comma-separated substring, e.g.
