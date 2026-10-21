@@ -3042,6 +3042,189 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("List<String?>", s.get("a.b.VA.main(java.util.List):0:args"), s + "\n" + explain(report));
     }
 
+    @DisplayName("Kotlin: a null argument to an anonymous class's creation in a field initializer reaches the superclass's constructor, jenkins CronTab")
+    @Test
+    public void anonymousFieldInitializerNull() {
+        NullabilityPass.Report report = run("a.b.CF", """
+                package a.b;
+                abstract class CF {
+                    private final String name;
+                    private final CF lower;
+                    private CF(String name, CF lower) {
+                        this.name = name;
+                        this.lower = lower;
+                    }
+                    abstract int bits();
+                    static final CF MINUTE = new CF("minute", null) {
+                        @Override
+                        int bits() {
+                            return 1;
+                        }
+                    };
+                    static final CF HOUR = new CF("hour", MINUTE) {
+                        @Override
+                        int bits() {
+                            return 2;
+                        }
+                    };
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("CF?", s.get("a.b.CF.<init>(String,a.b.CF):1:lower"), s + "\n" + explain(report));
+        assertEquals("String", s.get("a.b.CF.<init>(String,a.b.CF):0:name"), s + "\n" + explain(report));
+    }
+
+    @DisplayName("Kotlin: a method reference's nullable result reaches the functional parameter's result slot, jenkins CronTab")
+    @Test
+    public void methodReferenceResult() {
+        NullabilityPass.Report report = run("a.b.MR", """
+                package a.b;
+                import java.util.function.Supplier;
+                class MR {
+                    String message;
+                    String getErrorMessage() {
+                        return message.isEmpty() ? null : message;
+                    }
+                    static class Listener {
+                        private final Supplier<String> supplier;
+                        Listener(Supplier<String> supplier) {
+                            this.supplier = supplier;
+                        }
+                        String text() {
+                            return supplier.get();
+                        }
+                    }
+                    Listener listener() {
+                        return new Listener(this::getErrorMessage);
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("Supplier<String?>", s.get("a.b.MR.Listener.<init>(java.util.function.Supplier):0:supplier"),
+                s + "\n" + explain(report));
+    }
+
+    @DisplayName("Kotlin: a generic method's result slot that is not a type variable flows into the target, jenkins User.getProperties")
+    @Test
+    public void genericResultSlot() {
+        NullabilityPass.Report report = run("a.b.GR", """
+                package a.b;
+                import java.util.ArrayList;
+                import java.util.LinkedHashMap;
+                import java.util.List;
+                import java.util.Map;
+                class GR {
+                    static class Desc<T> {
+                    }
+                    interface Describable<T extends Describable<T>> {
+                        Desc<T> getDescriptor();
+                    }
+                    static class Prop implements Describable<Prop> {
+                        @Override
+                        public Desc<Prop> getDescriptor() {
+                            return null;
+                        }
+                    }
+                    static <T extends Describable<T>> Map<Desc<T>, T> toMap(Iterable<T> describables) {
+                        Map<Desc<T>, T> m = new LinkedHashMap<>();
+                        for (T d : describables) {
+                            Desc<T> descriptor = d.getDescriptor();
+                            m.put(descriptor, d);
+                        }
+                        return m;
+                    }
+                    List<Prop> properties = new ArrayList<>();
+                    Map<Desc<Prop>, Prop> getProperties() {
+                        return toMap(properties);
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("Map<Desc<Prop>?, Prop>", s.get("a.b.GR.getProperties()"), s + "\n" + explain(report));
+    }
+
+    @DisplayName("Kotlin: a lambda's nullable result given to computeIfAbsent reaches the map's values, jenkins XStream2")
+    @Test
+    public void computeIfAbsentLambda() {
+        NullabilityPass.Report report = run("a.b.CA", """
+                package a.b;
+                import java.util.concurrent.ConcurrentHashMap;
+                class CA {
+                    final ConcurrentHashMap<Class<?>, String> cache = new ConcurrentHashMap<>();
+                    String compute(Class<?> t) {
+                        return t.isArray() ? null : t.getName();
+                    }
+                    String find(Class<?> t) {
+                        String result = cache.computeIfAbsent(t, unused -> compute(t));
+                        return result;
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("ConcurrentHashMap<Class<?!>, String?>", s.get("a.b.CA.cache"), s + "\n" + explain(report));
+    }
+
+    @DisplayName("Kotlin: a lambda's nullable result through '<T> T call(Supplier<T>)' makes the call's result nullable, jenkins CrumbIssuer")
+    @Test
+    public void lambdaThroughGenericSupplier() {
+        NullabilityPass.Report report = run("a.b.LG", """
+                package a.b;
+                import java.util.function.Supplier;
+                class LG {
+                    static <T> T ifOverridden(Supplier<T> supplier, String name) {
+                        if (name.isEmpty()) {
+                            return supplier.get();
+                        }
+                        throw new AbstractMethodError(name);
+                    }
+                    String issue(String salt) {
+                        return salt.isEmpty() ? null : salt;
+                    }
+                    String issueOld(String salt) {
+                        return ifOverridden(() -> issue(salt), "issue");
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("String?", s.get("a.b.LG.issueOld(String)"), s + "\n" + explain(report));
+    }
+
+    @DisplayName("Kotlin: a three-argument collect returns the container its accumulator fills, jenkins PluginManager")
+    @Test
+    public void collectContainer() {
+        NullabilityPass.Report report = run("a.b.CC", """
+                package a.b;
+                import java.util.ArrayList;
+                import java.util.LinkedHashMap;
+                import java.util.List;
+                import java.util.Map;
+                class CC {
+                    static class Plugin {
+                        String url;
+                        Plugin(String url) {
+                            this.url = url;
+                        }
+                    }
+                    List<Plugin> plugins = new ArrayList<>();
+                    void add() {
+                        plugins.add(new Plugin(null));
+                    }
+                    Map<Plugin, String> deprecated() {
+                        return plugins.stream()
+                                .collect(LinkedHashMap::new, (map, plugin) -> map.put(plugin, plugin.url), Map::putAll);
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("Map<Plugin, String?>", s.get("a.b.CC.deprecated()"), s + "\n" + explain(report));
+    }
+
     @DisplayName("Kotlin: an override of a @NullMarked library method's non-null return stays non-null, jenkins AuthenticationProcessingFilter2")
     @Test
     public void nullMarkedLibraryReturnOverride() {
