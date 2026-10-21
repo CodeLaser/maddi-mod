@@ -357,14 +357,10 @@ public class TypeImmutableAnalyzerImpl extends CommonAnalyzerImpl implements Typ
      *  overriding {@code abstractMethod}. */
     static boolean coveredOnPath(TypeInfo typeInfo, TypeInfo declaringInterface, MethodInfo abstractMethod) {
         if (declaresOverride(typeInfo, abstractMethod)) return true;
-        for (TypeInfo between : typeInfo.superTypesExcludingJavaLangObject()) {
-            if (between != declaringInterface
-                && between.superTypesExcludingJavaLangObject().contains(declaringInterface)
-                && declaresOverride(between, abstractMethod)) {
-                return true;
-            }
-        }
-        return false;
+        return typeInfo.superTypesExcludingJavaLangObject().stream()
+                .anyMatch(between -> between != declaringInterface
+                        && between.superTypesExcludingJavaLangObject().contains(declaringInterface)
+                        && declaresOverride(between, abstractMethod));
     }
 
     private static boolean declaresOverride(TypeInfo type, MethodInfo abstractMethod) {
