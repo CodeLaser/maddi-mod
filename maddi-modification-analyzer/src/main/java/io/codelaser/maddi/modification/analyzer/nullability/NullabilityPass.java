@@ -1397,6 +1397,7 @@ public final class NullabilityPass {
         fieldInitializerNullArguments(fields);
         assignedParameterSlots(methods);
         enumValueOfContracts(methods);
+        nullFilteredParameters(methods);
         resolveTypeVariableArguments();
         coupleContent();
         if (!invariantTies.isEmpty()) {
@@ -6468,6 +6469,36 @@ public final class NullabilityPass {
     private static final boolean RECEIVER_LAMBDAS_OFF = System.getenv("NORECEIVERLAMBDAS") != null;
     private static final boolean COLLECT_CONTAINERS_OFF = System.getenv("NOCOLLECTCONTAINERS") != null;
     private static final boolean RETURN_NULL_LITERALS_OFF = System.getenv("NORETURNNULLLITERALS") != null;
+
+    /*
+     Kotlin: a method that returns its parameter filtered of nulls ('<T> Iterator<T> removeNull(Iterator<T> itr) {
+     return Iterators.filter(itr, Objects::nonNull); }') takes nullable elements and returns non-null ones:
+     'removeNull(itr: Iterator<T?>): Iterator<T>', from which Kotlin infers a non-null T for an Iterator<Int?>
+     argument (jenkins BuildReferenceMapAdapter.kt:111, 2026-10-21). Gate NONULLFILTEREDPARAMETERS.
+     */
+    private void nullFilteredParameters(List<MethodInfo> methods) {
+        if (NULL_FILTERED_PARAMETERS_OFF || !policy.callResults()) return;
+        for (MethodInfo mi : methods) {
+            if (mi.methodBody() == null || mi.methodBody().statements().size() != 1
+                || !(mi.methodBody().statements().getFirst() instanceof ReturnStatement rs)
+                || !(NonNullFacts.unwrap(rs.expression()) instanceof MethodCall mc) || mc.methodInfo() == null
+                || !"filter".equals(mc.methodInfo().name()) || mc.parameterExpressions().size() != 2
+                || !nullFilter(mc.parameterExpressions().get(1))
+                || !(NonNullFacts.unwrap(mc.parameterExpressions().getFirst()) instanceof VariableExpression ve)
+                || !(ve.variable() instanceof ParameterInfo pi) || !mi.equals(pi.methodInfo())) continue;
+            ParameterizedType type = pi.parameterizedType();
+            // only a covariant container ('Iterator<out T>', 'Iterable<out T>'): every caller's argument fits T?
+            String container = type.typeInfo() == null ? "" : type.typeInfo().fullyQualifiedName();
+            if (type.arrays() == 0 && type.parameters().size() == 1 && isTypeVariable(type.parameters().getFirst())
+                && ("java.util.Iterator".equals(container) || "java.lang.Iterable".equals(container))) {
+                Arg slot = new Arg(pi, 0);
+                typeVariableElementSlots.add(slot); // a T? slot, not held at T (boundedSlot)
+                seed(slot, "filtered of nulls in " + mi.fullyQualifiedName(), mi.typeInfo());
+            }
+        }
+    }
+
+    private static final boolean NULL_FILTERED_PARAMETERS_OFF = System.getenv("NONULLFILTEREDPARAMETERS") != null;
 
     // whether a lambda's functional type returns its type argument k ('Supplier<T>': get() returns argument 0)
     private static boolean lambdaResultsPosition(Lambda lambda, int k) {

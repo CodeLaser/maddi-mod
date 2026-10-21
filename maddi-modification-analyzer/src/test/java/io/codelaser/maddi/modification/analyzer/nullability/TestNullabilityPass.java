@@ -3225,6 +3225,31 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("Map<Plugin, String?>", s.get("a.b.CC.deprecated()"), s + "\n" + explain(report));
     }
 
+    @DisplayName("Kotlin: a method returning its parameter filtered of nulls takes nullable elements, jenkins Iterators.removeNull")
+    @Test
+    public void removeNullParameter() {
+        NullabilityPass.Report report = run("a.b.RM", """
+                package a.b;
+                import java.util.Iterator;
+                import java.util.Objects;
+                import java.util.function.Predicate;
+                class RM {
+                    static class Iterators {
+                        static <E> Iterator<E> filter(Iterator<E> unfiltered, Predicate<? super E> retainIfTrue) {
+                            return unfiltered;
+                        }
+                    }
+                    static <T> Iterator<T> removeNull(final Iterator<T> itr) {
+                        return Iterators.filter(itr, Objects::nonNull);
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("Iterator<T?>", s.get("a.b.RM.removeNull(java.util.Iterator):0:itr"), s + "\n" + explain(report));
+        assertEquals("Iterator<T!>", s.get("a.b.RM.removeNull(java.util.Iterator)"), s + "\n" + explain(report));
+    }
+
     @DisplayName("Kotlin: an override of a @NullMarked library method's non-null return stays non-null, jenkins AuthenticationProcessingFilter2")
     @Test
     public void nullMarkedLibraryReturnOverride() {
