@@ -20,6 +20,7 @@ import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
+import java.util.Arrays;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -301,10 +302,8 @@ public class EventualCluster {
 
     private static boolean treatAsDebugMatches(TypeInfo member, TypeInfo candidate) {
         if (TREATAS_DEBUG == null) return false;
-        for (String s : TREATAS_DEBUG) {
-            if (member.fullyQualifiedName().contains(s) || candidate.fullyQualifiedName().contains(s)) return true;
-        }
-        return false;
+        return Arrays.stream(TREATAS_DEBUG)
+                .anyMatch(s -> member.fullyQualifiedName().contains(s) || candidate.fullyQualifiedName().contains(s));
     }
 
     public boolean treatAsEventuallyImmutable(TypeInfo member, TypeInfo candidate, Value.EventuallyImmutable actual) {
