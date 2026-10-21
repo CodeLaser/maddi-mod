@@ -6027,6 +6027,7 @@ public final class NullabilityPass {
                        && slotReceiver(mi, scope, call, callee) != null)) {
                 continue;
             }
+            if (projectedReceiver(call, callee, parameter)) continue;
             // Kotlin: an argument to the callee's own type variable is decided once the graph is built
             // (resolveTypeVariableArguments)
             if (policy.callResults() && !METHOD_TYPE_VARIABLE_ARGUMENTS_OFF && call instanceof MethodCall
@@ -6080,6 +6081,29 @@ public final class NullabilityPass {
     // the receiver whose slots a call writes: a variable of the callee's generic class, with as many type arguments;
     // or an analysed method's result, whose slots are those of what it returns ('wrapper.getInits().addWithKey(v, k)'
     // writes the field 'inits' returns: fernflower InitializerProcessor)
+    /*
+     Kotlin: a receiver projected at the type variable of the parameter ('Funnel<?>', 'Funnel<? extends T>') takes
+     nothing in that position: Kotlin's 'Funnel<*>.funnel(from: Nothing, …)'. A null passed there belongs to no
+     implementation. Once the reachability pass completed on guava (5512762c), 'Funnel.funnel' was known
+     non-modifying, so slotReceiver no longer took FunnelsTest's 'funnel.funnel(null, sink)', and the null made every
+     implementation's 'from' nullable (BloomFilterTest.kt:557, HashTestUtils.kt:139, 2026-10-20). Gate
+     NOCONSUMERRECEIVERS.
+     */
+    private boolean projectedReceiver(Expression call, MethodInfo callee, ParameterInfo parameter) {
+        if (CONSUMER_RECEIVERS_OFF || !policy.callResults() || !(call instanceof MethodCall mc) || mc.object() == null
+            || callee.isStatic()) return false;
+        var tp = parameter.parameterizedType().typeParameter();
+        ParameterizedType type = mc.object().parameterizedType();
+        if (tp == null || type == null || type.arrays() > 0 || !tp.getOwner().isLeft()
+            || tp.getOwner().getLeft() != callee.typeInfo()) return false;
+        int index = slotIndex(type, callee.typeInfo(), tp.getIndex());
+        if (index < 0 || index >= type.parameters().size()) return false;
+        var wildcard = type.parameters().get(index).wildcard();
+        return wildcard != null && !wildcard.isSuper();
+    }
+
+    private static final boolean CONSUMER_RECEIVERS_OFF = System.getenv("NOCONSUMERRECEIVERS") != null;
+
     private Object slotReceiver(MethodInfo mi, Scope scope, Expression call, MethodInfo callee) {
         if (!(call instanceof MethodCall mc) || mc.object() == null || callee.isStatic()) return null;
         Expression object = NonNullFacts.unwrap(mc.object());
