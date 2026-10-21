@@ -562,6 +562,11 @@ public class ShadowModificationPass {
                 // fixpoint's undecided-implementation pessimism -- an implementation delegating to the abstract
                 // kept both modified (#24 R3, TestDelegatingImplementation)
                 if (e6Rederivable(pi.methodInfo())) return;
+                // ... or a parameter of an in-order method whose body the walk re-derives, as its own summary's entry
+                // is skipped above: the caller's entry is the fixpoint's verdict, imported. It also charges the
+                // callee with what the CALLER does to its argument after the call: guava's AvlNode.deleteMe,
+                // 'newTop.right = right.removeMin(newTop)', kept removeMin's node modified (#55)
+                if (walkable(pi.methodInfo())) return;
                 seed(pi, structural);
             }
             case DependentVariable dv when dv.arrayVariable() == null -> {
@@ -586,6 +591,16 @@ public class ShadowModificationPass {
                 // markers, intermediates: no nodes
             }
         }
+    }
+
+    private final Map<MethodInfo, Boolean> walkableCache = new HashMap<>();
+
+    /** an in-order method with a body that is neither a union over implementations nor opaque to the walk */
+    private boolean walkable(MethodInfo method) {
+        return walkableCache.computeIfAbsent(method, m -> orderMethods.contains(m)
+                && m.methodBody() != null && !m.methodBody().isEmpty()
+                && !io.codelaser.maddi.modification.prepwork.Util.unionOverImplementations(m)
+                && !bodyIsOpaque(m));
     }
 
     /** an in-order abstract with implementations, all in order and overriding it: its union is the E6 edges' */

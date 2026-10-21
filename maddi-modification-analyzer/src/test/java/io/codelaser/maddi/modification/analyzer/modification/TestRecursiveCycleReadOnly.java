@@ -213,6 +213,27 @@ public class TestRecursiveCycleReadOnly extends CommonTest {
                         }
                     }
                 }
+                static final class Avl2 {
+                    private Avl2 left, right, succ;
+                    private int distinctElements;
+                    private long totalCount;
+                    private int elemCount;
+                    private Avl2 rebalance() { return this; }
+                    private Avl2 removeMin(Avl2 node) {
+                        if (left == null) return right;
+                        left = left.removeMin(node);
+                        distinctElements--;
+                        totalCount -= node.elemCount;
+                        return rebalance();
+                    }
+                    // guava's AvlNode.deleteMe: the argument is modified by the CALLER, after the call
+                    Avl2 deleteMe() {
+                        Avl2 newTop = succ;
+                        newTop.right = right.removeMin(newTop);
+                        newTop.left = left;
+                        return newTop.rebalance();
+                    }
+                }
                 static BigInteger listProduct(List<BigInteger> nums, int start, int end) {
                     switch (end - start) {
                         case 0: return BigInteger.ONE;
@@ -243,11 +264,11 @@ public class TestRecursiveCycleReadOnly extends CommonTest {
                    + " containsKey=" + method(pps, "containsKey").parameters().getFirst().isUnmodified()
                    + " lookFor=" + method(pps, "lookForProperties").parameters().getFirst().isUnmodified()
                    + " removeMin=" + method(X.findSubType("Avl"), "removeMin").parameters().getFirst().isUnmodified()
+                   + " removeMin2=" + method(X.findSubType("Avl2"), "removeMin").parameters().getFirst().isUnmodified()
                    + " listProduct=" + method(X, "listProduct").parameters().getFirst().isUnmodified();
-        // PINS two defects: lookForProperties adds pps.properties to a list asProperties then reads, and the summary
-        // carries that as a modification of the parameter; listProduct's 'nums.get(start).multiply(..)' is a receiver
-        // chain through List.get, which has no METHOD_LINKS when only a RECURSIVE_METHOD calls it (see the class comment)
-        assertEquals("getProperty=true containsKey=true lookFor=false removeMin=true listProduct=false", s);
+        // PINS a defect: listProduct's 'nums.get(start).multiply(..)' is a receiver chain through List.get, which has no
+        // METHOD_LINKS when only a RECURSIVE_METHOD calls it (see the class comment); on guava another caller has it
+        assertEquals("getProperty=true containsKey=true lookFor=true removeMin=true removeMin2=true listProduct=false", s);
     }
 
     // nacos' ClassUtils.resolveGenericTypeByInterface: a call on an element of an array that a call returns. The summary's
