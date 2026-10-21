@@ -518,7 +518,39 @@ public final class NullabilityPass {
     // others' (the library's, from the hints) are read as contracts
     private final Set<MethodInfo> analysed = new HashSet<>();
     // source declarations annotated non-null (Policy.contracts): null stops there
-    private final Set<Object> nonNullContracts = new HashSet<>();
+    private final Set<Object> nonNullContracts = new HashSet<>() {
+        @Override
+        public boolean add(Object o) {
+            boolean added = super.add(o);
+            if (added && why(o)) whyLog("contract", o, null);
+            return added;
+        }
+    };
+
+    // NULLWHY=<substring>[|<substring>…]: why a node matching one is (not) nullable: its seeds, the non-null contracts put on it
+    // (with the code that did), and its final state. A debugging aid, as NULLMARKEDDEBUG.
+    private static final String NULL_WHY = System.getenv("NULLWHY");
+
+    private static boolean why(Object node) {
+        if (NULL_WHY == null || node == null) return false;
+        String name = whyName(node);
+        for (String part : NULL_WHY.split("\\|")) if (name.contains(part)) return true;
+        return false;
+    }
+
+    private static String whyName(Object node) {
+        return node instanceof Info info ? info.fullyQualifiedName() : String.valueOf(node);
+    }
+
+    private static void whyLog(String what, Object node, String detail) {
+        StringBuilder sb = new StringBuilder("NULLWHY ").append(what).append(' ').append(whyName(node));
+        if (detail != null) sb.append(" :: ").append(detail);
+        StackTraceElement[] trace = Thread.currentThread().getStackTrace();
+        for (int i = 3; i < Math.min(trace.length, 7); i++) {
+            sb.append("\n    at ").append(trace[i].getMethodName()).append(':').append(trace[i].getLineNumber());
+        }
+        System.err.println(sb);
+    }
     // (method, null marker): a return statement guarded the marker's link into the method's return (linksOf)
     private final Set<List<Object>> guardedReturnMarkers = new HashSet<>();
     // (method, null marker): a statement carried the marker's link into the method's return (linksOf)
@@ -1430,6 +1462,11 @@ public final class NullabilityPass {
             if (!mi.isConstructor() && !mi.returnType().isVoid()) {
                 verdicts.put(mi, contracted(mi, verdict(mi.returnType(), mi, deg)));
             }
+            if (why(mi)) {
+                System.err.println("NULLWHY final " + mi.fullyQualifiedName() + " reached=" + reached.contains(mi)
+                                   + " seed=" + seedOrigin.get(mi) + " contract=" + nonNullContracts.contains(mi)
+                                   + " degraded=" + deg + " verdict=" + verdicts.get(mi));
+            }
         }
         if (policy.callResults()) {
             clampTestOverrides(methods, verdicts);
@@ -2284,6 +2321,7 @@ public final class NullabilityPass {
             return;
         }
         if (node != null) {
+            if (why(node)) whyLog("seed", node, origin);
             seedOrigin.putIfAbsent(node, origin);
             strictSeeds.add(node);
             seedWriters.computeIfAbsent(node, _ -> new ArrayList<>()).add(writer);

@@ -2929,6 +2929,33 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("Long", s.get("a.b.WC.LongFunnel.funnel(Long,StringBuilder):0:value"), s + "\n" + explain(report));
     }
 
+    @DisplayName("Kotlin: 'return null' after a conditional return makes the result nullable, jenkins Hudson.getSlave")
+    @Test
+    public void returnNullAfterConditionalReturn() {
+        NullabilityPass.Report report = run("a.b.RN", """
+                package a.b;
+                class RN {
+                    static class Node {
+                    }
+                    static class Slave extends Node {
+                    }
+                    Node node;
+                    Node getNode(String name) {
+                        return node;
+                    }
+                    public Slave getSlave(String name) {
+                        Node n = getNode(name);
+                        if (n instanceof Slave)
+                            return (Slave) n;
+                        return null;
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("Slave?", s.get("a.b.RN.getSlave(String)"), s + "\n" + explain(report));
+    }
+
     @DisplayName("Kotlin: an override of a @NullMarked library method's non-null return stays non-null, jenkins AuthenticationProcessingFilter2")
     @Test
     public void nullMarkedLibraryReturnOverride() {
