@@ -3883,9 +3883,15 @@ public final class NullabilityPass {
                             // introduced it) decides. In 'var v = pick(); if (v != null) return v; ...; return
                             // other();' the second return's data still says 'return ← pick's null', though it
                             // returns something else (timefold ValueRangeState.getReachableValues)
-                            if (!returnMarkersSeen.add(key)) continue;
                             Expression returned = assignedValue(statement, fromVar);
-                            if (returned != null && facts.nonNull(returned, facts.before(statement))) {
+                            // a 'return null' itself is never guarded: the link engine can give its null the marker
+                            // of an earlier call's ('Node n = getNode(name); if (n instanceof Slave) return (Slave)
+                            // n; return null;'), whose first, guarded return then hid it (jenkins Hudson.kt:52,
+                            // PluginWrapper.kt:478, 2026-10-21). Gate NORETURNNULLLITERALS.
+                            boolean literal = !RETURN_NULL_LITERALS_OFF && returned != null
+                                              && NonNullFacts.unwrap(returned) instanceof NullConstant;
+                            if (!returnMarkersSeen.add(key) && !literal) continue;
+                            if (!literal && returned != null && facts.nonNull(returned, facts.before(statement))) {
                                 guardedReturnMarkers.add(key);
                                 continue;
                             }
@@ -6461,6 +6467,7 @@ public final class NullabilityPass {
 
     private static final boolean RECEIVER_LAMBDAS_OFF = System.getenv("NORECEIVERLAMBDAS") != null;
     private static final boolean COLLECT_CONTAINERS_OFF = System.getenv("NOCOLLECTCONTAINERS") != null;
+    private static final boolean RETURN_NULL_LITERALS_OFF = System.getenv("NORETURNNULLLITERALS") != null;
 
     // whether a lambda's functional type returns its type argument k ('Supplier<T>': get() returns argument 0)
     private static boolean lambdaResultsPosition(Lambda lambda, int k) {
