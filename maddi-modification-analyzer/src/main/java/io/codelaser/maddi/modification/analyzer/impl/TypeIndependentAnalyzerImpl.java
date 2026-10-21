@@ -34,6 +34,7 @@ import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -67,10 +68,8 @@ public class TypeIndependentAnalyzerImpl extends CommonAnalyzerImpl implements T
 
     private static boolean ecTypeDebug(TypeInfo typeInfo) {
         if (EC_TYPE_DEBUG == null) return false;
-        for (String part : EC_TYPE_DEBUG.split(",")) {
-            if (!part.isBlank() && typeInfo.fullyQualifiedName().contains(part)) return true;
-        }
-        return false;
+        return Arrays.stream(EC_TYPE_DEBUG.split(","))
+                .anyMatch(part -> !part.isBlank() && typeInfo.fullyQualifiedName().contains(part));
     }
 
     public TypeIndependentAnalyzerImpl(Runtime runtime, IteratingAnalyzer.Configuration configuration,
