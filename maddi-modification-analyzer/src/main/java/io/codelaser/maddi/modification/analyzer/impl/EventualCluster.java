@@ -417,10 +417,7 @@ public class EventualCluster {
     /** Diagnostic only: does {@code name} match any EC_SITE_DEBUG substring? */
     public static boolean siteDebugMatches(String name) {
         if (EC_SITE_DEBUG == null || name == null) return false;
-        for (String s : EC_SITE_DEBUG) {
-            if (!s.isBlank() && name.contains(s.trim())) return true;
-        }
-        return false;
+        return Arrays.stream(EC_SITE_DEBUG).anyMatch(s -> !s.isBlank() && name.contains(s.trim()));
     }
 
     /** Diagnostic only: an iteration-stamped ECSITE line. */
