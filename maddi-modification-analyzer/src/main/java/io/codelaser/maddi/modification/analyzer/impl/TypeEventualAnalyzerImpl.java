@@ -2080,10 +2080,7 @@ public class TypeEventualAnalyzerImpl extends CommonAnalyzerImpl implements Type
         Value.Immutable immutable = immutableOf(ti);
         if (immutable.isImmutable()) return true;
         if (immutable.isAtLeastImmutableHC()) {
-            for (ParameterizedType param : pt.parameters()) {
-                if (!contentTypeHarmless(param, depth + 1)) return false;
-            }
-            return true;
+            return pt.parameters().stream().allMatch(param -> contentTypeHarmless(param, depth + 1));
         }
         if (ti.compilationUnit().externalLibrary() && !pt.parameters().isEmpty()) {
             // a shallow container: reachable references are its type parameters
