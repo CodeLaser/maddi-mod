@@ -127,6 +127,15 @@ public class TestFernflowerNullabilityCauses {
                 lines.add(n + " TOP :: " + report.explain(info));
             }
         });
+        // a superclass's nullable type arguments (NullabilityFacts.parentClass), with what reaches them
+        report.parentClasses().forEach((type, parent) -> {
+            for (int i = 0; i < parent.parameters().size(); i++) {
+                if (parent.parameters().get(i).nullable() == io.codelaser.maddi.cst.api.type.NullableState.NULLABLE) {
+                    lines.add(type.fullyQualifiedName() + " SUPER [" + i + "] :: "
+                              + report.explain(new NullabilityPass.Arg(new NullabilityPass.AnonymousThis(type), i)));
+                }
+            }
+        });
         // array locals with nullable elements, and every local of a method named by -Dcauses.method
         String probe = System.getProperty("causes.method", "@@none");
         report.locals().forEach((local, pt) -> {
