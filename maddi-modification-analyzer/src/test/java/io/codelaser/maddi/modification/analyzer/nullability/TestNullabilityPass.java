@@ -3329,6 +3329,19 @@ public class TestNullabilityPass extends CommonTest {
                     interface ConstraintFactory {
                         <A> Stream2<A> forEach(Class<A> sourceClass);
                     }
+                    @NullMarked interface Move<M> {
+                    }
+                    abstract static class SwapIterator<Solution_, Move_ extends Move<Solution_>, Sub_> {
+                        abstract Move_ next(Sub_ sub);
+                    }
+                    static class Swap implements Move<String> {
+                    }
+                    static class SwapImpl extends SwapIterator<String, Swap, Integer> {
+                        @Override
+                        Swap next(Integer sub) {
+                            return new Swap();
+                        }
+                    }
                     static class Impl<S2, T2> implements NullComparatorFactory<S2, T2> {
                         @Override
                         public Comparator<T2> createComparator(S2 solution) {
@@ -3363,6 +3376,13 @@ public class TestNullabilityPass extends CommonTest {
                 for (var tp : mi.typeInfo().typeParameters()) {
                     if (report.nonNullTypeParameter(tp)) nonNull.add(mi.typeInfo().fullyQualifiedName() + " " + tp.simpleName());
                 }
+                if (mi.typeInfo().parentClass() != null && mi.typeInfo().parentClass().typeInfo() != null) {
+                    for (var tp : mi.typeInfo().parentClass().typeInfo().typeParameters()) {
+                        if (report.nonNullTypeParameter(tp)) {
+                            nonNull.add(mi.typeInfo().parentClass().typeInfo().fullyQualifiedName() + " " + tp.simpleName());
+                        }
+                    }
+                }
                 for (var st : mi.typeInfo().interfacesImplemented()) {
                     if (st.typeInfo() == null) continue;
                     for (var tp : st.typeInfo().typeParameters()) {
@@ -3372,6 +3392,7 @@ public class TestNullabilityPass extends CommonTest {
             }
         }
         String all = String.join("\n", nonNull);
+        assertTrue(all.contains("a.b.TF.SwapIterator Solution_"), all);
         assertTrue(all.contains("a.b.TF.NullComparatorFactory S"), all);
         assertTrue(all.contains("a.b.TF.NullComparatorFactory T"), all);
         assertTrue(all.contains("a.b.TF.UniStream.ifExists(Class) B"), all);
@@ -3412,6 +3433,39 @@ public class TestNullabilityPass extends CommonTest {
             Switches.offForNextPasses(java.util.Set.of());
         }
         assertEquals("Set<String>", local.apply("GS3"));
+    }
+
+    @DisplayName("Kotlin: arguments in an assertThrows(NullPointerException) lambda carry no null into the callee, guava ImmutableClassToInstanceMapTest")
+    @Test
+    public void rejectedNullFlows() {
+        NullabilityPass.Report report = run("a.b.RF", """
+                package a.b;
+                import java.util.Collections;
+                import java.util.Map;
+                import java.util.Objects;
+                import static org.junit.jupiter.api.Assertions.assertThrows;
+                class RF {
+                    static Class<?> wrap(Class<?> type) {
+                        Objects.requireNonNull(type);
+                        return type;
+                    }
+                    static int copyOf(Map<Class<?>, Number> map) {
+                        int n = 0;
+                        for (Map.Entry<Class<?>, Number> entry : map.entrySet()) {
+                            n += wrap(entry.getKey()).getName().length();
+                        }
+                        return n;
+                    }
+                    void testCopyOfNulls() {
+                        Map<Class<?>, Number> nullKey = Collections.singletonMap(null, 1.0);
+                        assertThrows(NullPointerException.class, () -> copyOf(nullKey));
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertFalse(s.get("a.b.RF.wrap(Class):0:type").endsWith("?"), s + "\n" + explain(report));
+        assertFalse(s.get("a.b.RF.copyOf(java.util.Map):0:map").startsWith("Map<Class<?!>?"), s + "\n" + explain(report));
     }
 
     @DisplayName("Kotlin: an override of a @NullMarked library method's non-null return stays non-null, jenkins AuthenticationProcessingFilter2")

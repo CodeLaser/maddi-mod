@@ -98,6 +98,12 @@ public class TestFernflowerNullabilityCauses {
                 Switches.offForNextPasses(Set.of());
             }
             long passMs = (System.nanoTime() - passStart) / 1_000_000;
+            // NULLMARKEDDEBUG=<file>: each pass rewrites it; keep one per side
+            String boundsDump = System.getenv("NULLMARKEDDEBUG");
+            if (boundsDump != null && sides != null && java.nio.file.Files.exists(Path.of(boundsDump))) {
+                java.nio.file.Files.copy(Path.of(boundsDump), Path.of(boundsDump + "-" + side),
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
             List<String> lines = lines(report, corpus);
             timing.add("pass " + (side.isEmpty() ? "on" : side) + " " + passMs + " ms");
             String suffix = side.isEmpty() ? "" : "-" + side;

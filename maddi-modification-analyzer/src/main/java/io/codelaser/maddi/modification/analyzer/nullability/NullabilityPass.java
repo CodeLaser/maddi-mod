@@ -2584,6 +2584,8 @@ public final class NullabilityPass {
 
     private static final Switches.Gate NULL_MARKED_BOUNDS_OFF = Switches.gate("NONULLMARKEDBOUNDS");
     private static final Switches.Gate MEMBERLESS_BOUNDS_OFF = Switches.gate("NOMEMBERLESSBOUNDS");
+    private static final Switches.Gate BOUND_USES_OFF = Switches.gate("NOBOUNDUSES");
+    private static final Switches.Gate REJECTED_FLOWS_OFF = Switches.gate("NOREJECTEDFLOWS");
 
     private void nonNullBounds(List<Info> analysisOrder, List<MethodInfo> methods, List<FieldInfo> fields) {
         if (!policy.callResults() || NULL_MARKED_BOUNDS_OFF.get()) return;
@@ -2613,6 +2615,12 @@ public final class NullabilityPass {
         for (TypeInfo t : types) {
             if (t.parentClass() != null) uses.add(new TypeUse(t.parentClass(), t, true));
             for (ParameterizedType i : t.interfacesImplemented()) uses.add(new TypeUse(i, t, true));
+            // a type parameter's bound: 'class AbstractOriginalSwapIterator<Solution_, Move_ extends
+            // Move<Solution_>, …>' passes Solution_ into Move's (timefold AbstractOriginalSwapIterator.kt:5,
+            // 2026-10-22). Strict, as a supertype: Kotlin writes no 'Solution_ & Any' in a bound. Gate NOBOUNDUSES.
+            if (!BOUND_USES_OFF.get()) {
+                for (var tp : t.typeParameters()) for (ParameterizedType b : tp.typeBounds()) uses.add(new TypeUse(b, t, true));
+            }
         }
         for (FieldInfo fi : fields) {
             uses.add(new TypeUse(fi.type(), fi, false));
@@ -2624,6 +2632,9 @@ public final class NullabilityPass {
             boolean repeated = !mi.isConstructor() && (!mi.overrides().isEmpty() || !mi.isStatic()
                     && !mi.access().isPrivate() && !mi.isFinal() && !mi.typeInfo().isFinal());
             for (ParameterInfo pi : mi.parameters()) uses.add(new TypeUse(pi.parameterizedType(), mi, repeated));
+            if (!BOUND_USES_OFF.get()) {
+                for (var tp : mi.typeParameters()) for (ParameterizedType b : tp.typeBounds()) uses.add(new TypeUse(b, mi, true));
+            }
             if (mi.methodBody() != null) mi.methodBody().visit(e -> bodyTypeUse(e, mi, uses, instantiations));
         }
         /*
@@ -6693,6 +6704,13 @@ public final class NullabilityPass {
     // pi: the parameter, or the Content of a varargs parameter
     private void argument(MethodInfo mi, Scope scope, Statement statement, Expression call,
                           LinkComputer.ListOfLinks list, List<Expression> arguments, int i, Object pi) {
+        // Kotlin: in 'assertThrows(NullPointerException.class, () -> copyOf(nullKey))' the arguments are the test's
+        // rejected input, whether a literal null (seed) or a variable holding one: they carry nothing into the
+        // callee. guava's ImmutableClassToInstanceMapTest had made Primitives.wrap(type), which starts with
+        // checkNotNull(type), take a Class<T>? (worktree-maddi-all 2026-10-22). Gate NOREJECTEDFLOWS.
+        if (policy.callResults() && !REJECTED_FLOWS_OFF.get() && nullRejectingBodies.contains(mi.fullyQualifiedName())) {
+            return;
+        }
         // also a cast null: '(AiMessage) null' choosing between overloads (langchain4j OutputGuardrailResult)
         if (NonNullFacts.unwrap(arguments.get(i)) instanceof NullConstant) {
             seed(pi, "null argument in " + mi.fullyQualifiedName(), mi.typeInfo());
