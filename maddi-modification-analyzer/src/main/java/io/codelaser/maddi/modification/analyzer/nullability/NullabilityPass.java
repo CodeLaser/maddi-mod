@@ -737,10 +737,7 @@ public final class NullabilityPass {
             FieldInfo field = member instanceof FieldInfo f ? f : member instanceof MethodInfo m ? getters.get(m) : null;
             Set<TypeInfo> classes = field == null ? null : nullClasses.get(field);
             if (classes == null) return false;
-            for (TypeInfo x : classes) {
-                if (isSubtype(x, type)) return false;
-            }
-            return true;
+            return classes.stream().noneMatch(x -> isSubtype(x, type));
         }
     }
 
@@ -813,10 +810,7 @@ public final class NullabilityPass {
         Set<TypeInfo> classes = narrowed.nullClasses().get(fi);
         if (classes == null) return false;
         TypeInfo owner = m.typeInfo();
-        for (TypeInfo s : classes) {
-            if (isSubtype(s, owner) && mayRunOn(m, s)) return false;
-        }
-        return true;
+        return classes.stream().noneMatch(s -> isSubtype(s, owner) && mayRunOn(m, s));
     }
 
     private boolean mayRunOn(MethodInfo m, TypeInfo s) {
