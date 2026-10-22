@@ -1530,12 +1530,21 @@ public final class NullabilityPass {
     private static final Switches.Gate SUPERTYPE_SLOTS_OFF = Switches.gate("NOSUPERTYPESLOTS");
     private static final Switches.Gate VIEW_LOOPS_OFF = Switches.gate("NOVIEWLOOPS");
 
-    // a class whose superclass has a type argument that is not a type variable: its 'this' has slots of its own
+    /*
+     a class whose superclass has a type argument that is not a type variable: its 'this' has slots of its own. A
+     private one only: its superclass is its type nowhere else. jenkins' public EnvVars as a TreeMap<String, String?>
+     broke the ~15 places that pass it as a Map<String, String> (Kotlin's maps are invariant), FingerprintMap and
+     DiskSpaceMonitorDescriptor likewise: 127 -> 159 errors (worktree-maddi-all 2026-10-22). Gate
+     NOPRIVATESUPERTYPESONLY (any class, as before).
+     */
     private static boolean thisTypedBySuperclass(TypeInfo type) {
         ParameterizedType parent = type.parentClass();
         return parent != null && parent.arrays() == 0 && parent.typeInfo() != null
+               && (type.access().isPrivate() || PRIVATE_SUPERTYPES_ONLY_OFF.get())
                && parent.parameters().stream().anyMatch(a -> a.typeParameter() == null && a.wildcard() == null);
     }
+
+    private static final Switches.Gate PRIVATE_SUPERTYPES_ONLY_OFF = Switches.gate("NOPRIVATESUPERTYPESONLY");
 
     /*
      A parameter whose only use is 'this.f = p', where f is nullable: passing null there means what not calling the

@@ -3259,7 +3259,7 @@ public class TestNullabilityPass extends CommonTest {
                 import java.util.LinkedList;
                 import java.util.Map;
                 class SS {
-                    static class OwnerContext extends LinkedList<String> {
+                    private static class OwnerContext extends LinkedList<String> {
                         void startVisiting(String owner) {
                             if (owner != null) {
                                 System.out.println(owner);
@@ -3279,7 +3279,7 @@ public class TestNullabilityPass extends CommonTest {
                     }
                     static class Space {
                     }
-                    static class Monitor extends Base<Space> {
+                    private static class Monitor extends Base<Space> {
                         @Override
                         Space get(String key) {
                             return key.isEmpty() ? null : new Space();
@@ -3295,7 +3295,16 @@ public class TestNullabilityPass extends CommonTest {
                             return data;
                         }
                     }
-                    static class Plain extends LinkedList<String> {
+                    // not private: its superclass is its type elsewhere too
+                    static class Shared extends LinkedList<String> {
+                        void add(String s, int n) {
+                            addFirst(s);
+                        }
+                        static void use(Shared s) {
+                            s.add(null, 1);
+                        }
+                    }
+                    private static class Plain extends LinkedList<String> {
                         void add2(String s) {
                             addFirst(s);
                         }
@@ -3309,6 +3318,7 @@ public class TestNullabilityPass extends CommonTest {
         report.locals().forEach((local, pt) -> l.put(local.name(), k(pt)));
         assertEquals("Base<Space?>", p.get("a.b.SS.Monitor"), p + "\n" + l + "\n" + explain(report));
         assertFalse(p.containsKey("a.b.SS.Plain"), p + "\n" + explain(report));
+        assertFalse(p.containsKey("a.b.SS.Shared"), p + "\n" + explain(report));
     }
 
     @DisplayName("Kotlin: non-null bounds reach a member-less subinterface and an override family's method type parameter, timefold")
