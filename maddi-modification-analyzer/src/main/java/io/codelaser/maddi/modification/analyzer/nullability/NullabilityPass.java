@@ -705,10 +705,7 @@ public final class NullabilityPass {
             FieldInfo field = member instanceof FieldInfo f ? f : member instanceof MethodInfo m ? getters.get(m) : null;
             Set<TypeInfo> classes = field == null ? null : nullClasses.get(field);
             if (classes == null) return false;
-            for (TypeInfo x : classes) {
-                if (isSubtype(x, type)) return false;
-            }
-            return true;
+            return classes.stream().noneMatch(x -> isSubtype(x, type));
         }
     }
 
