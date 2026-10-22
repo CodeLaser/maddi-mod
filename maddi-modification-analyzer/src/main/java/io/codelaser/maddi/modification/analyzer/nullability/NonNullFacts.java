@@ -79,9 +79,9 @@ public final class NonNullFacts {
     // per private instance method, the fields of this non-null at its entry (withFieldsAtEntry)
     private Map<MethodInfo, Set<Variable>> fieldsAtEntry = Map.of();
     // gate NOENTRYFIELDS (with NullabilityPass's): forget at a compound statement as before #48 A5 (A/B)
-    private static final boolean ENTRY_FIELDS_OFF = System.getenv("NOENTRYFIELDS") != null;
+    private static final Switches.Gate ENTRY_FIELDS_OFF = Switches.gate("NOENTRYFIELDS");
     // gate NOLOOPBACKEDGES: a loop's start knows only what the loop does not change (A/B for #48 B8)
-    private static final boolean LOOP_BACK_EDGES_OFF = System.getenv("NOLOOPBACKEDGES") != null;
+    private static final Switches.Gate LOOP_BACK_EDGES_OFF = Switches.gate("NOLOOPBACKEDGES");
     // the loops refined at once (nested), and the rounds per loop (assumedAtLoopStart): each round walks the body again
     private static final int MAX_LOOP_DEPTH = 2;
     private static final int MAX_LOOP_ROUNDS = 2;
@@ -89,9 +89,9 @@ public final class NonNullFacts {
     // the facts at each unlabeled 'continue' of the loop whose back edges are collected; null when none is
     private List<Set<Variable>> continues;
     // gate NOCHAINEDKEYS: no constant key, no map reached through pure calls in key presence (A/B for #48 A2)
-    private static final boolean CHAINED_KEYS_OFF = System.getenv("NOCHAINEDKEYS") != null;
+    private static final Switches.Gate CHAINED_KEYS_OFF = Switches.gate("NOCHAINEDKEYS");
     // gate NOTERNARYFACTS: a ternary's branches without their condition's facts in nonNull (A/B for #48 A3)
-    private static final boolean TERNARY_FACTS_OFF = System.getenv("NOTERNARYFACTS") != null;
+    private static final Switches.Gate TERNARY_FACTS_OFF = Switches.gate("NOTERNARYFACTS");
     // the method being walked
     private MethodInfo walking;
     // the facts at each normal exit (a return, the end of the body) of the method being walked; null in a lambda
@@ -490,7 +490,7 @@ public final class NonNullFacts {
      MAX_LOOP_ROUNDS rounds, and MAX_LOOP_DEPTH nested loops: each round walks the body again.
      */
     private Set<Variable> assumedAtLoopStart(Statement statement, Set<Variable> in, Set<Variable> stable) {
-        if (kotlinSmartCasts || LOOP_BACK_EDGES_OFF || loopDepth >= MAX_LOOP_DEPTH) return Set.of();
+        if (kotlinSmartCasts || LOOP_BACK_EDGES_OFF.get() || loopDepth >= MAX_LOOP_DEPTH) return Set.of();
         Set<Variable> changed = new HashSet<>(in);
         changed.removeAll(stable);
         if (changed.isEmpty() || !refinable(statement)) return Set.of();
@@ -564,7 +564,7 @@ public final class NonNullFacts {
             });
             facts.removeIf(v -> v instanceof KeyPresence kp && calls.stream().anyMatch(c -> keyPresenceLost(kp, c)));
         }
-        boolean coarse = kotlinSmartCasts || ENTRY_FIELDS_OFF;
+        boolean coarse = kotlinSmartCasts || ENTRY_FIELDS_OFF.get();
         facts.removeAll(coarse ? assigned : mayAssignNull(statement));
         facts.removeIf(v -> dependsOnAssigned(v, assigned));
         if (coarse) {
@@ -690,7 +690,7 @@ public final class NonNullFacts {
      answering the absent key's null; a comparator that accepts null is the exception, and not looked at.
      */
     // gate NONAVKEYS: no key presence from navigation, nor forgetting it at a call through a non-final field (#29 C off)
-    private static final boolean NAV_KEYS_OFF = System.getenv("NONAVKEYS") != null;
+    private static final Switches.Gate NAV_KEYS_OFF = Switches.gate("NONAVKEYS");
     private static final Set<String> MAP_KEYS = Set.of("firstKey", "lastKey", "higherKey", "lowerKey", "ceilingKey",
             "floorKey");
     // "entrySet": the loop's entry stands for its key, as 'map.get(e.getKey())' resolves (keyPresence)
@@ -726,7 +726,7 @@ public final class NonNullFacts {
      */
     private Variable mapVariable(Expression e) {
         Variable v = trackableVariable(e);
-        if (v != null || CHAINED_KEYS_OFF || !(unwrap(e) instanceof MethodCall mc)) return v;
+        if (v != null || CHAINED_KEYS_OFF.get() || !(unwrap(e) instanceof MethodCall mc)) return v;
         MethodInfo mi = mc.methodInfo();
         if (mi == null || mi.isStatic() || !mc.parameterExpressions().isEmpty() || mc.object() == null
             || !(mi.isNonModifying() || libraryGetter(mi)) || mi.returnType().isPrimitiveExcludingVoid()) return null;
@@ -753,7 +753,7 @@ public final class NonNullFacts {
             return trackableVariable(gk.object());
         }
         // a constant: 'containsKey(HEART_BEAT_INTERVAL)' (#48 A2)
-        if (!CHAINED_KEYS_OFF && unwrap(key) instanceof VariableExpression ve
+        if (!CHAINED_KEYS_OFF.get() && unwrap(key) instanceof VariableExpression ve
             && ve.variable() instanceof FieldReference fr && fr.fieldInfo().isStatic() && fr.fieldInfo().isFinal()) {
             return fr;
         }
@@ -864,7 +864,7 @@ public final class NonNullFacts {
     }
 
     private void navigatedKey(Variable key, Expression value, Set<Variable> facts) {
-        if (kotlinSmartCasts || key == null || NAV_KEYS_OFF) return;
+        if (kotlinSmartCasts || key == null || NAV_KEYS_OFF.get()) return;
         Expression v = unwrap(value);
         if (v instanceof InlineConditional ic) {
             if (unwrap(ic.ifTrue()) instanceof NullConstant) v = unwrap(ic.ifFalse());
@@ -947,7 +947,7 @@ public final class NonNullFacts {
                 : call instanceof ConstructorCall cc ? cc.parameterExpressions() : List.of();
         boolean keepsThis = !reachesThis(call);
         return touches(kp.map(), receiver, read, arguments, callee(call))
-               || !NAV_KEYS_OFF && (changesAtCall(kp.key(), keepsThis) || changesAtCall(kp.map(), keepsThis));
+               || !NAV_KEYS_OFF.get() && (changesAtCall(kp.key(), keepsThis) || changesAtCall(kp.map(), keepsThis));
     }
 
     /*
@@ -1073,10 +1073,10 @@ public final class NonNullFacts {
     }
 
     // gate NOUNMODIFIEDARGS: a call handed a map forgets its keys whatever the parameter (A/B for #48 B6)
-    private static final boolean UNMODIFIED_ARGS_OFF = System.getenv("NOUNMODIFIEDARGS") != null;
+    private static final Switches.Gate UNMODIFIED_ARGS_OFF = Switches.gate("NOUNMODIFIEDARGS");
 
     private static boolean unmodifiedParameter(MethodInfo callee, int index) {
-        if (UNMODIFIED_ARGS_OFF || callee == null || callee.parameters().isEmpty()) return false;
+        if (UNMODIFIED_ARGS_OFF.get() || callee == null || callee.parameters().isEmpty()) return false;
         List<ParameterInfo> parameters = callee.parameters();
         ParameterInfo pi = index < parameters.size() ? parameters.get(index) : parameters.getLast();
         if (index >= parameters.size() - 1 && pi.isVarArgs()) return false;
@@ -1092,7 +1092,7 @@ public final class NonNullFacts {
     }
 
     private Set<Variable> withCondition(Set<Variable> facts, Set<Variable> condition) {
-        if (condition.isEmpty() || TERNARY_FACTS_OFF) return facts;
+        if (condition.isEmpty() || TERNARY_FACTS_OFF.get()) return facts;
         Set<Variable> copy = new HashSet<>(facts);
         addCondition(copy, condition);
         return copy;
@@ -1506,7 +1506,7 @@ public final class NonNullFacts {
     private void dereference(Expression scope, Set<Variable> facts) {
         if (unwrap(scope) instanceof VariableExpression ve && trackable(ve.variable())) facts.add(ve.variable());
         // 'clazz.getSuperclass().equals(X.class)': the same pure call again is non-null (gap 8, #48 B8)
-        if (!LOOP_BACK_EDGES_OFF && unwrap(scope) instanceof MethodCall mc && pureCall(mc) instanceof Variable pc) {
+        if (!LOOP_BACK_EDGES_OFF.get() && unwrap(scope) instanceof MethodCall mc && pureCall(mc) instanceof Variable pc) {
             facts.add(pc);
         }
     }

@@ -455,7 +455,7 @@ public final class NullabilityPass {
     // array creations ('new T[n]') the next statement fills completely before anything reads them (indexFills)
     private final Set<Expression> filledCreations = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
     // gate NOFIELDFILL: only a local's declaration counts as the creation the next loop fills (A/B for CodeLaser/maddi-mod#22 gap 4)
-    private static final boolean FIELD_FILLS_OFF = System.getenv("NOFIELDFILL") != null;
+    private static final Switches.Gate FIELD_FILLS_OFF = Switches.gate("NOFIELDFILL");
     // analysed methods whose return an earlier round found unreached by null (see go)
     private final Set<MethodInfo> trustedReturns;
     // analysed parameters an earlier round found non-null on every normal exit of their method: passing null throws
@@ -483,9 +483,9 @@ public final class NullabilityPass {
     private Set<Expression> nextPresentLookups = Set.of();
     private final Set<MethodCall> lookups = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
     // gate NOROUNDKEYS: no key presence from an earlier round (A/B for #48 B6)
-    private static final boolean ROUND_KEYS_OFF = System.getenv("NOROUNDKEYS") != null;
+    private static final Switches.Gate ROUND_KEYS_OFF = Switches.gate("NOROUNDKEYS");
     // gate NOENTRYFIELDS: no field of this is non-null at a private method's entry by its calls (A/B for #48 A5)
-    private static final boolean ENTRY_FIELDS_OFF = System.getenv("NOENTRYFIELDS") != null;
+    private static final Switches.Gate ENTRY_FIELDS_OFF = Switches.gate("NOENTRYFIELDS");
     private List<FieldInfo> analysedFields = List.of();
     // keyed map fields (CodeLaser/maddi-mod#22 gap 2): the value slot per field, the accessors that take the key as a
     // parameter, and the keys written per slot
@@ -580,9 +580,9 @@ public final class NullabilityPass {
     private NullPredicates predicates;
     private java.util.function.BiPredicate<Object, TypeInfo> narrowedReads;
     // gate NOGAP9 for A/B: every call's result is the callee's return, as before
-    private static final boolean GAP9_OFF = System.getenv("NOGAP9") != null;
+    private static final Switches.Gate GAP9_OFF = Switches.gate("NOGAP9");
     // NODIRECT: read the closure's products (Link.derived()) as before, for an A/B against the direct links only
-    private static final boolean DERIVED_LINKS = System.getenv("NODIRECT") != null;
+    private static final Switches.Gate DERIVED_LINKS = Switches.gate("NODIRECT");
     // a parameter the body assigns (CodeLaser/maddi-mod#22 gap 5, #9): the parameter node is the caller's value only; what
     // the body assigns goes to a shadow local of the same name (the Kotlin printer's `var p = p`), which the parameter
     // flows into, and which reads after the first assignment resolve to (from the loop's start, for an assignment
@@ -619,7 +619,7 @@ public final class NullabilityPass {
      (ImmutableMap.kt:105/107, AbstractMultimap.kt:76, 2026-10-17). Gate NOLAZYCACHES.
      */
     private Set<MethodInfo> lazyCacheCalls(List<Info> analysisOrder) {
-        if (!policy.callResults() || LAZY_CACHES_OFF) return Set.of();
+        if (!policy.callResults() || LAZY_CACHES_OFF.get()) return Set.of();
         Set<MethodInfo> out = new HashSet<>();
         for (Info info : analysisOrder) {
             if (!(info instanceof MethodInfo mi) || mi.methodBody() == null) continue;
@@ -655,7 +655,7 @@ public final class NullabilityPass {
     }
 
     // gate NOLAZYCACHES: round 1 trusts no analysed method's return (A/B)
-    private static final boolean LAZY_CACHES_OFF = System.getenv("NOLAZYCACHES") != null;
+    private static final Switches.Gate LAZY_CACHES_OFF = Switches.gate("NOLAZYCACHES");
 
     /**
      * Runs the pass in rounds. Round 1 trusts no analysed method's return. Each later round takes the analysed
@@ -701,7 +701,7 @@ public final class NullabilityPass {
      */
     private static Map<MethodInfo, Set<Variable>> fieldsAtEntry(NonNullFacts walked, List<MethodInfo> methods,
                                                                 List<FieldInfo> fields) {
-        if (ENTRY_FIELDS_OFF) return Map.of();
+        if (ENTRY_FIELDS_OFF.get()) return Map.of();
         Set<MethodInfo> unwalked = new HashSet<>();
         java.util.function.Predicate<Element> uses = e -> {
             MethodInfo callee = e instanceof MethodCall mc ? mc.methodInfo()
@@ -723,9 +723,9 @@ public final class NullabilityPass {
     // ------------------------------------------------------------------ narrowed reads (CodeLaser/maddi-mod#22 gap 3)
 
     // gate NONARROWING: no read is narrowed by the receiver's runtime type (A/B)
-    private static final boolean NARROWING_OFF = System.getenv("NONARROWING") != null;
+    private static final Switches.Gate NARROWING_OFF = Switches.gate("NONARROWING");
     // gate NOOPENNARROWING: the narrowing in the closed world only, as before CodeLaser/maddi-mod#30's open-world part
-    private static final boolean OPEN_NARROWING_OFF = System.getenv("NOOPENNARROWING") != null;
+    private static final Switches.Gate OPEN_NARROWING_OFF = Switches.gate("NOOPENNARROWING");
 
     /**
      * Per final instance field, the concrete classes whose instances may hold null in it; per getter, its field.
@@ -766,7 +766,7 @@ public final class NullabilityPass {
      */
     private NarrowedReads narrowedReads() {
         boolean open = policy.world() != World.CLOSED;
-        if (NARROWING_OFF || open && OPEN_NARROWING_OFF) return NarrowedReads.NONE;
+        if (NARROWING_OFF.get() || open && OPEN_NARROWING_OFF.get()) return NarrowedReads.NONE;
         Set<TypeInfo> classes = new LinkedHashSet<>();
         for (MethodInfo mi : analysed) classes.add(mi.typeInfo());
         for (FieldInfo fi : analysedFields) classes.add(fi.owner());
@@ -1014,11 +1014,11 @@ public final class NullabilityPass {
     }
 
     // gate NOFAMILYPRECONDITIONS: only methods no override replaces have preconditions, as before CodeLaser/maddi-mod#41
-    private static final boolean FAMILY_PRECONDITIONS_OFF = System.getenv("NOFAMILYPRECONDITIONS") != null;
+    private static final Switches.Gate FAMILY_PRECONDITIONS_OFF = Switches.gate("NOFAMILYPRECONDITIONS");
 
     private Set<ParameterInfo> preconditions() {
         Set<ParameterInfo> set = new HashSet<>();
-        Map<MethodInfo, Set<MethodInfo>> families = policy.world() == World.CLOSED && !FAMILY_PRECONDITIONS_OFF
+        Map<MethodInfo, Set<MethodInfo>> families = policy.world() == World.CLOSED && !FAMILY_PRECONDITIONS_OFF.get()
                 ? families() : Map.of();
         for (MethodInfo mi : analysed) {
             if (families.containsKey(mi)) continue;
@@ -1100,13 +1100,13 @@ public final class NullabilityPass {
 
     private static final String NULL_ARGUMENT = "null argument in ";
     // gate NOREJECTEDNULLS: a null passed inside assertThrows(NullPointerException.class, ...) seeds as any (A/B)
-    private static final boolean REJECTED_NULLS_OFF = System.getenv("NOREJECTEDNULLS") != null;
+    private static final Switches.Gate REJECTED_NULLS_OFF = Switches.gate("NOREJECTEDNULLS");
 
     private void indexFunctionals(List<MethodInfo> methods) {
         for (MethodInfo mi : methods) {
             if (mi.methodBody() == null) continue;
             mi.methodBody().visit(e -> {
-                if (e instanceof MethodCall mc && policy.callResults() && !REJECTED_NULLS_OFF) rejectsNull(mc);
+                if (e instanceof MethodCall mc && policy.callResults() && !REJECTED_NULLS_OFF.get()) rejectsNull(mc);
                 if (e instanceof Lambda lambda && lambda.methodInfo() != null) {
                     lambdaMethods.add(lambda.methodInfo());
                 } else if (e instanceof MethodReference mr && mr.methodInfo() != null) {
@@ -1168,7 +1168,7 @@ public final class NullabilityPass {
      assertion would replace by an NPE (langchain4j's ensureNotNull; CodeLaser/maddi-mod#28).
      */
     private Set<ParameterInfo> declaredPreconditions() {
-        Map<MethodInfo, Set<MethodInfo>> families = policy.world() == World.CLOSED && !FAMILY_PRECONDITIONS_OFF
+        Map<MethodInfo, Set<MethodInfo>> families = policy.world() == World.CLOSED && !FAMILY_PRECONDITIONS_OFF.get()
                 ? families() : Map.of();
         Set<ParameterInfo> declared = new HashSet<>();
         for (ParameterInfo pi : preconditions) {
@@ -1350,7 +1350,7 @@ public final class NullabilityPass {
                 .withNarrowedReads(narrowedReads)
                 .withNarrowedInMethod(narrowedReads == null ? null : this::narrowedInMethod)
                 .withFieldsAtEntry(fieldsAtEntry)
-                .withSuperCalls(policy.callResults() && !SUPER_CALLS_OFF ? this::ownReturnsNonNull : null);
+                .withSuperCalls(policy.callResults() && !SUPER_CALLS_OFF.get() ? this::ownReturnsNonNull : null);
         if (policy.contracts()) {
             for (FieldInfo fi : fields) contract(fi, fi);
             for (MethodInfo mi : methods) {
@@ -1370,7 +1370,7 @@ public final class NullabilityPass {
             }
             nonNullOverrides(methods);
         }
-        if (policy.callResults() && !DEAD_NULLS_OFF) {
+        if (policy.callResults() && !DEAD_NULLS_OFF.get()) {
             for (MethodInfo mi : methods) if (mi.methodBody() != null) deadNullAssignments(mi.methodBody());
         }
         for (MethodInfo mi : methods) {
@@ -1495,7 +1495,7 @@ public final class NullabilityPass {
                 .withFieldsAtEntry(fieldsAtEntry);
         methods.forEach(useSites::walk);
         nextFieldsAtEntry = fieldsAtEntry(useSites, methods, fields);
-        if (!ROUND_KEYS_OFF) {
+        if (!ROUND_KEYS_OFF.get()) {
             Set<Expression> present = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
             for (MethodCall lookup : lookups) if (useSites.keyPresentWhenCalled(lookup)) present.add(lookup);
             nextPresentLookups = present;
@@ -1513,7 +1513,7 @@ public final class NullabilityPass {
      DiskSpaceMonitorDescriptor.kt:38, 2026-10-22). Only the classes with such a slot.
      */
     private Map<TypeInfo, ParameterizedType> parentClassVerdicts(List<MethodInfo> methods) {
-        if (SUPERTYPE_SLOTS_OFF || !policy.callResults()) return Map.of();
+        if (SUPERTYPE_SLOTS_OFF.get() || !policy.callResults()) return Map.of();
         Map<TypeInfo, ParameterizedType> out = new LinkedHashMap<>();
         for (MethodInfo mi : methods) {
             TypeInfo type = mi.typeInfo();
@@ -1527,8 +1527,8 @@ public final class NullabilityPass {
         return Map.copyOf(out);
     }
 
-    private static final boolean SUPERTYPE_SLOTS_OFF = System.getenv("NOSUPERTYPESLOTS") != null;
-    private static final boolean VIEW_LOOPS_OFF = System.getenv("NOVIEWLOOPS") != null;
+    private static final Switches.Gate SUPERTYPE_SLOTS_OFF = Switches.gate("NOSUPERTYPESLOTS");
+    private static final Switches.Gate VIEW_LOOPS_OFF = Switches.gate("NOVIEWLOOPS");
 
     // a class whose superclass has a type argument that is not a type variable: its 'this' has slots of its own
     private static boolean thisTypedBySuperclass(TypeInfo type) {
@@ -1696,7 +1696,7 @@ public final class NullabilityPass {
      first, so a chain settles (a few passes).
      */
     private void clampTypeVariableOverrides(List<MethodInfo> methods, Map<Info, ParameterizedType> verdicts) {
-        if (TYPE_VARIABLE_OVERRIDES_OFF) return;
+        if (TYPE_VARIABLE_OVERRIDES_OFF.get()) return;
         for (int pass = 0; pass < 3; pass++) {
             boolean changed = false;
             for (MethodInfo mi : methods) {
@@ -1733,7 +1733,7 @@ public final class NullabilityPass {
     }
 
     // gate NOTYPEVAROVERRIDES: an override keeps its own parameter state over a type-variable parameter (A/B)
-    private static final boolean TYPE_VARIABLE_OVERRIDES_OFF = System.getenv("NOTYPEVAROVERRIDES") != null;
+    private static final Switches.Gate TYPE_VARIABLE_OVERRIDES_OFF = Switches.gate("NOTYPEVAROVERRIDES");
 
     // 'ours' with the overridden type's states, type arguments included
     static ParameterizedType clamped(ParameterizedType ours, ParameterizedType theirs) {
@@ -1760,7 +1760,7 @@ public final class NullabilityPass {
      any analysed type-variable return (MapMakerInternalMap.kt, 7 "not a subtype of the overridden member").
      Gate NOEXPLICITBOUNDED.
      */
-    private static final boolean RETURNS_NULL_BOUNDED_OFF = System.getenv("NORETURNSNULLBOUNDED") != null;
+    private static final Switches.Gate RETURNS_NULL_BOUNDED_OFF = Switches.gate("NORETURNSNULLBOUNDED");
 
     private static boolean returnsNullLiteral(MethodInfo mi) {
         if (mi.methodBody() == null) return false;
@@ -1776,11 +1776,11 @@ public final class NullabilityPass {
 
     private static boolean boundedTypeVariableOverride(MethodInfo mi) {
         if (mi.isConstructor() || mi.returnType().isVoid() || mi.returnType().typeParameter() != null) return false;
-        if (!EXPLICIT_BOUNDED_OFF && NullAnnotations.explicitState(mi) == NullableState.NULLABLE) return false;
+        if (!EXPLICIT_BOUNDED_OFF.get() && NullAnnotations.explicitState(mi) == NullableState.NULLABLE) return false;
         // nor where the override returns a null literal itself ('else { return null; }' in nacos
         // NacosDelayTaskExecuteEngine.removeTask over 'T removeTask(Object)', T bounded by NacosTask: Kotlin had
         // 'return null' in a non-null function, NacosDelayTaskExecuteEngine.java:90, 2026-10-19). Gate NORETURNSNULLBOUNDED.
-        if (!RETURNS_NULL_BOUNDED_OFF && returnsNullLiteral(mi)) return false;
+        if (!RETURNS_NULL_BOUNDED_OFF.get() && returnsNullLiteral(mi)) return false;
         for (MethodInfo overridden : mi.overrides()) {
             ParameterizedType rt = overridden.returnType();
             if (isClassTypeVariable(rt) && !rt.typeParameter().typeBounds().isEmpty()
@@ -1804,7 +1804,7 @@ public final class NullabilityPass {
      */
     private NullableState explicitState(Info info) {
         NullableState state = NullAnnotations.explicitState(info);
-        if (state == null || !policy.callResults() || ELEMENT_ANNOTATIONS_OFF) return state;
+        if (state == null || !policy.callResults() || ELEMENT_ANNOTATIONS_OFF.get()) return state;
         ParameterizedType type = switch (info) {
             case FieldInfo fi -> fi.type();
             case ParameterInfo pi -> pi.parameterizedType();
@@ -1840,7 +1840,7 @@ public final class NullabilityPass {
     // Kotlin: a type-use @Nullable in a field's declaration position, which the front end leaves off the element
     // type: it is about the elements (explicitState)
     private boolean nullableElementsByDeclaration(Info info) {
-        if (!policy.callResults() || ELEMENT_ANNOTATIONS_OFF || !(info instanceof FieldInfo fi)) return false;
+        if (!policy.callResults() || ELEMENT_ANNOTATIONS_OFF.get() || !(info instanceof FieldInfo fi)) return false;
         ParameterizedType type = fi.type();
         // one dimension only: in '@Nullable V[][] values' (guava DenseImmutableTable, ArrayTable) the innermost V is
         // nullable, not the rows, and the pass has no node for an element's element
@@ -1864,7 +1864,7 @@ public final class NullabilityPass {
     }
 
     // gate NOELEMENTANNOTATIONS: an array's element annotation in declaration position counts for the array (A/B)
-    private static final boolean ELEMENT_ANNOTATIONS_OFF = System.getenv("NOELEMENTANNOTATIONS") != null;
+    private static final Switches.Gate ELEMENT_ANNOTATIONS_OFF = Switches.gate("NOELEMENTANNOTATIONS");
 
     // a source declaration's null annotation, under Policy.contracts: nullable seeds, non-null stops null
     private void contract(Info info, Object node) {
@@ -1994,7 +1994,7 @@ public final class NullabilityPass {
 
     private final Map<MethodInfo, Boolean> ownReturnsNonNull = new HashMap<>();
     // gate NOSUPERCALLS: a call through super returns what the method's override family does (A/B)
-    private static final boolean SUPER_CALLS_OFF = System.getenv("NOSUPERCALLS") != null;
+    private static final Switches.Gate SUPER_CALLS_OFF = Switches.gate("NOSUPERCALLS");
 
     private NullableState returnContract(MethodInfo mi) {
         if (!analysed.contains(mi)) {
@@ -2015,13 +2015,13 @@ public final class NullabilityPass {
      made Multimap.asMap() and values() nullable across their override families (2026-10-17).
      */
     private static boolean collectionsFactory(MethodInfo mi) {
-        return !COLLECTIONS_FACTORIES_OFF && mi.isStatic() && !isTypeVariable(mi.returnType())
+        return !COLLECTIONS_FACTORIES_OFF.get() && mi.isStatic() && !isTypeVariable(mi.returnType())
                && !mi.returnType().isPrimitiveExcludingVoid() && !mi.returnType().isVoid()
                && "java.util.Collections".equals(mi.typeInfo().fullyQualifiedName());
     }
 
     // gate NOCOLLECTIONSFACTORIES: a Collections factory's return is unknown, as any unhinted library return (A/B)
-    private static final boolean COLLECTIONS_FACTORIES_OFF = System.getenv("NOCOLLECTIONSFACTORIES") != null;
+    private static final Switches.Gate COLLECTIONS_FACTORIES_OFF = Switches.gate("NOCOLLECTIONSFACTORIES");
 
     /**
      * The methods {@code mi} overrides; for a lambda's synthetic method (which overrides nothing in the model) the
@@ -2059,14 +2059,14 @@ public final class NullabilityPass {
                 .filter(m -> !analysed.contains(m))
                 .filter(m -> libraryReturnState(m) != NullableState.UNSPECIFIED)
                 .toList();
-        if (NEAREST_LIBRARY_RETURN_OFF || declared.size() < 2) return declared;
+        if (NEAREST_LIBRARY_RETURN_OFF.get() || declared.size() < 2) return declared;
         return declared.stream()
                 .filter(m -> declared.stream().noneMatch(o -> o != m && o.typeInfo() != m.typeInfo()
                         && o.typeInfo().superTypesExcludingJavaLangObject().contains(m.typeInfo())))
                 .toList();
     }
 
-    private static final boolean NEAREST_LIBRARY_RETURN_OFF = System.getenv("NONEARESTLIBRARYRETURN") != null;
+    private static final Switches.Gate NEAREST_LIBRARY_RETURN_OFF = Switches.gate("NONEARESTLIBRARYRETURN");
 
     /*
      Kotlin: an override of a library method whose return is declared non-null may not widen it ('override fun
@@ -2074,7 +2074,7 @@ public final class NullabilityPass {
      asserted. Gate NONEARESTLIBRARYRETURN.
      */
     private boolean overridesLibraryNonNullReturn(MethodInfo mi) {
-        if (NEAREST_LIBRARY_RETURN_OFF || mi.isConstructor() || mi.returnType().isVoid()
+        if (NEAREST_LIBRARY_RETURN_OFF.get() || mi.isConstructor() || mi.returnType().isVoid()
             || mi.returnType().isPrimitiveExcludingVoid() && mi.returnType().arrays() == 0
             || NullAnnotations.explicitState(mi) == NullableState.NULLABLE) return false;
         return overrides(mi).stream().anyMatch(m -> !analysed.contains(m)
@@ -2094,7 +2094,7 @@ public final class NullabilityPass {
         NullableState explicit = NullAnnotations.explicitState(mi);
         if (explicit != null) return explicit;
         // a @NullMarked scope's unannotated return that is not a type variable (Spring Security 7)
-        if (!NEAREST_LIBRARY_RETURN_OFF && !mi.isConstructor() && !mi.returnType().isVoid()
+        if (!NEAREST_LIBRARY_RETURN_OFF.get() && !mi.isConstructor() && !mi.returnType().isVoid()
             && !isTypeVariable(mi.returnType()) && NullAnnotations.inNullMarkedScope(mi)) {
             return NullableState.NONNULL;
         }
@@ -2164,10 +2164,10 @@ public final class NullabilityPass {
             "javax.servlet.FilterChain.doFilter(", "jakarta.servlet.http.HttpServlet.", "javax.servlet.http.HttpServlet.",
             "jakarta.servlet.GenericServlet.", "javax.servlet.GenericServlet.");
 
-    private static final boolean CONTAINER_CALLBACKS_OFF = System.getenv("NOCONTAINERCALLBACKS") != null;
+    private static final Switches.Gate CONTAINER_CALLBACKS_OFF = Switches.gate("NOCONTAINERCALLBACKS");
 
     private static boolean containerCallback(MethodInfo mi) {
-        if (CONTAINER_CALLBACKS_OFF || mi.isConstructor() || mi.isStatic()) return false;
+        if (CONTAINER_CALLBACKS_OFF.get() || mi.isConstructor() || mi.isStatic()) return false;
         String fqn = mi.fullyQualifiedName();
         return CONTAINER_CALLBACKS.stream().anyMatch(fqn::startsWith);
     }
@@ -2179,7 +2179,7 @@ public final class NullabilityPass {
      jenkins RememberMeServicesProxy.kt:20, 2026-10-20). Gate NOLIBRARYCONTRACTS.
      */
     private void libraryParameterContracts() {
-        if (LIBRARY_CONTRACTS_OFF || !policy.callResults()) return;
+        if (LIBRARY_CONTRACTS_OFF.get() || !policy.callResults()) return;
         Set<ParameterInfo> seen = new HashSet<>();
         for (Set<Object> targets : successors.values()) {
             for (Object t : targets) {
@@ -2191,7 +2191,7 @@ public final class NullabilityPass {
         }
     }
 
-    private static final boolean LIBRARY_CONTRACTS_OFF = System.getenv("NOLIBRARYCONTRACTS") != null;
+    private static final Switches.Gate LIBRARY_CONTRACTS_OFF = Switches.gate("NOLIBRARYCONTRACTS");
 
     /*
      A library method mi overrides (a real override, not a lambda's functional method) whose parameter 'index'
@@ -2334,7 +2334,7 @@ public final class NullabilityPass {
         // 'Boolean apply(T t) { return predicate.apply(t); }' over 'boolean Predicate.apply' was 'Boolean?' through a
         // test's MockEquivalence.doEquivalent and the boolean equivalent()/doEquivalent() family (Functions.kt:103,
         // 2026-10-18). Gate NOPRIMITIVECUTS.
-        if (policy.callResults() && !PRIMITIVE_CUTS_OFF && !(from instanceof Content) && primitive(typeOf(from))) return;
+        if (policy.callResults() && !PRIMITIVE_CUTS_OFF.get() && !(from instanceof Content) && primitive(typeOf(from))) return;
         flows.add(List.of(from, to));
         successors.computeIfAbsent(from, _ -> new LinkedHashSet<>()).add(to);
     }
@@ -2343,7 +2343,7 @@ public final class NullabilityPass {
         return type != null && type.arrays() == 0 && type.isPrimitiveExcludingVoid();
     }
 
-    private static final boolean PRIMITIVE_CUTS_OFF = System.getenv("NOPRIMITIVECUTS") != null;
+    private static final Switches.Gate PRIMITIVE_CUTS_OFF = Switches.gate("NOPRIMITIVECUTS");
 
     private void seed(Object node, String origin) {
         seed(node, origin, null);
@@ -2462,14 +2462,14 @@ public final class NullabilityPass {
         if (known != null) return known;
         ParameterizedType outer = typeOf(a.of());
         TypeInfo ti = outer == null || outer.arrays() > 0 ? null : outer.typeInfo();
-        boolean bounded = !BOUNDED_SLOTS_OFF && ti != null && a.index() < ti.typeParameters().size()
+        boolean bounded = !BOUNDED_SLOTS_OFF.get() && ti != null && a.index() < ti.typeParameters().size()
                           && ti.typeParameters().get(a.index()).typeBounds().stream()
                                   .anyMatch(b -> b.typeParameter() == null && b.typeInfo() != null
                                                  && !b.typeInfo().isJavaLangObject())
                           // a slot holding a type variable stays that variable ('Converter<A, B>', never
                           // 'Converter<A?, B>'): it already ranges over nullable instantiations, and Kotlin's
                           // invariant generics make the two incompatible (guava's Converter, Maps, TreeRangeSet, ...)
-                          || !TYPE_VARIABLE_SLOTS_OFF && outer != null && a.index() < outer.parameters().size()
+                          || !TYPE_VARIABLE_SLOTS_OFF.get() && outer != null && a.index() < outer.parameters().size()
                              && isTypeVariable(outer.parameters().get(a.index()))
                              && !typeVariableElementSlots.contains(a)
                           || erasedSingleton(a, outer)
@@ -2503,7 +2503,7 @@ public final class NullabilityPass {
     private Set<Arg> tiedToNonNullSlots() {
         if (tiedToNonNull != null) return tiedToNonNull;
         tiedToNonNull = new HashSet<>();
-        if (TIED_BOUNDS_OFF || nonNullTypeParameters.isEmpty()) return tiedToNonNull;
+        if (TIED_BOUNDS_OFF.get() || nonNullTypeParameters.isEmpty()) return tiedToNonNull;
         List<String> why = NULL_MARKED_DEBUG == null ? null : new ArrayList<>();
         // the container itself given to a null-marked slot that the graph does not tie, a method type variable's:
         // 'copyOf(multiset)'. Not along the slot edges: those carry values ('accessQueue.add(table.get(i))'), which
@@ -2551,7 +2551,7 @@ public final class NullabilityPass {
     }
 
     private Set<Arg> tiedToNonNull;
-    private static final boolean TIED_BOUNDS_OFF = System.getenv("NOTIEDBOUNDS") != null;
+    private static final Switches.Gate TIED_BOUNDS_OFF = Switches.gate("NOTIEDBOUNDS");
 
     /*
      Kotlin: a static final singleton with Object type arguments ('RegularImmutableMap.EMPTY', an
@@ -2560,7 +2560,7 @@ public final class NullabilityPass {
      ImmutableMapFloodingTest) into ImmutableListMultimap.readObject's tmpMap (guava 2026-10-17, after 594f20b7).
      */
     private static boolean erasedSingleton(Arg a, ParameterizedType outer) {
-        return !ERASED_SINGLETONS_OFF && a.of() instanceof FieldInfo fi && fi.isStatic() && fi.isFinal()
+        return !ERASED_SINGLETONS_OFF.get() && a.of() instanceof FieldInfo fi && fi.isStatic() && fi.isFinal()
                && outer != null && outer.arrays() == 0 && !outer.parameters().isEmpty()
                && outer.parameters().stream().allMatch(p -> p.wildcard() == null && p.typeParameter() == null
                                                             && p.arrays() == 0 && p.typeInfo() != null
@@ -2568,7 +2568,7 @@ public final class NullabilityPass {
     }
 
     // gate NOERASEDSINGLETONS: an Object-typed singleton's slots take null as any other (A/B)
-    private static final boolean ERASED_SINGLETONS_OFF = System.getenv("NOERASEDSINGLETONS") != null;
+    private static final Switches.Gate ERASED_SINGLETONS_OFF = Switches.gate("NOERASEDSINGLETONS");
 
     private final Map<Object, Boolean> boundedSlots = new HashMap<>();
 
@@ -2582,11 +2582,11 @@ public final class NullabilityPass {
      */
     private final Set<io.codelaser.maddi.cst.api.info.TypeParameter> nonNullTypeParameters = new HashSet<>();
 
-    private static final boolean NULL_MARKED_BOUNDS_OFF = System.getenv("NONULLMARKEDBOUNDS") != null;
-    private static final boolean MEMBERLESS_BOUNDS_OFF = System.getenv("NOMEMBERLESSBOUNDS") != null;
+    private static final Switches.Gate NULL_MARKED_BOUNDS_OFF = Switches.gate("NONULLMARKEDBOUNDS");
+    private static final Switches.Gate MEMBERLESS_BOUNDS_OFF = Switches.gate("NOMEMBERLESSBOUNDS");
 
     private void nonNullBounds(List<Info> analysisOrder, List<MethodInfo> methods, List<FieldInfo> fields) {
-        if (!policy.callResults() || NULL_MARKED_BOUNDS_OFF) return;
+        if (!policy.callResults() || NULL_MARKED_BOUNDS_OFF.get()) return;
         // a source package's annotations sit on its package-info type, not on the compilation units of its classes
         // (guava's com.google.common.cache, 2026-10-18)
         for (Info info : analysisOrder) {
@@ -2601,7 +2601,7 @@ public final class NullabilityPass {
         // ComparatorFactory<Solution_, T>' passes its parameters into null-marked positions, a member-less
         // '@NullMarked interface UniConstraintStream<A>' has non-null ones (timefold PlanningEntity.kt:15,
         // 2026-10-22). Gate NOMEMBERLESSBOUNDS.
-        if (!MEMBERLESS_BOUNDS_OFF) {
+        if (!MEMBERLESS_BOUNDS_OFF.get()) {
             for (Info info : analysisOrder) {
                 if (info instanceof TypeInfo t && !t.typeNature().isPackageInfo()) types.add(t);
             }
@@ -2653,7 +2653,7 @@ public final class NullabilityPass {
                     changed |= carryInstantiation(in.declared(), in.concrete(), in.callee(), in.where(), types,
                             blocked, conflicts);
                 }
-                if (!OVERRIDE_BOUNDS_OFF) changed |= overrideFamilyBounds(methods, blocked, conflicts);
+                if (!OVERRIDE_BOUNDS_OFF.get()) changed |= overrideFamilyBounds(methods, blocked, conflicts);
             }
             if (conflicts.isEmpty() || !blocked.addAll(conflicts)) {
                 if (NULL_MARKED_DEBUG != null) debugNullMarked(types, blocked);
@@ -2699,7 +2699,7 @@ public final class NullabilityPass {
         return changed;
     }
 
-    private static final boolean OVERRIDE_BOUNDS_OFF = System.getenv("NOOVERRIDEBOUNDS") != null;
+    private static final Switches.Gate OVERRIDE_BOUNDS_OFF = Switches.gate("NOOVERRIDEBOUNDS");
 
     private final Map<String, List<io.codelaser.maddi.cst.api.expression.AnnotationExpression>> packageInfoAnnotations
             = new HashMap<>();
@@ -2893,13 +2893,13 @@ public final class NullabilityPass {
     // where the array is an 'Array<T?>'
     private final Set<Arg> typeVariableElementSlots = new HashSet<>();
     // gate NOBOUNDEDSLOTS: a bounded type parameter's slot takes null as any other (A/B)
-    private static final boolean BOUNDED_SLOTS_OFF = System.getenv("NOBOUNDEDSLOTS") != null;
+    private static final Switches.Gate BOUNDED_SLOTS_OFF = Switches.gate("NOBOUNDEDSLOTS");
     // gate NOWILDCARDSLOTS: a slot flows back out of an unbound '?' parameter (A/B)
-    private static final boolean WILDCARD_SLOTS_OFF = System.getenv("NOWILDCARDSLOTS") != null;
+    private static final Switches.Gate WILDCARD_SLOTS_OFF = Switches.gate("NOWILDCARDSLOTS");
     // gate NOUNCHECKEDSLOTS: slots of different concrete type arguments are tied as any other (A/B)
-    private static final boolean UNCHECKED_SLOTS_OFF = System.getenv("NOUNCHECKEDSLOTS") != null;
+    private static final Switches.Gate UNCHECKED_SLOTS_OFF = Switches.gate("NOUNCHECKEDSLOTS");
     // gate NOTYPEVARSLOTS: a slot holding a type variable takes null as any other (A/B)
-    private static final boolean TYPE_VARIABLE_SLOTS_OFF = System.getenv("NOTYPEVARSLOTS") != null;
+    private static final Switches.Gate TYPE_VARIABLE_SLOTS_OFF = Switches.gate("NOTYPEVARSLOTS");
 
     // strict: when not null, an edge from a value into a slot is followed only from a node in it
     private Set<Object> closure(Map<Object, Object> cause, Set<Object> seeds, Set<Object> strict) {
@@ -2944,7 +2944,7 @@ public final class NullabilityPass {
     private boolean callResultNullable(MethodInfo callee, int call, Set<Object> reached,
                                        java.util.function.Predicate<Object> isReached,
                                        Map<MethodInfo, Boolean> intrinsicMemo) {
-        if (GAP9_OFF || !argumentsSeen.contains(call)) return true;
+        if (GAP9_OFF.get() || !argumentsSeen.contains(call)) return true;
         Set<ParameterInfo> through = passThrough(callee);
         if (through.isEmpty()) return true;
         if (intrinsicMemo.computeIfAbsent(callee, m -> reachedWithout(m, through, reached))) return true;
@@ -3097,7 +3097,7 @@ public final class NullabilityPass {
      GrpcClient.java:91, 2026-10-19). Gate NOFIELDINITNULLS.
      */
     private void fieldInitializerNullArguments(List<FieldInfo> fields) {
-        if (FIELD_INIT_NULLS_OFF) return;
+        if (FIELD_INIT_NULLS_OFF.get()) return;
         for (FieldInfo fi : fields) {
             if (fi.initializer() == null || fi.initializer().isEmpty()) continue;
             fi.initializer().visit(e -> {
@@ -3106,7 +3106,7 @@ public final class NullabilityPass {
                 // ('static final CalendarField MINUTE = new CalendarField("minute", …, null) { … }', jenkins
                 // CronTab.kt:216, 2026-10-21); its body is not the initializer's. Gate NOANONYMOUSFIELDINIT.
                 boolean anonymous = e instanceof ConstructorCall cc && cc.anonymousClass() != null;
-                if (anonymous && ANONYMOUS_FIELD_INIT_OFF) return false;
+                if (anonymous && ANONYMOUS_FIELD_INIT_OFF.get()) return false;
                 MethodInfo callee = switch (e) {
                     case MethodCall mc -> mc.methodInfo();
                     case ConstructorCall cc when anonymous -> anonymousSuperConstructor(cc);
@@ -3131,8 +3131,8 @@ public final class NullabilityPass {
         }
     }
 
-    private static final boolean FIELD_INIT_NULLS_OFF = System.getenv("NOFIELDINITNULLS") != null;
-    private static final boolean ANONYMOUS_FIELD_INIT_OFF = System.getenv("NOANONYMOUSFIELDINIT") != null;
+    private static final Switches.Gate FIELD_INIT_NULLS_OFF = Switches.gate("NOFIELDINITNULLS");
+    private static final Switches.Gate ANONYMOUS_FIELD_INIT_OFF = Switches.gate("NOANONYMOUSFIELDINIT");
 
     /*
      Kotlin: 'this.f = p' of a generic type makes p's slots f's (invariant), also where the link engine does not say so:
@@ -3141,7 +3141,7 @@ public final class NullabilityPass {
      only: coupleContent ties the slots; the value itself is the links' to decide. Gate NOASSIGNEDSLOTS.
      */
     private void assignedParameterSlots(List<MethodInfo> methods) {
-        if (ASSIGNED_SLOTS_OFF || !policy.callResults()) return;
+        if (ASSIGNED_SLOTS_OFF.get() || !policy.callResults()) return;
         for (MethodInfo mi : methods) {
             if (mi.methodBody() == null) continue;
             mi.methodBody().visit(e -> {
@@ -3159,7 +3159,7 @@ public final class NullabilityPass {
         }
     }
 
-    private static final boolean ASSIGNED_SLOTS_OFF = System.getenv("NOASSIGNEDSLOTS") != null;
+    private static final Switches.Gate ASSIGNED_SLOTS_OFF = Switches.gate("NOASSIGNEDSLOTS");
 
     /*
      Kotlin: an enum's 'valueOf(String)' is Kotlin's own, which takes a 'String': its parameter is a non-null contract,
@@ -3168,7 +3168,7 @@ public final class NullabilityPass {
      2026-10-19). Gate NOENUMVALUEOF.
      */
     private void enumValueOfContracts(List<MethodInfo> methods) {
-        if (ENUM_VALUE_OF_OFF || !policy.callResults()) return;
+        if (ENUM_VALUE_OF_OFF.get() || !policy.callResults()) return;
         for (MethodInfo mi : methods) {
             if (mi.isStatic() && "valueOf".equals(mi.name()) && mi.typeInfo().typeNature().isEnum()
                 && mi.parameters().size() == 1 && mi.parameters().getFirst().parameterizedType().isJavaLangString()) {
@@ -3177,7 +3177,7 @@ public final class NullabilityPass {
         }
     }
 
-    private static final boolean ENUM_VALUE_OF_OFF = System.getenv("NOENUMVALUEOF") != null;
+    private static final Switches.Gate ENUM_VALUE_OF_OFF = Switches.gate("NOENUMVALUEOF");
 
     /*
      A field typed by its class's type variable ('T t' in 'Box<T>') holds, in each box, a value of that box's type
@@ -3296,7 +3296,7 @@ public final class NullabilityPass {
                     // Kotlin: nor between two different concrete arguments, which only an unchecked conversion
                     // relates ('(ImmutableMap<K, V>) RegularImmutableMap.EMPTY', an ImmutableMap<Object, Object> the
                     // links see as every caller's map): each conversion starts an instantiation of its own
-                    if (policy.callResults() && !UNCHECKED_SLOTS_OFF && uncheckedConversion(p0, p1)) continue;
+                    if (policy.callResults() && !UNCHECKED_SLOTS_OFF.get() && uncheckedConversion(p0, p1)) continue;
                     // A slot typed by a CLASS type variable ('FastFixedSet<E> spawnEmptySet()' in Factory<E>,
                     // 'union(FastFixedSet<E> set)', 'Factory(Collection<E> set)') is parametric: it receives nothing
                     // from one instantiation's slot ('FastFixedSet<Statement?> tmpSet'), or Kotlin would see 'E?'
@@ -3311,13 +3311,13 @@ public final class NullabilityPass {
                     // Kotlin: nor out of an unbound '?' ('Joiner.MapJoiner.join(Map<?, ?>)'): Kotlin's '*' only
                     // receives too. Back out, JoinerTest's null reached every map passed to join, and through
                     // ImmutableMap.of()'s RegularImmutableMap.EMPTY all of guava's empty maps (2026-10-17)
-                    boolean unbound = policy.callResults() && !WILDCARD_SLOTS_OFF && p1.wildcard() != null
+                    boolean unbound = policy.callResults() && !WILDCARD_SLOTS_OFF.get() && p1.wildcard() != null
                                       && p1.wildcard().isUnbound();
                     // Kotlin: nor out of a position declared nullable ('Predicate<@Nullable Object> equalTo1 =
                     // Equivalence.equals().equivalentTo("1")'): it is 'T?' whatever flows in, and its null is not the
                     // source's (EquivalenceTest's 'equalTo1.apply(null)' made Equivalence.equals() an
                     // Equivalence<Any?>, Equivalence.kt:98/99, 2026-10-18)
-                    boolean declaredNullable = policy.callResults() && !NULLABLE_PARAMETER_SLOTS_OFF
+                    boolean declaredNullable = policy.callResults() && !NULLABLE_PARAMETER_SLOTS_OFF.get()
                                                && explicit(p1.annotations()) == NullableState.NULLABLE;
                     if (!isExtendsWildcard(p1) && !unbound && !declaredNullable && (!class0 || class1)) {
                         successors.computeIfAbsent(a1, _ -> new LinkedHashSet<>()).add(a0);
@@ -3341,7 +3341,7 @@ public final class NullabilityPass {
      Gate NOREADONLYARRAYS.
      */
     private Set<ParameterInfo> readOnlyArrayParameters() {
-        if (READ_ONLY_ARRAYS_OFF || !policy.callResults()) return Set.of();
+        if (READ_ONLY_ARRAYS_OFF.get() || !policy.callResults()) return Set.of();
         Set<ParameterInfo> candidates = new HashSet<>();
         Map<ParameterInfo, Set<Object>> out = new HashMap<>();
         for (List<Object> flow : flows) {
@@ -3420,7 +3420,7 @@ public final class NullabilityPass {
      */
     private final Set<List<Object>> varargsPasses = new HashSet<>();
 
-    private static final boolean VARARG_COPIES_OFF = System.getenv("NOVARARGCOPIES") != null;
+    private static final Switches.Gate VARARG_COPIES_OFF = Switches.gate("NOVARARGCOPIES");
 
     private static boolean readOnlyArrayParameter(Object node, Set<ParameterInfo> readOnlyArrays) {
         Object root = node;
@@ -3428,7 +3428,7 @@ public final class NullabilityPass {
         return root instanceof ParameterInfo pi && readOnlyArrays.contains(pi);
     }
 
-    private static final boolean READ_ONLY_ARRAYS_OFF = System.getenv("NOREADONLYARRAYS") != null;
+    private static final Switches.Gate READ_ONLY_ARRAYS_OFF = Switches.gate("NOREADONLYARRAYS");
 
     /*
      For Java annotations an array's elements need to flow only forward: Java arrays are covariant, and so is
@@ -3490,7 +3490,7 @@ public final class NullabilityPass {
      (coupleContent), so the seed reaches only what is read from it.
      */
     private void starSlots(ParameterInfo pi) {
-        if (!policy.callResults() || STAR_SLOTS_OFF) return;
+        if (!policy.callResults() || STAR_SLOTS_OFF.get()) return;
         ParameterizedType pt = pi.parameterizedType();
         if (pt.arrays() != 0) return;
         for (int i = 0; i < pt.parameters().size(); i++) {
@@ -3504,10 +3504,10 @@ public final class NullabilityPass {
     }
 
     // gate NOSTARRESULTS: a generic call given a '?' argument does not read its result from that slot (A/B)
-    private static final boolean STAR_RESULTS_OFF = System.getenv("NOSTARRESULTS") != null;
+    private static final Switches.Gate STAR_RESULTS_OFF = Switches.gate("NOSTARRESULTS");
 
     // gate NOSTARSLOTS: a '?' argument's values are not read as nullable (A/B)
-    private static final boolean STAR_SLOTS_OFF = System.getenv("NOSTARSLOTS") != null;
+    private static final Switches.Gate STAR_SLOTS_OFF = Switches.gate("NOSTARSLOTS");
 
     /*
      Kotlin: a call on this object to a method of its own class instantiates the class's type variables as the
@@ -3518,7 +3518,7 @@ public final class NullabilityPass {
      */
     private static boolean sameInstantiation(MethodCall mc, MethodInfo caller) {
         MethodInfo callee = mc.methodInfo();
-        if (SAME_INSTANTIATION_OFF || callee.isStatic() || callee.typeInfo() != caller.typeInfo()
+        if (SAME_INSTANTIATION_OFF.get() || callee.isStatic() || callee.typeInfo() != caller.typeInfo()
             || caller.isStatic() || hasMethodTypeVariable(callee.returnType())) {
             return false;
         }
@@ -3535,7 +3535,7 @@ public final class NullabilityPass {
     }
 
     // gate NOSAMEINSTANTIATION: a call on this does not tie its result's slots to the target's (A/B)
-    private static final boolean SAME_INSTANTIATION_OFF = System.getenv("NOSAMEINSTANTIATION") != null;
+    private static final Switches.Gate SAME_INSTANTIATION_OFF = Switches.gate("NOSAMEINSTANTIATION");
 
     private static boolean uncheckedConversion(ParameterizedType p0, ParameterizedType p1) {
         return p0.wildcard() == null && p1.wildcard() == null && p0.typeParameter() == null
@@ -3604,11 +3604,11 @@ public final class NullabilityPass {
 
     // the parameters of mi assigned (plainly, not '+=') anywhere in element, lambdas excluded
     // gate NOPARAMSHADOW: a reassigned parameter keeps one node for the caller's and the body's values (A/B)
-    private static final boolean PARAMETER_SHADOWS_OFF = System.getenv("NOPARAMSHADOW") != null;
+    private static final Switches.Gate PARAMETER_SHADOWS_OFF = Switches.gate("NOPARAMSHADOW");
 
     private static Set<ParameterInfo> parametersAssignedIn(Element element, MethodInfo mi) {
         Set<ParameterInfo> set = new HashSet<>();
-        if (element == null || PARAMETER_SHADOWS_OFF) return set;
+        if (element == null || PARAMETER_SHADOWS_OFF.get()) return set;
         element.visit(e -> {
             if (e instanceof Lambda) return false;
             if (e instanceof Assignment a && a.assignmentOperator() == null
@@ -3741,12 +3741,12 @@ public final class NullabilityPass {
      AbstractMapBasedMultimap.map's values, guava 2026-10-17).
      */
     private static boolean parametricNullness(MethodInfo mi) {
-        return !PARAMETRIC_OFF && mi.annotations().stream().anyMatch(a -> a.typeInfo() != null
+        return !PARAMETRIC_OFF.get() && mi.annotations().stream().anyMatch(a -> a.typeInfo() != null
                 && a.typeInfo().simpleName().equals("ParametricNullness"));
     }
 
     // gate NOPARAMETRIC: a '@ParametricNullness' type-variable return's own null reaches every call (A/B)
-    private static final boolean PARAMETRIC_OFF = System.getenv("NOPARAMETRIC") != null;
+    private static final Switches.Gate PARAMETRIC_OFF = Switches.gate("NOPARAMETRIC");
 
     // '@NullSource' / '@NullAndEmptySource' (org.junit.jupiter.params.provider) on a parameterized test
     private static boolean junitNullSource(MethodInfo mi) {
@@ -3907,7 +3907,7 @@ public final class NullabilityPass {
             // is still read from the closure: the reconstruction of an assignment group does not spell the hop
             // through a local's face ('return b.get()' on a 'Box<String> b = new Box<>(null)' has no 'read ← b.t'),
             // and the marker rules below decide per statement anyway.
-            if (link.derived() && !DERIVED_LINKS && !isNullMarker(link.to()) && !updaterLink(statement, link)) continue;
+            if (link.derived() && !DERIVED_LINKS.get() && !isNullMarker(link.to()) && !updaterLink(statement, link)) continue;
             if (updaterLink(statement, link) && !link.from().equals(v)
                 && link.linkNature().isIdenticalToOrAssignedFromTo()) {
                 // 'child.parent → node', stored with child: a face of v that the updater assigns to the loop variable
@@ -3972,7 +3972,7 @@ public final class NullabilityPass {
                             // of an earlier call's ('Node n = getNode(name); if (n instanceof Slave) return (Slave)
                             // n; return null;'), whose first, guarded return then hid it (jenkins Hudson.kt:52,
                             // PluginWrapper.kt:478, 2026-10-21). Gate NORETURNNULLLITERALS.
-                            boolean literal = !RETURN_NULL_LITERALS_OFF && returned != null
+                            boolean literal = !RETURN_NULL_LITERALS_OFF.get() && returned != null
                                               && NonNullFacts.unwrap(returned) instanceof NullConstant;
                             if (!returnMarkersSeen.add(key) && !literal) continue;
                             if (!literal && returned != null && facts.nonNull(returned, facts.before(statement))) {
@@ -4157,7 +4157,7 @@ public final class NullabilityPass {
     }
 
     // gate NONESTEDASSIGNMENTS: a link into a variable assigned inside an expression is not counted (A/B)
-    private static final boolean NESTED_ASSIGNMENTS_OFF = System.getenv("NONESTEDASSIGNMENTS") != null;
+    private static final Switches.Gate NESTED_ASSIGNMENTS_OFF = Switches.gate("NONESTEDASSIGNMENTS");
 
     // the value 'recipient' gets in this statement: 'recipient = v;', 'T recipient = v;', 'return v;'; else null
     private static Expression assignedValue(Statement statement, Variable recipient) {
@@ -4179,7 +4179,7 @@ public final class NullabilityPass {
      */
     private enum Guard {ABSENT, GUARDED, UNGUARDED, OPAQUE}
 
-    private static final boolean KNOWN_ARGUMENTS_OFF = System.getenv("NOKNOWNARGUMENTS") != null;
+    private static final Switches.Gate KNOWN_ARGUMENTS_OFF = Switches.gate("NOKNOWNARGUMENTS");
 
     private Guard guard(Expression value, Variable source, Set<Variable> known) {
         // a value known non-null as a whole carries no null, whatever flows into it ('return requireNonNull(f)')
@@ -4214,7 +4214,7 @@ public final class NullabilityPass {
                 // a call that is not given the source cannot return it ('a == null ? Collections.emptyList() : a')
                 return Guard.ABSENT;
             }
-            case MethodCall _ when policy.callResults() && !KNOWN_ARGUMENTS_OFF && known.contains(source) -> {
+            case MethodCall _ when policy.callResults() && !KNOWN_ARGUMENTS_OFF.get() && known.contains(source) -> {
                 // Kotlin: a call given the source where it is known non-null returns no null of it. guava
                 // TypeResolver.TypeTable.resolveInternal: 'type = map.get(key); if (type == null) { ...; return ...; }
                 // return new TypeResolver(...).resolveType(type)' carried ImmutableMap.get's null into the return,
@@ -4565,7 +4565,7 @@ public final class NullabilityPass {
     }
 
     // gate NODEADNULLS: a library null assigned to a local seeds it even when the next statement exits on it (A/B)
-    private static final boolean DEAD_NULLS_OFF = System.getenv("NODEADNULLS") != null;
+    private static final Switches.Gate DEAD_NULLS_OFF = Switches.gate("NODEADNULLS");
 
     private void syntacticSeeds(MethodInfo mi, Scope scope, Statement statement) {
         readScope = new ReadScope(mi, scope);
@@ -4608,7 +4608,7 @@ public final class NullabilityPass {
             // Kotlin: a library view ('for (Map.Entry<K, V> e : data.entrySet())') holds the receiver's data: the loop
             // variable's slots are the map's, so 'e.setValue(null)' writes it (jenkins DiskSpaceMonitorDescriptor.kt:38,
             // 2026-10-22). Gate NOVIEWLOOPS.
-            if (array == null && policy.callResults() && !VIEW_LOOPS_OFF) array = viewArgument(mi, scope, iterated);
+            if (array == null && policy.callResults() && !VIEW_LOOPS_OFF.get()) array = viewArgument(mi, scope, iterated);
             ParameterizedType type = array == null ? null : typeOf(array);
             if (type != null && (type.arrays() > 0 || type.parameters().size() == 1)) {
                 // over an array its elements, over an Iterable<T> its one type argument; the statement's own scope
@@ -4643,7 +4643,7 @@ public final class NullabilityPass {
      local printed 'Runnable' (worktree-maddi-all 2026-10-17).
      */
     private void nestedCopy(MethodInfo mi, Scope scope, Statement statement, Object target, Expression value) {
-        if (!policy.callResults() || NESTED_ASSIGNMENTS_OFF || target == null
+        if (!policy.callResults() || NESTED_ASSIGNMENTS_OFF.get() || target == null
             || !(NonNullFacts.unwrap(value) instanceof VariableExpression ve)) return;
         Object source = node(mi, scope, ve.variable());
         if (source == null) return;
@@ -4687,7 +4687,7 @@ public final class NullabilityPass {
      instantiates the chain's T (jenkins InstallUtil.kt:62, 2026-10-20). Gate NOVIEWARGUMENTS.
      */
     private Object viewArgument(MethodInfo mi, Scope scope, Expression argument) {
-        if (VIEW_ARGUMENTS_OFF || !(NonNullFacts.unwrap(argument) instanceof MethodCall mc) || mc.methodInfo() == null
+        if (VIEW_ARGUMENTS_OFF.get() || !(NonNullFacts.unwrap(argument) instanceof MethodCall mc) || mc.methodInfo() == null
             || analysed.contains(mc.methodInfo()) || mc.methodInfo().isStatic() || mc.concreteReturnType() == null) {
             return null;
         }
@@ -4702,8 +4702,8 @@ public final class NullabilityPass {
         return result;
     }
 
-    private static final boolean VIEW_ARGUMENTS_OFF = System.getenv("NOVIEWARGUMENTS") != null;
-    private static final boolean VIEW_METHOD_ARGUMENTS_OFF = System.getenv("NOVIEWMETHODARGUMENTS") != null;
+    private static final Switches.Gate VIEW_ARGUMENTS_OFF = Switches.gate("NOVIEWARGUMENTS");
+    private static final Switches.Gate VIEW_METHOD_ARGUMENTS_OFF = Switches.gate("NOVIEWMETHODARGUMENTS");
 
     /*
      A parameter whose type arguments are the declaring class's type variables ('addAll(Collection<? extends E>)',
@@ -4834,7 +4834,7 @@ public final class NullabilityPass {
                 // instantiation: it ties nothing back into the receiver's slot. EquivalenceTest's 'equalTo1.apply(null)'
                 // on a Predicate<@Nullable Object> had made Equivalence.equals() an Equivalence<Any?>, which
                 // Equals (an Equivalence<Object>) is not (Equivalence.kt:98/99, 2026-10-18)
-                boolean declaredNullable = policy.callResults() && !NULLABLE_PARAMETER_SLOTS_OFF
+                boolean declaredNullable = policy.callResults() && !NULLABLE_PARAMETER_SLOTS_OFF.get()
                                            && explicit(f.annotations()) == NullableState.NULLABLE;
                 boolean receivesOnly = isExtendsWildcard(f) || declaredNullable;
                 boolean consumes = f.wildcard() != null && f.wildcard().isSuper(); // 'sort(Comparator<? super E>)'
@@ -4944,11 +4944,11 @@ public final class NullabilityPass {
         return List.of();
     }
 
-    private static final boolean NULL_FILTERS_OFF = System.getenv("NONULLFILTERS") != null;
+    private static final Switches.Gate NULL_FILTERS_OFF = Switches.gate("NONULLFILTERS");
 
     // a predicate that holds only for a non-null element: 'Objects::nonNull', 'x -> x != null', 'x -> null != x'
     private boolean nullFilter(Expression predicate) {
-        if (NULL_FILTERS_OFF || !policy.callResults()) return false;
+        if (NULL_FILTERS_OFF.get() || !policy.callResults()) return false;
         Expression p = NonNullFacts.unwrap(predicate);
         if (p instanceof MethodReference mr && mr.methodInfo() != null) {
             return "nonNull".equals(mr.methodInfo().name())
@@ -5079,7 +5079,7 @@ public final class NullabilityPass {
                         array = locals.getFirst();
                         init = locals.getFirst().assignmentExpression();
                     }
-                } else if (!FIELD_FILLS_OFF && statement instanceof ExpressionAsStatement eas
+                } else if (!FIELD_FILLS_OFF.get() && statement instanceof ExpressionAsStatement eas
                            && eas.expression() instanceof Assignment a && a.assignmentOperator() == null
                            && (a.variableTarget() instanceof FieldReference || a.variableTarget() instanceof LocalVariable)) {
                     // `this.workers = new Worker[n]; for (...) workers[i] = new Worker();` in a constructor (nacos's
@@ -5242,7 +5242,7 @@ public final class NullabilityPass {
             typeArgumentsPassedThrough(mc).forEach((source, k) -> {
                 // Kotlin: a lambda in a functional position whose result is T ('<T> T ifOverridden(Supplier<T>, …)')
                 // returns the call's result (jenkins CrumbIssuer.kt:60, 2026-10-21). Gate NOLAMBDATYPEVARRESULTS.
-                if (!LAMBDA_TYPE_VARIABLE_RESULTS_OFF && NonNullFacts.unwrap(source) instanceof Lambda lambda
+                if (!LAMBDA_TYPE_VARIABLE_RESULTS_OFF.get() && NonNullFacts.unwrap(source) instanceof Lambda lambda
                     && lambda.methodInfo() != null && lambdaResultsPosition(lambda, k)) {
                     addEdge(lambda.methodInfo(), target);
                     return;
@@ -5253,14 +5253,14 @@ public final class NullabilityPass {
                 // getUninterruptibly(future)' on a ListenableFuture<?>: guava AbstractFuture.getFutureValue then tests
                 // 'v == null', AbstractFuture.kt:346, 2026-10-18). Gate NOSTARRESULTS.
                 ParameterizedType st = node == null ? null : typeOf(node);
-                if (!STAR_RESULTS_OFF && st != null && k < st.parameters().size()
+                if (!STAR_RESULTS_OFF.get() && st != null && k < st.parameters().size()
                     && st.parameters().get(k).wildcard() != null) {
                     addEdge(new Arg(node, k), target);
                 }
             });
             arrayResultElements(target, mc);
             libraryView(target, mc, 0);
-            if (!ARRAY_ELEMENTS_PASSED_OFF) {
+            if (!ARRAY_ELEMENTS_PASSED_OFF.get()) {
                 List<Expression> calls = new ArrayList<>();
                 calls.add(mc);
                 for (Expression source : passedThrough(mc)) {
@@ -5300,7 +5300,7 @@ public final class NullabilityPass {
             if (concreteArguments(rt) || rt.arrays() > 0 && !isMethodTypeVariable(rt.componentType())
                 || policy.callResults() && readScope != null && sameInstantiation(mc, readScope.mi())) {
                 flows.add(List.of(callee, target));
-            } else if (policy.callResults() && !GENERIC_RESULT_SLOTS_OFF && rt.arrays() == 0) {
+            } else if (policy.callResults() && !GENERIC_RESULT_SLOTS_OFF.get() && rt.arrays() == 0) {
                 // Kotlin: a slot whose argument is not a type variable has its own nullability whatever the
                 // instantiation: 'Map<Descriptor<T>, T> toMap(…)' with a nullable key makes 'return toMap(properties)'
                 // a Map<Descriptor<UserProperty>?, UserProperty> (jenkins User.kt:143, 2026-10-21). Gate
@@ -5322,7 +5322,7 @@ public final class NullabilityPass {
                                   || callee.parameters().stream().noneMatch(pi ->
                                          rt.typeParameter().equals(pi.parameterizedType().typeParameter())));
             if (policy.callResults() && (!isTypeVariable(rt) || ownNull && !parametricNullness(callee))) {
-                if (GAP9_OFF || callee.parameters().isEmpty()) addEdge(callee, target);
+                if (GAP9_OFF.get() || callee.parameters().isEmpty()) addEdge(callee, target);
                 else gatedSites.add(new GatedSite(callee, target, callId(mc, callee)));
             }
             // a result typed with the callee's class type variables inside a generic type ('FastFixedSet<E>
@@ -5345,7 +5345,7 @@ public final class NullabilityPass {
         // Kotlin: 'collect(LinkedHashMap::new, (map, plugin) -> map.put(plugin, url), Map::putAll)' returns the
         // container its accumulator fills: the lambda's first parameter is the result, slots and all (jenkins
         // PluginManager.kt:1532, 2026-10-21). Gate NOCOLLECTCONTAINERS.
-        if (policy.callResults() && !COLLECT_CONTAINERS_OFF && isStreamType(callee) && "collect".equals(callee.name())
+        if (policy.callResults() && !COLLECT_CONTAINERS_OFF.get() && isStreamType(callee) && "collect".equals(callee.name())
             && mc.parameterExpressions().size() == 3
             && NonNullFacts.unwrap(mc.parameterExpressions().get(1)) instanceof Lambda accumulator
             && accumulator.methodInfo() != null && !accumulator.methodInfo().parameters().isEmpty()) {
@@ -5430,11 +5430,11 @@ public final class NullabilityPass {
      a Callable<V?> (TrustedListenableFutureTask.kt:68, 2026-10-18). Gate NOPARAMETRICPARAMETERS.
      */
     private static boolean parametricParameter(ParameterInfo pi) {
-        return !PARAMETRIC_PARAMETERS_OFF && pi.annotations().stream().anyMatch(a -> a.typeInfo() != null
+        return !PARAMETRIC_PARAMETERS_OFF.get() && pi.annotations().stream().anyMatch(a -> a.typeInfo() != null
                 && a.typeInfo().simpleName().equals("ParametricNullness"));
     }
 
-    private static final boolean PARAMETRIC_PARAMETERS_OFF = System.getenv("NOPARAMETRICPARAMETERS") != null;
+    private static final Switches.Gate PARAMETRIC_PARAMETERS_OFF = Switches.gate("NOPARAMETRICPARAMETERS");
 
     // does the parameter's value leave the method unchecked: into its return, or into another class's type variable
     private boolean passedOnUnchecked(ParameterInfo pi) {
@@ -5565,7 +5565,7 @@ public final class NullabilityPass {
      own target only, so no two callers are tied. Gate NOARRAYRESULTS.
      */
     private void arrayResultElements(Object target, MethodCall mc) {
-        if (ARRAY_RESULTS_OFF || readScope == null) return;
+        if (ARRAY_RESULTS_OFF.get() || readScope == null) return;
         MethodInfo callee = mc.methodInfo();
         // an analysed callee only: through 'Arrays.copyOf(castBuffer, n)' guava's TopKSelector.topK() returned a
         // List<T?>, where 'T[] castBuffer = buffer' is guava's own @SuppressWarnings("nullness") assertion. Nor in a
@@ -5585,10 +5585,10 @@ public final class NullabilityPass {
         }
     }
 
-    private static final boolean ARRAY_RESULTS_OFF = System.getenv("NOARRAYRESULTS") != null;
+    private static final Switches.Gate ARRAY_RESULTS_OFF = Switches.gate("NOARRAYRESULTS");
 
     // gate NOARRAYELEMENTSPASSED: an array argument's elements do not reach the slot of a generic call's result (A/B)
-    private static final boolean ARRAY_ELEMENTS_PASSED_OFF = System.getenv("NOARRAYELEMENTSPASSED") != null;
+    private static final Switches.Gate ARRAY_ELEMENTS_PASSED_OFF = Switches.gate("NOARRAYELEMENTSPASSED");
 
     // is the return type the parameter's, in the method's own type variables: 'T' and 'T', 'List<T>' and
     // 'List<? extends T>', 'Map<K, V>' and 'Map<K, V>'
@@ -5764,7 +5764,7 @@ public final class NullabilityPass {
     // ------------------------------------------------------------------ keyed maps (CodeLaser/maddi-mod#22 gap 2)
 
     // gate NOKEYEDMAPS: a map field's values stay one slot for all keys (A/B)
-    private static final boolean KEYED_MAPS_OFF = System.getenv("NOKEYEDMAPS") != null;
+    private static final Switches.Gate KEYED_MAPS_OFF = Switches.gate("NOKEYEDMAPS");
 
     /**
      * The values a keyed map field holds under one constant key: nacos's {@code MapperContext.whereParamMap}, a
@@ -5796,7 +5796,7 @@ public final class NullabilityPass {
      write or read the key they pass.
      */
     private void indexKeyedMaps(List<MethodInfo> methods, List<FieldInfo> fields) {
-        if (KEYED_MAPS_OFF) return;
+        if (KEYED_MAPS_OFF.get()) return;
         Map<FieldInfo, Boolean> candidates = new HashMap<>();
         for (FieldInfo fi : fields) {
             ParameterizedType type = fi.type();
@@ -6035,7 +6035,7 @@ public final class NullabilityPass {
      */
     private void anonymousSuperArguments(MethodInfo mi, Scope scope, Statement statement, ConstructorCall cc) {
         TypeInfo anonymous = cc.anonymousClass();
-        if (!policy.callResults() || ANONYMOUS_SUPER_OFF || anonymous == null || anonymous.parentClass() == null
+        if (!policy.callResults() || ANONYMOUS_SUPER_OFF.get() || anonymous == null || anonymous.parentClass() == null
             || anonymous.parentClass().typeInfo() == null) {
             return;
         }
@@ -6084,20 +6084,20 @@ public final class NullabilityPass {
         }
     }
 
-    private static final boolean ANONYMOUS_THIS_OFF = System.getenv("NOANONYMOUSTHIS") != null;
+    private static final Switches.Gate ANONYMOUS_THIS_OFF = Switches.gate("NOANONYMOUSTHIS");
 
     private AnonymousThis anonymousThis(Variable v) {
-        if (ANONYMOUS_THIS_OFF || !policy.callResults() || !(v instanceof This t)) return null;
+        if (ANONYMOUS_THIS_OFF.get() || !policy.callResults() || !(v instanceof This t)) return null;
         TypeInfo type = t.typeInfo();
         if (type == null || type.parentClass() == null || type.parentClass().parameters().isEmpty()) return null;
         // a named class too, whose superclass's slots its own code writes (parentClassVerdicts)
-        if (!type.isAnonymous() && (SUPERTYPE_SLOTS_OFF || !thisTypedBySuperclass(type))) return null;
+        if (!type.isAnonymous() && (SUPERTYPE_SLOTS_OFF.get() || !thisTypedBySuperclass(type))) return null;
         return new AnonymousThis(type);
     }
 
     private void anonymousThisTarget(MethodInfo mi, Scope scope, Statement statement, ConstructorCall cc) {
         TypeInfo anonymous = cc.anonymousClass();
-        if (ANONYMOUS_THIS_OFF || !policy.callResults() || anonymous == null || anonymous.parentClass() == null
+        if (ANONYMOUS_THIS_OFF.get() || !policy.callResults() || anonymous == null || anonymous.parentClass() == null
             || anonymous.parentClass().parameters().isEmpty()) return;
         Object target = switch (statement) {
             case LocalVariableCreation lvc -> lvc.localVariableStream()
@@ -6138,10 +6138,10 @@ public final class NullabilityPass {
         }
     }
 
-    private static final boolean LIBRARY_VIEWS_OFF = System.getenv("NOLIBRARYVIEWS") != null;
+    private static final Switches.Gate LIBRARY_VIEWS_OFF = Switches.gate("NOLIBRARYVIEWS");
 
     private void libraryView(Object target, MethodCall mc, int depth) {
-        if (LIBRARY_VIEWS_OFF || readScope == null || depth > 3) return;
+        if (LIBRARY_VIEWS_OFF.get() || readScope == null || depth > 3) return;
         MethodInfo callee = mc.methodInfo();
         ParameterizedType tt = typeOf(target);
         if (callee == null || analysed.contains(callee) || callee.isStatic() || mc.object() == null || tt == null
@@ -6186,11 +6186,11 @@ public final class NullabilityPass {
     }
 
     // gate NOCONSUMERSLOTS: a caller's null into an abstract type-variable parameter reaches the implementations (A/B)
-    private static final boolean CONSUMER_SLOTS_OFF = System.getenv("NOCONSUMERSLOTS") != null;
-    private static final boolean METHOD_TYPE_VARIABLE_ARGUMENTS_OFF = System.getenv("NOMETHODTYPEVARARGS") != null;
-    private static final boolean EXPLICIT_BOUNDED_OFF = System.getenv("NOEXPLICITBOUNDED") != null;
+    private static final Switches.Gate CONSUMER_SLOTS_OFF = Switches.gate("NOCONSUMERSLOTS");
+    private static final Switches.Gate METHOD_TYPE_VARIABLE_ARGUMENTS_OFF = Switches.gate("NOMETHODTYPEVARARGS");
+    private static final Switches.Gate EXPLICIT_BOUNDED_OFF = Switches.gate("NOEXPLICITBOUNDED");
     // gate NOANONYMOUSSUPER: an anonymous class's arguments do not reach its superclass's constructor (A/B)
-    private static final boolean ANONYMOUS_SUPER_OFF = System.getenv("NOANONYMOUSSUPER") != null;
+    private static final Switches.Gate ANONYMOUS_SUPER_OFF = Switches.gate("NOANONYMOUSSUPER");
 
     private void callSite(MethodInfo mi, Scope scope, Statement statement, Expression call, MethodInfo callee,
                           io.codelaser.maddi.cst.api.analysis.PropertyValueMap analysis, List<Expression> arguments) {
@@ -6215,7 +6215,7 @@ public final class NullabilityPass {
                 argument(mi, scope, statement, call, list, arguments, i, new Content(parameter));
                 continue;
             }
-            if (parameter.isVarArgs() && policy.callResults() && !VARARG_COPIES_OFF) {
+            if (parameter.isVarArgs() && policy.callResults() && !VARARG_COPIES_OFF.get()) {
                 // an array spread into varargs ('*array'): the callee holds a copy (varargsCopy)
                 Object source = argumentNode(mi, scope, arguments.get(i));
                 if (source != null) varargsPasses.add(List.of(source, parameter));
@@ -6241,7 +6241,7 @@ public final class NullabilityPass {
                 && !parameter.parameterizedType().typeParameter().isMethodTypeParameter()
                 && parameter.parameterizedType().arrays() == 0
                 && (!analysed.contains(callee)
-                    || (policy.callResults() && !CONSUMER_SLOTS_OFF
+                    || (policy.callResults() && !CONSUMER_SLOTS_OFF.get()
                         || !callee.isAbstract() && !implementations.containsKey(callee))
                        && slotReceiver(mi, scope, call, callee) != null)) {
                 continue;
@@ -6249,7 +6249,7 @@ public final class NullabilityPass {
             if (projectedReceiver(call, callee, parameter)) continue;
             // Kotlin: an argument to the callee's own type variable is decided once the graph is built
             // (resolveTypeVariableArguments)
-            if (policy.callResults() && !METHOD_TYPE_VARIABLE_ARGUMENTS_OFF && call instanceof MethodCall
+            if (policy.callResults() && !METHOD_TYPE_VARIABLE_ARGUMENTS_OFF.get() && call instanceof MethodCall
                 && analysed.contains(callee) && isMethodTypeVariable(parameter.parameterizedType())
                 && !parameter.isVarArgs() && explicitState(parameter) != NullableState.NULLABLE) {
                 int index = i;
@@ -6286,7 +6286,7 @@ public final class NullabilityPass {
             // instantiation stays. guava's tests' 'Ints.stringConverter().convert(null)' had made
             // IntConverter.INSTANCE a Converter<String?, Int>, which an IntConverter (a Converter<String, Int>) is
             // not; likewise 'Equivalence.equals().equivalentTo(null)' (Ints.kt:101, Equivalence.kt:98, 2026-10-18)
-            if (policy.callResults() && !NULLABLE_PARAMETER_SLOTS_OFF
+            if (policy.callResults() && !NULLABLE_PARAMETER_SLOTS_OFF.get()
                 && explicitState(parameters.get(i)) == NullableState.NULLABLE) continue;
             int index = slotIndex(type, callee.typeInfo(), pt.typeParameter().getIndex());
             if (index >= 0) argument(mi, scope, statement, call, list, arguments, i, new Arg(receiver, index));
@@ -6295,7 +6295,7 @@ public final class NullabilityPass {
     }
 
     // gate NONULLABLEPARAMETERSLOTS: a null into a parameter declared nullable writes the receiver's slot too (A/B)
-    private static final boolean NULLABLE_PARAMETER_SLOTS_OFF = System.getenv("NONULLABLEPARAMETERSLOTS") != null;
+    private static final Switches.Gate NULLABLE_PARAMETER_SLOTS_OFF = Switches.gate("NONULLABLEPARAMETERSLOTS");
 
     // the receiver whose slots a call writes: a variable of the callee's generic class, with as many type arguments;
     // or an analysed method's result, whose slots are those of what it returns ('wrapper.getInits().addWithKey(v, k)'
@@ -6309,7 +6309,7 @@ public final class NullabilityPass {
      NOCONSUMERRECEIVERS.
      */
     private boolean projectedReceiver(Expression call, MethodInfo callee, ParameterInfo parameter) {
-        if (CONSUMER_RECEIVERS_OFF || !policy.callResults() || !(call instanceof MethodCall mc) || mc.object() == null
+        if (CONSUMER_RECEIVERS_OFF.get() || !policy.callResults() || !(call instanceof MethodCall mc) || mc.object() == null
             || callee.isStatic()) return false;
         var tp = parameter.parameterizedType().typeParameter();
         ParameterizedType type = mc.object().parameterizedType();
@@ -6321,7 +6321,7 @@ public final class NullabilityPass {
         return wildcard != null && !wildcard.isSuper();
     }
 
-    private static final boolean CONSUMER_RECEIVERS_OFF = System.getenv("NOCONSUMERRECEIVERS") != null;
+    private static final Switches.Gate CONSUMER_RECEIVERS_OFF = Switches.gate("NOCONSUMERRECEIVERS");
 
     private Object slotReceiver(MethodInfo mi, Scope scope, Expression call, MethodInfo callee) {
         if (!(call instanceof MethodCall mc) || mc.object() == null || callee.isStatic()) return null;
@@ -6480,7 +6480,7 @@ public final class NullabilityPass {
         ParameterizedType formal;
         if (pi instanceof ParameterInfo parameter && analysed.contains(parameter.methodInfo())) {
             formal = parameter.parameterizedType();
-        } else if (!LAMBDA_SLOTS_OFF && policy.callResults() && pi instanceof Arg slot) {
+        } else if (!LAMBDA_SLOTS_OFF.get() && policy.callResults() && pi instanceof Arg slot) {
             // a receiver's slot: 'chain.add(input -> states.get(current))' on a List<Function<Provider<S>, S>> makes
             // it a List<Function<Provider<S>, S?>> (jenkins InstallUtil.kt:48/60, 2026-10-20). Gate NOLAMBDASLOTS.
             formal = typeOf(slot);
@@ -6498,7 +6498,7 @@ public final class NullabilityPass {
         }
     }
 
-    private static final boolean LAMBDA_SLOTS_OFF = System.getenv("NOLAMBDASLOTS") != null;
+    private static final Switches.Gate LAMBDA_SLOTS_OFF = Switches.gate("NOLAMBDASLOTS");
 
     /*
      Kotlin: a method reference returns what its method returns, as a lambda its body: 'new
@@ -6508,7 +6508,7 @@ public final class NullabilityPass {
      */
     private void methodReferenceResult(MethodReference mr, Object pi) {
         MethodInfo method = mr.methodInfo();
-        if (METHOD_REF_RESULTS_OFF || method == null || method.isConstructor() || method.returnType().isVoid()
+        if (METHOD_REF_RESULTS_OFF.get() || method == null || method.isConstructor() || method.returnType().isVoid()
             || !analysed.contains(method)) return;
         ParameterizedType formal;
         if (pi instanceof ParameterInfo parameter && analysed.contains(parameter.methodInfo())) {
@@ -6528,7 +6528,7 @@ public final class NullabilityPass {
         }
     }
 
-    private static final boolean METHOD_REF_RESULTS_OFF = System.getenv("NOMETHODREFRESULTS") != null;
+    private static final Switches.Gate METHOD_REF_RESULTS_OFF = Switches.gate("NOMETHODREFRESULTS");
     /*
      Kotlin: a lambda given to 'computeIfAbsent(K, Function<? super K, ? extends V>)', whose functional parameter
      returns the callee class's type variable, returns a value of the receiver's slot for it: 'cache
@@ -6536,7 +6536,7 @@ public final class NullabilityPass {
      nullable (jenkins XStream2.kt:224, 2026-10-21). Gate NORECEIVERLAMBDAS.
      */
     private void receiverLambdaResult(MethodInfo mi, Scope scope, Expression call, Lambda lambda, Object pi) {
-        if (RECEIVER_LAMBDAS_OFF || lambda.methodInfo() == null || !(pi instanceof ParameterInfo parameter)
+        if (RECEIVER_LAMBDAS_OFF.get() || lambda.methodInfo() == null || !(pi instanceof ParameterInfo parameter)
             || analysed.contains(parameter.methodInfo()) || !(call instanceof MethodCall mc)) return;
         MethodInfo callee = parameter.methodInfo();
         ParameterizedType formal = parameter.parameterizedType();
@@ -6565,9 +6565,9 @@ public final class NullabilityPass {
         if (index >= 0) addEdge(lambda.methodInfo(), new Arg(receiver, index));
     }
 
-    private static final boolean RECEIVER_LAMBDAS_OFF = System.getenv("NORECEIVERLAMBDAS") != null;
-    private static final boolean COLLECT_CONTAINERS_OFF = System.getenv("NOCOLLECTCONTAINERS") != null;
-    private static final boolean RETURN_NULL_LITERALS_OFF = System.getenv("NORETURNNULLLITERALS") != null;
+    private static final Switches.Gate RECEIVER_LAMBDAS_OFF = Switches.gate("NORECEIVERLAMBDAS");
+    private static final Switches.Gate COLLECT_CONTAINERS_OFF = Switches.gate("NOCOLLECTCONTAINERS");
+    private static final Switches.Gate RETURN_NULL_LITERALS_OFF = Switches.gate("NORETURNNULLLITERALS");
 
     /*
      Kotlin: a method that returns its parameter filtered of nulls ('<T> Iterator<T> removeNull(Iterator<T> itr) {
@@ -6576,7 +6576,7 @@ public final class NullabilityPass {
      argument (jenkins BuildReferenceMapAdapter.kt:111, 2026-10-21). Gate NONULLFILTEREDPARAMETERS.
      */
     private void nullFilteredParameters(List<MethodInfo> methods) {
-        if (NULL_FILTERED_PARAMETERS_OFF || !policy.callResults()) return;
+        if (NULL_FILTERED_PARAMETERS_OFF.get() || !policy.callResults()) return;
         for (MethodInfo mi : methods) {
             if (mi.methodBody() == null || mi.methodBody().statements().size() != 1
                 || !(mi.methodBody().statements().getFirst() instanceof ReturnStatement rs)
@@ -6597,7 +6597,7 @@ public final class NullabilityPass {
         }
     }
 
-    private static final boolean NULL_FILTERED_PARAMETERS_OFF = System.getenv("NONULLFILTEREDPARAMETERS") != null;
+    private static final Switches.Gate NULL_FILTERED_PARAMETERS_OFF = Switches.gate("NONULLFILTEREDPARAMETERS");
 
     // whether a lambda's functional type returns its type argument k ('Supplier<T>': get() returns argument 0)
     private static boolean lambdaResultsPosition(Lambda lambda, int k) {
@@ -6608,8 +6608,8 @@ public final class NullabilityPass {
         return type.typeInfo().typeParameters().indexOf(sam.returnType().typeParameter()) == k;
     }
 
-    private static final boolean LAMBDA_TYPE_VARIABLE_RESULTS_OFF = System.getenv("NOLAMBDATYPEVARRESULTS") != null;
-    private static final boolean GENERIC_RESULT_SLOTS_OFF = System.getenv("NOGENERICRESULTSLOTS") != null;
+    private static final Switches.Gate LAMBDA_TYPE_VARIABLE_RESULTS_OFF = Switches.gate("NOLAMBDATYPEVARRESULTS");
+    private static final Switches.Gate GENERIC_RESULT_SLOTS_OFF = Switches.gate("NOGENERICRESULTSLOTS");
 
     /*
      Kotlin: a lambda's parameters are values of the type arguments its interface method takes, in the parameter it
@@ -6620,11 +6620,11 @@ public final class NullabilityPass {
      */
     private void lambdaParameters(Lambda lambda, Object pi) {
         MethodInfo body = lambda.methodInfo();
-        if (LAMBDA_PARAMETERS_OFF || body == null) return;
+        if (LAMBDA_PARAMETERS_OFF.get() || body == null) return;
         ParameterizedType formal;
         if (pi instanceof ParameterInfo parameter && analysed.contains(parameter.methodInfo())) {
             formal = parameter.parameterizedType();
-        } else if (!LAMBDA_PARAMETER_SLOTS_OFF && pi instanceof Arg slot) {
+        } else if (!LAMBDA_PARAMETER_SLOTS_OFF.get() && pi instanceof Arg slot) {
             // a receiver's slot, as in lambdaResult: 'chain.add(next -> filter.getNextInstallState(current, next))'
             // on a List<Function<Provider<S?>, S?>> makes 'next' a Provider<S?>, which it passes on (jenkins
             // InstallUtil.kt:44, 2026-10-20). Gate NOLAMBDAPARAMETERSLOTS.
@@ -6653,9 +6653,9 @@ public final class NullabilityPass {
         }
     }
 
-    private static final boolean LAMBDA_PARAMETER_SLOTS_OFF = System.getenv("NOLAMBDAPARAMETERSLOTS") != null;
+    private static final Switches.Gate LAMBDA_PARAMETER_SLOTS_OFF = Switches.gate("NOLAMBDAPARAMETERSLOTS");
 
-    private static final boolean LAMBDA_PARAMETERS_OFF = System.getenv("NOLAMBDAPARAMETERS") != null;
+    private static final Switches.Gate LAMBDA_PARAMETERS_OFF = Switches.gate("NOLAMBDAPARAMETERS");
 
     /*
      A lambda handed to a library parameter whose functional type has a nullable type argument (the hints'
@@ -6727,7 +6727,7 @@ public final class NullabilityPass {
             }
             // Kotlin: a library view ('main(args.subList(1, args.size()))') is the receiver's data: the parameter's
             // slots are the receiver's (jenkins CLIAction.kt:232, 2026-10-21). Gate NOVIEWMETHODARGUMENTS.
-            if (source == null && policy.callResults() && !VIEW_METHOD_ARGUMENTS_OFF && pi instanceof ParameterInfo) {
+            if (source == null && policy.callResults() && !VIEW_METHOD_ARGUMENTS_OFF.get() && pi instanceof ParameterInfo) {
                 Object view = viewArgument(mi, scope, unwrappedArgument);
                 if (view != null) flows.add(List.of(view, pi));
             }
@@ -6842,7 +6842,7 @@ public final class NullabilityPass {
      Array<String?> field (jenkins CrontabLexer.kt:45, DomainValidator.kt:1714, 2026-10-20). Gate NOFIELDINITCONTENT.
      */
     private void initializerContent(FieldInfo fi, Expression initializer) {
-        if (FIELD_INIT_CONTENT_OFF || !policy.callResults() || fi.type().arrays() == 0 && fi.type().parameters().isEmpty()) {
+        if (FIELD_INIT_CONTENT_OFF.get() || !policy.callResults() || fi.type().arrays() == 0 && fi.type().parameters().isEmpty()) {
             return;
         }
         Expression e = NonNullFacts.unwrap(initializer);
@@ -6856,7 +6856,7 @@ public final class NullabilityPass {
         if (source != null && source != fi) flows.add(List.of(source, fi));
     }
 
-    private static final boolean FIELD_INIT_CONTENT_OFF = System.getenv("NOFIELDINITCONTENT") != null;
+    private static final Switches.Gate FIELD_INIT_CONTENT_OFF = Switches.gate("NOFIELDINITCONTENT");
 
     private static boolean assigns(MethodInfo constructor, FieldInfo fi) {
         Block body = constructor.methodBody();

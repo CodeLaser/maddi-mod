@@ -8,6 +8,7 @@ import io.codelaser.maddi.inspection.api.integration.JavaInspector;
 import io.codelaser.maddi.modification.analyzer.IteratingAnalyzer;
 import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
 import io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass;
+import io.codelaser.maddi.modification.analyzer.nullability.Switches;
 import io.codelaser.maddi.run.analysis.AnalysisEngineImpl;
 import io.codelaser.maddi.run.j2k.JavaToKotlinRatchet;
 import org.junit.jupiter.api.BeforeAll;
@@ -43,6 +44,7 @@ public class TestFernflowerNullabilityCauses {
         String corpusName = java.util.Objects.requireNonNullElse(System.getenv("NULLABILITY_CORPUS"), "fernflower");
         // nacos: one module per run, J2K_NACOS_MAIN as TestJavaToKotlinNacosNullability (api/main by default)
         String nacosMain = java.util.Objects.requireNonNullElse(System.getenv("J2K_NACOS_MAIN"), "api/main");
+        long parseStart = System.nanoTime();
         // jenkins: its core module, as TestJavaToKotlinJenkinsNullability
         JavaToKotlinRatchet.Corpus corpus = switch (corpusName) {
             case "nacos" -> JavaToKotlinRatchet.parse("nacos", nacosMain, null, false, true);
@@ -53,11 +55,15 @@ public class TestFernflowerNullabilityCauses {
         };
         JavaInspector javaInspector = corpus.javaInspector();
         AnalysisEngineImpl engine = new AnalysisEngineImpl();
+        long parseMs = (System.nanoTime() - parseStart) / 1_000_000;
+        long prepStart = System.nanoTime();
         engine.resultsLoader(javaInspector.runtime(), javaInspector.mainSources()).load(List.of(JDK_HINTS));
         var parseResult = corpus.summary().parseResult();
         PrepOutcome prep = engine.prep(new PrepRequest(javaInspector.runtime(), Set.copyOf(parseResult.primaryTypes()),
                 parseResult.sourceSetToModuleInfoMap().values(), _ -> false, true, true));
         List<Info> order = new ComputeAnalysisOrder().go(prep.callGraph().graph(), true);
+        long prepMs = (System.nanoTime() - prepStart) / 1_000_000;
+        long analysisStart = System.nanoTime();
         IteratingAnalyzer analyzer = new IteratingAnalyzerImpl(javaInspector,
                 new IteratingAnalyzerImpl.ConfigurationBuilder()
                         .setMaxIterations(30)
@@ -67,6 +73,7 @@ public class TestFernflowerNullabilityCauses {
                         .setNullability(true)
                         .build());
         analyzer.analyze(order, prep.callGraph().graph());
+        long analysisMs = (System.nanoTime() - analysisStart) / 1_000_000;
         // NULLABILITY_POLICY=diagnose: the diagnostics' policy (flow only, no contracts, closed world); else Kotlin's.
         // NULLABILITY_WORLD=open: the open world (timefold's diagnostics); NULLABILITY_TEST_NULLS=off: withoutTestNulls
         NullabilityPass.Policy policy = "diagnose".equals(System.getenv("NULLABILITY_POLICY"))
@@ -75,7 +82,33 @@ public class TestFernflowerNullabilityCauses {
                 : NullabilityPass.Policy.KOTLIN;
         if ("open".equals(System.getenv("NULLABILITY_WORLD"))) policy = policy.withWorld(NullabilityPass.World.OPEN);
         if ("off".equals(System.getenv("NULLABILITY_TEST_NULLS"))) policy = policy.withoutTestNulls();
-        NullabilityPass.Report report = new NullabilityPass(policy).go(order);
+        // NULLABILITY_SIDES=on,NOX,NOY+NOZ: one analysis, then one pass per side with those gates off besides the
+        // environment's (Switches), each written to build/<corpus>-nullability-causes-<side>.txt; without it, one pass
+        // to build/<corpus>-nullability-causes.txt. The phases' times go to build/<corpus>-nullability-timing.txt.
+        String sides = System.getenv("NULLABILITY_SIDES");
+        List<String> timing = new java.util.ArrayList<>(List.of("parse " + parseMs + " ms", "prep " + prepMs + " ms",
+                "analysis " + analysisMs + " ms"));
+        for (String side : sides == null ? List.of("") : List.of(sides.split(","))) {
+            Switches.offForNextPasses(side.isEmpty() || "on".equals(side) ? Set.of() : Set.of(side.split("\\+")));
+            long passStart = System.nanoTime();
+            NullabilityPass.Report report;
+            try {
+                report = new NullabilityPass(policy).go(order);
+            } finally {
+                Switches.offForNextPasses(Set.of());
+            }
+            long passMs = (System.nanoTime() - passStart) / 1_000_000;
+            List<String> lines = lines(report, corpus);
+            timing.add("pass " + (side.isEmpty() ? "on" : side) + " " + passMs + " ms");
+            String suffix = side.isEmpty() ? "" : "-" + side;
+            java.nio.file.Files.write(Path.of("build/" + corpusName + "-nullability-causes" + suffix + ".txt"), lines);
+            org.junit.jupiter.api.Assertions.assertFalse(lines.isEmpty());
+        }
+        java.nio.file.Files.write(Path.of("build/" + corpusName + "-nullability-timing.txt"), timing);
+        timing.forEach(t -> System.err.println("NULLTIMING " + corpusName + " " + t));
+    }
+
+    private static List<String> lines(NullabilityPass.Report report, JavaToKotlinRatchet.Corpus corpus) {
         List<String> lines = new java.util.ArrayList<>();
         report.verdicts().forEach((info, pt) -> {
             String n = info.fullyQualifiedName();
@@ -128,7 +161,6 @@ public class TestFernflowerNullabilityCauses {
                         return true;
                     }));
         }
-        java.nio.file.Files.write(Path.of("build/" + corpusName + "-nullability-causes.txt"), lines);
-        org.junit.jupiter.api.Assertions.assertFalse(lines.isEmpty());
+        return lines;
     }
 }
