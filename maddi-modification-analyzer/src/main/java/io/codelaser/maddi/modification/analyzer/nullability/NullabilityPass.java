@@ -518,7 +518,39 @@ public final class NullabilityPass {
     // others' (the library's, from the hints) are read as contracts
     private final Set<MethodInfo> analysed = new HashSet<>();
     // source declarations annotated non-null (Policy.contracts): null stops there
-    private final Set<Object> nonNullContracts = new HashSet<>();
+    private final Set<Object> nonNullContracts = new HashSet<>() {
+        @Override
+        public boolean add(Object o) {
+            boolean added = super.add(o);
+            if (added && why(o)) whyLog("contract", o, null);
+            return added;
+        }
+    };
+
+    // NULLWHY=<substring>[|<substring>…]: why a node matching one is (not) nullable: its seeds, the non-null contracts put on it
+    // (with the code that did), and its final state. A debugging aid, as NULLMARKEDDEBUG.
+    private static final String NULL_WHY = System.getenv("NULLWHY");
+
+    private static boolean why(Object node) {
+        if (NULL_WHY == null || node == null) return false;
+        String name = whyName(node);
+        for (String part : NULL_WHY.split("\\|")) if (name.contains(part)) return true;
+        return false;
+    }
+
+    private static String whyName(Object node) {
+        return node instanceof Info info ? info.fullyQualifiedName() : String.valueOf(node);
+    }
+
+    private static void whyLog(String what, Object node, String detail) {
+        StringBuilder sb = new StringBuilder("NULLWHY ").append(what).append(' ').append(whyName(node));
+        if (detail != null) sb.append(" :: ").append(detail);
+        StackTraceElement[] trace = Thread.currentThread().getStackTrace();
+        for (int i = 3; i < Math.min(trace.length, 7); i++) {
+            sb.append("\n    at ").append(trace[i].getMethodName()).append(':').append(trace[i].getLineNumber());
+        }
+        System.err.println(sb);
+    }
     // (method, null marker): a return statement guarded the marker's link into the method's return (linksOf)
     private final Set<List<Object>> guardedReturnMarkers = new HashSet<>();
     // (method, null marker): a statement carried the marker's link into the method's return (linksOf)
@@ -1365,6 +1397,7 @@ public final class NullabilityPass {
         fieldInitializerNullArguments(fields);
         assignedParameterSlots(methods);
         enumValueOfContracts(methods);
+        nullFilteredParameters(methods);
         resolveTypeVariableArguments();
         coupleContent();
         if (!invariantTies.isEmpty()) {
@@ -1429,6 +1462,11 @@ public final class NullabilityPass {
             }
             if (!mi.isConstructor() && !mi.returnType().isVoid()) {
                 verdicts.put(mi, contracted(mi, verdict(mi.returnType(), mi, deg)));
+            }
+            if (why(mi)) {
+                System.err.println("NULLWHY final " + mi.fullyQualifiedName() + " reached=" + reached.contains(mi)
+                                   + " seed=" + seedOrigin.get(mi) + " contract=" + nonNullContracts.contains(mi)
+                                   + " degraded=" + deg + " verdict=" + verdicts.get(mi));
             }
         }
         if (policy.callResults()) {
@@ -2284,6 +2322,7 @@ public final class NullabilityPass {
             return;
         }
         if (node != null) {
+            if (why(node)) whyLog("seed", node, origin);
             seedOrigin.putIfAbsent(node, origin);
             strictSeeds.add(node);
             seedWriters.computeIfAbsent(node, _ -> new ArrayList<>()).add(writer);
@@ -2979,12 +3018,19 @@ public final class NullabilityPass {
         for (FieldInfo fi : fields) {
             if (fi.initializer() == null || fi.initializer().isEmpty()) continue;
             fi.initializer().visit(e -> {
-                if (e instanceof Lambda || e instanceof ConstructorCall cc && cc.anonymousClass() != null) return false;
+                if (e instanceof Lambda) return false;
+                // an anonymous class's creation passes its arguments to the superclass's constructor
+                // ('static final CalendarField MINUTE = new CalendarField("minute", …, null) { … }', jenkins
+                // CronTab.kt:216, 2026-10-21); its body is not the initializer's. Gate NOANONYMOUSFIELDINIT.
+                boolean anonymous = e instanceof ConstructorCall cc && cc.anonymousClass() != null;
+                if (anonymous && ANONYMOUS_FIELD_INIT_OFF) return false;
                 MethodInfo callee = switch (e) {
                     case MethodCall mc -> mc.methodInfo();
+                    case ConstructorCall cc when anonymous -> anonymousSuperConstructor(cc);
                     case ConstructorCall cc -> cc.constructor();
                     default -> null;
                 };
+                if (anonymous && callee == null) return false;
                 if (callee == null || !analysed.contains(callee)) return true;
                 List<Expression> args = e instanceof MethodCall mc ? mc.parameterExpressions()
                         : ((ConstructorCall) e).parameterExpressions();
@@ -2997,12 +3043,13 @@ public final class NullabilityPass {
                         seed(pi, NULL_ARGUMENT + fi.fullyQualifiedName(), fi.owner());
                     }
                 }
-                return true;
+                return !anonymous;
             });
         }
     }
 
     private static final boolean FIELD_INIT_NULLS_OFF = System.getenv("NOFIELDINITNULLS") != null;
+    private static final boolean ANONYMOUS_FIELD_INIT_OFF = System.getenv("NOANONYMOUSFIELDINIT") != null;
 
     /*
      Kotlin: 'this.f = p' of a generic type makes p's slots f's (invariant), also where the link engine does not say so:
@@ -3823,6 +3870,10 @@ public final class NullabilityPass {
                     // find(c); if (d == null) throw ...; return d;' the return is linked to find's 'return null'
                     // through d (timefold SolutionDescriptor.findEntityDescriptorOrFail, the diagnose session). The
                     // method's own summary repeats the link (no statement): skipped once a return guarded it.
+                    if (why(mi)) {
+                        whyLog("marker", mi, "from " + from + " to " + link.to() + " statement "
+                                             + (statement == null ? "-" : statement.toString().strip()));
+                    }
                     if (fromVar instanceof ReturnVariable) {
                         List<Object> key = List.of(mi, link.to());
                         if (statement == null) {
@@ -3833,9 +3884,15 @@ public final class NullabilityPass {
                             // introduced it) decides. In 'var v = pick(); if (v != null) return v; ...; return
                             // other();' the second return's data still says 'return ← pick's null', though it
                             // returns something else (timefold ValueRangeState.getReachableValues)
-                            if (!returnMarkersSeen.add(key)) continue;
                             Expression returned = assignedValue(statement, fromVar);
-                            if (returned != null && facts.nonNull(returned, facts.before(statement))) {
+                            // a 'return null' itself is never guarded: the link engine can give its null the marker
+                            // of an earlier call's ('Node n = getNode(name); if (n instanceof Slave) return (Slave)
+                            // n; return null;'), whose first, guarded return then hid it (jenkins Hudson.kt:52,
+                            // PluginWrapper.kt:478, 2026-10-21). Gate NORETURNNULLLITERALS.
+                            boolean literal = !RETURN_NULL_LITERALS_OFF && returned != null
+                                              && NonNullFacts.unwrap(returned) instanceof NullConstant;
+                            if (!returnMarkersSeen.add(key) && !literal) continue;
+                            if (!literal && returned != null && facts.nonNull(returned, facts.before(statement))) {
                                 guardedReturnMarkers.add(key);
                                 continue;
                             }
@@ -4529,7 +4586,7 @@ public final class NullabilityPass {
             ParameterizedType formal = parameters.get(i).parameterizedType();
             if (formal.arrays() > 0 || formal.parameters().isEmpty()) continue;
             Object argument = argumentNode(mi, scope, arguments.get(i));
-            if (argument == null) argument = viewArgument(arguments.get(i));
+            if (argument == null) argument = viewArgument(mi, scope, arguments.get(i));
             if (argument == null) continue;
             ParameterizedType type = typeOf(argument);
             instantiatedSlots(argument, type != null ? type : arguments.get(i).parameterizedType(), parameters.get(i),
@@ -4542,17 +4599,24 @@ public final class NullabilityPass {
      its own (CallResult), its slots tied to the receiver's (libraryView). The list's 'Function<…, InstallState?>' then
      instantiates the chain's T (jenkins InstallUtil.kt:62, 2026-10-20). Gate NOVIEWARGUMENTS.
      */
-    private Object viewArgument(Expression argument) {
+    private Object viewArgument(MethodInfo mi, Scope scope, Expression argument) {
         if (VIEW_ARGUMENTS_OFF || !(NonNullFacts.unwrap(argument) instanceof MethodCall mc) || mc.methodInfo() == null
             || analysed.contains(mc.methodInfo()) || mc.methodInfo().isStatic() || mc.concreteReturnType() == null) {
             return null;
         }
         CallResult result = new CallResult(mc);
-        libraryView(result, mc, 0);
+        ReadScope outer = readScope;
+        if (outer == null) readScope = new ReadScope(mi, scope); // a call site's argument (callSite has none)
+        try {
+            libraryView(result, mc, 0);
+        } finally {
+            readScope = outer;
+        }
         return result;
     }
 
     private static final boolean VIEW_ARGUMENTS_OFF = System.getenv("NOVIEWARGUMENTS") != null;
+    private static final boolean VIEW_METHOD_ARGUMENTS_OFF = System.getenv("NOVIEWMETHODARGUMENTS") != null;
 
     /*
      A parameter whose type arguments are the declaring class's type variables ('addAll(Collection<? extends E>)',
@@ -4755,6 +4819,9 @@ public final class NullabilityPass {
         String name = callee.name();
         List<Expression> args = mc.parameterExpressions();
         if (isStreamType(callee)) {
+            // Kotlin: 'filter(Objects::nonNull)', 'filter(x -> x != null)' lets no null through (jenkins CspBuilder.kt:52,
+            // Jenkins.kt:619, 2026-10-21). Gate NONULLFILTERS.
+            if ("filter".equals(name) && args.size() == 1 && nullFilter(args.getFirst())) return List.of();
             if (STREAM_PASS_THROUGH.contains(name)) return streamElements(mi, scope, mc.object());
             if (("map".equals(name) || "mapToObj".equals(name)) && args.size() == 1) {
                 return mapped(mi, scope, mc.object(), args.getFirst());
@@ -4785,6 +4852,29 @@ public final class NullabilityPass {
             return array == null ? List.of() : List.of(new Content(array));
         }
         return List.of();
+    }
+
+    private static final boolean NULL_FILTERS_OFF = System.getenv("NONULLFILTERS") != null;
+
+    // a predicate that holds only for a non-null element: 'Objects::nonNull', 'x -> x != null', 'x -> null != x'
+    private boolean nullFilter(Expression predicate) {
+        if (NULL_FILTERS_OFF || !policy.callResults()) return false;
+        Expression p = NonNullFacts.unwrap(predicate);
+        if (p instanceof MethodReference mr && mr.methodInfo() != null) {
+            return "nonNull".equals(mr.methodInfo().name())
+                   && "java.util.Objects".equals(mr.methodInfo().typeInfo().fullyQualifiedName());
+        }
+        if (!(p instanceof Lambda lambda) || lambda.methodInfo() == null || lambda.methodInfo().parameters().size() != 1) {
+            return false;
+        }
+        if (lambda.singleExpression() == null) return false;
+        Expression body = NonNullFacts.unwrap(lambda.singleExpression());
+        if (!(body instanceof BinaryOperator bo) || !NonNullFacts.isOperator(bo, "!=")) return false;
+        ParameterInfo element = lambda.methodInfo().parameters().getFirst();
+        Expression l = NonNullFacts.unwrap(bo.lhs());
+        Expression r = NonNullFacts.unwrap(bo.rhs());
+        return l instanceof NullConstant && r instanceof VariableExpression rv && element.equals(rv.variable())
+               || r instanceof NullConstant && l instanceof VariableExpression lv && element.equals(lv.variable());
     }
 
     // the nodes a mapping function ('map(t -> t.f)', 'map(Foo::bar)') produces from the elements of 'source'
@@ -5060,6 +5150,13 @@ public final class NullabilityPass {
                         .add(new CallTarget(target, readScope.mi(), readScope.scope()));
             }
             typeArgumentsPassedThrough(mc).forEach((source, k) -> {
+                // Kotlin: a lambda in a functional position whose result is T ('<T> T ifOverridden(Supplier<T>, …)')
+                // returns the call's result (jenkins CrumbIssuer.kt:60, 2026-10-21). Gate NOLAMBDATYPEVARRESULTS.
+                if (!LAMBDA_TYPE_VARIABLE_RESULTS_OFF && NonNullFacts.unwrap(source) instanceof Lambda lambda
+                    && lambda.methodInfo() != null && lambdaResultsPosition(lambda, k)) {
+                    addEdge(lambda.methodInfo(), target);
+                    return;
+                }
                 Object node = argumentNode(readScope.mi(), readScope.scope(), source);
                 if (node != null) flows.add(List.of(new Arg(node, k), target));
                 // Kotlin: from a '?' argument the result is the star projection's value, Any? ('Object v =
@@ -5113,6 +5210,19 @@ public final class NullabilityPass {
             if (concreteArguments(rt) || rt.arrays() > 0 && !isMethodTypeVariable(rt.componentType())
                 || policy.callResults() && readScope != null && sameInstantiation(mc, readScope.mi())) {
                 flows.add(List.of(callee, target));
+            } else if (policy.callResults() && !GENERIC_RESULT_SLOTS_OFF && rt.arrays() == 0) {
+                // Kotlin: a slot whose argument is not a type variable has its own nullability whatever the
+                // instantiation: 'Map<Descriptor<T>, T> toMap(…)' with a nullable key makes 'return toMap(properties)'
+                // a Map<Descriptor<UserProperty>?, UserProperty> (jenkins User.kt:143, 2026-10-21). Gate
+                // NOGENERICRESULTSLOTS.
+                ParameterizedType tt = typeOf(target);
+                for (int j = 0; j < rt.parameters().size(); j++) {
+                    ParameterizedType a = rt.parameters().get(j);
+                    if (a.typeParameter() == null && a.wildcard() == null && tt != null && tt.arrays() == 0
+                        && j < tt.parameters().size()) {
+                        addEdge(new Arg(callee, j), new Arg(target, j));
+                    }
+                }
             }
             // a class type variable's own null ('E getWithKey(K k) { ... return null; }', E?) holds for every
             // instantiation; so does a method type variable's, unless a parameter of that very type can carry the
@@ -5141,6 +5251,15 @@ public final class NullabilityPass {
             // a stream's terminal operation: its elements are values of the result's slot
             streamTerminal(readScope.mi(), readScope.scope(), unwrapped)
                     .forEach((j, nodes) -> nodes.forEach(n -> addEdge(n, new Arg(target, j))));
+        }
+        // Kotlin: 'collect(LinkedHashMap::new, (map, plugin) -> map.put(plugin, url), Map::putAll)' returns the
+        // container its accumulator fills: the lambda's first parameter is the result, slots and all (jenkins
+        // PluginManager.kt:1532, 2026-10-21). Gate NOCOLLECTCONTAINERS.
+        if (policy.callResults() && !COLLECT_CONTAINERS_OFF && isStreamType(callee) && "collect".equals(callee.name())
+            && mc.parameterExpressions().size() == 3
+            && NonNullFacts.unwrap(mc.parameterExpressions().get(1)) instanceof Lambda accumulator
+            && accumulator.methodInfo() != null && !accumulator.methodInfo().parameters().isEmpty()) {
+            flows.add(List.of(accumulator.methodInfo().parameters().getFirst(), target));
         }
         if (readScope != null && argumentNode(readScope.mi(), readScope.scope(), unwrapped) instanceof Arg slot) {
             if (!analysed.contains(callee)) {
@@ -5832,11 +5951,8 @@ public final class NullabilityPass {
         }
         List<Expression> arguments = cc.parameterExpressions();
         int n = arguments.size();
-        List<MethodInfo> candidates = anonymous.parentClass().typeInfo().constructors().stream()
-                .filter(c -> c.parameters().size() == n && c.parameters().stream().noneMatch(ParameterInfo::isVarArgs))
-                .toList();
-        if (candidates.size() != 1 || !analysed.contains(candidates.getFirst())) return;
-        MethodInfo constructor = candidates.getFirst();
+        MethodInfo constructor = anonymousSuperConstructor(cc);
+        if (constructor == null) return;
         for (int i = 0; i < n; i++) {
             ParameterInfo pi = constructor.parameters().get(i);
             Expression argument = NonNullFacts.unwrap(arguments.get(i));
@@ -5852,6 +5968,17 @@ public final class NullabilityPass {
                 }
             }
         }
+    }
+
+    // the superclass constructor an anonymous class's creation calls: the one of that arity, when there is exactly one
+    private MethodInfo anonymousSuperConstructor(ConstructorCall cc) {
+        TypeInfo anonymous = cc.anonymousClass();
+        if (anonymous == null || anonymous.parentClass() == null || anonymous.parentClass().typeInfo() == null) return null;
+        int n = cc.parameterExpressions().size();
+        List<MethodInfo> candidates = anonymous.parentClass().typeInfo().constructors().stream()
+                .filter(c -> c.parameters().size() == n && c.parameters().stream().noneMatch(ParameterInfo::isVarArgs))
+                .toList();
+        return candidates.size() == 1 && analysed.contains(candidates.getFirst()) ? candidates.getFirst() : null;
     }
 
     /*
@@ -6282,6 +6409,117 @@ public final class NullabilityPass {
     private static final boolean LAMBDA_SLOTS_OFF = System.getenv("NOLAMBDASLOTS") != null;
 
     /*
+     Kotlin: a method reference returns what its method returns, as a lambda its body: 'new
+     JenkinsANTLRErrorListener(parser::getErrorMessage)' with a nullable getErrorMessage() makes the parameter a
+     Supplier<String?> (jenkins CronTab.kt:30, 2026-10-21). Not a constructor reference, whose result is never null.
+     Gate NOMETHODREFRESULTS.
+     */
+    private void methodReferenceResult(MethodReference mr, Object pi) {
+        MethodInfo method = mr.methodInfo();
+        if (METHOD_REF_RESULTS_OFF || method == null || method.isConstructor() || method.returnType().isVoid()
+            || !analysed.contains(method)) return;
+        ParameterizedType formal;
+        if (pi instanceof ParameterInfo parameter && analysed.contains(parameter.methodInfo())) {
+            formal = parameter.parameterizedType();
+        } else if (pi instanceof Arg slot) {
+            formal = typeOf(slot);
+            if (formal == null) return;
+        } else {
+            return;
+        }
+        if (formal.arrays() > 0 || formal.typeInfo() == null || formal.parameters().isEmpty()) return;
+        MethodInfo sam = formal.typeInfo().singleAbstractMethod();
+        if (sam == null || !isClassTypeVariable(sam.returnType())) return;
+        int j = formal.typeInfo().typeParameters().indexOf(sam.returnType().typeParameter());
+        if (j >= 0 && j < formal.parameters().size() && formal.parameters().get(j).typeParameter() == null) {
+            addEdge(method, new Arg(pi, j));
+        }
+    }
+
+    private static final boolean METHOD_REF_RESULTS_OFF = System.getenv("NOMETHODREFRESULTS") != null;
+    /*
+     Kotlin: a lambda given to 'computeIfAbsent(K, Function<? super K, ? extends V>)', whose functional parameter
+     returns the callee class's type variable, returns a value of the receiver's slot for it: 'cache
+     .computeIfAbsent(t, unused -> computeConverter(t))' with a nullable computeConverter makes the cache's values
+     nullable (jenkins XStream2.kt:224, 2026-10-21). Gate NORECEIVERLAMBDAS.
+     */
+    private void receiverLambdaResult(MethodInfo mi, Scope scope, Expression call, Lambda lambda, Object pi) {
+        if (RECEIVER_LAMBDAS_OFF || lambda.methodInfo() == null || !(pi instanceof ParameterInfo parameter)
+            || analysed.contains(parameter.methodInfo()) || !(call instanceof MethodCall mc)) return;
+        MethodInfo callee = parameter.methodInfo();
+        ParameterizedType formal = parameter.parameterizedType();
+        // only ConcurrentHashMap's own 'computeIfAbsent', whose function Kotlin types '(K) -> V': Map's (and
+        // ConcurrentMap's) is enhanced to 'Function<in K, out V?>', so jenkins AbstractCIBase's
+        // 'computers.computeIfAbsent(n, node -> node.createComputer())' on a ConcurrentMap compiles as it is. For
+        // 'compute', 'computeIfPresent' and 'merge' a null result removes the entry (guava MapsTest, nacos
+        // SelectorManager: their maps' values had become nullable)
+        if (!"computeIfAbsent".equals(callee.name())
+            || !"java.util.concurrent.ConcurrentHashMap".equals(callee.typeInfo().fullyQualifiedName())) return;
+        if (callee.isStatic() || formal.arrays() > 0 || formal.typeInfo() == null || formal.parameters().isEmpty()) return;
+        MethodInfo sam = formal.typeInfo().singleAbstractMethod();
+        if (sam == null || !isClassTypeVariable(sam.returnType())) return;
+        int j = formal.typeInfo().typeParameters().indexOf(sam.returnType().typeParameter());
+        if (j < 0 || j >= formal.parameters().size()) return;
+        ParameterizedType result = formal.parameters().get(j); // '? extends V'
+        var tp = result.typeParameter();
+        if (tp == null || tp.isMethodTypeParameter() || !tp.getOwner().isLeft()
+            || tp.getOwner().getLeft() != callee.typeInfo() || result.wildcard() != null && result.wildcard().isSuper()) {
+            return;
+        }
+        Object receiver = receiverNode(mi, scope, mc);
+        ParameterizedType receiverType = receiver == null ? null : typeOf(receiver);
+        if (receiverType == null || receiverType.arrays() > 0) return;
+        int index = slotIndex(receiverType, callee.typeInfo(), tp.getIndex());
+        if (index >= 0) addEdge(lambda.methodInfo(), new Arg(receiver, index));
+    }
+
+    private static final boolean RECEIVER_LAMBDAS_OFF = System.getenv("NORECEIVERLAMBDAS") != null;
+    private static final boolean COLLECT_CONTAINERS_OFF = System.getenv("NOCOLLECTCONTAINERS") != null;
+    private static final boolean RETURN_NULL_LITERALS_OFF = System.getenv("NORETURNNULLLITERALS") != null;
+
+    /*
+     Kotlin: a method that returns its parameter filtered of nulls ('<T> Iterator<T> removeNull(Iterator<T> itr) {
+     return Iterators.filter(itr, Objects::nonNull); }') takes nullable elements and returns non-null ones:
+     'removeNull(itr: Iterator<T?>): Iterator<T>', from which Kotlin infers a non-null T for an Iterator<Int?>
+     argument (jenkins BuildReferenceMapAdapter.kt:111, 2026-10-21). Gate NONULLFILTEREDPARAMETERS.
+     */
+    private void nullFilteredParameters(List<MethodInfo> methods) {
+        if (NULL_FILTERED_PARAMETERS_OFF || !policy.callResults()) return;
+        for (MethodInfo mi : methods) {
+            if (mi.methodBody() == null || mi.methodBody().statements().size() != 1
+                || !(mi.methodBody().statements().getFirst() instanceof ReturnStatement rs)
+                || !(NonNullFacts.unwrap(rs.expression()) instanceof MethodCall mc) || mc.methodInfo() == null
+                || !"filter".equals(mc.methodInfo().name()) || mc.parameterExpressions().size() != 2
+                || !nullFilter(mc.parameterExpressions().get(1))
+                || !(NonNullFacts.unwrap(mc.parameterExpressions().getFirst()) instanceof VariableExpression ve)
+                || !(ve.variable() instanceof ParameterInfo pi) || !mi.equals(pi.methodInfo())) continue;
+            ParameterizedType type = pi.parameterizedType();
+            // only a covariant container ('Iterator<out T>', 'Iterable<out T>'): every caller's argument fits T?
+            String container = type.typeInfo() == null ? "" : type.typeInfo().fullyQualifiedName();
+            if (type.arrays() == 0 && type.parameters().size() == 1 && isTypeVariable(type.parameters().getFirst())
+                && ("java.util.Iterator".equals(container) || "java.lang.Iterable".equals(container))) {
+                Arg slot = new Arg(pi, 0);
+                typeVariableElementSlots.add(slot); // a T? slot, not held at T (boundedSlot)
+                seed(slot, "filtered of nulls in " + mi.fullyQualifiedName(), mi.typeInfo());
+            }
+        }
+    }
+
+    private static final boolean NULL_FILTERED_PARAMETERS_OFF = System.getenv("NONULLFILTEREDPARAMETERS") != null;
+
+    // whether a lambda's functional type returns its type argument k ('Supplier<T>': get() returns argument 0)
+    private static boolean lambdaResultsPosition(Lambda lambda, int k) {
+        ParameterizedType type = lambda.concreteFunctionalType();
+        if (type == null || type.typeInfo() == null) return false;
+        MethodInfo sam = type.typeInfo().singleAbstractMethod();
+        if (sam == null || !isClassTypeVariable(sam.returnType())) return false;
+        return type.typeInfo().typeParameters().indexOf(sam.returnType().typeParameter()) == k;
+    }
+
+    private static final boolean LAMBDA_TYPE_VARIABLE_RESULTS_OFF = System.getenv("NOLAMBDATYPEVARRESULTS") != null;
+    private static final boolean GENERIC_RESULT_SLOTS_OFF = System.getenv("NOGENERICRESULTSLOTS") != null;
+
+    /*
      Kotlin: a lambda's parameters are values of the type arguments its interface method takes, in the parameter it
      is passed to: 's -> Json.fromJson(s, type)' for a 'ThrowingFunction<String?, T>' has 's: String?'. Since a
      caller's null into 'parser.apply(text)' goes to the receiver's instantiation (6494045c), it reaches the lambda
@@ -6379,7 +6617,9 @@ public final class NullabilityPass {
         if (policy.callResults() && unwrappedArgument instanceof Lambda lambda) {
             lambdaResult(lambda, pi);
             lambdaParameters(lambda, pi);
+            receiverLambdaResult(mi, scope, call, lambda, pi);
         }
+        if (policy.callResults() && unwrappedArgument instanceof MethodReference mr) methodReferenceResult(mr, pi);
         if (unwrappedArgument instanceof Lambda lambda) libraryCallback(lambda, pi);
         // 'getUniqueNext(graph, new HashSet<>(mapNext.values()))': a library copy constructor as the argument copies
         // its argument's content into the parameter's slots (fernflower FinallyProcessor)
@@ -6392,6 +6632,12 @@ public final class NullabilityPass {
             Object source = argumentNode(mi, scope, unwrappedArgument);
             if (source instanceof Arg || source instanceof MethodInfo m && concreteArguments(m.returnType())) {
                 flows.add(List.of(source, pi)); // the same object: content slots tied (coupleContent)
+            }
+            // Kotlin: a library view ('main(args.subList(1, args.size()))') is the receiver's data: the parameter's
+            // slots are the receiver's (jenkins CLIAction.kt:232, 2026-10-21). Gate NOVIEWMETHODARGUMENTS.
+            if (source == null && policy.callResults() && !VIEW_METHOD_ARGUMENTS_OFF && pi instanceof ParameterInfo) {
+                Object view = viewArgument(mi, scope, unwrappedArgument);
+                if (view != null) flows.add(List.of(view, pi));
             }
             // Kotlin: a slot read passed on ('new Pair(cv.get(i), i)') gives the parameter the slot's value, as
             // callResult does for an assignment; the Java policies leave this to the links
