@@ -14,6 +14,7 @@
 
 package io.codelaser.maddi.modification.prepwork.variable.impl;
 
+import io.codelaser.maddi.annotation.rare.IgnoreModifications;
 import io.codelaser.maddi.modification.prepwork.variable.ObjectCreationVariable;
 import io.codelaser.maddi.cst.api.element.*;
 import io.codelaser.maddi.cst.api.info.InfoMap;
@@ -41,6 +42,11 @@ public class ObjectCreationVariableImpl implements ObjectCreationVariable {
     public final String index;
     public final String fqn;
     private final MethodInfo methodInfo;
+    // hashCode(), cached; String.hash's race-safe scheme
+    @IgnoreModifications
+    private int hash;
+    @IgnoreModifications
+    private boolean hashIsZero;
 
     public ObjectCreationVariableImpl(MethodInfo methodInfo, String index, ParameterizedType parameterizedType) {
         this.returnType = parameterizedType;
@@ -69,7 +75,15 @@ public class ObjectCreationVariableImpl implements ObjectCreationVariable {
 
     @Override
     public int hashCode() {
-        return Objects.hash(returnType, fqn);
+        // Objects.hash(returnType, fqn), without its argument array, and cached: the profile of 2026-10-22
+        // (maddi's docs/status/performance-2026-10-22.md) had it at 17% of timefold's CPU. An object creation
+        // variable is made by the analysis, after inspection, so its type's hash is final.
+        int h = hash;
+        if (h != 0 || hashIsZero) return h;
+        h = 31 * (31 + Objects.hashCode(returnType)) + Objects.hashCode(fqn);
+        if (h == 0) hashIsZero = true;
+        else hash = h;
+        return h;
     }
 
     @Override
