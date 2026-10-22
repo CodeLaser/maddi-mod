@@ -3311,6 +3311,74 @@ public class TestNullabilityPass extends CommonTest {
         assertFalse(p.containsKey("a.b.SS.Plain"), p + "\n" + explain(report));
     }
 
+    @DisplayName("Kotlin: non-null bounds reach a member-less subinterface and an override family's method type parameter, timefold")
+    @Test
+    public void nonNullBoundsFamilies() {
+        NullabilityPass.Report report = run("a.b.TF", """
+                package a.b;
+                import java.util.Comparator;
+                class TF {
+                    @interface NullMarked {}
+                    @NullMarked interface ComparatorFactory<S, T> {
+                        Comparator<T> createComparator(S solution);
+                    }
+                    interface NullComparatorFactory<S, T> extends ComparatorFactory<S, T> {
+                    }
+                    @NullMarked interface Stream2<A> {
+                    }
+                    interface ConstraintFactory {
+                        <A> Stream2<A> forEach(Class<A> sourceClass);
+                    }
+                    static class Impl<S2, T2> implements NullComparatorFactory<S2, T2> {
+                        @Override
+                        public Comparator<T2> createComparator(S2 solution) {
+                            return null;
+                        }
+                    }
+                    interface UniStream<A> {
+                        <B> UniStream<A> ifExists(Class<B> otherClass);
+                    }
+                    static class InnerStream<A> implements UniStream<A> {
+                        ConstraintFactory factory;
+                        @Override
+                        public <B> UniStream<A> ifExists(Class<B> otherClass) {
+                            factory.forEach(otherClass);
+                            return this;
+                        }
+                    }
+                    static class OtherStream<A> implements UniStream<A> {
+                        @Override
+                        public <B> UniStream<A> ifExists(Class<B> otherClass) {
+                            return this;
+                        }
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        java.util.Set<String> nonNull = new java.util.TreeSet<>();
+        for (Info info : report.verdicts().keySet()) {
+            if (info instanceof io.codelaser.maddi.cst.api.info.MethodInfo mi) {
+                for (var tp : mi.typeParameters()) {
+                    if (report.nonNullTypeParameter(tp)) nonNull.add(mi.fullyQualifiedName() + " " + tp.simpleName());
+                }
+                for (var tp : mi.typeInfo().typeParameters()) {
+                    if (report.nonNullTypeParameter(tp)) nonNull.add(mi.typeInfo().fullyQualifiedName() + " " + tp.simpleName());
+                }
+                for (var st : mi.typeInfo().interfacesImplemented()) {
+                    if (st.typeInfo() == null) continue;
+                    for (var tp : st.typeInfo().typeParameters()) {
+                        if (report.nonNullTypeParameter(tp)) nonNull.add(st.typeInfo().fullyQualifiedName() + " " + tp.simpleName());
+                    }
+                }
+            }
+        }
+        String all = String.join("\n", nonNull);
+        assertTrue(all.contains("a.b.TF.NullComparatorFactory S"), all);
+        assertTrue(all.contains("a.b.TF.NullComparatorFactory T"), all);
+        assertTrue(all.contains("a.b.TF.UniStream.ifExists(Class) B"), all);
+        assertTrue(all.contains("a.b.TF.OtherStream.ifExists(Class) B"), all);
+        assertTrue(all.contains("a.b.TF.InnerStream.ifExists(Class) B"), all);
+    }
+
     @DisplayName("Kotlin: an override of a @NullMarked library method's non-null return stays non-null, jenkins AuthenticationProcessingFilter2")
     @Test
     public void nullMarkedLibraryReturnOverride() {

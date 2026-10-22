@@ -2583,6 +2583,7 @@ public final class NullabilityPass {
     private final Set<io.codelaser.maddi.cst.api.info.TypeParameter> nonNullTypeParameters = new HashSet<>();
 
     private static final boolean NULL_MARKED_BOUNDS_OFF = System.getenv("NONULLMARKEDBOUNDS") != null;
+    private static final boolean MEMBERLESS_BOUNDS_OFF = System.getenv("NOMEMBERLESSBOUNDS") != null;
 
     private void nonNullBounds(List<Info> analysisOrder, List<MethodInfo> methods, List<FieldInfo> fields) {
         if (!policy.callResults() || NULL_MARKED_BOUNDS_OFF) return;
@@ -2596,6 +2597,15 @@ public final class NullabilityPass {
         Set<TypeInfo> types = new java.util.LinkedHashSet<>();
         for (MethodInfo mi : methods) types.add(mi.typeInfo());
         for (FieldInfo fi : fields) types.add(fi.owner());
+        // a type without members of its own too: 'interface NullComparatorFactory<Solution_, T> extends
+        // ComparatorFactory<Solution_, T>' passes its parameters into null-marked positions, a member-less
+        // '@NullMarked interface UniConstraintStream<A>' has non-null ones (timefold PlanningEntity.kt:15,
+        // 2026-10-22). Gate NOMEMBERLESSBOUNDS.
+        if (!MEMBERLESS_BOUNDS_OFF) {
+            for (Info info : analysisOrder) {
+                if (info instanceof TypeInfo t && !t.typeNature().isPackageInfo()) types.add(t);
+            }
+        }
         // every type use: supertypes, fields, parameters and results, and in the bodies the types of locals, casts,
         // calls and constructor calls ('new ReverseImmutableList<>(this)' in ImmutableList.reverse())
         List<TypeUse> uses = new ArrayList<>();
@@ -2643,6 +2653,7 @@ public final class NullabilityPass {
                     changed |= carryInstantiation(in.declared(), in.concrete(), in.callee(), in.where(), types,
                             blocked, conflicts);
                 }
+                if (!OVERRIDE_BOUNDS_OFF) changed |= overrideFamilyBounds(methods, blocked, conflicts);
             }
             if (conflicts.isEmpty() || !blocked.addAll(conflicts)) {
                 if (NULL_MARKED_DEBUG != null) debugNullMarked(types, blocked);
@@ -2650,6 +2661,45 @@ public final class NullabilityPass {
             }
         }
     }
+
+    /*
+     Kotlin: an override repeats its method type parameters' bounds exactly. 'override fun <B> ifExists(otherClass:
+     Class<B>, …)' whose B goes into ConstraintFactory.forEach's '<A : Any>' must be '<B : Any>', and so must the
+     method it overrides and that method's other overrides (timefold InnerUniConstraintStream.kt:32, 2026-10-22). A
+     family member that cannot be bounded (not ours, blocked) leaves the position unbounded for all. Gate
+     NOOVERRIDEBOUNDS.
+     */
+    private boolean overrideFamilyBounds(List<MethodInfo> methods,
+                                         Set<io.codelaser.maddi.cst.api.info.TypeParameter> blocked,
+                                         Set<io.codelaser.maddi.cst.api.info.TypeParameter> conflicts) {
+        boolean changed = false;
+        for (MethodInfo mi : methods) {
+            int n = mi.typeParameters().size();
+            if (n == 0) continue;
+            for (MethodInfo om : mi.overrides()) {
+                if (om.typeParameters().size() != n) continue;
+                for (int i = 0; i < n; i++) {
+                    var mine = mi.typeParameters().get(i);
+                    var theirs = om.typeParameters().get(i);
+                    boolean a = nonNullTypeParameters.contains(mine);
+                    boolean b = nonNullTypeParameters.contains(theirs);
+                    if (a == b) continue;
+                    var other = a ? theirs : mine;
+                    var source = a ? mine : theirs;
+                    MethodInfo owner = a ? om : mi;
+                    if (analysed.contains(owner) && !blocked.contains(other) && !nullableBound(other)) {
+                        nonNullTypeParameters.add(other);
+                        changed = true;
+                    } else {
+                        conflicts.add(source);
+                    }
+                }
+            }
+        }
+        return changed;
+    }
+
+    private static final boolean OVERRIDE_BOUNDS_OFF = System.getenv("NOOVERRIDEBOUNDS") != null;
 
     private final Map<String, List<io.codelaser.maddi.cst.api.expression.AnnotationExpression>> packageInfoAnnotations
             = new HashMap<>();
