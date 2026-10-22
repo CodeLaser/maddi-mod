@@ -124,8 +124,10 @@ public class LoadAnalysisResults {
                     skippedPrimaryTypes);
         }
         if (skippedUnresolvableHints > 0) {
-            LOGGER.info("Skipped {} analysis hint(s) referencing an element not resolvable on the classpath",
-                    skippedUnresolvableHints);
+            // one line per load: the same archive skips the same hints every time (refactor server, 2026-10-22);
+            // each element, with the decoder's reason, is at DEBUG
+            LOGGER.warn("Skipped {} analysis hint(s) referencing an element not resolvable on the classpath, e.g. {}",
+                    skippedUnresolvableHints, String.join(", ", firstSkippedUnresolvable));
         }
         return countPrimaryTypes;
     }
@@ -328,6 +330,11 @@ public class LoadAnalysisResults {
     // number of individual element hints dropped because they reference something this reader cannot resolve
     // (chiefly the in-flux @GetSet synthetic interface field); the surrounding archive still loads. See the class note.
     private int skippedUnresolvableHints;
+    private final List<String> firstSkippedUnresolvable = new ArrayList<>();
+
+    private void skippedUnresolvable(String name) {
+        if (++skippedUnresolvableHints <= 3) firstSkippedUnresolvable.add("'" + name + "'");
+    }
 
     public int skippedUnresolvableHints() {
         return skippedUnresolvableHints;
@@ -398,8 +405,8 @@ public class LoadAnalysisResults {
             // The element itself names something this reader cannot resolve against the loaded types (chiefly a
             // synthetic @GetSet interface field written by the in-flux immutability analyzer). Drop its hint and
             // carry on rather than aborting the whole archive. See the class note.
-            LOGGER.warn("Skipping analysis hint for unresolvable element '{}': {}", name, de.getMessage());
-            ++skippedUnresolvableHints;
+            LOGGER.debug("Skipping analysis hint for unresolvable element '{}': {}", name, de.getMessage());
+            skippedUnresolvable(name);
             return !topLevel;
         }
         if (info == null) {
@@ -441,8 +448,8 @@ public class LoadAnalysisResults {
             // A property of this element references something unresolvable (e.g. its @GetSet field). The property
             // group is decoded as a unit, so this element's hints are dropped; its siblings still load. See the
             // class note.
-            LOGGER.warn("Skipping analysis hints for '{}': {}", name, de.getMessage());
-            ++skippedUnresolvableHints;
+            LOGGER.debug("Skipping analysis hints for '{}': {}", name, de.getMessage());
+            skippedUnresolvable(name);
             context.pop();
             return !topLevel;
         } catch (RuntimeException re) {
