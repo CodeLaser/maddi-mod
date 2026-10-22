@@ -778,10 +778,7 @@ public final class NullabilityPass {
         Set<TypeInfo> classes = narrowed.nullClasses().get(fi);
         if (classes == null) return false;
         TypeInfo owner = m.typeInfo();
-        for (TypeInfo s : classes) {
-            if (isSubtype(s, owner) && mayRunOn(m, s)) return false;
-        }
-        return true;
+        return classes.stream().noneMatch(s -> isSubtype(s, owner) && mayRunOn(m, s));
     }
 
     private boolean mayRunOn(MethodInfo m, TypeInfo s) {
