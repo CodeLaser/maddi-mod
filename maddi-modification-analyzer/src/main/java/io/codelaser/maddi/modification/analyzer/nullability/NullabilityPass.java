@@ -295,8 +295,15 @@ public final class NullabilityPass {
                          Set<Expression> nonNullCallResults, Set<ParameterInfo> preconditions,
                          List<NullArgument> nullArguments, Set<ParameterInfo> preconditionsNonNull,
                          Set<ParameterInfo> rejectsNull, Set<Object> writtenReach,
-                         Set<io.codelaser.maddi.cst.api.info.TypeParameter> nonNullTypeParameters)
+                         Set<io.codelaser.maddi.cst.api.info.TypeParameter> nonNullTypeParameters,
+                         Map<TypeInfo, ParameterizedType> parentClasses)
             implements NullabilityFacts {
+
+        /** Kotlin: a class's superclass with a nullable type argument its own code writes ('LinkedList<String?>'). */
+        @Override
+        public ParameterizedType parentClass(TypeInfo typeInfo) {
+            return parentClasses.get(typeInfo);
+        }
 
         /** Kotlin: a class or method type parameter the verdicts hold non-null ({@link #nonNullBounds}): the printer bounds it by Any. */
         @Override
@@ -1495,7 +1502,39 @@ public final class NullabilityPass {
         }
         return new Report(verdicts, locals, cause, seedOrigin, useSites, smartCasts, Set.copyOf(asserted),
                 Set.copyOf(unobservedCandidates), nonNullCallResults, preconditions, nullArguments, preconditionsNonNull,
-                rejectsNull(), writtenReach, Set.copyOf(nonNullTypeParameters));
+                rejectsNull(), writtenReach, Set.copyOf(nonNullTypeParameters), parentClassVerdicts(methods));
+    }
+
+    /*
+     Kotlin: a class whose own code writes null into its generic superclass's slots ('class OwnerContext extends
+     LinkedList<String>' calling 'addFirst(owner)' with a nullable owner; DiskSpaceMonitorDescriptor's
+     'e.setValue(get(c))' into the Map<Computer, T> of its AbstractAsyncNodeMonitorDescriptor<DiskSpace>) extends a
+     LinkedList<String?>, an AbstractAsyncNodeMonitorDescriptor<DiskSpace?> (jenkins RobustReflectionConverter.kt:449,
+     DiskSpaceMonitorDescriptor.kt:38, 2026-10-22). Only the classes with such a slot.
+     */
+    private Map<TypeInfo, ParameterizedType> parentClassVerdicts(List<MethodInfo> methods) {
+        if (SUPERTYPE_SLOTS_OFF || !policy.callResults()) return Map.of();
+        Map<TypeInfo, ParameterizedType> out = new LinkedHashMap<>();
+        for (MethodInfo mi : methods) {
+            TypeInfo type = mi.typeInfo();
+            if (out.containsKey(type) || type.isAnonymous() || !thisTypedBySuperclass(type)) continue;
+            ParameterizedType parent = type.parentClass();
+            AnonymousThis self = new AnonymousThis(type);
+            boolean nullable = false;
+            for (int i = 0; i < parent.parameters().size(); i++) nullable |= reached.contains(new Arg(self, i));
+            if (nullable) out.put(type, verdict(parent, self, false));
+        }
+        return Map.copyOf(out);
+    }
+
+    private static final boolean SUPERTYPE_SLOTS_OFF = System.getenv("NOSUPERTYPESLOTS") != null;
+    private static final boolean VIEW_LOOPS_OFF = System.getenv("NOVIEWLOOPS") != null;
+
+    // a class whose superclass has a type argument that is not a type variable: its 'this' has slots of its own
+    private static boolean thisTypedBySuperclass(TypeInfo type) {
+        ParameterizedType parent = type.parentClass();
+        return parent != null && parent.arrays() == 0 && parent.typeInfo() != null
+               && parent.parameters().stream().anyMatch(a -> a.typeParameter() == null && a.wildcard() == null);
     }
 
     /*
@@ -4516,6 +4555,10 @@ public final class NullabilityPass {
             Object array = iterated instanceof VariableExpression ve ? node(mi, scope, ve.variable())
                     : iterated instanceof MethodCall mc && mc.methodInfo() != null && analysed.contains(mc.methodInfo())
                     ? mc.methodInfo() : null;
+            // Kotlin: a library view ('for (Map.Entry<K, V> e : data.entrySet())') holds the receiver's data: the loop
+            // variable's slots are the map's, so 'e.setValue(null)' writes it (jenkins DiskSpaceMonitorDescriptor.kt:38,
+            // 2026-10-22). Gate NOVIEWLOOPS.
+            if (array == null && policy.callResults() && !VIEW_LOOPS_OFF) array = viewArgument(mi, scope, iterated);
             ParameterizedType type = array == null ? null : typeOf(array);
             if (type != null && (type.arrays() > 0 || type.parameters().size() == 1)) {
                 // over an array its elements, over an Iterable<T> its one type argument; the statement's own scope
@@ -4689,6 +4732,9 @@ public final class NullabilityPass {
     private Object receiverNode(MethodInfo mi, Scope scope, MethodCall mc) {
         if (mc.object() == null || mc.methodInfo() == null || mc.methodInfo().isStatic()) return null;
         Expression object = NonNullFacts.unwrap(mc.object());
+        if (object instanceof VariableExpression ve && anonymousThis(ve.variable()) instanceof AnonymousThis at) {
+            return at; // 'getData()' on a class's own 'this', typed by its generic superclass
+        }
         if (object instanceof VariableExpression ve) return node(mi, scope, ve.variable());
         if (object instanceof MethodCall getter && getter.methodInfo() != null
             && analysed.contains(getter.methodInfo()) && !getter.methodInfo().isConstructor()
@@ -5993,8 +6039,10 @@ public final class NullabilityPass {
     private AnonymousThis anonymousThis(Variable v) {
         if (ANONYMOUS_THIS_OFF || !policy.callResults() || !(v instanceof This t)) return null;
         TypeInfo type = t.typeInfo();
-        return type != null && type.isAnonymous() && type.parentClass() != null
-               && !type.parentClass().parameters().isEmpty() ? new AnonymousThis(type) : null;
+        if (type == null || type.parentClass() == null || type.parentClass().parameters().isEmpty()) return null;
+        // a named class too, whose superclass's slots its own code writes (parentClassVerdicts)
+        if (!type.isAnonymous() && (SUPERTYPE_SLOTS_OFF || !thisTypedBySuperclass(type))) return null;
+        return new AnonymousThis(type);
     }
 
     private void anonymousThisTarget(MethodInfo mi, Scope scope, Statement statement, ConstructorCall cc) {

@@ -3250,6 +3250,67 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("Iterator<T!>", s.get("a.b.RM.removeNull(java.util.Iterator)"), s + "\n" + explain(report));
     }
 
+    @DisplayName("Kotlin: a class writing null into its generic superclass's slots has a nullable supertype argument, jenkins OwnerContext, DiskSpaceMonitorDescriptor")
+    @Test
+    public void supertypeSlots() {
+        NullabilityPass.Report report = run("a.b.SS", """
+                package a.b;
+                import java.util.HashMap;
+                import java.util.LinkedList;
+                import java.util.Map;
+                class SS {
+                    static class OwnerContext extends LinkedList<String> {
+                        void startVisiting(String owner) {
+                            if (owner != null) {
+                                System.out.println(owner);
+                            }
+                            addFirst(owner);
+                        }
+                        static void use(OwnerContext c) {
+                            c.startVisiting(null);
+                        }
+                    }
+                    abstract static class Base<T> {
+                        final Map<String, T> data = new HashMap<>();
+                        Map<String, T> getData() {
+                            return data;
+                        }
+                        abstract T get(String key);
+                    }
+                    static class Space {
+                    }
+                    static class Monitor extends Base<Space> {
+                        @Override
+                        Space get(String key) {
+                            return key.isEmpty() ? null : new Space();
+                        }
+                        Map<String, Space> monitor() {
+                            Map<String, Space> data = getData();
+                            for (Map.Entry<String, Space> e : data.entrySet()) {
+                                Space d = e.getValue();
+                                if (d == null) {
+                                    e.setValue(d = get(e.getKey()));
+                                }
+                            }
+                            return data;
+                        }
+                    }
+                    static class Plain extends LinkedList<String> {
+                        void add2(String s) {
+                            addFirst(s);
+                        }
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> p = new java.util.TreeMap<>();
+        report.parentClasses().forEach((type, pt) -> p.put(type.fullyQualifiedName(), k(pt)));
+        assertEquals("LinkedList<String?>", p.get("a.b.SS.OwnerContext"), p + "\n" + explain(report));
+        Map<String, String> l = new java.util.TreeMap<>();
+        report.locals().forEach((local, pt) -> l.put(local.name(), k(pt)));
+        assertEquals("Base<Space?>", p.get("a.b.SS.Monitor"), p + "\n" + l + "\n" + explain(report));
+        assertFalse(p.containsKey("a.b.SS.Plain"), p + "\n" + explain(report));
+    }
+
     @DisplayName("Kotlin: an override of a @NullMarked library method's non-null return stays non-null, jenkins AuthenticationProcessingFilter2")
     @Test
     public void nullMarkedLibraryReturnOverride() {
