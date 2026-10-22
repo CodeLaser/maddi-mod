@@ -47,6 +47,8 @@ public class TestFernflowerNullabilityCauses {
         JavaToKotlinRatchet.Corpus corpus = switch (corpusName) {
             case "nacos" -> JavaToKotlinRatchet.parse("nacos", nacosMain, null, false, true);
             case "jenkins" -> JavaToKotlinRatchet.parse("jenkins", "Jenkins core/main", null, false);
+            // timefold: its core module with tests, as TestJavaToKotlinTimefoldNullability
+            case "timefold" -> JavaToKotlinRatchet.parse("timefold-solver", "core/main", "core/test-classes", false);
             default -> JavaToKotlinRatchet.parse(corpusName);
         };
         JavaInspector javaInspector = corpus.javaInspector();
