@@ -3341,9 +3341,11 @@ public final class NullabilityPass {
                     // Equivalence<Any?>, Equivalence.kt:98/99, 2026-10-18)
                     boolean declaredNullable = policy.callResults() && !NULLABLE_PARAMETER_SLOTS_OFF.get()
                                                && explicit(p1.annotations()) == NullableState.NULLABLE;
-                    if (!isExtendsWildcard(p1) && !unbound && !declaredNullable && (!class0 || class1)) {
+                    boolean read = viewLoopReads.contains(flow);
+                    if (!isExtendsWildcard(p1) && !unbound && !declaredNullable && (!class0 || class1) && !read) {
                         successors.computeIfAbsent(a1, _ -> new LinkedHashSet<>()).add(a0);
                     }
+                    if (read) viewLoopReads.add(List.of(a0, a1));
                     queue.add(List.of(a0, a1));
                 }
             }
@@ -3441,6 +3443,19 @@ public final class NullabilityPass {
      Policy.callResults. Gate NOVARARGCOPIES.
      */
     private final Set<List<Object>> varargsPasses = new HashSet<>();
+
+    /*
+     Kotlin: the loop variable over a library view reads the map's slots, but what the loop writes through it does not
+     flow back. jenkins' EnvVars.resolve 'entry.setValue(Util.replaceMacro(entry.getValue(), env))' (an @Nullable
+     return, null only for a null input) made masterEnvVars, EnvVars(Map) and through them EnvVars a map of 'String?'
+     (EnvVars.kt:22/25/79, AbstractBuild.kt:179); DiskSpaceMonitorDescriptor.monitor() a Map<Computer, DiskSpace?>
+     against its superclass's (DiskSpaceMonitorDescriptor.kt:20/42): 127 -> 133 errors (worktree-maddi-all
+     2026-10-22). The write stays one mismatch at the loop. The (view slot, loop variable) flows, and the slot pairs
+     under them. Gate NOVIEWLOOPWRITES.
+     */
+    private final Set<List<Object>> viewLoopReads = new HashSet<>();
+
+    private static final Switches.Gate VIEW_LOOP_WRITES_OFF = Switches.gate("NOVIEWLOOPWRITES");
 
     private static final Switches.Gate VARARG_COPIES_OFF = Switches.gate("NOVARARGCOPIES");
 
@@ -4636,8 +4651,12 @@ public final class NullabilityPass {
                 // over an array its elements, over an Iterable<T> its one type argument; the statement's own scope
                 // declares the loop variable
                 Object elements = type.arrays() > 0 ? new Content(array) : new Arg(array, 0);
-                fe.initializer().localVariableStream()
-                        .forEach(lv -> addEdge(elements, local(mi, scope, lv.simpleName())));
+                boolean view = !(iterated instanceof VariableExpression) && !(array instanceof MethodInfo);
+                fe.initializer().localVariableStream().forEach(lv -> {
+                    Object local = local(mi, scope, lv.simpleName());
+                    addEdge(elements, local);
+                    if (view && !VIEW_LOOP_WRITES_OFF.get()) viewLoopReads.add(List.of(elements, local));
+                });
             }
         }
     }

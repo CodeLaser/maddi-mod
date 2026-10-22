@@ -3250,7 +3250,7 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("Iterator<T!>", s.get("a.b.RM.removeNull(java.util.Iterator)"), s + "\n" + explain(report));
     }
 
-    @DisplayName("Kotlin: a class writing null into its generic superclass's slots has a nullable supertype argument, jenkins OwnerContext, DiskSpaceMonitorDescriptor")
+    @DisplayName("Kotlin: a private class writing null into its generic superclass's slots has a nullable supertype argument, jenkins OwnerContext")
     @Test
     public void supertypeSlots() {
         NullabilityPass.Report report = run("a.b.SS", """
@@ -3316,7 +3316,10 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("LinkedList<String?>", p.get("a.b.SS.OwnerContext"), p + "\n" + explain(report));
         Map<String, String> l = new java.util.TreeMap<>();
         report.locals().forEach((local, pt) -> l.put(local.name(), k(pt)));
-        assertEquals("Base<Space?>", p.get("a.b.SS.Monitor"), p + "\n" + l + "\n" + explain(report));
+        // a write through a view loop's variable stays there (NOVIEWLOOPWRITES): the map and the superclass keep Space
+        assertFalse(p.containsKey("a.b.SS.Monitor"), p + "\n" + l + "\n" + explain(report));
+        assertEquals("Entry<String, Space?>", l.get("e"), l + "\n" + explain(report));
+        assertEquals("Map<String, Space>", l.get("data"), l + "\n" + explain(report));
         assertFalse(p.containsKey("a.b.SS.Plain"), p + "\n" + explain(report));
         assertFalse(p.containsKey("a.b.SS.Shared"), p + "\n" + explain(report));
     }
