@@ -2084,10 +2084,7 @@ public class TypeEventualAnalyzerImpl extends CommonAnalyzerImpl implements Type
         }
         if (ti.compilationUnit().externalLibrary() && !pt.parameters().isEmpty()) {
             // a shallow container: reachable references are its type parameters
-            for (ParameterizedType param : pt.parameters()) {
-                if (!contentTypeHarmless(param, depth + 1)) return false;
-            }
-            return true;
+            return pt.parameters().stream().allMatch(param -> contentTypeHarmless(param, depth + 1));
         }
         return ti.isInterface() && signatureOpaque(ti, depth);
     }
