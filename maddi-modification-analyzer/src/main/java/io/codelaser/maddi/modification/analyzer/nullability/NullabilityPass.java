@@ -2677,7 +2677,10 @@ public final class NullabilityPass {
             int n = mi.typeParameters().size();
             if (n == 0) continue;
             for (MethodInfo om : mi.overrides()) {
-                if (om.typeParameters().size() != n) continue;
+                // a library method keeps its own bounds: Kotlin matches an override of a Java method against its
+                // platform bounds, and a conflict there would unbound the variable for all its uses (guava
+                // Parameter.getDeclaredAnnotation's A, and through it Optional's T)
+                if (om.typeParameters().size() != n || !analysed.contains(om)) continue;
                 for (int i = 0; i < n; i++) {
                     var mine = mi.typeParameters().get(i);
                     var theirs = om.typeParameters().get(i);
@@ -2686,8 +2689,7 @@ public final class NullabilityPass {
                     if (a == b) continue;
                     var other = a ? theirs : mine;
                     var source = a ? mine : theirs;
-                    MethodInfo owner = a ? om : mi;
-                    if (analysed.contains(owner) && !blocked.contains(other) && !nullableBound(other)) {
+                    if (!blocked.contains(other) && !nullableBound(other)) {
                         nonNullTypeParameters.add(other);
                         changed = true;
                     } else {
