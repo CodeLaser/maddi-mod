@@ -2375,6 +2375,8 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("String", s.get("a.b.DN.Range.lowerBound"), s + "\n" + explain(report));
         assertTrue(locals(report).contains("early.v: String?"), "read before the test: " + locals(report));
         assertTrue(locals(report).contains("mapped.m: String?"), "Kotlin's Map.get is V?: " + locals(report));
+        // the local itself is declared nullable (NOGUARDEDLOCALS): its null flows nowhere, Kotlin smart-casts it
+        assertTrue(locals(report).contains("span.lowerBound: String?"), locals(report));
     }
 
     @DisplayName("Kotlin: a generic method's T[] result has the elements of the T[] it is given, guava's ObjectArrays.concat")
@@ -3261,6 +3263,52 @@ public class TestNullabilityPass extends CommonTest {
         assertTrue(l.contains("addMapping.class_mapping: Map<String, Map<Integer, Integer>>\n"), l + "\n" + explain(report));
         assertTrue(l.contains("dump.class_entry: Entry<String?, Map<String, Map<Integer, Integer>>>\n"), l);
         assertTrue((l + "\n").contains("dump.offsets: List<Integer>\n"), l);
+    }
+
+    @DisplayName("Kotlin: a local in a lambda body, peeked from a deque and tested for null, is nullable, fernflower ExprProcessor")
+    @Test
+    public void lambdaLocalPeek() {
+        NullabilityPass.Report report = run("a.b.LP", """
+                package a.b;
+                import java.util.ArrayDeque;
+                import java.util.Deque;
+                import java.util.List;
+                import java.util.stream.Collectors;
+                class LP {
+                    static class Entry {
+                    }
+                    static class Helper {
+                        private final Deque<Entry> paths = new ArrayDeque<>();
+                        Deque<Entry> getPaths() {
+                            return paths;
+                        }
+                        void writeTo(StringBuilder sb) {
+                            sb.append("x");
+                        }
+                    }
+                    static List<Helper> nested(StringBuilder sb, List<Helper> helpers) {
+                        return helpers.stream().filter(helper -> {
+                            Entry path = helper.getPaths().peek();
+                            if (path == null) {
+                                helper.writeTo(sb);
+                                return false;
+                            }
+                            return true;
+                        }).collect(Collectors.toList());
+                    }
+                    static boolean plain(StringBuilder sb, Helper helper) {
+                        Entry entry = helper.getPaths().peek();
+                        if (entry == null) {
+                            helper.writeTo(sb);
+                            return false;
+                        }
+                        return true;
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        String l = locals(report);
+        assertTrue(l.contains("plain.entry: Entry?"), l + "\n" + explain(report));
+        assertTrue(l.contains("test.path: Entry?"), l + "\n" + explain(report));
     }
 
     @DisplayName("Kotlin: a method returning its parameter filtered of nulls takes nullable elements, jenkins Iterators.removeNull")

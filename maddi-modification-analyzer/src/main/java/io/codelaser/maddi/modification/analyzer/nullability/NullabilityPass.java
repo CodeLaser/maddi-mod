@@ -1450,8 +1450,11 @@ public final class NullabilityPass {
         Map<Info, ParameterizedType> verdicts = new LinkedHashMap<>();
         Map<Local, ParameterizedType> locals = new LinkedHashMap<>();
         // an unreached local of a degraded method: its links are missing, so "no null reaches it" is not known
-        declaredLocals.forEach((local, lv) -> locals.put(local, verdict(lv.parameterizedType(), local,
-                degraded.contains(localOwner.get(local)))));
+        declaredLocals.forEach((local, lv) -> {
+            ParameterizedType v = verdict(lv.parameterizedType(), local, degraded.contains(localOwner.get(local)));
+            locals.put(local, guardedLocals.contains(local) && !(v.isPrimitiveExcludingVoid() && v.arrays() == 0)
+                    ? v.withNullable(NullableState.NULLABLE) : v);
+        });
         shadows.forEach((local, pi) -> locals.put(local, verdict(pi.parameterizedType(), local,
                 degraded.contains(pi.methodInfo()))));
         for (FieldInfo fi : fields) {
@@ -4636,6 +4639,18 @@ public final class NullabilityPass {
         return null;
     }
 
+    /*
+     Kotlin: the local of such a dead library null is still declared nullable, though its null flows nowhere: the
+     platform value checked into a non-null local throws on the very null the next statement handles. fernflower's
+     ExprProcessor.writeNestedTypeAnnotations 'path = helper.getPaths().peek(); if (path == null) {...; return false;}'
+     printed 'val path = ...peek()!!' (ExprProcessor.kt:932: SingleClassesTest and JavaTypeAnnotationsDecompilerTest,
+     6 tests, worktree-maddi-all 2026-10-23). After the exit Kotlin smart-casts it, also across an if/else merge whose
+     other branch assigns a non-null value. Gate NOGUARDEDLOCALS.
+     */
+    private final Set<Object> guardedLocals = new HashSet<>();
+
+    private static final Switches.Gate GUARDED_LOCALS_OFF = Switches.gate("NOGUARDEDLOCALS");
+
     // gate NODEADNULLS: a library null assigned to a local seeds it even when the next statement exits on it (A/B)
     private static final Switches.Gate DEAD_NULLS_OFF = Switches.gate("NODEADNULLS");
 
@@ -5444,6 +5459,8 @@ public final class NullabilityPass {
                   && java.util.stream.Stream.concat(java.util.stream.Stream.of(callee), overrides(callee).stream())
                           .noneMatch(m -> KOTLIN_COLLECTIONS.contains(m.typeInfo().fullyQualifiedName())))) {
                 seedIndirect(target, "assigned " + lib);
+            } else if (!GUARDED_LOCALS_OFF.get()) {
+                guardedLocals.add(target);
             }
         } else if (policy.contracts() && analysed.contains(callee)
                    && explicitState(callee) == NullableState.NULLABLE) {
