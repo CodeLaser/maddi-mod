@@ -25,17 +25,21 @@ import static org.junit.jupiter.api.Assertions.*;
 
 public class TestJavaUtilLogging extends CommonTest {
 
-    // jdk/JavaUtilLogging (2026-10-12): logging reads its arguments and does not modify the logger; configuring it does
+    // jdk/JavaUtilLogging: logging reads its arguments; it modifies the logger, but carries @IgnoreModifications
+    // (2026-10-22, was @NotModified); configuring the logger is a modification that counts
     @Test
     public void testLogger() {
         TypeInfo logger = compiledTypesManager().typeIfLoaded(Logger.class);
         MethodInfo log = method(logger, "java.util.logging.Logger.log(java.util.logging.Level,String,Throwable)");
-        assertFalse(log.isModifying());
+        assertTrue(log.isModifying());
+        assertTrue(log.isIgnoreModification());
         assertFalse(log.parameters().get(2).isModified());
         MethodInfo logArray = method(logger, "java.util.logging.Logger.log(java.util.logging.Level,String,Object[])");
         assertFalse(logArray.parameters().get(2).isModified());
 
-        assertTrue(method(logger, "java.util.logging.Logger.setLevel(java.util.logging.Level)").isModifying());
+        MethodInfo setLevel = method(logger, "java.util.logging.Logger.setLevel(java.util.logging.Level)");
+        assertTrue(setLevel.isModifying());
+        assertFalse(setLevel.isIgnoreModification());
         assertTrue(method(logger, "java.util.logging.Logger.log(java.util.logging.LogRecord)").parameters().getFirst().isModified());
     }
 
