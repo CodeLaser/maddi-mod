@@ -123,8 +123,15 @@ class LinkToField {
     private static Value.Immutable dynamicImmutabilityOfWholeField(Link link, Variable primaryTo, FieldReference fr) {
         boolean wholeField = primaryTo == link.to()
                              && (link.linkNature().equals(LinkNatureImpl.IS_ASSIGNED_TO)
-                                 || link.linkNature().equals(LinkNatureImpl.IS_ASSIGNED_FROM));
+                                 || link.linkNature().equals(LinkNatureImpl.IS_ASSIGNED_FROM))
+                             || sharesModification(link);
         return wholeField ? DynamicImmutability.ofField(fr.fieldInfo()) : null;
+    }
+
+    /** {@code view.§m ≡ this.list.§m}: the two share the field's modification, a plain ≡ (no pass set) */
+    private static boolean sharesModification(Link link) {
+        return link.linkNature().isIdenticalTo() && link.linkNature().pass().isEmpty()
+               && Util.isVirtualModification(link.from()) && Util.isVirtualModification(link.to());
     }
 
     private static ParameterizedType linkedType(Link link, Variable primaryTo) {
@@ -144,8 +151,7 @@ class LinkToField {
             // (docs/design/eventual-info-hierarchy.md §"The independence sampling round").
             return link.to().parameterizedType().copyWithoutArrays();
         }
-        if (link.linkNature().isIdenticalTo() && link.linkNature().pass().isEmpty()
-            && Util.isVirtualModification(link.from()) && Util.isVirtualModification(link.to())) {
+        if (sharesModification(link)) {
             // view.§m ≡ this.list.§m: a view of the field (Collections.unmodifiableList, synchronizedList), whatever
             // modifies the field shows through the result; judged as the whole field (CodeLaser/maddi-mod#60). The ☷
             // variant (a pass set) is an exception list, TypeModIndyAnalyzerImpl.withDependentExceptions

@@ -96,10 +96,10 @@ public class TestKotlinAnalyzerSynthesized extends CommonKotlinAnalyzerTest {
 
     /*
      CodeLaser/maddi#90 (fixed by CodeLaser/maddi#85, 2026-09-28): the constructor stores the delegate, so the type, the constructor and the field
-     agree with the Java twin. ⛔ CodeLaser/maddi#93: the forwarder's parameter does not: Java's one-method Sink is a functional
-     interface and `$$delegate_0.put(s)` takes the lambda path (`~Λ`, @Dependent); Kotlin's `interface Sink` is not
-     (`fun interface` would be), and the ordinary abstract call reads `s` as @Independent of the delegate. When CodeLaser/maddi#93
-     is settled, this becomes `a.assertSameAsJava("Forward2")` and `a.assertSameAsJava("Forward")`.
+     agree with the Java twin. CodeLaser/maddi#93: Java's one-method Sink is a functional interface and `$$delegate_0.put(s)`
+     takes the lambda path (`~Λ`, @Dependent); Kotlin's `interface Sink` is not (`fun interface` would be). Since
+     independence judges a shared modification face (CodeLaser/maddi-mod#60), the forwarder's parameter is @Dependent
+     on the Kotlin side too.
      */
     @Test
     public void delegation() {
@@ -109,9 +109,7 @@ public class TestKotlinAnalyzerSynthesized extends CommonKotlinAnalyzerTest {
         assertEquals("""
                 type Forward2: @FinalFields @Dependent
                 method put: nonModifying=false @Independent | 0: unmodified=false @Dependent""", a.java("Forward2", "put"));
-        assertEquals("""
-                type Forward2: @FinalFields @Dependent
-                method put: nonModifying=false @Independent | 0: unmodified=false @Independent""", a.kotlin("Forward2", "put"));
+        a.assertSameAsJava("Forward2", "put");
         assertEquals(a.java("Forward2", "put").replace("Forward2", "Forward"), a.java("Forward", "put"));
         assertEquals(a.kotlin("Forward2", "put").replace("Forward2", "Forward"), a.kotlin("Forward", "put"));
     }

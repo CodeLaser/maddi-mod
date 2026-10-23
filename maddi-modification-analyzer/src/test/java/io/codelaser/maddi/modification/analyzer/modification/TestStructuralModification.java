@@ -45,7 +45,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * <li>The reachability pass follows no element link for a parameter (its E1/E2 projections walk assignment
  *     links only), so its DEEP verdict never saw an element-only modification of a parameter in a walkable body:
  *     the two columns agree there, before and after #25. A field keeps its deep evidence through the
- *     statement-level seeds ({@code Holder.touched}), and the structural twin classifies that seed.</li>
+ *     statement-level seeds ({@code Holder.touched}), and the structural twin classifies that seed; the method's
+ *     receiver through its summary's deep-only entry ({@code Holder.touchAll}, CodeLaser/maddi-mod#59).</li>
  * </ul>
  */
 public class TestStructuralModification extends CommonTest {
@@ -161,7 +162,7 @@ public class TestStructuralModification extends CommonTest {
                                                         + " addVia=false/false touchVia=true/true"
                                                         + " addLambda=true/true,false/false"
                                                         + " Holder.items=false/false Holder.touched=false/true"
-                                                        + " Holder.add=false/false Holder.touchAll=true/true"
+                                                        + " Holder.add=false/false Holder.touchAll=false/true"
                                                         + " Sink.accept=false/false Reader.read=true/true"
                                                         + " useSink=false/false useReader=true/true";
 
