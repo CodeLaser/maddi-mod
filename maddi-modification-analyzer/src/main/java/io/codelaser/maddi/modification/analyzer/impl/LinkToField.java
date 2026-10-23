@@ -144,6 +144,13 @@ class LinkToField {
             // (docs/design/eventual-info-hierarchy.md §"The independence sampling round").
             return link.to().parameterizedType().copyWithoutArrays();
         }
+        if (link.linkNature().isIdenticalTo() && link.linkNature().pass().isEmpty()
+            && Util.isVirtualModification(link.from()) && Util.isVirtualModification(link.to())) {
+            // view.§m ≡ this.list.§m: a view of the field (Collections.unmodifiableList, synchronizedList), whatever
+            // modifies the field shows through the result; judged as the whole field (CodeLaser/maddi-mod#60). The ☷
+            // variant (a pass set) is an exception list, TypeModIndyAnalyzerImpl.withDependentExceptions
+            return primaryTo.parameterizedType();
+        }
         if (link.linkNature().equals(LinkNatureImpl.CONTAINS_AS_MEMBER)) {
             // 0:element ∋ this.set.§cs
             return link.to().parameterizedType();
