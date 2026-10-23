@@ -93,6 +93,9 @@
 # - BatchItemResultTest#failure_shouldRejectNullError: the record's constructor rejects null with its own
 #   IllegalArgumentException; the Kotlin call asserts first (NullPointerException). maddi-mod#28 keeps such parameters
 #   non-null by default (NULL_REJECTION_REPLACED); Policy.withRejectionsNullable() is the opt-in.
+# 2026-10-23, the first maddi slowTest gate's fixes (maddi f47fa0fa4 and before: getOrDefault, String.format's null
+# arguments, Guardrail.name(), Set.of/Map.of order, @MethodSource factories) with maddi-mod 004ea078: 151 test files
+# compile to class files; 1,106 tests pass with the Kotlin classes and with the translated tests.
 types	346
 printerCrashes	0
 syntaxErrors	0
@@ -100,5 +103,5 @@ syntaxCleanFiles	346
 compilingFiles	346
 bytecodeFiles	346
 testsPassing	1106
-testBytecodeFiles	139
+testBytecodeFiles	151
 translatedTestsPassing	1106
