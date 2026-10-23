@@ -94,6 +94,17 @@ public class TestStreamMapSpec extends CommonTest {
                 // ---- unbound instance method reference ----
                 List<X> mapUnboundGetFirst(List<List<X>> list) { return list.stream().map(List::getFirst).toList(); }
 
+                // ---- unbound accessor of a mutable class returning an immutable field (CodeLaser/maddi-mod#58) ----
+                static final class Order {
+                    private final String customer;
+                    private int count;
+                    Order(String customer) { this.customer = customer; }
+                    void inc() { count++; }
+                    String customer() { return customer; }
+                }
+                List<String> mapCustomerMR(List<Order> orders) { return orders.stream().map(Order::customer).toList(); }
+                List<String> mapCustomerLambda(List<Order> orders) { return orders.stream().map(o -> o.customer()).toList(); }
+
                 // ---- JDK static method reference ----
                 List<String> mapJdkStaticMR(List<X> list) { return list.stream().map(String::valueOf).toList(); }
             }
@@ -228,6 +239,18 @@ public class TestStreamMapSpec extends CommonTest {
     @Test
     public void unboundMethodReference() {
         assertEquals("[-] --> mapUnboundGetFirst.§xs≤0:list.§xss", mlv("mapUnboundGetFirst"));
+    }
+
+    /*
+     the referenced method's 'this.customer' is a primary of its own; lifted unchanged it would map onto the source
+     as a whole, the identity ('mapCustomerMR.§$s⊆0:orders.§$s'). Re-homed onto the SAM's parameter, the MR lifts
+     like the lambda: a String is no part of the orders' hidden content (CodeLaser/maddi-mod#58)
+     */
+    @DisplayName("unbound accessor of a mutable class (Order::customer) is not the identity: like the lambda")
+    @Test
+    public void unboundAccessorIsNotIdentity() {
+        assertEquals("[-] --> -", mlv("mapCustomerLambda"));
+        assertEquals("[-] --> -", mlv("mapCustomerMR"));
     }
 
     // ---- known gaps (to fix) ----------------------------------------------------------------------------

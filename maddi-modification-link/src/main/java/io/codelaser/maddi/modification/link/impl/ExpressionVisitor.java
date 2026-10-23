@@ -286,7 +286,7 @@ public record ExpressionVisitor(Runtime runtime,
             }
             newRv = rvBuilder.build();
         } else {
-            newRv = tMlv.ofReturnValue();
+            newRv = unboundReceiverAsSamParameter(mr, object, tMlv.ofReturnValue());
             for (Links paramLinks : tMlv.ofParameters()) {
                 map.put(mr.methodInfo().parameters().get(i), paramLinks);
                 ++i;
@@ -321,6 +321,25 @@ public record ExpressionVisitor(Runtime runtime,
         Links links = new LinksImpl.Builder(fiv).build();
         return new Result(links, LinkedVariablesImpl.EMPTY)
                 .addModified(leakedModified, leakedDeepOnly, null);
+    }
+
+    /*
+     An unbound instance method reference ('Order::customer') is applied to the SAM's first parameter, as the lambda
+     'o -> o.customer()' is. Its summary speaks of the referenced method's 'this' ('customer←this.customer'), and a
+     field of 'this' is a primary of its own: the lifting engine would map the whole 'this.customer' onto the source,
+     as if the function were the identity (CodeLaser/maddi-mod#58). Re-homed onto the SAM's parameter, it reads
+     'customer←0:t.customer', the lambda's shape.
+     */
+    private Links unboundReceiverAsSamParameter(MethodReference mr, Result object, Links rv) {
+        MethodInfo target = mr.methodInfo();
+        if (object.links().primary() != null || target.isStatic() || target.isConstructor()
+            || rv == null || rv.isEmpty()) return rv;
+        MethodInfo sam = mr.parameterizedType().typeInfo() == null ? null
+                : mr.parameterizedType().typeInfo().singleAbstractMethod();
+        if (sam == null || sam.parameters().isEmpty()) return rv;
+        This thisVar = runtime.newThis(target.typeInfo().asParameterizedType());
+        TranslationMap tm = new VariableTranslationMap(runtime).put(thisVar, sam.parameters().getFirst());
+        return rv.translate(tm);
     }
 
     /** the deep-only subset of {@code variables}: deep-only in every result that has them (#25) */
