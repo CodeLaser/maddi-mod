@@ -98,6 +98,12 @@ public class TestFernflowerNullabilityCauses {
                 Switches.offForNextPasses(Set.of());
             }
             long passMs = (System.nanoTime() - passStart) / 1_000_000;
+            // NULLMARKEDDEBUG=<file>: each pass rewrites it; keep one per side
+            String boundsDump = System.getenv("NULLMARKEDDEBUG");
+            if (boundsDump != null && sides != null && java.nio.file.Files.exists(Path.of(boundsDump))) {
+                java.nio.file.Files.copy(Path.of(boundsDump), Path.of(boundsDump + "-" + side),
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
             List<String> lines = lines(report, corpus);
             timing.add("pass " + (side.isEmpty() ? "on" : side) + " " + passMs + " ms");
             String suffix = side.isEmpty() ? "" : "-" + side;
@@ -119,6 +125,15 @@ public class TestFernflowerNullabilityCauses {
             }
             if (pt.nullable() == io.codelaser.maddi.cst.api.type.NullableState.NULLABLE) {
                 lines.add(n + " TOP :: " + report.explain(info));
+            }
+        });
+        // a superclass's nullable type arguments (NullabilityFacts.parentClass), with what reaches them
+        report.parentClasses().forEach((type, parent) -> {
+            for (int i = 0; i < parent.parameters().size(); i++) {
+                if (parent.parameters().get(i).nullable() == io.codelaser.maddi.cst.api.type.NullableState.NULLABLE) {
+                    lines.add(type.fullyQualifiedName() + " SUPER [" + i + "] :: "
+                              + report.explain(new NullabilityPass.Arg(new NullabilityPass.AnonymousThis(type), i)));
+                }
             }
         });
         // array locals with nullable elements, and every local of a method named by -Dcauses.method

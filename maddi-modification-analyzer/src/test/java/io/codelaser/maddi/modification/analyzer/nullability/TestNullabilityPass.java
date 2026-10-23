@@ -3250,7 +3250,7 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("Iterator<T!>", s.get("a.b.RM.removeNull(java.util.Iterator)"), s + "\n" + explain(report));
     }
 
-    @DisplayName("Kotlin: a class writing null into its generic superclass's slots has a nullable supertype argument, jenkins OwnerContext, DiskSpaceMonitorDescriptor")
+    @DisplayName("Kotlin: a private class writing null into its generic superclass's slots has a nullable supertype argument, jenkins OwnerContext")
     @Test
     public void supertypeSlots() {
         NullabilityPass.Report report = run("a.b.SS", """
@@ -3259,7 +3259,7 @@ public class TestNullabilityPass extends CommonTest {
                 import java.util.LinkedList;
                 import java.util.Map;
                 class SS {
-                    static class OwnerContext extends LinkedList<String> {
+                    private static class OwnerContext extends LinkedList<String> {
                         void startVisiting(String owner) {
                             if (owner != null) {
                                 System.out.println(owner);
@@ -3279,7 +3279,7 @@ public class TestNullabilityPass extends CommonTest {
                     }
                     static class Space {
                     }
-                    static class Monitor extends Base<Space> {
+                    private static class Monitor extends Base<Space> {
                         @Override
                         Space get(String key) {
                             return key.isEmpty() ? null : new Space();
@@ -3295,7 +3295,16 @@ public class TestNullabilityPass extends CommonTest {
                             return data;
                         }
                     }
-                    static class Plain extends LinkedList<String> {
+                    // not private: its superclass is its type elsewhere too
+                    static class Shared extends LinkedList<String> {
+                        void add(String s, int n) {
+                            addFirst(s);
+                        }
+                        static void use(Shared s) {
+                            s.add(null, 1);
+                        }
+                    }
+                    private static class Plain extends LinkedList<String> {
                         void add2(String s) {
                             addFirst(s);
                         }
@@ -3307,8 +3316,12 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("LinkedList<String?>", p.get("a.b.SS.OwnerContext"), p + "\n" + explain(report));
         Map<String, String> l = new java.util.TreeMap<>();
         report.locals().forEach((local, pt) -> l.put(local.name(), k(pt)));
-        assertEquals("Base<Space?>", p.get("a.b.SS.Monitor"), p + "\n" + l + "\n" + explain(report));
+        // a write through a view loop's variable stays there (NOVIEWLOOPWRITES): the map and the superclass keep Space
+        assertFalse(p.containsKey("a.b.SS.Monitor"), p + "\n" + l + "\n" + explain(report));
+        assertEquals("Entry<String, Space?>", l.get("e"), l + "\n" + explain(report));
+        assertEquals("Map<String, Space>", l.get("data"), l + "\n" + explain(report));
         assertFalse(p.containsKey("a.b.SS.Plain"), p + "\n" + explain(report));
+        assertFalse(p.containsKey("a.b.SS.Shared"), p + "\n" + explain(report));
     }
 
     @DisplayName("Kotlin: non-null bounds reach a member-less subinterface and an override family's method type parameter, timefold")
@@ -3328,6 +3341,19 @@ public class TestNullabilityPass extends CommonTest {
                     }
                     interface ConstraintFactory {
                         <A> Stream2<A> forEach(Class<A> sourceClass);
+                    }
+                    @NullMarked interface Move<M> {
+                    }
+                    abstract static class SwapIterator<Solution_, Move_ extends Move<Solution_>, Sub_> {
+                        abstract Move_ next(Sub_ sub);
+                    }
+                    static class Swap implements Move<String> {
+                    }
+                    static class SwapImpl extends SwapIterator<String, Swap, Integer> {
+                        @Override
+                        Swap next(Integer sub) {
+                            return new Swap();
+                        }
                     }
                     static class Impl<S2, T2> implements NullComparatorFactory<S2, T2> {
                         @Override
@@ -3363,6 +3389,13 @@ public class TestNullabilityPass extends CommonTest {
                 for (var tp : mi.typeInfo().typeParameters()) {
                     if (report.nonNullTypeParameter(tp)) nonNull.add(mi.typeInfo().fullyQualifiedName() + " " + tp.simpleName());
                 }
+                if (mi.typeInfo().parentClass() != null && mi.typeInfo().parentClass().typeInfo() != null) {
+                    for (var tp : mi.typeInfo().parentClass().typeInfo().typeParameters()) {
+                        if (report.nonNullTypeParameter(tp)) {
+                            nonNull.add(mi.typeInfo().parentClass().typeInfo().fullyQualifiedName() + " " + tp.simpleName());
+                        }
+                    }
+                }
                 for (var st : mi.typeInfo().interfacesImplemented()) {
                     if (st.typeInfo() == null) continue;
                     for (var tp : st.typeInfo().typeParameters()) {
@@ -3372,6 +3405,7 @@ public class TestNullabilityPass extends CommonTest {
             }
         }
         String all = String.join("\n", nonNull);
+        assertTrue(all.contains("a.b.TF.SwapIterator Solution_"), all);
         assertTrue(all.contains("a.b.TF.NullComparatorFactory S"), all);
         assertTrue(all.contains("a.b.TF.NullComparatorFactory T"), all);
         assertTrue(all.contains("a.b.TF.UniStream.ifExists(Class) B"), all);
@@ -3412,6 +3446,39 @@ public class TestNullabilityPass extends CommonTest {
             Switches.offForNextPasses(java.util.Set.of());
         }
         assertEquals("Set<String>", local.apply("GS3"));
+    }
+
+    @DisplayName("Kotlin: arguments in an assertThrows(NullPointerException) lambda carry no null into the callee, guava ImmutableClassToInstanceMapTest")
+    @Test
+    public void rejectedNullFlows() {
+        NullabilityPass.Report report = run("a.b.RF", """
+                package a.b;
+                import java.util.Collections;
+                import java.util.Map;
+                import java.util.Objects;
+                import static org.junit.jupiter.api.Assertions.assertThrows;
+                class RF {
+                    static Class<?> wrap(Class<?> type) {
+                        Objects.requireNonNull(type);
+                        return type;
+                    }
+                    static int copyOf(Map<Class<?>, Number> map) {
+                        int n = 0;
+                        for (Map.Entry<Class<?>, Number> entry : map.entrySet()) {
+                            n += wrap(entry.getKey()).getName().length();
+                        }
+                        return n;
+                    }
+                    void testCopyOfNulls() {
+                        Map<Class<?>, Number> nullKey = Collections.singletonMap(null, 1.0);
+                        assertThrows(NullPointerException.class, () -> copyOf(nullKey));
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertFalse(s.get("a.b.RF.wrap(Class):0:type").endsWith("?"), s + "\n" + explain(report));
+        assertFalse(s.get("a.b.RF.copyOf(java.util.Map):0:map").startsWith("Map<Class<?!>?"), s + "\n" + explain(report));
     }
 
     @DisplayName("Kotlin: an override of a @NullMarked library method's non-null return stays non-null, jenkins AuthenticationProcessingFilter2")

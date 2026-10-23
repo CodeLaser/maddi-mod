@@ -1530,12 +1530,21 @@ public final class NullabilityPass {
     private static final Switches.Gate SUPERTYPE_SLOTS_OFF = Switches.gate("NOSUPERTYPESLOTS");
     private static final Switches.Gate VIEW_LOOPS_OFF = Switches.gate("NOVIEWLOOPS");
 
-    // a class whose superclass has a type argument that is not a type variable: its 'this' has slots of its own
+    /*
+     a class whose superclass has a type argument that is not a type variable: its 'this' has slots of its own. A
+     private one only: its superclass is its type nowhere else. jenkins' public EnvVars as a TreeMap<String, String?>
+     broke the ~15 places that pass it as a Map<String, String> (Kotlin's maps are invariant), FingerprintMap and
+     DiskSpaceMonitorDescriptor likewise: 127 -> 159 errors (worktree-maddi-all 2026-10-22). Gate
+     NOPRIVATESUPERTYPESONLY (any class, as before).
+     */
     private static boolean thisTypedBySuperclass(TypeInfo type) {
         ParameterizedType parent = type.parentClass();
         return parent != null && parent.arrays() == 0 && parent.typeInfo() != null
+               && (type.access().isPrivate() || PRIVATE_SUPERTYPES_ONLY_OFF.get())
                && parent.parameters().stream().anyMatch(a -> a.typeParameter() == null && a.wildcard() == null);
     }
+
+    private static final Switches.Gate PRIVATE_SUPERTYPES_ONLY_OFF = Switches.gate("NOPRIVATESUPERTYPESONLY");
 
     /*
      A parameter whose only use is 'this.f = p', where f is nullable: passing null there means what not calling the
@@ -2584,6 +2593,8 @@ public final class NullabilityPass {
 
     private static final Switches.Gate NULL_MARKED_BOUNDS_OFF = Switches.gate("NONULLMARKEDBOUNDS");
     private static final Switches.Gate MEMBERLESS_BOUNDS_OFF = Switches.gate("NOMEMBERLESSBOUNDS");
+    private static final Switches.Gate BOUND_USES_OFF = Switches.gate("NOBOUNDUSES");
+    private static final Switches.Gate REJECTED_FLOWS_OFF = Switches.gate("NOREJECTEDFLOWS");
 
     private void nonNullBounds(List<Info> analysisOrder, List<MethodInfo> methods, List<FieldInfo> fields) {
         if (!policy.callResults() || NULL_MARKED_BOUNDS_OFF.get()) return;
@@ -2613,6 +2624,12 @@ public final class NullabilityPass {
         for (TypeInfo t : types) {
             if (t.parentClass() != null) uses.add(new TypeUse(t.parentClass(), t, true));
             for (ParameterizedType i : t.interfacesImplemented()) uses.add(new TypeUse(i, t, true));
+            // a type parameter's bound: 'class AbstractOriginalSwapIterator<Solution_, Move_ extends
+            // Move<Solution_>, …>' passes Solution_ into Move's (timefold AbstractOriginalSwapIterator.kt:5,
+            // 2026-10-22). Strict, as a supertype: Kotlin writes no 'Solution_ & Any' in a bound. Gate NOBOUNDUSES.
+            if (!BOUND_USES_OFF.get()) {
+                for (var tp : t.typeParameters()) for (ParameterizedType b : tp.typeBounds()) uses.add(new TypeUse(b, t, true));
+            }
         }
         for (FieldInfo fi : fields) {
             uses.add(new TypeUse(fi.type(), fi, false));
@@ -2624,6 +2641,9 @@ public final class NullabilityPass {
             boolean repeated = !mi.isConstructor() && (!mi.overrides().isEmpty() || !mi.isStatic()
                     && !mi.access().isPrivate() && !mi.isFinal() && !mi.typeInfo().isFinal());
             for (ParameterInfo pi : mi.parameters()) uses.add(new TypeUse(pi.parameterizedType(), mi, repeated));
+            if (!BOUND_USES_OFF.get()) {
+                for (var tp : mi.typeParameters()) for (ParameterizedType b : tp.typeBounds()) uses.add(new TypeUse(b, mi, true));
+            }
             if (mi.methodBody() != null) mi.methodBody().visit(e -> bodyTypeUse(e, mi, uses, instantiations));
         }
         /*
@@ -2677,7 +2697,10 @@ public final class NullabilityPass {
             int n = mi.typeParameters().size();
             if (n == 0) continue;
             for (MethodInfo om : mi.overrides()) {
-                if (om.typeParameters().size() != n) continue;
+                // a library method keeps its own bounds: Kotlin matches an override of a Java method against its
+                // platform bounds, and a conflict there would unbound the variable for all its uses (guava
+                // Parameter.getDeclaredAnnotation's A, and through it Optional's T)
+                if (om.typeParameters().size() != n || !analysed.contains(om)) continue;
                 for (int i = 0; i < n; i++) {
                     var mine = mi.typeParameters().get(i);
                     var theirs = om.typeParameters().get(i);
@@ -2686,8 +2709,7 @@ public final class NullabilityPass {
                     if (a == b) continue;
                     var other = a ? theirs : mine;
                     var source = a ? mine : theirs;
-                    MethodInfo owner = a ? om : mi;
-                    if (analysed.contains(owner) && !blocked.contains(other) && !nullableBound(other)) {
+                    if (!blocked.contains(other) && !nullableBound(other)) {
                         nonNullTypeParameters.add(other);
                         changed = true;
                     } else {
@@ -3319,9 +3341,11 @@ public final class NullabilityPass {
                     // Equivalence<Any?>, Equivalence.kt:98/99, 2026-10-18)
                     boolean declaredNullable = policy.callResults() && !NULLABLE_PARAMETER_SLOTS_OFF.get()
                                                && explicit(p1.annotations()) == NullableState.NULLABLE;
-                    if (!isExtendsWildcard(p1) && !unbound && !declaredNullable && (!class0 || class1)) {
+                    boolean read = viewLoopReads.contains(flow);
+                    if (!isExtendsWildcard(p1) && !unbound && !declaredNullable && (!class0 || class1) && !read) {
                         successors.computeIfAbsent(a1, _ -> new LinkedHashSet<>()).add(a0);
                     }
+                    if (read) viewLoopReads.add(List.of(a0, a1));
                     queue.add(List.of(a0, a1));
                 }
             }
@@ -3419,6 +3443,19 @@ public final class NullabilityPass {
      Policy.callResults. Gate NOVARARGCOPIES.
      */
     private final Set<List<Object>> varargsPasses = new HashSet<>();
+
+    /*
+     Kotlin: the loop variable over a library view reads the map's slots, but what the loop writes through it does not
+     flow back. jenkins' EnvVars.resolve 'entry.setValue(Util.replaceMacro(entry.getValue(), env))' (an @Nullable
+     return, null only for a null input) made masterEnvVars, EnvVars(Map) and through them EnvVars a map of 'String?'
+     (EnvVars.kt:22/25/79, AbstractBuild.kt:179); DiskSpaceMonitorDescriptor.monitor() a Map<Computer, DiskSpace?>
+     against its superclass's (DiskSpaceMonitorDescriptor.kt:20/42): 127 -> 133 errors (worktree-maddi-all
+     2026-10-22). The write stays one mismatch at the loop. The (view slot, loop variable) flows, and the slot pairs
+     under them. Gate NOVIEWLOOPWRITES.
+     */
+    private final Set<List<Object>> viewLoopReads = new HashSet<>();
+
+    private static final Switches.Gate VIEW_LOOP_WRITES_OFF = Switches.gate("NOVIEWLOOPWRITES");
 
     private static final Switches.Gate VARARG_COPIES_OFF = Switches.gate("NOVARARGCOPIES");
 
@@ -4614,8 +4651,12 @@ public final class NullabilityPass {
                 // over an array its elements, over an Iterable<T> its one type argument; the statement's own scope
                 // declares the loop variable
                 Object elements = type.arrays() > 0 ? new Content(array) : new Arg(array, 0);
-                fe.initializer().localVariableStream()
-                        .forEach(lv -> addEdge(elements, local(mi, scope, lv.simpleName())));
+                boolean view = !(iterated instanceof VariableExpression) && !(array instanceof MethodInfo);
+                fe.initializer().localVariableStream().forEach(lv -> {
+                    Object local = local(mi, scope, lv.simpleName());
+                    addEdge(elements, local);
+                    if (view && !VIEW_LOOP_WRITES_OFF.get()) viewLoopReads.add(List.of(elements, local));
+                });
             }
         }
     }
@@ -6691,6 +6732,13 @@ public final class NullabilityPass {
     // pi: the parameter, or the Content of a varargs parameter
     private void argument(MethodInfo mi, Scope scope, Statement statement, Expression call,
                           LinkComputer.ListOfLinks list, List<Expression> arguments, int i, Object pi) {
+        // Kotlin: in 'assertThrows(NullPointerException.class, () -> copyOf(nullKey))' the arguments are the test's
+        // rejected input, whether a literal null (seed) or a variable holding one: they carry nothing into the
+        // callee. guava's ImmutableClassToInstanceMapTest had made Primitives.wrap(type), which starts with
+        // checkNotNull(type), take a Class<T>? (worktree-maddi-all 2026-10-22). Gate NOREJECTEDFLOWS.
+        if (policy.callResults() && !REJECTED_FLOWS_OFF.get() && nullRejectingBodies.contains(mi.fullyQualifiedName())) {
+            return;
+        }
         // also a cast null: '(AiMessage) null' choosing between overloads (langchain4j OutputGuardrailResult)
         if (NonNullFacts.unwrap(arguments.get(i)) instanceof NullConstant) {
             seed(pi, "null argument in " + mi.fullyQualifiedName(), mi.typeInfo());
