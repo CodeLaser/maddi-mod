@@ -1388,6 +1388,7 @@ public final class NullabilityPass {
             // an assignment the statement shows: kept.
             // [3] a link of a method's summary (no statement): kept as before, unless guarded somewhere
             boolean slot = edge.get(1) instanceof Arg || edge.get(1) instanceof Content;
+            if (policy.callResults() && !DIFFERENT_SHAPES_OFF.get() && differentShapes(edge.get(0), edge.get(1))) return;
             if (count[1] > 0 || count[2] > 0 || count[0] == 0 && slot) {
                 addEdge(edge.get(0), edge.get(1));
             } else {
@@ -3573,6 +3574,40 @@ public final class NullabilityPass {
 
     // gate NOSAMEINSTANTIATION: a call on this does not tie its result's slots to the target's (A/B)
     private static final Switches.Gate SAME_INSTANTIATION_OFF = Switches.gate("NOSAMEINSTANTIATION");
+
+    /*
+     Kotlin: two generic types that differ in a concrete type argument at some depth are not one object, whatever
+     the links say. fernflower's 'class_mapping = mapping.computeIfAbsent(className, k -> new LinkedHashMap<>())' has
+     the link class_mapping ← mapping: a Map<String, Map<String, Map<Integer, Integer>>> into a Map<String,
+     Map<Integer, Integer>>. Matched by position, mapping's key slot (a nullable className) became class_mapping's,
+     and through the view loops of dumpMapping lstBytecodeOffsets a List<Int?> that Collections.sort rejects
+     (BytecodeSourceMapper.kt:40, worktree-maddi-all 2026-10-23). Link edges between such nodes, or between their slots
+     at the same depth, are dropped. uncheckedConversion skips only the one position that differs. Gate NODIFFERENTSHAPES.
+     */
+    private boolean differentShapes(Object from, Object to) {
+        while (from instanceof Arg(Object f, int _) && to instanceof Arg(Object t, int _)) {
+            from = f;
+            to = t;
+        }
+        ParameterizedType t0 = typeOf(from);
+        ParameterizedType t1 = typeOf(to);
+        return t0 != null && t1 != null && t0.arrays() == 0 && t1.arrays() == 0 && t0.typeInfo() != null
+               && t0.typeInfo() == t1.typeInfo() && differentShapes(t0, t1);
+    }
+
+    private static boolean differentShapes(ParameterizedType t0, ParameterizedType t1) {
+        for (int i = 0; i < t0.parameters().size() && i < t1.parameters().size(); i++) {
+            ParameterizedType p0 = t0.parameters().get(i);
+            ParameterizedType p1 = t1.parameters().get(i);
+            if (uncheckedConversion(p0, p1)) return true;
+            if (p0.wildcard() == null && p1.wildcard() == null && p0.typeParameter() == null
+                && p1.typeParameter() == null && p0.typeInfo() != null && p0.typeInfo() == p1.typeInfo()
+                && p0.arrays() == p1.arrays() && differentShapes(p0, p1)) return true;
+        }
+        return false;
+    }
+
+    private static final Switches.Gate DIFFERENT_SHAPES_OFF = Switches.gate("NODIFFERENTSHAPES");
 
     private static boolean uncheckedConversion(ParameterizedType p0, ParameterizedType p1) {
         return p0.wildcard() == null && p1.wildcard() == null && p0.typeParameter() == null

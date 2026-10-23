@@ -3225,6 +3225,44 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("Map<Plugin, String?>", s.get("a.b.CC.deprecated()"), s + "\n" + explain(report));
     }
 
+    @DisplayName("Kotlin: computeIfAbsent's result is the map's value, not its key, fernflower BytecodeSourceMapper")
+    @Test
+    public void computeIfAbsentValue() {
+        NullabilityPass.Report report = run("a.b.CV", """
+                package a.b;
+                import java.util.ArrayList;
+                import java.util.Collections;
+                import java.util.HashMap;
+                import java.util.LinkedHashMap;
+                import java.util.List;
+                import java.util.Map;
+                class CV {
+                    private final Map<String, Map<String, Map<Integer, Integer>>> mapping = new LinkedHashMap<>();
+                    void addMapping(String className, String methodName, int offset, int line) {
+                        Map<String, Map<Integer, Integer>> class_mapping = mapping.computeIfAbsent(className, k -> new LinkedHashMap<>());
+                        Map<Integer, Integer> method_mapping = class_mapping.computeIfAbsent(methodName, k -> new HashMap<>());
+                        method_mapping.putIfAbsent(offset, line);
+                    }
+                    void use() {
+                        addMapping(null, "m", 1, 2);
+                    }
+                    void dump() {
+                        for (Map.Entry<String, Map<String, Map<Integer, Integer>>> class_entry : mapping.entrySet()) {
+                            for (Map.Entry<String, Map<Integer, Integer>> method_entry : class_entry.getValue().entrySet()) {
+                                Map<Integer, Integer> method_mapping = method_entry.getValue();
+                                List<Integer> offsets = new ArrayList<>(method_mapping.keySet());
+                                Collections.sort(offsets);
+                            }
+                        }
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        String l = locals(report);
+        assertTrue(l.contains("addMapping.class_mapping: Map<String, Map<Integer, Integer>>\n"), l + "\n" + explain(report));
+        assertTrue(l.contains("dump.class_entry: Entry<String?, Map<String, Map<Integer, Integer>>>\n"), l);
+        assertTrue((l + "\n").contains("dump.offsets: List<Integer>\n"), l);
+    }
+
     @DisplayName("Kotlin: a method returning its parameter filtered of nulls takes nullable elements, jenkins Iterators.removeNull")
     @Test
     public void removeNullParameter() {
