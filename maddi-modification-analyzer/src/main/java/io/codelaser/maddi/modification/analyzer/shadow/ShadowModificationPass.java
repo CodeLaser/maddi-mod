@@ -543,6 +543,10 @@ public class ShadowModificationPass {
 
     /** @param structural the summary's modification of {@code v} is structural (#25), not of its hidden content only */
     private void seedVariable(MethodInfo mi, Variable v, boolean skipReceiverRooted, boolean structural) {
+        // #59: a deep-only entry is an element's modification ('products.get(k).put(...)': 'p ∈ this.products'), the
+        // one channel the walk does not follow (element natures are off): it stays a seed, deep-only, and so cannot
+        // touch the structural twin, which the walk re-derives
+        if (!structural) skipReceiverRooted = false;
         switch (v) {
             case This thisVar -> {
                 // P3: receiver-rooted summary entry of a walkable body — re-derived via primitives + E2
