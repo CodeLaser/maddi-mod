@@ -633,7 +633,11 @@ public class ShadowModificationPass {
 
     private void handleBlock(MethodInfo mi, Block block) {
         for (Statement statement : block.statements()) {
-            statement.subBlockStream().forEach(sb -> handleBlock(mi, sb));
+            Set<Block> subBlocks = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+            statement.subBlockStream().forEach(sb -> {
+                subBlocks.add(sb);
+                handleBlock(mi, sb);
+            });
             VariableData vd = VariableDataImpl.of(statement);
             if (vd == null) continue; // synthetic, e.g. implicit super()
             statement.visit(e -> {
@@ -643,7 +647,13 @@ public class ShadowModificationPass {
                     if (lambda.methodBody() != null) handleBlock(mi, lambda.methodBody());
                     return false;
                 }
-                if (e instanceof Block) return false; // nested statements handled with their own vd
+                if (e instanceof Block b) {
+                    // a sub-block's statements are handled above, with their own vd; a block inside an expression
+                    // (a switch expression's 'case -> { ... yield }' arm) is walked here, as a lambda's body is
+                    // (CodeLaser/maddi-mod#63)
+                    if (!subBlocks.contains(b)) handleBlock(mi, b);
+                    return false;
+                }
                 if (e instanceof Assignment a && a.variableTarget() != null) {
                     seedAssignmentTarget(mi, vd, a.variableTarget());
                 }
