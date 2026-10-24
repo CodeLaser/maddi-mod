@@ -23,11 +23,13 @@
 # 861,124 pass with the Kotlin classes in front, 861,097 with the translated tests too: 1,788 fewer than at the
 # record above, with 210 more files in front, a trade Bart accepted. The translated tests run again only for the 408
 # test classes they can change, and the original classes' run is a kept baseline: some 32 minutes on laser1.
+# 2026-10-24, maddi b8f892a7b: a raw cast of a typed library result keeps the target's type arguments (Multisets'
+# entrySet), 603 files compiling, 12 type errors.
 types	610
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	610
-compilingFiles	602
+compilingFiles	603
 bytecodeFiles	490
 testsPassing	861124
 testBytecodeFiles	341
