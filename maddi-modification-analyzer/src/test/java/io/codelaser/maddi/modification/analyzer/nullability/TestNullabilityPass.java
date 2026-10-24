@@ -1620,6 +1620,13 @@ public class TestNullabilityPass extends CommonTest {
                     String reassigned(Map<String, String> m, String k) { if (m.containsKey(k)) { k = k + "x"; return m.get(k); } return ""; }
                     String passed(Map<String, String> m, String k) { if (m.containsKey(k)) { use(m); return m.get(k); } return ""; }
                     static void use(Map<String, String> m) { m.clear(); }
+                    String peeked(Map<String, String> m, String k) { if (m.containsKey(k)) { peek(m); return m.get(k); } return ""; }
+                    static int peek(Map<String, String> m) { return m.size(); }
+                    String removedAll(Map<String, String> m, String k) { if (m.containsKey(k)) { removeAllKeys(m, List.of(k)); return m.get(k); } return ""; }
+                    static void removeAllKeys(Map<String, String> map, Collection<?> keys) {
+                        Iterator<Map.Entry<String, String>> it = map.entrySet().iterator();
+                        while (it.hasNext()) { if (keys.contains(it.next().getKey())) it.remove(); }
+                    }
                     String removed(Map<String, String> m, String k) { if (m.containsKey(k)) { return m.remove(k); } return ""; }
                     int length(Map<String, String> m, String k) { if (m.containsKey(k)) { return m.get(k).length(); } return 0; }
                 }
@@ -1637,6 +1644,9 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("String", byName.get("a.b.K.otherCall(java.util.Map,String,java.util.List)"));
         assertEquals("String?", byName.get("a.b.K.reassigned(java.util.Map,String)"), "the key is assigned");
         assertEquals("String?", byName.get("a.b.K.passed(java.util.Map,String)"), "the map is handed to a call");
+        assertEquals("String", byName.get("a.b.K.peeked(java.util.Map,String)"), "handed to a call that does not modify it");
+        // CodeLaser/maddi-mod#54: removal through the entry set's iterator modifies the parameter
+        assertEquals("String?", byName.get("a.b.K.removedAll(java.util.Map,String)"), "removal through a view");
         assertEquals("String", byName.get("a.b.K.removed(java.util.Map,String)"));
     }
 
