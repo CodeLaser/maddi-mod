@@ -71,6 +71,12 @@ public class AnalysisHelper {
         } else {
             Value.Immutable inMap = bestType.analysis().getOrNull(PropertyImpl.IMMUTABLE_TYPE, ValueImpl.ImmutableImpl.class);
             if (inMap == null) {
+                if (bestType.isSynthetic() && bestType.simpleName().startsWith("§")) {
+                    // the virtual-field container of a multi-parameter type (Map's key/value pair §KV, §$$): final
+                    // fields, nothing else, so as immutable as its components. Without analysis it defaulted to
+                    // MUTABLE, and new HashMap<>(field) over String/Integer was dependent (CodeLaser/maddi-mod#64)
+                    return containerTypeImmutable(bestType, dynamicValues, nullIfUndecided);
+                }
                 if (nullIfUndecided && isPartOfSourceCode(bestType)) return null;
                 // java.lang.Object is pure hidden content, like an unbound type parameter: the shallow analyzer
                 // (ShallowMethodAnalyzer.computeMethodIndependentReturnValue) already says so for a bodiless
@@ -96,6 +102,18 @@ public class AnalysisHelper {
             }
         }
         return dynamicBaseValue;
+    }
+
+    private Value.Immutable containerTypeImmutable(TypeInfo containerType,
+                                                   Map<ParameterizedType, Value.Immutable> dynamicValues,
+                                                   boolean nullIfUndecided) {
+        Value.Immutable result = ValueImpl.ImmutableImpl.IMMUTABLE;
+        for (var fieldInfo : containerType.fields()) {
+            Value.Immutable component = typeImmutable(fieldInfo.type(), dynamicValues, nullIfUndecided);
+            if (component == null) return null;
+            result = result.min(component);
+        }
+        return result;
     }
 
     /*
