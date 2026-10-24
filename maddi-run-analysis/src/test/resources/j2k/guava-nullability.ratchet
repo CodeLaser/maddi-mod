@@ -15,12 +15,20 @@
 # 389 files compiling (1,342 type errors), 280 to class files, 246 test files to class files; syntax-clean, all 610.
 # First record of guava's tests, now that the vintage engine runs them (772b7835): 865,124 pass on the original classes
 # (5 fail there), 862,912 with the Kotlin classes in front, 862,910 with the translated tests too.
+# 2026-10-24, devel at maddi 154baa811 / maddi-mod d79cd437, after a week of the printer's guava work: 602 files
+# compiling (14 type errors), 490 to class files, 341 test files to class files. The tests no longer lose whole
+# suites: compile 3 leaves out a Kotlin class an original Java class cannot extend (Kotlin's final size() bridge
+# under HashBiMap), volatile fields print @Volatile (AtomicDouble's field updater), and a cast of a library result
+# into a nullable target is to the nullable type (AbstractFutureState's waiters hung com.google.common.util).
+# 861,124 pass with the Kotlin classes in front, 861,097 with the translated tests too: 1,788 fewer than at the
+# record above, with 210 more files in front, a trade Bart accepted. The translated tests run again only for the 408
+# test classes they can change, and the original classes' run is a kept baseline: some 32 minutes on laser1.
 types	610
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	610
-compilingFiles	389
-bytecodeFiles	280
-testsPassing	862912
-testBytecodeFiles	246
-translatedTestsPassing	862910
+compilingFiles	602
+bytecodeFiles	490
+testsPassing	861124
+testBytecodeFiles	341
+translatedTestsPassing	861097
