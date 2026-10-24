@@ -15,6 +15,7 @@ import io.codelaser.maddi.modification.prepwork.variable.impl.VariableInfoImpl;
 import io.codelaser.maddi.modification.prepwork.variable.ObjectCreationVariable;
 import io.codelaser.maddi.cst.api.analysis.PropertyValueMap;
 import io.codelaser.maddi.cst.api.analysis.Value;
+import io.codelaser.maddi.cst.api.element.SourceSet;
 import io.codelaser.maddi.cst.api.expression.AnnotationExpression;
 import io.codelaser.maddi.cst.api.expression.Assignment;
 import io.codelaser.maddi.cst.api.expression.ConstructorCall;
@@ -170,12 +171,14 @@ public class ShadowModificationPass {
     // P3 discriminator: a callee in the analysis order is re-derived through edges; a callee
     // outside it (jar, shallow, preloaded) is a boundary whose verdict is primitive evidence
     private final Set<MethodInfo> orderMethods = new HashSet<>();
+    private final Set<TypeInfo> orderPrimaryTypes = new HashSet<>();
     private int methods, methodsWithoutLinks, edgeCount, callSitesWithoutArgumentLinks, unprojectedReceivers;
 
     public Report go(List<Info> analysisOrder) {
         List<MethodInfo> methodInfos = analysisOrder.stream()
                 .filter(i -> i instanceof MethodInfo).map(i -> (MethodInfo) i).toList();
         orderMethods.addAll(methodInfos);
+        analysisOrder.forEach(info -> orderPrimaryTypes.add(info.typeInfo().primaryType()));
         List<FieldInfo> fieldInfos = analysisOrder.stream()
                 .filter(i -> i instanceof FieldInfo).map(i -> (FieldInfo) i).toList();
         for (MethodInfo mi : methodInfos) {
@@ -615,6 +618,20 @@ public class ShadowModificationPass {
                 && !bodyIsOpaque(m));
     }
 
+    /**
+     * A source method of a type this analysis leaves out: an incremental run analyses the verdict closure of an edit
+     * only (refactor-base's ModificationAnalysisResource), and the types outside it keep the verdicts the previous
+     * run's pass wrote. Those verdicts are the reachability of the method's nodes in that run, so they seed the
+     * boundary (seedBoundaryCallee) as a jar's contracts do. Where a rule is keyed on the cold run's walk having had
+     * the method's body, the method counts as analysed: R2's outer callee (computeReceiverChain). A lambda's or an
+     * anonymous class's method is outside the order but not outside its primary type: not carried.
+     */
+    private boolean carried(MethodInfo method) {
+        if (orderMethods.contains(method) || orderPrimaryTypes.contains(method.typeInfo().primaryType())) return false;
+        SourceSet sourceSet = method.typeInfo().primaryType().compilationUnit().sourceSet();
+        return sourceSet != null && !sourceSet.externalLibrary();
+    }
+
     /** an in-order abstract with implementations, all in order and overriding it: its union is the E6 edges' */
     private boolean e6Rederivable(MethodInfo method) {
         if (!orderMethods.contains(method)
@@ -945,14 +962,16 @@ public class ShadowModificationPass {
                 // through E3, whatever was assigned to it) by its own body; only the result object as a whole is
                 // projected here. A builder setter returns 'this' and 'anyOf.anyOf <- 0:anyOf': following the
                 // component link made the next setter in the chain modify the first one's argument (#24 R2,
-                // TestBuilderFieldAssignment). A boundary outer callee, or an argument (outer null), keeps it.
+                // TestBuilderFieldAssignment). A carried outer callee was analysed too, by the run that wrote its
+                // verdicts (TestReachabilityOnClosure). A library outer callee, or an argument (outer null), keeps it.
                 // The result's own modification face is the whole result, not a component: an accessor's
                 // 'delegate.§m ≡ this.§m' carries guava's ForwardingTable.clear, 'delegate().clear()' on the analyzed
                 // Table.clear, to the receiver (CodeLaser/maddi-mod#42; followsReturnLink admits only ≡ between
                 // modification faces there)
                 String resultFqn = mlv.ofReturnValue().primary() == null ? null
                         : mlv.ofReturnValue().primary().fullyQualifiedName();
-                boolean wholeResultOnly = outer != null && orderMethods.contains(outer) && resultFqn != null;
+                boolean wholeResultOnly = outer != null && (orderMethods.contains(outer) || carried(outer))
+                                          && resultFqn != null;
                 mlv.ofReturnValue().stream().filter(link -> followsReturnLink(link, outer))
                         .filter(link -> !wholeResultOnly || resultFqn.equals(link.from().fullyQualifiedName())
                                         || resultModificationFace(link.from(), resultFqn))
