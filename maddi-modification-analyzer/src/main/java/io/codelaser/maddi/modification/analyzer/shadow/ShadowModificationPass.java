@@ -712,7 +712,11 @@ public class ShadowModificationPass {
                     // implementations instead
                     List<MethodInfo> cone = ReceiverLevel.enabled()
                             ? ReceiverLevel.coneImplementations(mc.methodInfo(), receiverType) : null;
-                    for (Object node : projectReceiverChain(mi, vd, mc.object(), mc.methodInfo())) {
+                    // engine mirror (MethodModification's receiver rule, and seedBoundaryCallee's): an
+                    // @IgnoreModifications or @Finalizer callee never implicates its receiver
+                    boolean receiverExempt = mc.methodInfo().isIgnoreModification() || mc.methodInfo().isFinalizer();
+                    for (Object node : receiverExempt ? Set.<Object>of()
+                            : projectReceiverChain(mi, vd, mc.object(), mc.methodInfo())) {
                         if (cone == null) {
                             addEdge(mc.methodInfo(), node);
                         } else {

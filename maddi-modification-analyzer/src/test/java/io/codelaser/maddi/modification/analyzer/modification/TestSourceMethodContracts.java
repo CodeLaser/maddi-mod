@@ -27,11 +27,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * {@code @Finalizer} is a pure contract: nothing computes it. On a source method {@code SourceContractMaterializer}
- * writes it into {@code analysis()}, where {@code MethodInfo.isFinalizer()} reads it (CodeLaser/maddi#167: the Rust
- * printer's {@code self} by value).
+ * {@code @Finalizer} and {@code @IgnoreModifications} on a method are pure contracts: nothing computes them. On a
+ * source method {@code SourceContractMaterializer} writes them into {@code analysis()}, where
+ * {@code MethodInfo.isFinalizer()} and {@code isIgnoreModification()} read them (CodeLaser/maddi#167: the Rust
+ * printer's {@code self} by value, and {@code &self} over a {@code RefCell}).
  */
-public class TestSourceFinalizer extends CommonTest {
+public class TestSourceMethodContracts extends CommonTest {
 
     @Language("java")
     private static final String INPUT = """
@@ -53,5 +54,37 @@ public class TestSourceFinalizer extends CommonTest {
         analyzer.go(ao);
         assertTrue(X.findUniqueMethod("build", 0).isFinalizer());
         assertFalse(X.findUniqueMethod("add", 1).isFinalizer());
+    }
+
+    @Language("java")
+    private static final String LOGS = """
+            package a.b;
+            import io.codelaser.maddi.annotation.rare.IgnoreModifications;
+            import java.util.ArrayList;
+            import java.util.List;
+            public class Logs {
+                private final List<String> buffer = new ArrayList<>();
+                private int total;
+                @IgnoreModifications
+                public void log(String s) { buffer.add(s); }
+                public int twice(int x) { log("twice"); return 2 * x; }
+                public void add(int x) { log("add"); total += x; }
+            }
+            """;
+
+    /**
+     * Materialized, the contract is read by the receiver rules (MethodModification, and the reachability pass's
+     * mirror): with the pass, a caller that only logs is non-modifying. This test runs the fixpoint engine alone, where
+     * {@code twice()} stays modifying: {@code log}'s summary carries the modification of {@code this.buffer} to its
+     * callers, a channel that does not look at the callee's contract.
+     */
+    @DisplayName("a source method's @IgnoreModifications is materialized")
+    @Test
+    public void ignoreModifications() {
+        TypeInfo logs = javaInspector.parse("a.b.Logs", LOGS);
+        List<Info> ao = prepWork(logs);
+        analyzer.go(ao);
+        assertTrue(logs.findUniqueMethod("log", 1).isIgnoreModification());
+        assertFalse(logs.findUniqueMethod("add", 1).isNonModifying());
     }
 }
