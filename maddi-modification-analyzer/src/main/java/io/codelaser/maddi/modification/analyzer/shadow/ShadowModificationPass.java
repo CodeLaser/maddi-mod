@@ -15,6 +15,7 @@ import io.codelaser.maddi.modification.prepwork.variable.impl.VariableInfoImpl;
 import io.codelaser.maddi.modification.prepwork.variable.ObjectCreationVariable;
 import io.codelaser.maddi.cst.api.analysis.PropertyValueMap;
 import io.codelaser.maddi.cst.api.analysis.Value;
+import io.codelaser.maddi.cst.api.element.SourceSet;
 import io.codelaser.maddi.cst.api.expression.AnnotationExpression;
 import io.codelaser.maddi.cst.api.expression.Assignment;
 import io.codelaser.maddi.cst.api.expression.ConstructorCall;
@@ -68,11 +69,12 @@ import static io.codelaser.maddi.modification.prepwork.callgraph.ComputePartOfCo
  * <p>
  * The structural twins (CodeLaser/maddi-mod#25, {@code STRUCTURALLY_*}): the same graph, closed a second time from
  * the seeds that are structural -- a modification of the node's object itself or of its accessible content, not of
- * its hidden content (an element). Every edge is between variables holding the same object or its accessible
- * content, so a structural modification stays structural along it, and a deep-only seed (a parameter that is
- * modified but structurally unmodified, a summary's deep-only entry, a field whose statement-level structural verdict
- * is true) reaches its nodes deep-only. The structural closure is a subset of the deep one, and the twin is written
- * from it beside the deep property.
+ * its hidden content (an element). An edge between variables holding the same object or its accessible content keeps
+ * a structural modification structural; an edge from an element to its container (a local {@code i ∈ items.§$s}, a
+ * call result {@code m.get(k)}) is deep-only, and the structural closure skips it. A deep-only seed (a parameter that
+ * is modified but structurally unmodified, a summary's deep-only entry, a field whose statement-level structural
+ * verdict is true) reaches its nodes deep-only. The structural closure is a subset of the deep one, and the twin is
+ * written from it beside the deep property.
  * Abstract in-order methods seed from their frozen FALSE only when the E6 edges cannot re-derive
  * it (not all implementations analyzed, or an explicit source @Modified contract). Methods
  * carrying DEGRADED_ANALYSIS_METHOD seed their receiver and all parameters (soundness, plan §9.1).
@@ -85,9 +87,8 @@ import static io.codelaser.maddi.modification.prepwork.callgraph.ComputePartOfCo
  * implicates the field, its containing fields along the scope chain, and the enclosing method's
  * receiver; E6 override parameter/receiver -> overridden parameter/receiver (the union-over-
  * implementations direction of AbstractMethodAnalyzer); E7 needs no edge here because seeding from
- * the modified sets inherits the engine's eager creation-site attribution. Element natures (plan
- * §7.1) are off: local links are followed through IS_ASSIGNED_FROM only, like the existing
- * consumers.
+ * the modified sets inherits the engine's eager creation-site attribution. Local links are followed
+ * through IS_ASSIGNED_FROM, and through IS_ELEMENT_OF to the container, deep-only (plan §7.1; see project).
  */
 public class ShadowModificationPass {
     private static final Logger LOGGER = LoggerFactory.getLogger(ShadowModificationPass.class);
@@ -153,6 +154,8 @@ public class ShadowModificationPass {
     }
 
     private final Map<Object, Set<Object>> successors = new HashMap<>();
+    // #25: the subset of the edges that is deep-only, element to container; the structural closure skips them
+    private final Map<Object, Set<Object>> deepOnlySuccessors = new HashMap<>();
     private final Set<Object> seeds = new HashSet<>();
     private final Set<Object> structuralSeeds = new HashSet<>(); // #25: the subset of seeds that is structural
     private final Map<Object, String> seedOrigin = new HashMap<>();
@@ -168,12 +171,14 @@ public class ShadowModificationPass {
     // P3 discriminator: a callee in the analysis order is re-derived through edges; a callee
     // outside it (jar, shallow, preloaded) is a boundary whose verdict is primitive evidence
     private final Set<MethodInfo> orderMethods = new HashSet<>();
+    private final Set<TypeInfo> orderPrimaryTypes = new HashSet<>();
     private int methods, methodsWithoutLinks, edgeCount, callSitesWithoutArgumentLinks, unprojectedReceivers;
 
     public Report go(List<Info> analysisOrder) {
         List<MethodInfo> methodInfos = analysisOrder.stream()
                 .filter(i -> i instanceof MethodInfo).map(i -> (MethodInfo) i).toList();
         orderMethods.addAll(methodInfos);
+        analysisOrder.forEach(info -> orderPrimaryTypes.add(info.typeInfo().primaryType()));
         List<FieldInfo> fieldInfos = analysisOrder.stream()
                 .filter(i -> i instanceof FieldInfo).map(i -> (FieldInfo) i).toList();
         for (MethodInfo mi : methodInfos) {
@@ -184,8 +189,8 @@ public class ShadowModificationPass {
                                                   + (structuralSeeds.contains(s) ? "" : " (deep-only)")
                                                   + " <- " + seedOrigin.getOrDefault(s, "?")));
         }
-        Set<Object> reached = closure(seeds, cause);
-        Set<Object> reachedStructural = closure(structuralSeeds, null);
+        Set<Object> reached = closure(seeds, cause, false);
+        Set<Object> reachedStructural = closure(structuralSeeds, null, true);
         List<Divergence> divergences = new ArrayList<>();
         List<Divergence> reverse = new ArrayList<>();
         for (MethodInfo mi : methodInfos) {
@@ -211,7 +216,8 @@ public class ShadowModificationPass {
         // MODREACH round 1, 1-in-6, cascading to the statement family); diffing two runs' dumps names it.
         if (System.getenv("EDGEDUMP") != null) {
             successors.entrySet().stream()
-                    .flatMap(e -> e.getValue().stream().map(to -> Report.label(e.getKey()) + " => " + Report.label(to)))
+                    .flatMap(e -> e.getValue().stream().map(to -> Report.label(e.getKey()) + " => " + Report.label(to)
+                            + (deepOnlySuccessors.getOrDefault(e.getKey(), Set.of()).contains(to) ? " (deep-only)" : "")))
                     .sorted()
                     .forEach(s -> System.out.println("EDGE " + s));
         }
@@ -425,7 +431,8 @@ public class ShadowModificationPass {
      this-scoped fields of a walkable body that occur ONLY as the direct receiver of calls to in-order methods: E2 carries
      those calls' modification onto the field node, so the walk re-derives it. Any other occurrence (a for-each over the
      field, an argument, a chained or element read) keeps the statement-level seed, the one channel for modification
-     the walk does not model (element modification: 'for (File f : tempFiles) f.delete()').
+     the walk does not model fully (element modification, 'for (File f : tempFiles) f.delete()', reaches the field
+     through project's element link, but not every element channel does).
      */
     private Set<FieldInfo> fieldsOnlyCallReceivers(MethodInfo mi) {
         Map<FieldInfo, Integer> all = new HashMap<>();
@@ -500,6 +507,10 @@ public class ShadowModificationPass {
 
     /** @param structural the modification is of the node's object itself (#25); false: of its hidden content only */
     private void seedWithOrigin(Object node, MethodInfo mi, String why, boolean structural) {
+        if (node instanceof DeepOnly(Object inner)) {
+            seedWithOrigin(inner, mi, why, false);
+            return;
+        }
         if (seeds.add(node)) seedOrigin.put(node, mi.fullyQualifiedName() + " " + why);
         if (structural) structuralSeeds.add(node);
     }
@@ -543,9 +554,9 @@ public class ShadowModificationPass {
 
     /** @param structural the summary's modification of {@code v} is structural (#25), not of its hidden content only */
     private void seedVariable(MethodInfo mi, Variable v, boolean skipReceiverRooted, boolean structural) {
-        // #59: a deep-only entry is an element's modification ('products.get(k).put(...)': 'p ∈ this.products'), the
-        // one channel the walk does not follow (element natures are off): it stays a seed, deep-only, and so cannot
-        // touch the structural twin, which the walk re-derives
+        // #59: a deep-only entry is an element's modification ('products.get(k).put(...)': 'p ∈ this.products'). The
+        // walk follows the plain element links (project), not every channel there is: it stays a seed, deep-only, and
+        // so cannot touch the structural twin, which the walk re-derives
         if (!structural) skipReceiverRooted = false;
         switch (v) {
             case This thisVar -> {
@@ -605,6 +616,20 @@ public class ShadowModificationPass {
                 && m.methodBody() != null && !m.methodBody().isEmpty()
                 && !io.codelaser.maddi.modification.prepwork.Util.unionOverImplementations(m)
                 && !bodyIsOpaque(m));
+    }
+
+    /**
+     * A source method of a type this analysis leaves out: an incremental run analyses the verdict closure of an edit
+     * only (refactor-base's ModificationAnalysisResource), and the types outside it keep the verdicts the previous
+     * run's pass wrote. Those verdicts are the reachability of the method's nodes in that run, so they seed the
+     * boundary (seedBoundaryCallee) as a jar's contracts do. Where a rule is keyed on the cold run's walk having had
+     * the method's body, the method counts as analysed: R2's outer callee (computeReceiverChain). A lambda's or an
+     * anonymous class's method is outside the order but not outside its primary type: not carried.
+     */
+    private boolean carried(MethodInfo method) {
+        if (orderMethods.contains(method) || orderPrimaryTypes.contains(method.typeInfo().primaryType())) return false;
+        SourceSet sourceSet = method.typeInfo().primaryType().compilationUnit().sourceSet();
+        return sourceSet != null && !sourceSet.externalLibrary();
     }
 
     /** an in-order abstract with implementations, all in order and overriding it: its union is the E6 edges' */
@@ -687,7 +712,11 @@ public class ShadowModificationPass {
                     // implementations instead
                     List<MethodInfo> cone = ReceiverLevel.enabled()
                             ? ReceiverLevel.coneImplementations(mc.methodInfo(), receiverType) : null;
-                    for (Object node : projectReceiverChain(mi, vd, mc.object(), mc.methodInfo())) {
+                    // engine mirror (MethodModification's receiver rule, and seedBoundaryCallee's): an
+                    // @IgnoreModifications or @Finalizer callee never implicates its receiver
+                    boolean receiverExempt = mc.methodInfo().isIgnoreModification() || mc.methodInfo().isFinalizer();
+                    for (Object node : receiverExempt ? Set.<Object>of()
+                            : projectReceiverChain(mi, vd, mc.object(), mc.methodInfo())) {
                         if (cone == null) {
                             addEdge(mc.methodInfo(), node);
                         } else {
@@ -782,7 +811,7 @@ public class ShadowModificationPass {
             }
             case DependentVariable dv -> {
                 for (Object node : project(mi, vd, dv.arrayVariable())) {
-                    if (node instanceof FieldInfo fi && constructionPhaseWrite(mi, fi)) continue;
+                    if (unwrap(node) instanceof FieldInfo fi && constructionPhaseWrite(mi, fi)) continue;
                     seedWithOrigin(node, mi, "array-element assignment " + dv.fullyQualifiedName());
                 }
             }
@@ -937,14 +966,16 @@ public class ShadowModificationPass {
                 // through E3, whatever was assigned to it) by its own body; only the result object as a whole is
                 // projected here. A builder setter returns 'this' and 'anyOf.anyOf <- 0:anyOf': following the
                 // component link made the next setter in the chain modify the first one's argument (#24 R2,
-                // TestBuilderFieldAssignment). A boundary outer callee, or an argument (outer null), keeps it.
+                // TestBuilderFieldAssignment). A carried outer callee was analysed too, by the run that wrote its
+                // verdicts (TestReachabilityOnClosure). A library outer callee, or an argument (outer null), keeps it.
                 // The result's own modification face is the whole result, not a component: an accessor's
                 // 'delegate.§m ≡ this.§m' carries guava's ForwardingTable.clear, 'delegate().clear()' on the analyzed
                 // Table.clear, to the receiver (CodeLaser/maddi-mod#42; followsReturnLink admits only ≡ between
                 // modification faces there)
                 String resultFqn = mlv.ofReturnValue().primary() == null ? null
                         : mlv.ofReturnValue().primary().fullyQualifiedName();
-                boolean wholeResultOnly = outer != null && orderMethods.contains(outer) && resultFqn != null;
+                boolean wholeResultOnly = outer != null && (orderMethods.contains(outer) || carried(outer))
+                                          && resultFqn != null;
                 mlv.ofReturnValue().stream().filter(link -> followsReturnLink(link, outer))
                         .filter(link -> !wholeResultOnly || resultFqn.equals(link.from().fullyQualifiedName())
                                         || resultModificationFace(link.from(), resultFqn))
@@ -971,6 +1002,23 @@ public class ShadowModificationPass {
                         }
                     }
                 }));
+                // the result is an element of the receiver or of an argument ('m.get(k).touch()': 'rv ∈ this.§$$s'):
+                // modifying it modifies that object's hidden content, deep-only (see project)
+                if (resultFqn != null) {
+                    for (Link link : mlv.ofReturnValue()) {
+                        if (link.linkNature() != LinkNatureImpl.IS_ELEMENT_OF
+                            || !resultFqn.equals(link.from().fullyQualifiedName())) continue;
+                        io.codelaser.maddi.cst.api.expression.Expression container = switch (Util.firstRealVariable(link.to())) {
+                            case This thisVar when callee.typeInfo().isEqualToOrInnerClassOf(thisVar.typeInfo()) ->
+                                    mc.object();
+                            case ParameterInfo pi when pi.methodInfo() == callee
+                                                       && pi.index() < mc.parameterExpressions().size() ->
+                                    mc.parameterExpressions().get(pi.index());
+                            case null, default -> null;
+                        };
+                        projectReceiverChain(mi, vd, container, null).forEach(node -> out.add(deepOnly(node)));
+                    }
+                }
                 return out;
             }
             case ConstructorCall cc when cc.constructor() != null -> {
@@ -1008,13 +1056,31 @@ public class ShadowModificationPass {
     /**
      * Project a caller-side variable onto graph nodes: parameters of the current method, fields
      * (plus containing fields and the receiver for this-scoped references — E4/E5), the receiver for
-     * This; locals are followed through the statement's converged links (IS_ASSIGNED_FROM only,
-     * element natures off) until they reach projectable variables.
+     * This; locals are followed through the statement's converged links (IS_ASSIGNED_FROM) until they
+     * reach projectable variables.
+     * <p>
+     * A local that is an element of another variable ({@code i ∈ 0:items.§$s}, the loop variable of
+     * {@code for (Item i : items)}) projects that container as well, deep-only ({@link DeepOnly}): modifying an
+     * element modifies the container's hidden content, not the container itself. The engine's rule
+     * (WriteLinksAndModification.notLinkedToModified: ∋ counts in the deep question only). The containers are
+     * projected after everything the start reaches structurally, so a node reached both ways stays structural.
      */
     private Set<Object> project(MethodInfo mi, VariableData vd, Variable start) {
         Set<Object> out = new LinkedHashSet<>();
-        Deque<Variable> todo = new ArrayDeque<>();
         Set<String> done = new HashSet<>();
+        List<Variable> containers = new ArrayList<>();
+        project(mi, vd, start, false, done, out, containers);
+        // an element's container can be an element in turn: the list grows while we walk it
+        for (int i = 0; i < containers.size(); i++) {
+            project(mi, vd, containers.get(i), true, done, out, containers);
+        }
+        return out;
+    }
+
+    private void project(MethodInfo mi, VariableData vd, Variable start, boolean deepOnly, Set<String> done,
+                         Set<Object> nodes, List<Variable> containers) {
+        Set<Object> out = deepOnly ? new LinkedHashSet<>() : nodes;
+        Deque<Variable> todo = new ArrayDeque<>();
         push(todo, start);
         while (!todo.isEmpty()) {
             Variable v = todo.poll();
@@ -1066,13 +1132,33 @@ public class ShadowModificationPass {
                                                 push(todo, l.from());
                                             }
                                         });
+                                links.stream().filter(l -> l.linkNature() == LinkNatureImpl.IS_ELEMENT_OF
+                                                           && l.from().fullyQualifiedName().equals(v.fullyQualifiedName()))
+                                        .map(l -> Util.firstRealVariable(l.to()))
+                                        .filter(Objects::nonNull)
+                                        .forEach(containers::add);
                             }
                         }
                     }
                 }
             }
         }
-        return out;
+        if (deepOnly) out.forEach(node -> nodes.add(deepOnly(node)));
+    }
+
+    /**
+     * A node whose hidden content only is implicated (#25): an edge to it is deep-only, as is a seed. Only projections
+     * carry it; the graph's nodes are the wrapped ones.
+     */
+    private record DeepOnly(Object node) {
+    }
+
+    private static Object deepOnly(Object node) {
+        return node instanceof DeepOnly ? node : new DeepOnly(node);
+    }
+
+    private static Object unwrap(Object node) {
+        return node instanceof DeepOnly(Object inner) ? inner : node;
     }
 
     private static final boolean NO_VIEW_LOCAL = io.codelaser.maddi.modification.link.impl.Gate.isSet("NOVIEWLOCAL");
@@ -1187,7 +1273,8 @@ public class ShadowModificationPass {
     private static final String[] TAINT_DEBUG = Optional.ofNullable(System.getenv("MODREACH_TAINT"))
             .map(s -> s.split(",")).orElse(new String[0]);
 
-    private void taint(Object node, String why) {
+    private void taint(Object projected, String why) {
+        Object node = unwrap(projected);
         if (frontierIncomplete.add(node) && TAINT_DEBUG.length > 0 && node instanceof Info info
             && Arrays.stream(TAINT_DEBUG).anyMatch(part -> !part.isBlank()
                                                           && info.fullyQualifiedName().contains(part))) {
@@ -1195,9 +1282,17 @@ public class ShadowModificationPass {
         }
     }
 
+    /** @param to a node, or a {@link DeepOnly} one: the edge then carries modification into its hidden content only */
     private void addEdge(Object from, Object to) {
-        if (from == to) return;
-        if (successors.computeIfAbsent(from, k -> new HashSet<>()).add(to)) edgeCount++;
+        Object node = unwrap(to);
+        if (from == node) return;
+        if (successors.computeIfAbsent(from, k -> new HashSet<>()).add(node)) {
+            edgeCount++;
+            if (to instanceof DeepOnly) deepOnlySuccessors.computeIfAbsent(from, k -> new HashSet<>()).add(node);
+        } else if (!(to instanceof DeepOnly)) {
+            Set<Object> deep = deepOnlySuccessors.get(from);
+            if (deep != null) deep.remove(node); // structural as well: structural wins
+        }
     }
 
     // ------------------------------------------------------------------ cutover writer (P2.3)
@@ -1340,8 +1435,11 @@ public class ShadowModificationPass {
         return NO_CHANGE; // TRUE and unreached: agreement
     }
 
-    /** @param cause the BFS predecessor of each reached node, for explanations; null to record none */
-    private Set<Object> closure(Set<Object> from, Map<Object, Object> cause) {
+    /**
+     * @param cause      the BFS predecessor of each reached node, for explanations; null to record none
+     * @param structural skip the deep-only edges (#25)
+     */
+    private Set<Object> closure(Set<Object> from, Map<Object, Object> cause, boolean structural) {
         Set<Object> reached = new HashSet<>(from);
         Deque<Object> todo = new ArrayDeque<>(from);
         while (!todo.isEmpty()) {
@@ -1351,8 +1449,9 @@ public class ShadowModificationPass {
             // parameters/fields (the writer's immutable guard stopped the WRITE but not the walk) —
             // fernflower cause-chain diagnosis 2026-07-19.
             if (immutableTyped(node)) continue;
+            Set<Object> deepOnly = structural ? deepOnlySuccessors.getOrDefault(node, Set.of()) : Set.of();
             for (Object next : successors.getOrDefault(node, Set.of())) {
-                if (reached.add(next)) {
+                if (!deepOnly.contains(next) && reached.add(next)) {
                     if (cause != null) cause.put(next, node);
                     todo.add(next);
                 }

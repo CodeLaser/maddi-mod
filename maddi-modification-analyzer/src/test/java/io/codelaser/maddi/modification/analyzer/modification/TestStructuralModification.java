@@ -39,14 +39,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * <p>
  * Each verdict is written {@code deep/structural}, by the fixpoint and by the reachability pass.
  * <ul>
- * <li>{@code useReader}: an argument handed to the SAM of one of the method's own functional parameters is
+ * <li>{@code useReader}, by the fixpoint: an argument handed to the SAM of one of the method's own functional parameters is
  *     "modified for some function" ({@code MODIFIED_THROUGH_PASSED_FUNCTION}), whatever the SAM's own verdict; the
  *     structural twin follows the deep one's pessimism.</li>
- * <li>The reachability pass follows no element link for a parameter (its E1/E2 projections walk assignment
- *     links only), so its DEEP verdict never saw an element-only modification of a parameter in a walkable body:
- *     the two columns agree there, before and after #25. A field keeps its deep evidence through the
- *     statement-level seeds ({@code Holder.touched}), and the structural twin classifies that seed; the method's
- *     receiver through its summary's deep-only entry ({@code Holder.touchAll}, CodeLaser/maddi-mod#59).</li>
+ * <li>The reachability pass follows a local's element link ({@code i ∈ items.§$s}) and a call result's
+ *     ({@code m.get(k)}) to the container, deep-only: its structural closure skips those edges. Before, its deep
+ *     verdict missed every element-only modification of a parameter in a walkable body (touchAll true/true).</li>
+ * <li>{@code useReader} is the one place the two modes differ: the pass has no such rule, it reads
+ *     {@code Reader.read} from its implementations, and none of them modifies the list structurally.</li>
  * </ul>
  */
 public class TestStructuralModification extends CommonTest {
@@ -70,6 +70,9 @@ public class TestStructuralModification extends CommonTest {
                 static void touchAll(List<Item> items) { for (Item i : items) i.touch(); }
                 static void touchFirst(Collection<Item> items) { Item first = items.iterator().next(); touch(first); }
                 static void touchValue(Map<String, Item> m, String k) { m.get(k).touch(); }
+                static void setAll(List<Item> items) { for (Item i : items) i.n = 1; }
+                static void touchNested(List<List<Item>> lists) { for (List<Item> l : lists) for (Item i : l) i.touch(); }
+                static int sum(List<Item> items) { int s = 0; for (Item i : items) s += i.n; return s; }
                 // the collection itself
                 static void add(List<Item> items, Item i) { items.add(i); }
                 static void addAlias(List<Item> items, Item i) { List<Item> l = items; l.add(i); }
@@ -129,6 +132,9 @@ public class TestStructuralModification extends CommonTest {
         return "touchAll=" + p(method(S, "touchAll"), 0)
                + " touchFirst=" + p(method(S, "touchFirst"), 0)
                + " touchValue=" + p(method(S, "touchValue"), 0)
+               + " setAll=" + p(method(S, "setAll"), 0)
+               + " touchNested=" + p(method(S, "touchNested"), 0)
+               + " sum=" + p(method(S, "sum"), 0)
                + " add=" + p(method(S, "add"), 0)
                + " addAlias=" + p(method(S, "addAlias"), 0)
                + " sort=" + p(method(S, "sort"), 0)
@@ -148,6 +154,7 @@ public class TestStructuralModification extends CommonTest {
     }
 
     private static final String EXPECTED_FIXPOINT = "touchAll=false/true touchFirst=false/true touchValue=false/true"
+                                                    + " setAll=false/true touchNested=false/true sum=true/true"
                                                     + " add=false/false addAlias=false/false sort=false/false dropFirst=false/false peek=true/true"
                                                     + " addVia=false/false touchVia=false/true"
                                                     + " addLambda=true/true,false/false"
@@ -156,15 +163,8 @@ public class TestStructuralModification extends CommonTest {
                                                     + " Sink.accept=false/false Reader.read=false/true"
                                                     + " useSink=false/false useReader=false/false";
 
-    // the deep column differs from the fixpoint's exactly where a parameter is modified through its elements
-    private static final String EXPECTED_REACHABILITY = "touchAll=true/true touchFirst=true/true touchValue=true/true"
-                                                        + " add=false/false addAlias=false/false sort=false/false dropFirst=false/false peek=true/true"
-                                                        + " addVia=false/false touchVia=true/true"
-                                                        + " addLambda=true/true,false/false"
-                                                        + " Holder.items=false/false Holder.touched=false/true"
-                                                        + " Holder.add=false/false Holder.touchAll=false/true"
-                                                        + " Sink.accept=false/false Reader.read=true/true"
-                                                        + " useSink=false/false useReader=true/true";
+    private static final String EXPECTED_REACHABILITY = EXPECTED_FIXPOINT
+            .replace("useReader=false/false", "useReader=false/true");
 
     @DisplayName("structural beside deep: fixpoint")
     @Test

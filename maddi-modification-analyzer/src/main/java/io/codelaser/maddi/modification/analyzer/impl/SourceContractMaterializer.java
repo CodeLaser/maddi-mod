@@ -121,6 +121,14 @@ public class SourceContractMaterializer {
         // so it is read from analysis() like every other consumer expects. It caps nothing (SSE is informational,
         // feeding only the @IgnoreModifications containment guard), so trusting it here is safe.
         materializeTrueBool(methodInfo, STATIC_SIDE_EFFECTS_METHOD);
+        // @Finalizer is a pure contract too: nothing computes it, and without materialization a SOURCE method's
+        // annotation is read by nothing (MethodInfo.isFinalizer() reads analysis()). The Rust printer turns it into
+        // a method taking self by value (CodeLaser/maddi#167).
+        materializeTrueBool(methodInfo, io.codelaser.maddi.cst.impl.analysis.PropertyImpl.FINALIZER_METHOD);
+        // @IgnoreModifications on a SOURCE method (a log method writing a buffer): the same pure contract as on a
+        // parameter or field below. Its callers do not count a call to it as a modification (the reachability
+        // pass, ShallowMethodLinkComputer); the method's own NON_MODIFYING_METHOD stays computed.
+        materializeTrueBool(methodInfo, io.codelaser.maddi.cst.impl.analysis.PropertyImpl.IGNORE_MODIFICATION_METHOD);
         // @IgnoreModifications on a SOURCE parameter is the same pure-contract gap as the field arm below:
         // the author disclaims what the argument object does (typically a functional parameter applied to
         // this — Element.visit(@IgnoreModifications Predicate)); it cannot be computed, and without
