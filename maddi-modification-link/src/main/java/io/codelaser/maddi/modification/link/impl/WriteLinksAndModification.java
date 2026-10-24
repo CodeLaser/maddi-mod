@@ -121,10 +121,11 @@ class WriteLinksAndModification {
 
         Map<Variable, Set<MethodInfo>> expandedModifiedDuringEvaluation = expand(modifiedDuringEvaluation, Set.of());
         // #25: the structural view of the same evaluation, the deep-only keys left out. The expansion is over
-        // variables holding the SAME object, so a key's kind is its expansion's kind. The same map when nothing is
-        // deep-only: the completion a ≡-hit writes into it (notLinkedToModified) then serves both views, as it must.
+        // variables holding the SAME object, so a key's kind is its expansion's kind. Always a map of its own: the
+        // completion notLinkedToModified writes after a ∋-hit is a deep-only modification (#62), which the structural
+        // view must not see; its ≡-hits, it derives itself.
         Map<Variable, Set<MethodInfo>> expandedStructurallyModifiedDuringEvaluation = deepOnlyDuringEvaluation.isEmpty()
-                ? expandedModifiedDuringEvaluation
+                ? new HashMap<>(expandedModifiedDuringEvaluation)
                 : expand(modifiedDuringEvaluation, deepOnlyDuringEvaluation);
         closeOverModificationGroups(expandedModifiedDuringEvaluation);
         if (expandedStructurallyModifiedDuringEvaluation != expandedModifiedDuringEvaluation) {
@@ -1020,6 +1021,10 @@ class WriteLinksAndModification {
                 if (ln == CONTAINS_AS_FIELD
                     || ln == SHARES_FIELDS // see impl/TestInstanceOf,2
                     || ln == CONTAINS_AS_MEMBER && !structural) {
+                    // the completion, as for ≡ above: a later variable holding this one as an element (∋) is
+                    // modified in turn. vlist.get(i).put(..) modifies vlist through its element, and versions,
+                    // which holds vlist, through vlist (CodeLaser/maddi-mod#62)
+                    modifiedVariablesAndTheirCause.putIfAbsent(builder.primary(), causesOfModification);
                     return false;
                 }
                 // the following rule is only valid for variables of non-abstract types (those that have no §m)
