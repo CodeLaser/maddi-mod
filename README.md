@@ -46,6 +46,23 @@ Without the analyses' facts, the same corpora are ratcheted in maddi's `maddi-ru
 `slowTest` run as evidence, read maddi's `AGENTS.md` §Commands: a green corpus run can be cached, skipped, vacuous or
 starved of heap, and each one looks like success.
 
+## rustc as a judge of the verdicts
+
+maddi's Rust printer (`maddi-cst-print-rust`, CodeLaser/maddi#167) prints the verdicts computed here as Rust's
+ownership modes, and prints the bodies without softening them, so rustc's borrow checker checks the verdicts against
+the code:
+
+| rustc says | reading |
+|---|---|
+| E0596, E0594: cannot borrow or assign behind `&` | a non-modifying or unmodified verdict the body contradicts: an unsound modification verdict |
+| E0597, E0716, E0515: does not live long enough | a missed dependence |
+| E0382: use of a moved value | usually the printer's: Java shares a kept object, Rust moves it |
+| E0133: unsafe call | a missed `@StaticSideEffects` |
+
+rustc catches unsound verdicts, not imprecise ones: a `&mut` where `&` would do compiles. Issues #58, #59, #60, #62,
+#63 and #64 came from such rejections, each with a minimal repro, and #65 is a question this check raised.
+To run it on a project: `maddi --translate rust --translate-output out`, then `cargo build` in `out`.
+
 ## The annotated APIs
 
 The hint sources are in maddi (`maddi-aapi-archive`); this repository compiles them. After a change there:
