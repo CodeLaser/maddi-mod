@@ -314,7 +314,14 @@ public class TestShadowCloneBench extends CommonTest {
         // @Immutable); divergences 62 -> 56, all six the caller-summary channel: two String parameters
         // (writer__setOutputFolders), Map_Merge(_RV)'s String value, update(URL) charged by its anonymous
         // Runnable; Map_ComputeIfPresent(_RV)'s map stays a divergence, now through Map.remove.
-        org.junit.jupiter.api.Assertions.assertEquals(331, totalRev,
+        // ⭐ Re-baselined 2026-10-24 for the ws/maddi-bug commits #58-#60 (af7d0243, bf20ff11, dfea2a11, d79cd437):
+        // reverse 331 -> 317, 14 closed and none opened, divergences unchanged (56, same lists). Measured on the Mac
+        // with maddi b8f892a7b: maddi-mod 2119d556 gives 331, ea82c893 317; maddi 81ce53bec and e28e7f511 (JDK hints
+        // for the unmodifiable views, the boolean simplifier) and maddi-mod 0fe28364 (#54, #55, #62-#64) are neutral.
+        // All 14 are nonModifyingMethod and one shape, a for-each over a field's collection that calls the
+        // elements' methods: fireModifiedListeners, notifyObservers(Object), stopAll, pauseAll, close, flush,
+        // cleanUp, triggerAction(String), isSizeEqualsOrLargerThan(int) (in two corpora), ...
+        org.junit.jupiter.api.Assertions.assertEquals(317, totalRev,
                 "reverse divergences are expected since design A (110695ece) retired the "
                 + "walkable-summary seed channel; re-baseline deliberately, and reclassify");
         // Re-baselined 2026-09-22 for the RECEIVER-DISCLAIMER rule (@IgnoreModifications on a parameter now
