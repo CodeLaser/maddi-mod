@@ -56,22 +56,27 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * {@code independentParameter}, where a link to the return value (-1) says how the result shares it.
  * CodeLaser/maddi-mod#60 was this test's first shape: {@code Collections.unmodifiable*} read as independent views.
  * <p>
- * One rule overrules the JDK here, on purpose: an iterator is {@code @Independent(hc=true)} of what it iterates
- * (road-to-immutability §"Hidden content", the iterator "is independent of the fields of the implementing type, but
- * has the ability to return its hidden content"), although it shows a later change of its list. {@link #BY_DESIGN}
- * lists where; a change on either side still fails.
+ * An iterator is judged the other way round. The hints say {@code @Independent(hc = true, except = "remove")}
+ * ({@code Iterable.iterator()}): it hands out the source's elements, and only the methods in {@code except} write
+ * through to the source; {@code next()} moves the iterator, not the iterable. A change of the source while iterating
+ * is not modelled: an iterator lives inside one loop, and the JDK enforces that with
+ * {@code ConcurrentModificationException}. So for a method that makes an iterator the test calls every method of the
+ * iterator on a fresh one, collects those that change the source, and holds that set to the hint's {@code except}
+ * ({@link Value.Independent#dependentMethods()}); the level is INDEPENDENT_HC when {@code next()} hands out the
+ * source's own element.
  */
 public class TestJdkCollectionViews {
 
     enum Level {DEPENDENT, INDEPENDENT_HC, INDEPENDENT}
 
-    /** Where the hints differ from the JDK on purpose: the iterator rule (see the class comment). */
-    private static final Map<String, String> BY_DESIGN = Map.of(
-            "List.iterator()", "the JDK says DEPENDENT, the hints INDEPENDENT_HC",
-            "Collections.enumeration(Collection)", "the JDK says DEPENDENT, the hints INDEPENDENT_HC");
-
-    /** One case: the executable whose verdict is checked (-1: the method's own; else that parameter's), and the run. */
-    private record Case(Executable executable, int parameter, Supplier<Level> run) {
+    /**
+     * One case: the executable whose verdict is checked (-1: the method's own; else that parameter's), the run, and
+     * the names of the result's methods that write through to the source (none for a view or a copy).
+     */
+    private record Case(Executable executable, int parameter, Supplier<Level> run, Supplier<Set<String>> through) {
+        Case(Executable executable, int parameter, Supplier<Level> run) {
+            this(executable, parameter, run, Set::of);
+        }
     }
 
     @Test
@@ -92,10 +97,18 @@ public class TestJdkCollectionViews {
                 continue;
             }
             Level jdk = c.run().get();
-            Level hints = c.parameter() < 0 ? method(methodInfo) : parameter(methodInfo.parameters().get(c.parameter()));
-            String verdict = "the JDK says " + jdk + ", the hints " + hints;
-            String byDesign = BY_DESIGN.get(where);
-            if (byDesign != null ? !byDesign.equals(verdict) : jdk != hints) wrong.add(where + ": " + verdict);
+            Set<String> jdkThrough = c.through().get();
+            Value.Independent independent = c.parameter() < 0
+                    ? methodInfo.analysis().getOrDefault(INDEPENDENT_METHOD, ValueImpl.IndependentImpl.DEPENDENT)
+                    : methodInfo.parameters().get(c.parameter()).analysis().getOrDefault(INDEPENDENT_PARAMETER,
+                    ValueImpl.IndependentImpl.DEPENDENT);
+            Level hints = c.parameter() < 0 ? level(independent) : parameterLevel(independent);
+            Set<String> hintsThrough = new TreeSet<>();
+            independent.dependentMethods().forEach(mi -> hintsThrough.add(mi.name()));
+            if (jdk != hints || !jdkThrough.equals(hintsThrough)) {
+                wrong.add(where + ": the JDK says " + jdk + (jdkThrough.isEmpty() ? "" : " except " + jdkThrough)
+                          + ", the hints " + hints + (hintsThrough.isEmpty() ? "" : " except " + hintsThrough));
+            }
         }
         assertEquals(List.of(), notFound, "executables the CST does not have");
         assertTrue(cases.size() > 50, "only " + cases.size() + " cases");
@@ -104,13 +117,7 @@ public class TestJdkCollectionViews {
 
     // ---- the hints' verdict
 
-    private static Level method(MethodInfo methodInfo) {
-        return level(methodInfo.analysis().getOrDefault(INDEPENDENT_METHOD, ValueImpl.IndependentImpl.DEPENDENT));
-    }
-
-    private static Level parameter(ParameterInfo parameterInfo) {
-        Value.Independent independent = parameterInfo.analysis().getOrDefault(INDEPENDENT_PARAMETER,
-                ValueImpl.IndependentImpl.DEPENDENT);
+    private static Level parameterLevel(Value.Independent independent) {
         Integer toReturnValue = independent.linkToParametersReturnValue().get(-1);
         if (toReturnValue != null) return Level.values()[toReturnValue];
         return level(independent);
@@ -133,10 +140,6 @@ public class TestJdkCollectionViews {
         cases.add(receiver(List.class.getMethod("reversed"), List.class, l -> ((List<?>) l).reversed()));
         cases.add(receiver(List.class.getMethod("toArray"), List.class, l -> ((List<?>) l).toArray()));
         cases.add(receiver(Collection.class.getMethod("toArray"), Collection.class, l -> ((Collection<?>) l).toArray()));
-        cases.add(iterator(List.class.getMethod("iterator"), l -> l.iterator()));
-        cases.add(iterator(List.class.getMethod("listIterator"), l -> l.listIterator()));
-        cases.add(iterator(Collections.class.getMethod("enumeration", Collection.class),
-                l -> Collections.enumeration(l).asIterator()));
         for (String name : List.of("keySet", "values", "entrySet")) {
             cases.add(receiver(Map.class.getMethod(name), Map.class, m -> invoke(Map.class, name, m)));
         }
@@ -210,6 +213,32 @@ public class TestJdkCollectionViews {
                 }
             }
         }
+        // what makes an iterator: which of its methods write through to the source
+        Supplier<Collection<StringBuilder>> list = () -> new ArrayList<>(List.of(new StringBuilder("e"), new StringBuilder("f")));
+        Supplier<Collection<StringBuilder>> set = () -> new LinkedHashSet<>(List.of(new StringBuilder("e"), new StringBuilder("f")));
+        Supplier<Collection<StringBuilder>> sorted = () -> new TreeSet<>(List.of(new StringBuilder("e"), new StringBuilder("f")));
+        Supplier<Collection<StringBuilder>> deque = () -> new ArrayDeque<>(List.of(new StringBuilder("e"), new StringBuilder("f")));
+        for (Class<?> type : List.of(Iterable.class, Collection.class, List.class, ArrayList.class, LinkedList.class,
+                Vector.class)) {
+            cases.add(iterator(type.getMethod("iterator"), list, c -> c.iterator()));
+        }
+        for (Class<?> type : List.of(List.class, ArrayList.class, LinkedList.class, Vector.class)) {
+            cases.add(iterator(type.getMethod("listIterator"), list, c -> ((List<?>) c).listIterator()));
+            cases.add(iterator(type.getMethod("listIterator", int.class), list, c -> ((List<?>) c).listIterator(0)));
+        }
+        cases.add(iterator(Set.class.getMethod("iterator"), set, c -> c.iterator()));
+        cases.add(iterator(TreeSet.class.getMethod("iterator"), sorted, c -> c.iterator()));
+        cases.add(iterator(ArrayDeque.class.getMethod("iterator"), deque, c -> c.iterator()));
+        for (Class<?> type : List.of(Deque.class, ArrayDeque.class, LinkedList.class)) {
+            cases.add(iterator(type.getMethod("descendingIterator"), type == LinkedList.class
+                            ? () -> new LinkedList<>(List.of(new StringBuilder("e"), new StringBuilder("f"))) : deque,
+                    c -> ((Deque<?>) c).descendingIterator()));
+        }
+        for (Class<?> type : List.of(NavigableSet.class, TreeSet.class)) {
+            cases.add(iterator(type.getMethod("descendingIterator"), sorted, c -> ((NavigableSet<?>) c).descendingIterator()));
+        }
+        cases.add(iterator(Collections.class.getMethod("enumeration", Collection.class), list,
+                c -> Collections.enumeration(c)));
         return cases;
     }
 
@@ -222,20 +251,50 @@ public class TestJdkCollectionViews {
         });
     }
 
-    /** An iterator over a list: changed in place after the call, then read to the end. */
-    private static Case iterator(Executable executable, Function<List<StringBuilder>, Iterator<?>> call) {
-        return new Case(executable, executable instanceof Method m && !java.lang.reflect.Modifier.isStatic(m.getModifiers())
-                ? -1 : 0, () -> {
-            StringBuilder element = new StringBuilder("e");
-            List<StringBuilder> source = new ArrayList<>(List.of(element, new StringBuilder("f")));
-            Iterator<?> it = call.apply(source);
-            StringBuilder replacement = new StringBuilder("g");
-            source.set(1, replacement);
-            List<Object> seen = new ArrayList<>();
-            it.forEachRemaining(seen::add);
-            if (seen.stream().anyMatch(o -> o == replacement)) return Level.DEPENDENT;
-            return seen.stream().anyMatch(o -> o == element) ? Level.INDEPENDENT_HC : Level.INDEPENDENT;
-        });
+    /**
+     * A method that makes an iterator ({@code Iterator}, {@code ListIterator}, {@code Enumeration}), on the receiver
+     * or, for a static, on its first argument. Each of the iterator's methods is called on a fresh one, moved past its
+     * first element; those after which the source holds other objects write through.
+     */
+    private static Case iterator(Method method, Supplier<Collection<StringBuilder>> source,
+                                 Function<Collection<StringBuilder>, Object> call) {
+        Class<?> iteratorType = method.getReturnType();
+        int parameter = java.lang.reflect.Modifier.isStatic(method.getModifiers()) ? 0 : -1;
+        Supplier<Level> level = () -> {
+            Collection<StringBuilder> s = source.get();
+            Object first = advance(call.apply(s));
+            return s.stream().anyMatch(o -> o == first) ? Level.INDEPENDENT_HC : Level.INDEPENDENT;
+        };
+        Supplier<Set<String>> through = () -> {
+            Set<String> names = new TreeSet<>();
+            for (Method m : iteratorType.getMethods()) {
+                if (java.lang.reflect.Modifier.isStatic(m.getModifiers()) || m.getDeclaringClass() == Object.class) continue;
+                Collection<StringBuilder> s = source.get();
+                Object it = call.apply(s);
+                advance(it);
+                List<Object> before = snapshot(s);
+                Object[] args = Arrays.stream(m.getParameterTypes()).map(TestJdkCollectionViews::iteratorArgument).toArray();
+                try {
+                    m.invoke(it, args);
+                } catch (ReflectiveOperationException | RuntimeException _) {
+                    // an exhausted iterator, or a call the iterator refuses: the source is compared all the same
+                }
+                if (!sameObjects(before, snapshot(s))) names.add(m.getName());
+            }
+            return names;
+        };
+        return new Case(method, parameter, level, through);
+    }
+
+    private static Object advance(Object iterator) {
+        return iterator instanceof Iterator<?> it ? it.next() : ((Enumeration<?>) iterator).nextElement();
+    }
+
+    private static Object iteratorArgument(Class<?> type) {
+        if (type == int.class) return 0;
+        if (type == java.util.function.Consumer.class) return (java.util.function.Consumer<Object>) _ -> {
+        };
+        return new StringBuilder("x");
     }
 
     /** A static or a constructor whose result is built on argument {@code index}: the source is that argument. */

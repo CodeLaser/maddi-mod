@@ -103,6 +103,35 @@ public class TestModificationThroughView extends CommonTest {
                     while (it.hasNext()) { it.next(); n++; }
                     return n;
                 }
+                // a ListIterator writes through with remove, set and add only; a descending iterator with remove
+                static <T> void addThroughListIterator(List<T> list, T t) {
+                    ListIterator<T> it = list.listIterator();
+                    it.add(t);
+                }
+                static <T> void removeDescending(java.util.Deque<T> deque) {
+                    Iterator<T> it = deque.descendingIterator();
+                    it.next();
+                    it.remove();
+                }
+                // structurally unmodified now; its content still reads modified (CodeLaser/maddi-mod#66)
+                static <T> int countThroughListIterator(List<T> list) {
+                    int n = 0;
+                    ListIterator<T> it = list.listIterator();
+                    while (it.hasNext()) { it.next(); n++; }
+                    return n;
+                }
+                static <T> int countDescending(java.util.Deque<T> deque) {
+                    int n = 0;
+                    Iterator<T> it = deque.descendingIterator();
+                    while (it.hasNext()) { it.next(); n++; }
+                    return n;
+                }
+                static <T> int countDescendingSet(java.util.NavigableSet<T> set) {
+                    int n = 0;
+                    Iterator<T> it = set.descendingIterator();
+                    while (it.hasNext()) { it.next(); n++; }
+                    return n;
+                }
             }
             """;
 
@@ -116,7 +145,7 @@ public class TestModificationThroughView extends CommonTest {
         return pi.isUnmodified() + "/" + pi.isStructurallyUnmodified();
     }
 
-    @DisplayName("removal and replacement through a view's iterator modify the parameter, structurally")
+    @DisplayName("removal, replacement and addition through a view's iterator modify the parameter, structurally; reading does not")
     @Test
     public void test() {
         TypeInfo views = javaInspector.parse("a.b.Views", INPUT);
@@ -126,7 +155,8 @@ public class TestModificationThroughView extends CommonTest {
         StringBuilder sb = new StringBuilder();
         for (String name : List.of("removeAllKeys", "removeKeys", "removeValues", "removeDirect",
                 "setThroughListIterator", "clearSubList", "clearValues", "clearValuesLocal",
-                "removeThroughSubListIterator", "removeThroughEntrySetLocal", "countKeys")) {
+                "removeThroughSubListIterator", "removeThroughEntrySetLocal", "countKeys", "addThroughListIterator",
+                "removeDescending", "countThroughListIterator", "countDescending", "countDescendingSet")) {
             sb.append(name).append('=').append(p(method(views, name))).append('\n');
         }
         assertEquals("""
@@ -141,6 +171,11 @@ public class TestModificationThroughView extends CommonTest {
                 removeThroughSubListIterator=false/false
                 removeThroughEntrySetLocal=false/false
                 countKeys=true/true
+                addThroughListIterator=false/false
+                removeDescending=false/false
+                countThroughListIterator=false/true
+                countDescending=true/true
+                countDescendingSet=true/true
                 """, sb.toString());
     }
 }
