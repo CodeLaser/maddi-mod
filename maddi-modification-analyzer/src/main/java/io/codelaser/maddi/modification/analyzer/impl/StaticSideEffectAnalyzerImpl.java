@@ -19,8 +19,11 @@ import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.element.Element;
 import io.codelaser.maddi.cst.api.expression.Assignment;
 import io.codelaser.maddi.cst.api.expression.ConstructorCall;
+import io.codelaser.maddi.cst.api.expression.Expression;
+import io.codelaser.maddi.cst.api.expression.MethodReference;
 import io.codelaser.maddi.cst.api.expression.MethodCall;
 import io.codelaser.maddi.cst.api.expression.VariableExpression;
+import io.codelaser.maddi.cst.api.info.FieldInfo;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.statement.ExplicitConstructorInvocation;
@@ -41,7 +44,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  * type <em>other</em> than its own primary type and its parent types (road-to-immutability §050, "Static side
  * effects"). A method adds to its set the owner of each static field it assigns or makes a modifying call on
  * ({@code Other.COUNTER.incrementAndGet()}, {@code System.out.println(...)}), and the sets of the methods and
- * constructors it calls, static or instance. So {@code Counter.next()} incrementing its own static counter has no
+ * constructors it calls or references ({@code Counter::next}, as a lambda calling it), static or instance. A
+ * constructor's set includes what the instance fields' initializers modify: they run as part of it. So {@code Counter.next()} incrementing its own static counter has no
  * static side effect, while {@code Client.twice()} calling it has one: Counter's state is not Client's
  * (CodeLaser/maddi-mod#65). A callee contracted {@code @StaticSideEffects} on the library's safe surface (an AAPI
  * declaration such as {@code System.setOut}, whose effect is not visible from source; see
@@ -121,7 +125,7 @@ public class StaticSideEffectAnalyzerImpl {
                             boolean activateCycleBreaking) {
         Set<TypeInfo> set = sets.get(mi);
         boolean[] waits = {false};
-        mi.methodBody().visit((Element e) -> {
+        java.util.function.Predicate<Element> visitor = e -> {
             // assignment to a static field: 'Other.STATIC = ...', 'count++'
             if (e instanceof Assignment a && a.variableTarget() instanceof FieldReference fr
                 && fr.fieldInfo().isStatic()) {
@@ -135,11 +139,13 @@ public class StaticSideEffectAnalyzerImpl {
                 if (nonModifying == null && !activateCycleBreaking) waits[0] = true;
                 else if (nonModifying == null || nonModifying.isFalse()) set.add(fr.fieldInfo().owner());
             }
-            // what the callee modifies, static or instance method, constructor, this(...) or super(...)
+            // what the callee modifies, static or instance method, constructor, this(...) or super(...); a method
+            // or constructor reference as a lambda calling it, whose body counts as if it ran here
             MethodInfo callee = switch (e) {
                 case MethodCall mc -> mc.methodInfo();
                 case ConstructorCall cc -> cc.constructor();
                 case ExplicitConstructorInvocation eci -> eci.methodInfo();
+                case MethodReference mr -> mr.methodInfo();
                 default -> null;
             };
             if (callee != null) {
@@ -148,8 +154,18 @@ public class StaticSideEffectAnalyzerImpl {
                 else if (computable(callee) && !activateCycleBreaking) waits[0] = true;
             }
             return true;
-        });
+        };
+        mi.methodBody().visit(visitor);
+        // an instance field's initializer runs in every constructor, as if written there ('int id = next++;')
+        if (mi.isConstructor()) instanceInitializers(mi.typeInfo()).forEach(i -> i.visit(visitor));
         return waits[0];
+    }
+
+    // the initializers of the type's instance fields; a static field's is the construction of the static state
+    private static List<Expression> instanceInitializers(TypeInfo typeInfo) {
+        return typeInfo.fields().stream()
+                .filter(fi -> !fi.isStatic() && fi.initializer() != null && !fi.initializer().isEmpty())
+                .map(FieldInfo::initializer).toList();
     }
 
     // decided: computed here, or contracted (SourceContractMaterializer, an AAPI declaration)
@@ -159,7 +175,8 @@ public class StaticSideEffectAnalyzerImpl {
 
     // a body this analyzer will decide; a shallow or abstract method is a static side effect only by contract
     private static boolean computable(MethodInfo mi) {
-        return !mi.isAbstract() && !mi.methodBody().isEmpty();
+        return !mi.isAbstract() && (!mi.methodBody().isEmpty()
+                                    || mi.isConstructor() && !instanceInitializers(mi.typeInfo()).isEmpty());
     }
 
     private Set<TypeInfo> modified(MethodInfo callee) {

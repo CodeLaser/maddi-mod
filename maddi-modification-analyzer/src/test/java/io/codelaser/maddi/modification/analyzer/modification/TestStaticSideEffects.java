@@ -102,7 +102,9 @@ public class TestStaticSideEffects extends CommonTest {
      * CodeLaser/maddi-mod#65: a type's own static state is its own, but not its callers'. {@code Counter.next()}
      * modifies Counter's static counter, no static side effect; {@code Client.twice()} calls it and modifies state
      * that is not Client's: a static side effect, whether the callee is static, an instance method, or a
-     * constructor (road §050's {@code HasUniqueIdentifier}, its generator incremented on every construction).
+     * constructor (road §050's {@code HasUniqueIdentifier}, its generator incremented on every construction), an
+     * instance field's initializer (it runs in the constructor), or a method or constructor reference (as a lambda
+     * calling it).
      */
     @Language("java")
     private static final String OWN_STATE = """
@@ -121,6 +123,10 @@ public class TestStaticSideEffects extends CommonTest {
                 final int identifier;
                 HasUniqueIdentifier() { identifier = generator.getAndIncrement(); }
             }
+            class Numbered {
+                private static int next;
+                final int id = next++;                                // runs in the constructor
+            }
             class Child extends HasUniqueIdentifier {
                 Child() { super(); }                                  // a parent type's state: excused
             }
@@ -132,6 +138,9 @@ public class TestStaticSideEffects extends CommonTest {
                 static Object createChild() { return new Child(); }
                 static int reads() { return Counter.read(); }
                 static int indirect() { return twice(); }
+                static Object numbered() { return new Numbered(); }
+                static java.util.function.IntSupplier reference() { return Counter::next; }
+                static java.util.function.Supplier<HasUniqueIdentifier> factory() { return HasUniqueIdentifier::new; }
             }
             """;
 
@@ -164,10 +173,14 @@ public class TestStaticSideEffects extends CommonTest {
         assertEquals(Set.of("HasUniqueIdentifier"), modified(constructor));
         assertFalse(sse(constructor));
         assertFalse(sse(child.findConstructor(0)), "a parent type's static state is excused");
+        MethodInfo numberedConstructor = type(parsed, "Numbered").findConstructor(0);
+        assertEquals(Set.of("Numbered"), modified(numberedConstructor), "the field initializer's next++");
+        assertFalse(sse(numberedConstructor));
 
         // another type's state: a static side effect, through a static method, an instance method, a
         // constructor, recursion, and on to the callers
-        for (String name : List.of("twice", "viaInstance", "viaRecursion", "create", "createChild", "indirect")) {
+        for (String name : List.of("twice", "viaInstance", "viaRecursion", "create", "createChild", "indirect", "numbered",
+                "reference", "factory")) {
             assertTrue(sse(client.findUniqueMethod(name, 0)), name);
         }
         assertEquals(Set.of("Counter"), modified(client.findUniqueMethod("twice", 0)));
