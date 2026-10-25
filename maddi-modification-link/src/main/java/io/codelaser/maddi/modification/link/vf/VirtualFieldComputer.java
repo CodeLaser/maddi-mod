@@ -70,6 +70,7 @@ public class VirtualFieldComputer {
     private final Runtime runtime;
     private final GenericsHelper genericsHelper;
     private final Set<TypeInfo> multi2;
+    private final ParameterizedType iteratorType;
 
     public static final String VF_CHAR = "§";
     public static final String VF_CONCRETE = "$";
@@ -82,6 +83,7 @@ public class VirtualFieldComputer {
         ParameterizedType iterator = javaInspector.compiledTypesManager().type(Iterator.class).asParameterizedType();
         this.genericsHelper = new GenericsHelperImpl(runtime);
         multi2 = Set.of(iterable.typeInfo(), iterator.typeInfo());
+        this.iteratorType = iterator;
     }
 
     // ----- computation of "temporary" virtual fields
@@ -340,11 +342,11 @@ public class VirtualFieldComputer {
     int maxMultiplicityFromMethods(TypeInfo typeInfo) {
         // base for many computations
         if (multi2.contains(typeInfo)) return 2;
-        // a subtype yields many elements too, whatever its own methods return: ListIterator's next() and previous()
-        // return one E, which read multiplicity 1, a single §e, so that a modifying call on the iterator reached the
-        // list's elements (CodeLaser/maddi-mod#66)
-        ParameterizedType pt = typeInfo.asParameterizedType();
-        if (multi2.stream().anyMatch(m2 -> runtime.isAssignableFrom(m2.asParameterizedType(), pt))) return 2;
+        // an Iterator subtype yields many elements too, whatever its own methods return: ListIterator's next() and
+        // previous() return one E, which read multiplicity 1, a single §e, so that a modifying call on the iterator
+        // reached the list's elements (CodeLaser/maddi-mod#66). Not so for an Iterable subtype: a single-valued one
+        // (vavr's Option, Value) stays at what its methods say, like Optional.
+        if (runtime.isAssignableFrom(iteratorType, typeInfo.asParameterizedType())) return 2;
         int multiplicity = 0;
         for (MethodInfo methodInfo : typeInfo.constructorsAndMethods()) {
             ParameterizedType returnType = methodInfo.returnType();
