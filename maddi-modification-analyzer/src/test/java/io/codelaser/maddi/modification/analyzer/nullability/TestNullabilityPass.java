@@ -2941,6 +2941,62 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("Long", s.get("a.b.WC.LongFunnel.funnel(Long,StringBuilder):0:value"), s + "\n" + explain(report));
     }
 
+    @DisplayName("Kotlin: a null into a non-modifying abstract consumer on an Ordering<@Nullable Object> belongs to the receiver, guava OrderingTest")
+    @Test
+    public void nullIntoAbstractConsumer() {
+        NullabilityPass.Report report = run("a.b.AC", """
+                package a.b;
+                import io.codelaser.maddi.annotation.NotModified;
+                import java.util.Map;
+                class AC {
+                    static abstract class Ordering<T> {
+                        @NotModified
+                        public abstract int compare(T left, T right);
+                    }
+                    static final class Incomparable extends RuntimeException {
+                        final Object value;
+                        Incomparable(Object value) {
+                            super("cannot compare " + value);
+                            this.value = value;
+                        }
+                    }
+                    static final class Explicit<T> extends Ordering<T> {
+                        private final Map<T, Integer> ranks;
+                        Explicit(Map<T, Integer> ranks) {
+                            this.ranks = ranks;
+                        }
+                        @Override
+                        public int compare(T left, T right) {
+                            return rank(left) - rank(right);
+                        }
+                        private int rank(T value) {
+                            Integer rank = ranks.get(value);
+                            if (rank == null) {
+                                throw new Incomparable(value);
+                            }
+                            return rank;
+                        }
+                    }
+                    static int allEqual(Ordering<Object> comparator) {
+                        return comparator.compare(null, null);
+                    }
+                    static int use(Map<String, Integer> ranks) {
+                        return new Explicit<>(ranks).compare("a", "b");
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        String context = s + "\n" + explain(report);
+        // the null is the receiver's: an Ordering<Object?>
+        assertEquals("Ordering<Object?>", s.get("a.b.AC.allEqual(a.b.AC.Ordering):0:comparator"), context);
+        // not every override's, whose parameter Kotlin types as the declaration's T anyway: before, the null flowed on
+        // from Explicit's clamped 'compare(left: T)' into 'rank(value: T?)' and 'Incomparable(value: Any?)'
+        assertEquals("T!", s.get("a.b.AC.Explicit.compare(Object,Object):0:left"), context);
+        assertEquals("T!", s.get("a.b.AC.Explicit.rank(Object):0:value"), context);
+        assertEquals("Object", s.get("a.b.AC.Incomparable.<init>(Object):0:value"), context);
+    }
+
     @DisplayName("Kotlin: 'return null' after a conditional return makes the result nullable, jenkins Hudson.getSlave")
     @Test
     public void returnNullAfterConditionalReturn() {

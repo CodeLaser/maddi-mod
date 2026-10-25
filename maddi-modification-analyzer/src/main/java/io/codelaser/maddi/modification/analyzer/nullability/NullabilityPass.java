@@ -6416,6 +6416,23 @@ public final class NullabilityPass {
 
     private static final Switches.Gate CONSUMER_RECEIVERS_OFF = Switches.gate("NOCONSUMERRECEIVERS");
 
+    /*
+     Kotlin: an analysed consumer that overrides replace ('Ordering.compare(T, T)', abstract) takes a null into its
+     class's type variable as its receiver's instantiation, as a modifying method does: the overrides' parameters
+     are the declaration's T (clampTypeVariableOverrides), and Kotlin passes null only to an 'Ordering<X?>'. Seeded
+     on the parameter instead, the null reached every override and flowed on from its clamped parameter: guava
+     OrderingTest's 'compare(null, null)' on an Ordering<@Nullable Object> made ExplicitOrdering's 'rank(value: T?)'
+     and IncomparableValueException's 'value: Any?', once Ordering.compare was known non-modifying (maddi
+     afb4537bf's JDK hints; ExplicitOrdering.kt:14, 2026-10-25). A concrete consumer nothing overrides keeps its own
+     nullable parameter. Gate NOFAMILYCONSUMERS.
+     */
+    private boolean familyConsumer(MethodInfo callee) {
+        return policy.callResults() && !FAMILY_CONSUMERS_OFF.get() && analysed.contains(callee)
+               && (callee.isAbstract() || implementations.containsKey(callee));
+    }
+
+    private static final Switches.Gate FAMILY_CONSUMERS_OFF = Switches.gate("NOFAMILYCONSUMERS");
+
     private Object slotReceiver(MethodInfo mi, Scope scope, Expression call, MethodInfo callee) {
         if (!(call instanceof MethodCall mc) || mc.object() == null || callee.isStatic()) return null;
         Expression object = NonNullFacts.unwrap(mc.object());
@@ -6440,7 +6457,8 @@ public final class NullabilityPass {
         }
         // only a method that modifies its receiver stores what it is given: 'add', 'put', 'set'; not a consumer
         // such as 'Comparator.compare(T, T)', 'Equivalence.equivalent', 'Predicate.test'
-        if (callee.analysis().getOrDefault(PropertyImpl.NON_MODIFYING_METHOD, ValueImpl.BoolImpl.FALSE).isTrue()) {
+        if (callee.analysis().getOrDefault(PropertyImpl.NON_MODIFYING_METHOD, ValueImpl.BoolImpl.FALSE).isTrue()
+            && !familyConsumer(callee)) {
             return null;
         }
         ParameterizedType type = receiver == null ? null : typeOf(receiver);
