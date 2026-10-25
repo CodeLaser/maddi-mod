@@ -837,7 +837,7 @@ public class ShadowModificationPass {
         if (callee == null || callee.parameters().isEmpty()) return;
         // engine mirror (MethodModification.functionalReceiver): the SAM of one of our own functional parameters
         boolean ownFunctionalReceiver = receiver instanceof ParameterInfo fp && fp.methodInfo() == mi
-                                        && callee.isAbstract() && fp.parameterizedType().isFunctionalInterface();
+                                        && PassedFunction.sam(callee) && PassedFunction.functional(fp);
         LinkComputer.ListOfLinks list = analysis.getOrNull(LinkComputerImpl.LINKED_VARIABLES_ARGUMENTS,
                 LinkComputerImpl.ListOfLinksImpl.class);
         if (list == null) {
@@ -886,16 +886,16 @@ public class ShadowModificationPass {
             // engine mirror: the callee modifies this parameter only through a function, and ours leaves it alone
             PassedFunction.Effect effect = PassedFunction.effectAtCallSite(pi, argumentExpressions);
             if (effect == PassedFunction.Effect.UNMODIFIED) continue;
-            // engine mirror: an element of our parameter is the argument of our own function's SAM; the engine
-            // records it for our callers (an element entry), the parameter is not modified here (#67)
+            // engine mirror: our parameter, or an element of it, is the argument of our own function's SAM; the
+            // engine records an entry for our callers, the parameter is not modified here (#67, #69)
             if (ownFunctionalReceiver && effect == null
-                && !PassedFunction.elementOf(links, vd, Stage.EVALUATION, mi).isEmpty()) {
+                && !PassedFunction.ownParametersHolding(links, vd, Stage.EVALUATION, mi).isEmpty()) {
                 continue;
             }
-            // engine mirror: only the argument's elements reach a function that may modify them; unless those
-            // functions are our own, passed on (the engine then records), its hidden content is modified
-            if (effect == PassedFunction.Effect.ELEMENTS
-                && PassedFunction.forwardedElementEntries(pi, argumentExpressions, mi) != null
+            // engine mirror: the callee hands the argument, or its elements, to functions we pass and one may modify
+            // it; unless those functions are our own, passed on (the engine then records), the argument is modified:
+            // structurally (ANY), or its hidden content only (ELEMENTS)
+            if (effect != null && PassedFunction.forwardedEntries(pi, argumentExpressions, mi) != null
                 && !PassedFunction.ownParametersHolding(links, vd, Stage.EVALUATION, mi).isEmpty()) {
                 continue;
             }
@@ -911,9 +911,11 @@ public class ShadowModificationPass {
             } else {
                 links.stream().forEach(link -> targets.addAll(project(mi, vd, Util.firstRealVariable(link.to()))));
             }
-            if (effect == PassedFunction.Effect.ELEMENTS) {
+            if (effect != null) {
+                boolean elements = effect == PassedFunction.Effect.ELEMENTS;
                 for (Object node : targets) {
-                    seedWithOrigin(deepOnly(node), mi, "element handed to a modifying function by " + callee);
+                    seedWithOrigin(elements ? deepOnly(node) : node, mi,
+                            (elements ? "element" : "argument") + " handed to a modifying function by " + callee);
                 }
                 continue;
             }

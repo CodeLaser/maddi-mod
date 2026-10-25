@@ -34,7 +34,8 @@ import java.util.TreeMap;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
- * An element of a parameter handed to one of the method's functional parameters (CodeLaser/maddi-mod#67, option b):
+ * An element of a parameter handed to one of the method's functional parameters (CodeLaser/maddi-mod#67, option b),
+ * or the parameter itself (#69):
  * the container stays unmodified, and the parameter records the function in
  * {@link PropertyImpl#MODIFIED_THROUGH_PASSED_FUNCTION}; a caller resolves the entry with the function it passes. The
  * element is read by {@code List.get}, {@code Optional.get}, a for-each, or a {@code Val}-style getter (vavr's
@@ -105,12 +106,21 @@ public class TestModificationOfElementThroughPassedFunction extends CommonTest {
                 static <T, R> R forwardListElement(List<T> list, Function<T, R> f) {
                     return listElement(list, f);
                 }
+
+                static <T> int callerWhole(List<T> list) {
+                    return whole(list, List::size);
+                }
+
+                static boolean callerWholeAdds(List<String> list) {
+                    return whole(list, l -> l.add("x"));
+                }
             }
             """;
 
     private static final List<String> METHODS = List.of("listElement", "optionalElement", "valElement",
             "eachElement", "whole", "callerListElement", "callerListElementAdds", "callerEachElement",
-            "callerEachElementAdds", "callerOptionalElement", "callerOptionalElementAdds", "forwardListElement");
+            "callerEachElementAdds", "callerOptionalElement", "callerOptionalElementAdds", "forwardListElement",
+            "callerWhole", "callerWholeAdds");
 
     /*
      first parameter: deep unmodified / structurally unmodified / through-set
@@ -120,7 +130,10 @@ public class TestModificationOfElementThroughPassedFunction extends CommonTest {
             Map.entry("optionalElement", "unmodified/unmodified/[1:0:e]"),
             Map.entry("valElement", "unmodified/unmodified/[1:0:e]"),
             Map.entry("eachElement", "unmodified/unmodified/[1:0:e]"),
-            Map.entry("whole", "modified/modified/[1:0]"),
+            // the whole parameter, likewise (CodeLaser/maddi-mod#69): that f is applied is recorded on f itself
+            Map.entry("whole", "unmodified/unmodified/[1:0]"),
+            Map.entry("callerWhole", "unmodified/unmodified/[]"),
+            Map.entry("callerWholeAdds", "modified/modified/[]"),
             Map.entry("callerListElement", "unmodified/unmodified/[]"),
             Map.entry("callerListElementAdds", "modified/unmodified/[]"),
             Map.entry("callerEachElement", "unmodified/unmodified/[]"),

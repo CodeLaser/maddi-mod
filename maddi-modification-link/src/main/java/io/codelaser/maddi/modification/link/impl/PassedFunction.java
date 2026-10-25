@@ -27,6 +27,7 @@ import io.codelaser.maddi.cst.api.variable.LocalVariable;
 import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
+import io.codelaser.maddi.modification.common.FunctionTypes;
 import io.codelaser.maddi.modification.prepwork.Util;
 import io.codelaser.maddi.modification.prepwork.variable.Link;
 import io.codelaser.maddi.modification.prepwork.variable.Links;
@@ -47,8 +48,9 @@ import java.util.Set;
  * but not for {@code Queue::ofAll}, so {@code toQueue()} does not modify its receiver.
  * <p>
  * Two kinds of entry. {@code k:j}: the parameter itself is argument {@code j} of the SAM of functional parameter
- * {@code k}; the parameter stays modified (it is, for some function), and a call site passing a function that leaves
- * it alone does not modify its argument. {@code k:j:e}: an ELEMENT of the parameter (its hidden content, read by
+ * {@code k}; the parameter is unmodified (that the function is applied is recorded on {@code k} itself, starred with
+ * an applied marker, linking manual §7; CodeLaser/maddi-mod#69), and a call site passing a function that may
+ * modify its argument modifies its own argument. {@code k:j:e}: an ELEMENT of the parameter (its hidden content, read by
  * {@code get}, an iterator or a for-each) is that SAM argument (CodeLaser/maddi-mod#67, option b); the parameter is
  * unmodified, and a call site passing a function that modifies its argument modifies the hidden content of its own
  * argument, deep-only.
@@ -60,6 +62,21 @@ public final class PassedFunction {
     private static final String ELEMENT = ":e";
 
     private PassedFunction() {
+    }
+
+    /** A parameter of functional type: a Java functional interface, or a Kotlin function type ({@link FunctionTypes}). */
+    public static boolean functional(ParameterInfo parameter) {
+        return parameter.parameterizedType().isFunctionalInterface()
+               || FunctionTypes.isStandardFunctionalInterface(parameter.parameterizedType().typeInfo());
+    }
+
+    /**
+     * The method called on a functional parameter is its SAM: abstract, or a Kotlin function type's {@code invoke}, which
+     * the stdlib jar does not present as abstract (so neither does {@code singleAbstractMethod()}).
+     */
+    public static boolean sam(MethodInfo methodInfo) {
+        return methodInfo.isAbstract() || FunctionTypes.isSAMOfStandardFunctionalInterface(methodInfo)
+               || FunctionTypes.isKotlinFunctionType(methodInfo.typeInfo()) && "invoke".equals(methodInfo.name());
     }
 
     public static String entry(int functionalParameterIndex, int samArgumentIndex) {
@@ -87,7 +104,7 @@ public final class PassedFunction {
         UNMODIFIED,
         /** only functions of element entries may modify: the argument's hidden content is modified, deep-only */
         ELEMENTS,
-        /** a function of a whole-parameter entry may modify, or the entries cannot be read here */
+        /** a function of a whole-parameter entry may modify, or the entries cannot be read here: structurally */
         ANY
     }
 
@@ -129,13 +146,13 @@ public final class PassedFunction {
     }
 
     /**
-     * The element entries the CALLER takes over when it passes its own functional parameters on: for
+     * The entries the CALLER takes over when it passes its own functional parameters on: for
      * {@code forward(list, f) { return listElement(list, f); }}, {@code listElement}'s {@code 1:0:e} becomes
-     * {@code forward}'s own {@code 1:0:e}, for its callers to resolve. Null when a function that may modify is not
-     * one of the caller's functional parameters, or belongs to a whole-parameter entry.
+     * {@code forward}'s own {@code 1:0:e}, for its callers to resolve. Null when a function that may modify is not one
+     * of the caller's functional parameters.
      */
-    public static List<String> forwardedElementEntries(ParameterInfo calleeParameter, List<Expression> arguments,
-                                                       MethodInfo caller) {
+    public static List<String> forwardedEntries(ParameterInfo calleeParameter, List<Expression> arguments,
+                                                MethodInfo caller) {
         List<String> out = new ArrayList<>();
         for (String s : entries(calleeParameter)) {
             Entry entry = Entry.parse(s);
@@ -143,14 +160,19 @@ public final class PassedFunction {
             Expression function = arguments.get(entry.functionalParameterIndex);
             Boolean modifies = modifiesArgument(function, entry.samArgumentIndex);
             if (modifies != null && !modifies) continue;
-            if (!entry.element || !(function instanceof VariableExpression ve)
-                || !(ve.variable() instanceof ParameterInfo own) || own.methodInfo() != caller
-                || !own.parameterizedType().isFunctionalInterface()) {
+            if (!(function instanceof VariableExpression ve) || !(ve.variable() instanceof ParameterInfo own)
+                || own.methodInfo() != caller || !functional(own)) {
                 return null;
             }
-            out.add(elementEntry(own.index(), entry.samArgumentIndex));
+            out.add(entry.element ? elementEntry(own.index(), entry.samArgumentIndex)
+                    : entry(own.index(), entry.samArgumentIndex));
         }
         return out;
+    }
+
+    /** The entry for an element of the parameter that {@code entry} is about. */
+    public static String asElementEntry(String entry) {
+        return isElementEntry(entry) ? entry : entry + ELEMENT;
     }
 
     /**

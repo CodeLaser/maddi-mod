@@ -48,10 +48,12 @@ import static org.junit.jupiter.api.Assertions.*;
  *     {@code sb} (with MODREACH); on vavr, through {@code Tuple.of}, to {@code List.Cons.tail}.</li>
  * <li>{@code Holder.perform}: the control -- a CONCRETE, non-immutable field handed over (vavr's
  *     {@code FutureImpl.perform}); that is accessible content and stays a modification.</li>
- * <li>{@code applyTo}/{@code caller2}/{@code caller3}: a type-parameter PARAMETER handed over stays modified. That is
- *     not the book's answer ({@code t} is hidden content of the method too), but it is the one channel that carries a
- *     concrete function's modification back to the caller's argument; exempting it loses {@code caller2}'s and
- *     {@code caller3}'s real modification of {@code sb}. Same for {@code fold}'s {@code zero}.</li>
+ * <li>{@code applyTo}/{@code caller2}/{@code caller3}: a PARAMETER handed to the method's own function is unmodified,
+ *     with the entry {@code 1:0} in {@code MODIFIED_THROUGH_PASSED_FUNCTION} (CodeLaser/maddi-mod#69): the entry, not a
+ *     modified verdict, is the channel that carries a concrete function's modification back to the caller's argument,
+ *     so {@code caller2}'s and {@code caller3}'s real modification of {@code sb} stays. {@code fold}'s {@code zero}
+ *     (assigned to {@code acc}, then handed over) is not the parameter itself and records no entry; its verdict
+ *     differs between the modes (fixpoint unmodified, MODREACH modified), as it did before #69.</li>
  * <li>{@code caller}: the book's call-site half -- a concrete {@code Append} modifies {@code first}, which is the
  *     caller's {@code sb} -- is NOT implemented, before or after this rule: {@code sb} comes out unmodified.</li>
  * </ul>
@@ -209,7 +211,10 @@ public class TestHiddenContentToModifiedArgument extends CommonTest {
                 "the FIELD Pair.first is never modified, so nothing flows back to the constructor parameter");
         assertFalse(modified(x, "make"), "no teleport: make only builds a pair");
 
-        assertTrue(applyTo.parameters().getFirst().isModified(), "a type-parameter parameter stays the channel");
+        assertFalse(applyTo.parameters().getFirst().isModified(), "handed whole to the method's own function (#69)");
+        assertEquals(java.util.Set.of("1:0"), applyTo.parameters().getFirst().analysis().getOrDefault(
+                PropertyImpl.MODIFIED_THROUGH_PASSED_FUNCTION, ValueImpl.SetOfStringsImpl.EMPTY_SET).set(),
+                "... the entry is the channel to the caller");
         assertTrue(modified(x, "caller2"), "Append modifies caller2's sb");
         assertTrue(modified(x, "caller3"), "the lambda modifies caller3's sb");
         assertFalse(modified(x, "caller"), "the call-site half is not implemented (see the class comment)");

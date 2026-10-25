@@ -755,14 +755,8 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                     if (structural) paramsStructurallyModified[pi.index()] = true;
                 }
             }
-            // handed to one of our own functional parameters: recorded, not marked (PassedFunction) -- but for SOME
-            // function it is modified, so the parameter's own verdict says so. Not when only its elements are handed
-            // on (an element entry, CodeLaser/maddi-mod#67): the parameter is unmodified, its callers resolve it.
-            for (Map.Entry<ParameterInfo, Set<String>> e : modifiedThroughPassedFunction.entrySet()) {
-                if (e.getValue().stream().allMatch(PassedFunction::isElementEntry)) continue;
-                paramsModified[e.getKey().index()] = true;
-                paramsStructurallyModified[e.getKey().index()] = true;
-            }
+            // handed to one of our own functional parameters, whole or an element of it: recorded, not marked; its
+            // callers resolve the entry with the function they pass (PassedFunction, CodeLaser/maddi-mod#67, #69)
             Value.Bool nonModifying = ValueImpl.BoolImpl.from(!methodModified);
             if (TolerantWrite.setAllowControlledOverwrite(methodInfo.analysis(), PropertyImpl.NON_MODIFYING_METHOD, nonModifying, methodInfo)) {
                 propertiesChanged.incrementAndGet();

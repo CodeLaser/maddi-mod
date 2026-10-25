@@ -77,6 +77,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>{@code invokesValue} hands {@code b} to an unknown function value. Java's {@code Consumer.accept} argument is
  * {@code @Modified}; Kotlin's {@code Function1.invoke} had no contract and read unmodified, until
  * {@code KotlinJvmFunctions} gave {@code Function0}-{@code Function3} the contract of {@code java.util.function.Function}.
+ * Since CodeLaser/maddi-mod#69 both sides leave {@code b} unmodified with the entry {@code 1:0}: the function is the
+ * method's own parameter, and its callers resolve what it does to {@code b} (Kotlin's {@code invoke}, read from the
+ * stdlib jar, is neither abstract nor a functional interface's SAM to the CST: {@code PassedFunction.sam/functional}).
  *
  * <p>The {@code suspend…} rows: a suspend function is {@code Object f(…, Continuation)} on the JVM, and a call to one
  * passes the caller's continuation. The Java side is written in that shape, and a modification must travel through
