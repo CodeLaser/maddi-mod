@@ -36,6 +36,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.Supplier;
 import java.util.jar.JarEntry;
 import java.util.jar.JarInputStream;
 import java.util.regex.Matcher;
@@ -287,8 +288,8 @@ public class LoadAnalysisResults {
     }
 
     private static void checkFormatMarker(JSONObject jo) {
-        String format = CodecImpl.unquote(pair(jo, 1, "format", "the format marker").get(2).getSource());
-        String version = pair(jo, 3, "version", "the format marker").get(2).getSource();
+        String format = CodecImpl.unquote(pair(jo, 1, "format", () -> "the format marker").get(2).getSource());
+        String version = pair(jo, 3, "version", () -> "the format marker").get(2).getSource();
         if (!WriteAnalysisResults.FORMAT_NAME.equals(format)) {
             throw new AnalysisResultsFormatException("not an analysis-results file: format '" + format
                                                      + "', expected '" + WriteAnalysisResults.FORMAT_NAME + "'");
@@ -304,18 +305,19 @@ public class LoadAnalysisResults {
      * The key-value pair at {@code position} of {@code jo}, which the format says carries {@code key}. The parser's
      * children interleave punctuation with pairs, so the pairs sit at the odd positions. A missing or differently
      * keyed pair is format drift: reported as such, with the element it occurs in, rather than as a
-     * ClassCastException (CodeLaser/maddi-mod#3).
+     * ClassCastException (CodeLaser/maddi-mod#3). {@code where} is only built for that report: it is asked for each
+     * element of every results file loaded.
      */
-    private static KeyValuePair pair(JSONObject jo, int position, String key, String where) {
+    private static KeyValuePair pair(JSONObject jo, int position, String key, Supplier<String> where) {
         if (jo.size() <= position || !(jo.get(position) instanceof KeyValuePair kv)) {
             throw new AnalysisResultsFormatException("expected \"" + key + "\" as entry " + (position / 2 + 1) + " of "
-                                                     + where + ", found " + (jo.size() <= position ? "nothing"
+                                                     + where.get() + ", found " + (jo.size() <= position ? "nothing"
                     : jo.get(position).getClass().getSimpleName()));
         }
         String found = kv.get(0).getSource();
         if (!("\"" + key + "\"").equals(found)) {
             throw new AnalysisResultsFormatException("expected \"" + key + "\" as entry " + (position / 2 + 1) + " of "
-                                                     + where + ", found " + found);
+                                                     + where.get() + ", found " + found);
         }
         return kv;
     }
@@ -381,13 +383,16 @@ public class LoadAnalysisResults {
     // (topLevel) whose own type is not on the classpath, so the caller counts it as skipped; a nested element that
     // cannot be applied is dropped in place (see the class note on tolerance) without failing its siblings.
     private boolean processSub(Codec codec, Codec.Context context, JSONObject jo, boolean topLevel, TypeInfo copy) {
-        String where = topLevel ? "a primary type's element" : "the element of a member of " + context.currentType();
+        // the enclosing element, by its name: context.currentType() is a Codec.TypeAndSorted, whose toString lists
+        // every member of its type
+        Supplier<String> where = () -> topLevel ? "a primary type's element"
+                : "a sub-element of " + context.peek(0);
         KeyValuePair nameKv = pair(jo, 1, "name", where);
         String fullyQualifiedWithType = CodecImpl.unquote(nameKv.get(2).getSource());
         if (fullyQualifiedWithType.isEmpty()) {
-            throw new AnalysisResultsFormatException("empty \"name\" in " + where);
+            throw new AnalysisResultsFormatException("empty \"name\" in " + where.get());
         }
-        KeyValuePair dataKv = pair(jo, 3, "data", "element " + fullyQualifiedWithType);
+        KeyValuePair dataKv = pair(jo, 3, "data", () -> "element " + fullyQualifiedWithType);
         if (!(dataKv.get(2) instanceof JSONObject dataJo)) {
             throw new AnalysisResultsFormatException("expected an object as \"data\" of element "
                                                      + fullyQualifiedWithType + ", found "
