@@ -111,29 +111,63 @@ public record MethodModification(Runtime runtime, VariableData variableData, Sta
         Set<Variable> recordedThroughPassedFunction = new HashSet<>();
         if (!receiverDisclaimed) {
             for (ParameterInfo pi : methodInfo.parameters()) {
-                if (pi.isModified() && !pi.isIgnoreModifications() && !parameterExcusedByCone(pi, receiverType)) {
-                    // deep-modified but structurally unmodified (its elements are modified, it is not): deep-only
-                    boolean structural = !pi.isStructurallyUnmodified();
-                    if (pi.isVarArgs()) {
-                        for (int i = methodInfo.parameters().size() - 1; i < mc.parameterExpressions().size(); i++) {
-                            Result rp = params.get(i);
-                            handleModifiedParameter(mc.parameterExpressions().get(i), rp, modified, structural);
-                        }
-                    } else if (PassedFunction.unmodifiedAtCallSite(pi, mc.parameterExpressions())) {
-                        LOGGER.debug("Argument {} of {} not modified: the function passed leaves it alone", pi.index(),
-                                methodInfo);
+                // an unmodified parameter with entries: only an element of it reaches a function (PassedFunction)
+                boolean throughElements = !pi.isModified() && !pi.isVarArgs() && PassedFunction.hasEntries(pi);
+                if ((!pi.isModified() && !throughElements) || pi.isIgnoreModifications()
+                    || parameterExcusedByCone(pi, receiverType)) {
+                    continue;
+                }
+                // deep-modified but structurally unmodified (its elements are modified, it is not): deep-only
+                boolean structural = !pi.isStructurallyUnmodified();
+                if (pi.isVarArgs()) {
+                    for (int i = methodInfo.parameters().size() - 1; i < mc.parameterExpressions().size(); i++) {
+                        Result rp = params.get(i);
+                        handleModifiedParameter(mc.parameterExpressions().get(i), rp, modified, structural);
+                    }
+                    continue;
+                }
+                Result rp = params.get(pi.index());
+                Expression argument = mc.parameterExpressions().get(pi.index());
+                PassedFunction.Effect effect = PassedFunction.effectAtCallSite(pi, mc.parameterExpressions());
+                if (effect == PassedFunction.Effect.UNMODIFIED) {
+                    LOGGER.debug("Argument {} of {} not modified: the function passed leaves it alone", pi.index(),
+                            methodInfo);
+                } else if (effect == PassedFunction.Effect.ELEMENTS) {
+                    // only the argument's elements reach a function that may modify them: its hidden content is
+                    // modified, deep-only; unless those functions are our own functional parameters, passed on
+                    List<String> forwarded = throughPassedFunction == null ? null
+                            : PassedFunction.forwardedElementEntries(pi, mc.parameterExpressions(), currentMethod);
+                    Set<ParameterInfo> owners = forwarded == null ? Set.of()
+                            : PassedFunction.ownParametersHolding(rp.links(), variableData, stage, currentMethod);
+                    if (owners.isEmpty()) {
+                        handleModifiedParameter(argument, rp, modified, false);
                     } else {
-                        Result rp = params.get(pi.index());
-                        if (functionalReceiver != null && throughPassedFunction != null
-                            && rp.links() != null && rp.links().isEmpty()
-                            && rp.links().primary() instanceof ParameterInfo ownParameter
-                            && ownParameter.methodInfo() == currentMethod) {
-                            throughPassedFunction.accept(ownParameter,
-                                    PassedFunction.entry(functionalReceiver.index(), pi.index()));
-                            recordedThroughPassedFunction.add(ownParameter);
-                        } else {
-                            handleModifiedParameter(mc.parameterExpressions().get(pi.index()), rp, modified, structural);
+                        for (ParameterInfo owner : owners) {
+                            forwarded.forEach(entry -> throughPassedFunction.accept(owner, entry));
                         }
+                    }
+                } else if (!throughElements) {
+                    if (functionalReceiver != null && throughPassedFunction != null
+                        && rp.links() != null && rp.links().isEmpty()
+                        && rp.links().primary() instanceof ParameterInfo ownParameter
+                        && ownParameter.methodInfo() == currentMethod) {
+                        throughPassedFunction.accept(ownParameter,
+                                PassedFunction.entry(functionalReceiver.index(), pi.index()));
+                        recordedThroughPassedFunction.add(ownParameter);
+                        continue;
+                    }
+                    // an element of our parameter is the SAM's argument (CodeLaser/maddi-mod#67): the parameter is
+                    // not modified here, whatever this function does to it is for our caller to resolve
+                    Set<ParameterInfo> elementOf = functionalReceiver == null || throughPassedFunction == null
+                            ? Set.of() : PassedFunction.elementOf(rp.links(), variableData, stage, currentMethod);
+                    if (elementOf.isEmpty()) {
+                        handleModifiedParameter(argument, rp, modified, structural);
+                    } else {
+                        for (ParameterInfo owner : elementOf) {
+                            throughPassedFunction.accept(owner,
+                                    PassedFunction.elementEntry(functionalReceiver.index(), pi.index()));
+                        }
+                        recordedThroughPassedFunction.add(rp.links().primary());
                     }
                 }
             }

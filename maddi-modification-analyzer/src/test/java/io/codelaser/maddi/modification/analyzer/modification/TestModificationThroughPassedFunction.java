@@ -209,7 +209,8 @@ public class TestModificationThroughPassedFunction extends CommonTest {
                     new IteratingAnalyzerImpl.ConfigurationBuilder().setMaxIterations(10)
                             .setModificationViaReachability(modReach).build());
             analyzer.analyze(analysisOrder);
-            assertEquals(Set.of("3:0"), through(y, "toTraversable"), "modReach=" + modReach);
+            // value itself goes to ofAll (3:0), its element to ofElement (2:0:e, CodeLaser/maddi-mod#67)
+            assertEquals(Set.of("2:0:e", "3:0"), through(y, "toTraversable"), "modReach=" + modReach);
             assertTrue(modified(y, "toTraversable"), "modReach=" + modReach);
             assertFalse(modified(y, "ofAll"), "modReach=" + modReach);
             assertFalse(modified(y, "toList"), "Y::ofAll does not modify in; modReach=" + modReach);

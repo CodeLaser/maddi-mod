@@ -32,6 +32,7 @@ import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.cst.api.variable.LocalVariable;
 import io.codelaser.maddi.cst.api.variable.This;
 import io.codelaser.maddi.cst.api.variable.Variable;
+import io.codelaser.maddi.modification.prepwork.variable.Stage;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 import org.slf4j.Logger;
@@ -703,7 +704,8 @@ public class ShadowModificationPass {
                     io.codelaser.maddi.cst.api.type.ParameterizedType receiverType =
                             mc.object() == null ? null : mc.object().parameterizedType();
                     if (!disclaimed) {
-                        handleCallSite(mi, vd, mc.methodInfo(), mc.analysis(), mc.parameterExpressions(), receiverType);
+                        handleCallSite(mi, vd, mc.methodInfo(), mc.analysis(), mc.parameterExpressions(), receiverType,
+                                mc.object() instanceof VariableExpression rve ? rve.variable() : null);
                     }
                     // E2: callee receiver -> caller-side receiver nodes (chained receivers resolved
                     // through the inner callee's return-value summary, P2.2a). Mirror of the engine's cone
@@ -732,7 +734,7 @@ public class ShadowModificationPass {
                     }
                 } else if (e instanceof ConstructorCall cc && cc.constructor() != null) {
                     seedBoundaryCalleeParameters(mi, cc.constructor());
-                    handleCallSite(mi, vd, cc.constructor(), cc.analysis(), cc.parameterExpressions(), null);
+                    handleCallSite(mi, vd, cc.constructor(), cc.analysis(), cc.parameterExpressions(), null, null);
                 }
                 return true;
             });
@@ -830,8 +832,12 @@ public class ShadowModificationPass {
 
     private void handleCallSite(MethodInfo mi, VariableData vd, MethodInfo callee, PropertyValueMap analysis,
                                 List<io.codelaser.maddi.cst.api.expression.Expression> argumentExpressions,
-                                io.codelaser.maddi.cst.api.type.ParameterizedType receiverType) {
+                                io.codelaser.maddi.cst.api.type.ParameterizedType receiverType,
+                                Variable receiver) {
         if (callee == null || callee.parameters().isEmpty()) return;
+        // engine mirror (MethodModification.functionalReceiver): the SAM of one of our own functional parameters
+        boolean ownFunctionalReceiver = receiver instanceof ParameterInfo fp && fp.methodInfo() == mi
+                                        && callee.isAbstract() && fp.parameterizedType().isFunctionalInterface();
         LinkComputer.ListOfLinks list = analysis.getOrNull(LinkComputerImpl.LINKED_VARIABLES_ARGUMENTS,
                 LinkComputerImpl.ListOfLinksImpl.class);
         if (list == null) {
@@ -878,7 +884,21 @@ public class ShadowModificationPass {
             // @Modified parameter is not modified by it, nor is its holder
             if (Util.isHiddenContentField(links.primary())) continue;
             // engine mirror: the callee modifies this parameter only through a function, and ours leaves it alone
-            if (PassedFunction.unmodifiedAtCallSite(pi, argumentExpressions)) continue;
+            PassedFunction.Effect effect = PassedFunction.effectAtCallSite(pi, argumentExpressions);
+            if (effect == PassedFunction.Effect.UNMODIFIED) continue;
+            // engine mirror: an element of our parameter is the argument of our own function's SAM; the engine
+            // records it for our callers (an element entry), the parameter is not modified here (#67)
+            if (ownFunctionalReceiver && effect == null
+                && !PassedFunction.elementOf(links, vd, Stage.EVALUATION, mi).isEmpty()) {
+                continue;
+            }
+            // engine mirror: only the argument's elements reach a function that may modify them; unless those
+            // functions are our own, passed on (the engine then records), its hidden content is modified
+            if (effect == PassedFunction.Effect.ELEMENTS
+                && PassedFunction.forwardedElementEntries(pi, argumentExpressions, mi) != null
+                && !PassedFunction.ownParametersHolding(links, vd, Stage.EVALUATION, mi).isEmpty()) {
+                continue;
+            }
             if (links.primary() != null) {
                 // the argument OBJECT and its whole-object aliases; links on component faces
                 // (oc.field <- ...) must not widen "argument modified" to "field modified"
@@ -890,6 +910,12 @@ public class ShadowModificationPass {
                         .forEach(l -> targets.addAll(project(mi, vd, l.to())));
             } else {
                 links.stream().forEach(link -> targets.addAll(project(mi, vd, Util.firstRealVariable(link.to()))));
+            }
+            if (effect == PassedFunction.Effect.ELEMENTS) {
+                for (Object node : targets) {
+                    seedWithOrigin(deepOnly(node), mi, "element handed to a modifying function by " + callee);
+                }
+                continue;
             }
             // engine mirror (MethodModification.parameterExcusedByCone): the cone's implementations' parameters
             List<MethodInfo> cone = ReceiverLevel.enabled()
