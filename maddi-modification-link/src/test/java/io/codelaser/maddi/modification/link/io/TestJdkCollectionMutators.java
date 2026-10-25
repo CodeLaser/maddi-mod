@@ -23,6 +23,7 @@ import io.codelaser.maddi.inspection.api.integration.JavaInspector;
 import io.codelaser.maddi.inspection.resource.SourceSetImpl;
 import io.codelaser.maddi.modification.common.CommonTest;
 import io.codelaser.maddi.modification.prepwork.io.LoadAnalysisResults;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -30,20 +31,38 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.Proxy;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Hashtable;
+import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.ListIterator;
 import java.util.Map;
+import java.util.NavigableMap;
+import java.util.NavigableSet;
+import java.util.PriorityQueue;
+import java.util.SequencedCollection;
+import java.util.SequencedMap;
+import java.util.SequencedSet;
 import java.util.Set;
+import java.util.SortedMap;
+import java.util.SortedSet;
+import java.util.Stack;
+import java.util.TreeMap;
+import java.util.TreeSet;
+import java.util.Vector;
+import java.util.WeakHashMap;
 import java.util.function.Supplier;
 
 import static io.codelaser.maddi.modification.prepwork.io.LoadAnalysisResults.ANALYZED_RESULTS_JDK;
@@ -64,6 +83,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * An iterator's {@code next()} moves its cursor, and maddi counts that as modifying the iterator; the yardstick asks
  * only about the collection. For {@link Iterator} and {@link ListIterator} the check therefore goes one way: what
  * throws must be modifying.
+ * <p>
+ * The concrete classes have no unmodifiable variant, but they keep their interfaces' contracts: an {@code ArrayList}
+ * used as a {@code List} must modify exactly where {@code List} does. {@link #classesFollowTheirInterfaces()} holds
+ * every public method of the common {@code java.util} collections to the interface method it implements.
  */
 public class TestJdkCollectionMutators {
 
@@ -77,6 +100,18 @@ public class TestJdkCollectionMutators {
             new Interface(List.class, true, () -> Collections.unmodifiableList(new ArrayList<>(List.of("a", "b")))),
             new Interface(Set.class, true, () -> Collections.unmodifiableSet(new LinkedHashSet<>(List.of("a", "b")))),
             new Interface(Map.class, true, () -> Collections.unmodifiableMap(new LinkedHashMap<>(Map.of("a", "b")))),
+            new Interface(SequencedCollection.class, true,
+                    () -> Collections.unmodifiableSequencedCollection(new ArrayList<>(List.of("a", "b")))),
+            new Interface(SequencedSet.class, true,
+                    () -> Collections.unmodifiableSequencedSet(new LinkedHashSet<>(List.of("a", "b")))),
+            new Interface(SortedSet.class, true, () -> Collections.unmodifiableSortedSet(new TreeSet<>(List.of("a", "b")))),
+            new Interface(NavigableSet.class, true,
+                    () -> Collections.unmodifiableNavigableSet(new TreeSet<>(List.of("a", "b")))),
+            new Interface(SequencedMap.class, true,
+                    () -> Collections.unmodifiableSequencedMap(new LinkedHashMap<>(Map.of("a", "b")))),
+            new Interface(SortedMap.class, true, () -> Collections.unmodifiableSortedMap(new TreeMap<>(Map.of("a", "b")))),
+            new Interface(NavigableMap.class, true,
+                    () -> Collections.unmodifiableNavigableMap(new TreeMap<>(Map.of("a", "b")))),
             new Interface(Map.Entry.class, true,
                     () -> Collections.unmodifiableMap(new LinkedHashMap<>(Map.of("a", "b"))).entrySet().iterator().next()),
             new Interface(Iterator.class, false, () -> {
@@ -90,12 +125,23 @@ public class TestJdkCollectionMutators {
                 return it;
             }));
 
-    @Test
-    public void test() throws IOException {
+    private static final List<Class<?>> CLASSES = List.of(ArrayList.class, LinkedList.class, Vector.class,
+            Stack.class, ArrayDeque.class, PriorityQueue.class, HashSet.class, LinkedHashSet.class, TreeSet.class,
+            HashMap.class, LinkedHashMap.class, TreeMap.class, Hashtable.class, IdentityHashMap.class,
+            WeakHashMap.class, EnumMap.class);
+
+    private static JavaInspector javaInspector;
+
+    @BeforeAll
+    public static void beforeAll() throws IOException {
         SourceSet sourceSet = SourceSetImpl.testProtocolSourceSet();
-        JavaInspector javaInspector = CommonTest.javaInspectorFactory().withSources(sourceSet);
+        javaInspector = CommonTest.javaInspectorFactory().withSources(sourceSet);
         javaInspector.onlyPreload();
         new LoadAnalysisResults(javaInspector.runtime(), sourceSet).go(List.of(ANALYZED_RESULTS_JDK));
+    }
+
+    @Test
+    public void test() {
 
         List<String> wrong = new ArrayList<>();
         List<String> notFound = new ArrayList<>();
@@ -126,6 +172,54 @@ public class TestJdkCollectionMutators {
         assertEquals(List.of(), notFound, "methods the CST does not have");
         assertTrue(checked > 100, "checked only " + checked);
         assertEquals("", String.join("\n", wrong));
+    }
+
+    @Test
+    public void classesFollowTheirInterfaces() {
+        List<String> wrong = new ArrayList<>();
+        List<String> notFound = new ArrayList<>();
+        int checked = 0;
+        for (Class<?> c : CLASSES) {
+            Method[] methods = c.getMethods();
+            Arrays.sort(methods, Comparator.comparing(Method::toString));
+            for (Method m : methods) {
+                if (Modifier.isStatic(m.getModifiers()) || m.isBridge() || m.getDeclaringClass().isInterface()
+                    || m.getDeclaringClass() == Object.class) continue;
+                Method implemented = implemented(c, m);
+                if (implemented == null) continue;
+                MethodInfo own = find(javaInspector, m);
+                MethodInfo contract = find(javaInspector, implemented);
+                String where = c.getSimpleName() + "." + signature(m);
+                if (own == null || contract == null) {
+                    notFound.add(where);
+                    continue;
+                }
+                checked++;
+                if (own.isModifying() != contract.isModifying()) {
+                    wrong.add(where + " (declared in " + m.getDeclaringClass().getSimpleName() + "): "
+                              + (own.isModifying() ? "modifying" : "non-modifying") + ", but "
+                              + implemented.getDeclaringClass().getSimpleName() + "." + signature(implemented)
+                              + " is " + (contract.isModifying() ? "modifying" : "non-modifying"));
+                }
+            }
+        }
+        assertEquals(List.of(), notFound, "methods the CST does not have");
+        assertTrue(checked > 200, "checked only " + checked);
+        assertEquals("", String.join("\n", wrong));
+    }
+
+    /** The method of one of {@link #INTERFACES} that {@code m} implements, as declared there; null if none. */
+    private static Method implemented(Class<?> c, Method m) {
+        for (Interface i : INTERFACES) {
+            if (!i.type().isAssignableFrom(c)) continue;
+            try {
+                Method im = i.type().getMethod(m.getName(), m.getParameterTypes());
+                if (!Modifier.isStatic(im.getModifiers()) && im.getDeclaringClass() != Object.class) return im;
+            } catch (NoSuchMethodException _) {
+                // not a member of this interface
+            }
+        }
+        return null;
     }
 
     private static String signature(Method m) {
