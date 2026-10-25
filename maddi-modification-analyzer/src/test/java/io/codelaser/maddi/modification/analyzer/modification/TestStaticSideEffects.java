@@ -123,6 +123,10 @@ public class TestStaticSideEffects extends CommonTest {
                 final int identifier;
                 HasUniqueIdentifier() { identifier = generator.getAndIncrement(); }
             }
+            class Service {
+                private static final java.util.logging.Logger LOG = java.util.logging.Logger.getLogger("s");
+                static void work() { LOG.info("x"); System.out.println("y"); }   // both @IgnoreModifications
+            }
             class Numbered {
                 private static int next;
                 final int id = next++;                                // runs in the constructor
@@ -139,6 +143,7 @@ public class TestStaticSideEffects extends CommonTest {
                 static int reads() { return Counter.read(); }
                 static int indirect() { return twice(); }
                 static Object numbered() { return new Numbered(); }
+                static void callsService() { Service.work(); }
                 static java.util.function.IntSupplier reference() { return Counter::next; }
                 static java.util.function.Supplier<HasUniqueIdentifier> factory() { return HasUniqueIdentifier::new; }
             }
@@ -186,6 +191,9 @@ public class TestStaticSideEffects extends CommonTest {
         assertEquals(Set.of("Counter"), modified(client.findUniqueMethod("twice", 0)));
         assertEquals(Set.of("HasUniqueIdentifier"), modified(client.findUniqueMethod("createChild", 0)));
         assertFalse(sse(client.findUniqueMethod("reads", 0)), "reading another type's static state");
+        // System.out is an @IgnoreModifications field, Logger.info an @IgnoreModifications method
+        assertEquals(Set.of(), modified(type(parsed, "Service").findUniqueMethod("work", 0)));
+        assertFalse(sse(client.findUniqueMethod("callsService", 0)));
     }
 
     private static TypeInfo type(TypeInfo primary, String simpleName) {

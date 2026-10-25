@@ -43,7 +43,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  * from it {@link PropertyImpl#STATIC_SIDE_EFFECTS_METHOD}: a method has a static side effect when that set holds a
  * type <em>other</em> than its own primary type and its parent types (road-to-immutability §050, "Static side
  * effects"). A method adds to its set the owner of each static field it assigns or makes a modifying call on
- * ({@code Other.COUNTER.incrementAndGet()}, {@code System.out.println(...)}), and the sets of the methods and
+ * ({@code Other.COUNTER.incrementAndGet()}; not {@code System.out.println(...)}: {@code System.out} is
+ * {@code @IgnoreModifications}, nor a logger's {@code LOG.info(...)}, an {@code @IgnoreModifications} method), and the sets of the methods and
  * constructors it calls or references ({@code Counter::next}, as a lambda calling it), static or instance. A
  * constructor's set includes what the instance fields' initializers modify: they run as part of it. So {@code Counter.next()} incrementing its own static counter has no
  * static side effect, while {@code Client.twice()} calling it has one: Counter's state is not Client's
@@ -126,14 +127,16 @@ public class StaticSideEffectAnalyzerImpl {
         Set<TypeInfo> set = sets.get(mi);
         boolean[] waits = {false};
         java.util.function.Predicate<Element> visitor = e -> {
-            // assignment to a static field: 'Other.STATIC = ...', 'count++'
+            // assignment to a static field: 'Other.STATIC = ...', 'count++'; not to an @IgnoreModifications one
             if (e instanceof Assignment a && a.variableTarget() instanceof FieldReference fr
-                && fr.fieldInfo().isStatic()) {
+                && fr.fieldInfo().isStatic() && !fr.fieldInfo().isIgnoreModifications()) {
                 set.add(fr.fieldInfo().owner());
             }
-            // modifying call on a static field: 'Other.STATIC.add(...)', 'System.out.println(...)'
+            // modifying call on a static field: 'Other.STATIC.add(...)'. Not on an @IgnoreModifications field
+            // ('System.out.println(...)', road §050), nor of an @IgnoreModifications method ('LOG.info(...)')
             if (e instanceof MethodCall mc && mc.object() instanceof VariableExpression ve
-                && ve.variable() instanceof FieldReference fr && fr.fieldInfo().isStatic()) {
+                && ve.variable() instanceof FieldReference fr && fr.fieldInfo().isStatic()
+                && !fr.fieldInfo().isIgnoreModifications() && !mc.methodInfo().isIgnoreModification()) {
                 Value.Bool nonModifying = mc.methodInfo().analysis()
                         .getOrNull(PropertyImpl.NON_MODIFYING_METHOD, ValueImpl.BoolImpl.class);
                 if (nonModifying == null && !activateCycleBreaking) waits[0] = true;
