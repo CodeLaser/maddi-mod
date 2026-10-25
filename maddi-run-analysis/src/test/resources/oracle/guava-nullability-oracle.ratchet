@@ -1,0 +1,14 @@
+# TestNullabilityOracleGuava.inference(): the NULL_MARKED policy's TOTAL row, guava's verdicts scored against guava's
+# own JSpecify annotations (CodeLaser/maddi-mod#51). `unsafe` (non-null where guava says nullable) is a hard ceiling:
+# any change fails, and a lower value is written here in the commit that earns it. `noise` (nullable where guava's
+# context guarantees a value) is the trend number: it fails only when it moves more than `noiseSlack` either way. The
+# other three policies and the per-kind, per-depth rows are logged, not ratcheted.
+#
+# Machine and input matter: until the guava input configuration was refreshed on 2026-10-13, the Mac and laser1
+# measured different numbers. Record on laser1, and say so when a number comes from elsewhere.
+#
+# 2026-10-25, first record, devel at maddi afb4537bf / maddi-mod 187d3281: 336 unsafe, 1,736 noise, 275 undecided, on
+# laser1 and on the Mac alike (10-13: 341, 1,740), after some 80 verdict commits for the Java -> Kotlin translation.
+unsafe	336
+noise	1736
+noiseSlack	20

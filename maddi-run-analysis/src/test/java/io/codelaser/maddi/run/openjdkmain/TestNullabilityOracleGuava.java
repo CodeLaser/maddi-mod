@@ -32,16 +32,21 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * The nullability oracle (maddi-mod {@code docs/design/nullability.md} §6, T6), first stage: guava's own JSpecify
@@ -168,7 +173,8 @@ public class TestNullabilityOracleGuava {
     /**
      * The inference (M3) against the reference: the modification analysis runs as the CLI runs it (JDK hints, prep,
      * call-graph order, MODREACH), plus {@code nullability}, then {@link NullabilityPass} under the
-     * {@code @NullMarked} policy. Logged, not yet ratcheted: this is the first measurement.
+     * {@code @NullMarked} policy. That policy's TOTAL is ratcheted (oracle/guava-nullability-oracle.ratchet, #51); the
+     * other policies are logged.
      */
     @Test
     public void inference() throws IOException {
@@ -211,6 +217,42 @@ public class TestNullabilityOracleGuava {
         assertTrue(open.count(Outcome.UNSAFE) >= openVisibility.count(Outcome.UNSAFE)
                    && open.count(Outcome.UNSAFE) <= comparison.count(Outcome.UNSAFE),
                 "preconditions take back part of what outside callers gave up");
+        ratchet(comparison);
+    }
+
+    private static final Path RATCHET = Path.of("src/test/resources/oracle/guava-nullability-oracle.ratchet");
+
+    /**
+     * CodeLaser/maddi-mod#51: the NULL_MARKED TOTAL against the ratchet file. Unsafe may not move; noise may move by
+     * the file's {@code noiseSlack}. Progress fails as a regression does, so that the file is tightened in the commit
+     * that earned it, as the J2K ratchets do.
+     */
+    private static void ratchet(NullabilityComparison comparison) throws IOException {
+        Map<String, Long> recorded = new HashMap<>();
+        try (Stream<String> lines = Files.lines(RATCHET)) {
+            lines.map(String::trim).filter(l -> !l.isEmpty() && !l.startsWith("#")).forEach(l -> {
+                String[] kv = l.split("\\s+");
+                recorded.put(kv[0], Long.parseLong(kv[1]));
+            });
+        }
+        long unsafe = comparison.count(Outcome.UNSAFE);
+        long noise = comparison.count(Outcome.NOISE);
+        long wasUnsafe = recorded.get("unsafe");
+        long wasNoise = recorded.get("noise");
+        long slack = recorded.get("noiseSlack");
+        List<String> worse = new ArrayList<>();
+        List<String> better = new ArrayList<>();
+        if (unsafe != wasUnsafe) (unsafe < wasUnsafe ? better : worse).add("unsafe: " + wasUnsafe + " -> " + unsafe);
+        if (noise > wasNoise + slack) worse.add("noise: " + wasNoise + " -> " + noise + " (slack " + slack + ")");
+        if (noise < wasNoise - slack) better.add("noise: " + wasNoise + " -> " + noise + " (slack " + slack + ")");
+        if (!worse.isEmpty()) {
+            fail("THE NULLABILITY VERDICTS GOT WORSE on guava: " + worse + ". The disagreements are in "
+                 + "build/nullability-oracle-guava-NULL_MARKED.tsv.");
+        }
+        if (!better.isEmpty()) {
+            fail("Progress on the guava nullability oracle: " + better + ". Tighten the ratchet: write these values"
+                 + " into " + RATCHET + " in the commit that made them.");
+        }
     }
 
     private static final List<String> EXPLAIN = System.getenv("ORACLE_EXPLAIN") == null ? List.of()
