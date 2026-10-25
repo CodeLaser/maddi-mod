@@ -570,7 +570,9 @@ public class TestJavaUtil extends CommonTest {
         assertTrue(overrideNames.contains("java.util.NavigableMap.firstEntry()"));
         assertFalse(methodInfo.isModifying());
         assertSame(TRUE, typeInfo.analysis().getOrDefault(CONTAINER_TYPE, FALSE));
-        assertSame(DEPENDENT, methodInfo.analysis().getOrDefault(INDEPENDENT_METHOD, DEPENDENT));
+        // a snapshot entry: the map changes, the entry does not, and it holds the map's keys and values (maddi
+        // 8a6ed7d60, measured by TestJdkCollectionViews; this read the DEPENDENT default before)
+        assertSame(INDEPENDENT_HC, methodInfo.analysis().getOrDefault(INDEPENDENT_METHOD, DEPENDENT));
         assertSame(MUTABLE, methodInfo.analysis().getOrDefault(IMMUTABLE_METHOD, MUTABLE));
     }
 
