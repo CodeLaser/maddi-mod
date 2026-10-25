@@ -370,7 +370,7 @@ which monitor guards it, or the order and moment in which it is initialised.*
 | which static methods an initialiser reaches | §3.1 | call graph (`ComputeCallGraph`) | available |
 | constant variables | §3.1 | CST (initialiser a constant expression, field `final`) | available (the downstream stack has its own `isConstantVariable`) |
 | implicit-receiver calls to `Object` monitor methods; `synchronized` | §3.2 | CST: `MethodCall` with implicit `this`; `MethodInfo.isSynchronized()`; `SynchronizedStatement` | available |
-| a static initialiser has a side effect | §3.3 | `STATIC_SIDE_EFFECTS_METHOD` on `<static_N>` methods | **gated** (env `SSE`, off by default); **field initialisers not examined**; constructor calls not examined; a bodyless callee with no contract counts as FALSE |
+| a static initialiser has a side effect | §3.3 | `STATIC_SIDE_EFFECTS_METHOD` on `<static_N>` methods | available (on by default since #65; constructor calls and callees of any kind examined, through `STATIC_STATE_MODIFIED_METHOD`); **field initialisers not examined**; a bodyless callee with no contract counts as FALSE |
 | a method lets `this` escape through its return or a callee | §3.4 | `METHOD_LINKS` → `ofReturnValue()`, `ofParameters()`; `FLUENT_METHOD`, `IDENTITY_METHOD` | available |
 | what a method modifies, including via callees | §3.5 | `METHOD_LINKS` → `modified()` | available |
 | two fields share a mutable object | §3.5 | field `LINKS`, `§m ≡` between fields | available; no tested direct `this.a ≡ this.b` entry; recoverable through a shared constructor parameter |

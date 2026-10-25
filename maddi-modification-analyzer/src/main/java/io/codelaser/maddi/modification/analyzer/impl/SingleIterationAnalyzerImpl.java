@@ -574,6 +574,6 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
         typeImmutableAnalyzer.go(typeInfo, activateCycleBreaking);
         typeContainerAnalyzer.go(typeInfo);
         typeEventualAnalyzer.go(typeInfo, activateCycleBreaking);
-        staticSideEffectAnalyzer.go(typeInfo, activateCycleBreaking); // gated on env SSE; additive, writes only its own
+        staticSideEffectAnalyzer.go(typeInfo, activateCycleBreaking); // additive, writes only its own
     }
 }

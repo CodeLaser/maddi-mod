@@ -52,12 +52,12 @@ import java.util.concurrent.atomic.AtomicInteger;
  * <b>global-escape arm</b> of the {@code @IgnoreModifications} confinement guard: a modification reached through
  * the ignored stratum that is a static side effect has left it.
  * <p>
- * Gated on env {@code SSE} until a broader corpus A/B clears it. Additive: it writes only its own properties and
- * changes no existing verdict.
+ * Additive: it writes only its own properties and changes no existing verdict. On by default; a run can switch it
+ * off ({@code ModificationOptions.staticSideEffects}).
  */
 public class StaticSideEffectAnalyzerImpl {
-    // non-final so a test can flip it; the env is the production default
-    public static boolean ENABLED = System.getenv("SSE") != null;
+    // non-final: a run's ModificationOptions can switch it off
+    public static boolean ENABLED = true;
 
     private final AtomicInteger propertyChanges;
     private final TypeInfo global;

@@ -15,7 +15,6 @@
 package io.codelaser.maddi.modification.analyzer.modification;
 
 import io.codelaser.maddi.modification.analyzer.CommonTest;
-import io.codelaser.maddi.modification.analyzer.impl.StaticSideEffectAnalyzerImpl;
 import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
@@ -34,8 +33,8 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * {@code @StaticSideEffects}: a method modifies static/global state of another type (road-to-immutability §050).
- * The global-escape signal underpinning the confinement guard's method-granularity arm. Gated on env {@code SSE}
- * (here flipped in-process). First cut: an assignment to, or a modifying call on, another type's static field.
+ * The global-escape signal underpinning the confinement guard's method-granularity arm: an assignment to, or a
+ * modifying call on, another type's static field, directly or through a callee.
  */
 public class TestStaticSideEffects extends CommonTest {
 
@@ -60,19 +59,13 @@ public class TestStaticSideEffects extends CommonTest {
     @DisplayName("assignment to another type's static field is a static side effect; own/pure methods are not")
     @Test
     public void test() throws IOException {
-        boolean saved = StaticSideEffectAnalyzerImpl.ENABLED;
-        StaticSideEffectAnalyzerImpl.ENABLED = true;
-        try {
-            TypeInfo X = javaInspector.parse("a.b.X", INPUT);
-            List<Info> ao = prepWork(X);
-            analyzer.go(ao);
+        TypeInfo X = javaInspector.parse("a.b.X", INPUT);
+        List<Info> ao = prepWork(X);
+        analyzer.go(ao);
 
-            assertTrue(sse(X.findUniqueMethod("raise", 0)), "Config.level = 5 is a static side effect");
-            assertFalse(sse(X.findUniqueMethod("pure", 0)), "a pure method has no static side effect");
-            assertFalse(sse(X.findUniqueMethod("own", 0)), "modifying an own instance field is not a static side effect");
-        } finally {
-            StaticSideEffectAnalyzerImpl.ENABLED = saved;
-        }
+        assertTrue(sse(X.findUniqueMethod("raise", 0)), "Config.level = 5 is a static side effect");
+        assertFalse(sse(X.findUniqueMethod("pure", 0)), "a pure method has no static side effect");
+        assertFalse(sse(X.findUniqueMethod("own", 0)), "modifying an own instance field is not a static side effect");
     }
 
     /**
@@ -96,20 +89,14 @@ public class TestStaticSideEffects extends CommonTest {
     @DisplayName("a call to a @StaticSideEffects method propagates to the caller, transitively")
     @Test
     public void testPropagation() throws IOException {
-        boolean saved = StaticSideEffectAnalyzerImpl.ENABLED;
-        StaticSideEffectAnalyzerImpl.ENABLED = true;
-        try {
-            TypeInfo X = javaInspector.parse("a.b.X", PROPAGATION);
-            List<Info> ao = prepWork(X);
-            analyzer.go(ao);
+        TypeInfo X = javaInspector.parse("a.b.X", PROPAGATION);
+        List<Info> ao = prepWork(X);
+        analyzer.go(ao);
 
-            assertTrue(sse(X.findUniqueMethod("reconfigure", 0)), "contracted @StaticSideEffects");
-            assertTrue(sse(X.findUniqueMethod("direct", 0)), "calls a static-side-effect method");
-            assertTrue(sse(X.findUniqueMethod("indirect", 0)), "transitively calls a static-side-effect method");
-            assertFalse(sse(X.findUniqueMethod("clean", 0)), "touches no global state");
-        } finally {
-            StaticSideEffectAnalyzerImpl.ENABLED = saved;
-        }
+        assertTrue(sse(X.findUniqueMethod("reconfigure", 0)), "contracted @StaticSideEffects");
+        assertTrue(sse(X.findUniqueMethod("direct", 0)), "calls a static-side-effect method");
+        assertTrue(sse(X.findUniqueMethod("indirect", 0)), "transitively calls a static-side-effect method");
+        assertFalse(sse(X.findUniqueMethod("clean", 0)), "touches no global state");
     }
     /**
      * CodeLaser/maddi-mod#65: a type's own static state is its own, but not its callers'. {@code Counter.next()}
@@ -156,42 +143,36 @@ public class TestStaticSideEffects extends CommonTest {
     @DisplayName("#65: calling another type's method that modifies that type's static state is a static side effect")
     @Test
     public void testOwnStateOfAnotherType() throws IOException {
-        boolean saved = StaticSideEffectAnalyzerImpl.ENABLED;
-        StaticSideEffectAnalyzerImpl.ENABLED = true;
-        try {
-            TypeInfo parsed = javaInspector.parse("a.b.Client", OWN_STATE);
-            // four primary types in one file: all of them analysed
-            List<Info> ao = prepAnalyzer.doPrimaryTypes(Set.copyOf(parsed.compilationUnit().types()));
-            analyzer.go(ao);
-            TypeInfo client = type(parsed, "Client");
-            TypeInfo counter = type(parsed, "Counter");
-            TypeInfo unique = type(parsed, "HasUniqueIdentifier");
-            TypeInfo child = type(parsed, "Child");
+        TypeInfo parsed = javaInspector.parse("a.b.Client", OWN_STATE);
+        // four primary types in one file: all of them analysed
+        List<Info> ao = prepAnalyzer.doPrimaryTypes(Set.copyOf(parsed.compilationUnit().types()));
+        analyzer.go(ao);
+        TypeInfo client = type(parsed, "Client");
+        TypeInfo counter = type(parsed, "Counter");
+        TypeInfo unique = type(parsed, "HasUniqueIdentifier");
+        TypeInfo child = type(parsed, "Child");
 
-            // own state: modified, no static side effect
-            for (String name : List.of("next", "nextTwice", "instanceNext")) {
-                MethodInfo mi = counter.findUniqueMethod(name, 0);
-                assertEquals(Set.of("Counter"), modified(mi), name);
-                assertFalse(sse(mi), name);
-            }
-            assertEquals(Set.of("Counter"), modified(counter.findUniqueMethod("recursive", 1)));
-            assertEquals(Set.of(), modified(counter.findUniqueMethod("read", 0)));
-            MethodInfo constructor = unique.findConstructor(0);
-            assertEquals(Set.of("HasUniqueIdentifier"), modified(constructor));
-            assertFalse(sse(constructor));
-            assertFalse(sse(child.findConstructor(0)), "a parent type's static state is excused");
-
-            // another type's state: a static side effect, through a static method, an instance method, a
-            // constructor, recursion, and on to the callers
-            for (String name : List.of("twice", "viaInstance", "viaRecursion", "create", "createChild", "indirect")) {
-                assertTrue(sse(client.findUniqueMethod(name, 0)), name);
-            }
-            assertEquals(Set.of("Counter"), modified(client.findUniqueMethod("twice", 0)));
-            assertEquals(Set.of("HasUniqueIdentifier"), modified(client.findUniqueMethod("createChild", 0)));
-            assertFalse(sse(client.findUniqueMethod("reads", 0)), "reading another type's static state");
-        } finally {
-            StaticSideEffectAnalyzerImpl.ENABLED = saved;
+        // own state: modified, no static side effect
+        for (String name : List.of("next", "nextTwice", "instanceNext")) {
+            MethodInfo mi = counter.findUniqueMethod(name, 0);
+            assertEquals(Set.of("Counter"), modified(mi), name);
+            assertFalse(sse(mi), name);
         }
+        assertEquals(Set.of("Counter"), modified(counter.findUniqueMethod("recursive", 1)));
+        assertEquals(Set.of(), modified(counter.findUniqueMethod("read", 0)));
+        MethodInfo constructor = unique.findConstructor(0);
+        assertEquals(Set.of("HasUniqueIdentifier"), modified(constructor));
+        assertFalse(sse(constructor));
+        assertFalse(sse(child.findConstructor(0)), "a parent type's static state is excused");
+
+        // another type's state: a static side effect, through a static method, an instance method, a
+        // constructor, recursion, and on to the callers
+        for (String name : List.of("twice", "viaInstance", "viaRecursion", "create", "createChild", "indirect")) {
+            assertTrue(sse(client.findUniqueMethod(name, 0)), name);
+        }
+        assertEquals(Set.of("Counter"), modified(client.findUniqueMethod("twice", 0)));
+        assertEquals(Set.of("HasUniqueIdentifier"), modified(client.findUniqueMethod("createChild", 0)));
+        assertFalse(sse(client.findUniqueMethod("reads", 0)), "reading another type's static state");
     }
 
     private static TypeInfo type(TypeInfo primary, String simpleName) {

@@ -437,7 +437,8 @@ not exist in the engine (only in road §050) — now implemented as a computed `
 (`StaticSideEffectAnalyzerImpl`): a method has a static side effect when it modifies static/global state of a
 type *other* than its own primary type (first cut: assignment to, or a modifying call on, another type's static
 field; static-method reconfiguration like `System.setOut` needs an AAPI safe-surface declaration, left for
-later). Gated on env `SSE`, additive (writes only its own property). `GuardAnalyzerImpl`.
+later). Additive (writes only its own property); on by default since 2026-10-25 (#65), which also made a
+callee's own static state count for a caller in another type. `GuardAnalyzerImpl`.
 `guardIgnoreModificationsContainment` then warns when a modifying call on an `@IgnoreModifications` field has a
 callee that is `@StaticSideEffects` — the modification reaches global state, so it left the ignored stratum.
 `TestStaticSideEffects` + `TestGuardIgnoreModifications.testGlobalEscapeIsWarned`; analyzer suite 231/0; corpus
