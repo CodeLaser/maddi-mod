@@ -1417,6 +1417,7 @@ public final class NullabilityPass {
         }
 
         libraryParameterContracts();
+        if (!TOLERANT_OFF.get()) tolerantParameters(methods);
         Map<Object, Object> cause = new LinkedHashMap<>();
         reached = closure(cause);
         List<NullArgument> nullArguments = nullArguments(reached);
@@ -2222,6 +2223,84 @@ public final class NullabilityPass {
                            && libraryParameterState(m.parameters().get(index)) == NullableState.UNSPECIFIED;
                 })
                 .map(MethodInfo::fullyQualifiedName).findFirst().orElse(null);
+    }
+
+    // ------------------------------------------------------------------ tolerated nulls (CodeLaser/maddi-mod#68)
+
+    // gate NOTOLERANT: a visible parameter whose body tolerates null is decided by the flow alone, as before #68
+    private static final Switches.Gate TOLERANT_OFF = Switches.gate("NOTOLERANT");
+    // the nodes one tolerance search visits at most; beyond that the parameter is not tolerant
+    private static final int MAX_TOLERANCE_SEARCH = 2000;
+
+    /*
+     CodeLaser/maddi-mod#68: a parameter callable from outside whose body tolerates null on every path is nullable,
+     whatever the analysed callers pass. guava marks Preconditions' message arguments, the exception constructors'
+     message and cause, and Synchronized's mutex @Nullable because they accept null; no analysed call passes one, so
+     the closed world said non-null, and a Kotlin translation would throw at a Java caller guava's API permits.
+     Not a type variable (parametric), not a primitive, not a declared non-null contract, not an override of a
+     library method declaring the parameter non-null.
+     */
+    private void tolerantParameters(List<MethodInfo> methods) {
+        // what null reaches without these seeds: a field or a return that is nullable anyway may take the parameter
+        Set<Object> before = closure(new HashMap<>());
+        for (MethodInfo mi : methods) {
+            if (!hasBody(mi) || !externallyCallable(mi)) continue;
+            for (ParameterInfo pi : mi.parameters()) {
+                ParameterizedType type = pi.parameterizedType();
+                if (primitive(type) || isTypeVariable(type) || before.contains(pi) || nonNullContracts.contains(pi)
+                    || libraryNonNullParameter(mi, pi.index())) continue;
+                if (tolerates(pi, before)) {
+                    seedIndirect(pi, mi.fullyQualifiedName() + " tolerates null in " + pi.name()
+                                     + ", callable from outside");
+                }
+            }
+        }
+    }
+
+    /*
+     No path requires the parameter non-null (NonNullFacts.demands), nor any local or parameter it flows into: along
+     the null edges, into the analysed callees it is passed to (a callee's tolerant parameter tolerates; checkArgument
+     hands its message arguments to lenientFormat), and both ways along the override chain. A field or return it flows
+     into must be nullable anyway; a non-null contract, or a method without a body, ends the tolerance.
+     */
+    private boolean tolerates(ParameterInfo start, Set<Object> before) {
+        Set<Object> seen = new HashSet<>();
+        Deque<Object> queue = new ArrayDeque<>();
+        seen.add(start);
+        queue.add(start);
+        while (!queue.isEmpty()) {
+            Object n = queue.removeFirst();
+            if (seen.size() > MAX_TOLERANCE_SEARCH || nonNullContracts.contains(n)) return false;
+            switch (n) {
+                case ParameterInfo pi -> {
+                    MethodInfo m = pi.methodInfo();
+                    if (!hasBody(m) || demanded(m, v -> pi.equals(v))) return false;
+                }
+                case Local local -> {
+                    // by name, as NonNullFacts compares locals; a reassigned parameter's shadow is the parameter
+                    if (demanded(local.methodInfo(), v -> (v instanceof LocalVariable || v instanceof ParameterInfo)
+                                                          && v.simpleName().equals(local.name()))) return false;
+                }
+                case FieldInfo _, MethodInfo _ -> {
+                    if (!before.contains(n)) return false;
+                    continue; // nullable anyway: what it flows into is decided without this parameter
+                }
+                default -> {
+                }
+            }
+            for (Object s : successors.getOrDefault(n, Set.of())) {
+                if (seen.add(s)) queue.addLast(s);
+            }
+        }
+        return true;
+    }
+
+    // a demand in m's body, or in the body of the method that encloses m's lambda or local class
+    private boolean demanded(MethodInfo m, java.util.function.Predicate<Variable> variable) {
+        for (MethodInfo mi = m; mi != null; mi = mi.typeInfo().enclosingMethod()) {
+            if (facts.demands(mi).stream().anyMatch(variable)) return true;
+        }
+        return false;
     }
 
     // ------------------------------------------------------------------ outside callers (World.OPEN*)

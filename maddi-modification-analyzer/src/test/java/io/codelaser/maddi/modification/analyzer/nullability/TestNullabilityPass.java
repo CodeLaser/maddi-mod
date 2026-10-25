@@ -904,8 +904,8 @@ public class TestNullabilityPass extends CommonTest {
                 checked(): String
                 checked(0:s): String?
                 compare(): int
-                compare(0:a): String
-                compare(1:b): String
+                compare(0:a): String?
+                compare(1:b): String?
                 early(): String
                 early(0:s): String
                 early(1:b): boolean
@@ -923,13 +923,13 @@ public class TestNullabilityPass extends CommonTest {
                 use(): String""", closed);
         // a public parameter no analysed call passes null to: unspecified, and so is what it flows into; the
         // package-private and private methods, and the public method of a package-private type, stay closed-world; an
-        // override of a library method is called by the library
+        // override of a library method is called by the library. 'compare' ignores both: nullable (maddi-mod#68)
         assertEquals("""
                 checked(): String
                 checked(0:s): String?
                 compare(): int
-                compare(0:a): String!
-                compare(1:b): String!
+                compare(0:a): String?
+                compare(1:b): String?
                 early(): String
                 early(0:s): String!
                 early(1:b): boolean
@@ -951,8 +951,8 @@ public class TestNullabilityPass extends CommonTest {
                 checked(): String
                 checked(0:s): String?
                 compare(): int
-                compare(0:a): String!
-                compare(1:b): String!
+                compare(0:a): String?
+                compare(1:b): String?
                 early(): String
                 early(0:s): String!
                 early(1:b): boolean
@@ -7315,5 +7315,119 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("List<St?>", byName(run("a.b.PG", PRECONDITIONS.replace("PF", "PG"))).get("a.b.PG.St.stats"));
         assertEquals("List<St>", byName(run("a.b.PH", PRECONDITIONS.replace("PF", "PH"),
                 NullabilityPass.Policy.NULL_MARKED.withPreconditionsNonNull())).get("a.b.PH.St.stats"));
+    }
+    @Language("java")
+    private static final String TOLERANT = """
+            package a.b;
+            import java.util.Objects;
+            public class TL {
+                private final Object delegate;
+                private final Object mutex;
+                private String name = "";
+                // Synchronized: null means 'this'
+                public TL(Object delegate, Object mutex) {
+                    this.delegate = Objects.requireNonNull(delegate);
+                    this.mutex = mutex == null ? this : mutex;
+                }
+                // Preconditions: the message arguments are formatted, null as "null"
+                public static void checkArgument(boolean b, String template, Object p1) {
+                    if (!b) throw new IllegalArgumentException(lenientFormat(template, p1));
+                }
+                public static String lenientFormat(String template, Object... args) {
+                    StringBuilder sb = new StringBuilder();
+                    sb.append(template);
+                    for (Object a : args) sb.append(lenientToString(a));
+                    return sb.toString();
+                }
+                static String lenientToString(Object o) {
+                    if (o == null) return "null";
+                    return o.toString();
+                }
+                public void unused(String s) { }
+                public int plusOne(Integer i) { return i + 1; }
+                public void locked(Object lock) { synchronized (lock) { System.out.println(); } }
+                public int onOnePath(boolean b, String s) { return b ? s.length() : 0; }
+                public void rejects(String s) {
+                    if (s == null) throw new IllegalArgumentException("s");
+                }
+                public void viaLocal(String s) {
+                    String t = s;
+                    System.out.println(t.length());
+                }
+                public void passedOnToDereference(String s) { onOnePath(true, s); }
+                public void setName(String s) { this.name = s; }
+                public int nameLength() { return name.length(); }
+                private void helper(String s) { }
+                public void callsHelper() { helper("x"); }
+                public Object delegate() { return delegate; }
+                public Object mutex() { return mutex; }
+                // an exception's message and cause
+                public static class UncheckedEx extends RuntimeException {
+                    public UncheckedEx(String message, Throwable cause) { super(message, cause); }
+                }
+            }
+            """;
+
+    /*
+     Without nullTests: a comparison with null would make 'mutex' and 'rejects(s)' nullable on its own.
+     */
+    @DisplayName("#68: a visible parameter whose body tolerates null is nullable, whatever the analysed callers pass")
+    @Test
+    public void toleratedNulls() {
+        NullabilityPass.Report report = run("a.b.TL", TOLERANT, NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY);
+        System.out.println(explain(report));
+        Map<String, String> v = byName(report);
+        // Preconditions' message argument, through lenientFormat's varargs into lenientToString's null check; the
+        // template appended to a StringBuilder; the varargs array itself is iterated
+        assertEquals("Object?", v.get("a.b.TL.checkArgument(boolean,String,Object):2:p1"));
+        assertEquals("String?", v.get("a.b.TL.checkArgument(boolean,String,Object):1:template"));
+        assertEquals("Object?[]", v.get("a.b.TL.lenientFormat(String,Object[]):1:args"));
+        // Synchronized: the mutex is tolerated, the delegate required; the field stays non-null
+        assertEquals("Object?", v.get("a.b.TL.<init>(Object,Object):1:mutex"));
+        assertEquals("Object", v.get("a.b.TL.<init>(Object,Object):0:delegate"));
+        assertEquals("Object", v.get("a.b.TL.mutex"));
+        // the exception constructor's message and cause, handed to RuntimeException
+        assertEquals("String?", v.get("a.b.TL.UncheckedEx.<init>(String,Throwable):0:message"));
+        assertEquals("Throwable?", v.get("a.b.TL.UncheckedEx.<init>(String,Throwable):1:cause"));
+        assertEquals("String?", v.get("a.b.TL.unused(String):0:s"));
+        // dereferenced on one path, rejected, dereferenced through a local or a callee: required
+        assertEquals("String", v.get("a.b.TL.onOnePath(boolean,String):1:s"));
+        assertEquals("String", v.get("a.b.TL.rejects(String):0:s"));
+        assertEquals("String", v.get("a.b.TL.viaLocal(String):0:s"));
+        // unboxed, locked on
+        assertEquals("Integer", v.get("a.b.TL.plusOne(Integer):0:i"));
+        assertEquals("Object", v.get("a.b.TL.locked(Object):0:lock"));
+        assertEquals("String", v.get("a.b.TL.passedOnToDereference(String):0:s"));
+        // stored into a field that is not nullable otherwise: not tolerated, the field keeps its verdict
+        assertEquals("String", v.get("a.b.TL.setName(String):0:s"));
+        // a private helper keeps the flow verdict
+        assertEquals("String", v.get("a.b.TL.helper(String):0:s"));
+
+        // gate NOTOLERANT: the closed world, as before
+        Switches.offForNextPasses(Set.of("NOTOLERANT"));
+        try {
+            Map<String, String> off = byName(new NullabilityPass(NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY)
+                    .go(analysisOrder));
+            assertEquals("Object", off.get("a.b.TL.checkArgument(boolean,String,Object):2:p1"));
+            assertEquals("Object", off.get("a.b.TL.<init>(Object,Object):1:mutex"));
+            assertEquals("String", off.get("a.b.TL.unused(String):0:s"));
+        } finally {
+            Switches.offForNextPasses(Set.of());
+        }
+    }
+
+    @Language("java")
+    private static final String TOLERANT_HIDDEN = """
+            package a.b;
+            class TH {
+                public void unused(String s) { }
+            }
+            """;
+
+    @DisplayName("#68: a public method of a type not visible from outside keeps the closed-world verdict")
+    @Test
+    public void toleratedNullsNeedVisibility() {
+        Map<String, String> v = byName(run("a.b.TH", TOLERANT_HIDDEN));
+        assertEquals("String", v.get("a.b.TH.unused(String):0:s"));
     }
 }

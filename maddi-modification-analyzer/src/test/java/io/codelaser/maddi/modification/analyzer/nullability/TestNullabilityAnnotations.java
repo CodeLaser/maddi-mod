@@ -120,7 +120,7 @@ public class TestNullabilityAnnotations extends CommonTest {
                 private String name = "";
                 public void setName(String name) { this.name = name; }
                 public int length(String s) { return s.length(); }
-                public String greet(String s, String t) { return t.trim() + s; }
+                public String greet(String s, String t) { this.name = s; return t.trim(); }
                 public String getName() { return name; }
             }
             """;
@@ -133,7 +133,8 @@ public class TestNullabilityAnnotations extends CommonTest {
         new IteratingAnalyzerImpl(javaInspector, new IteratingAnalyzerImpl.ConfigurationBuilder()
                 .setMaxIterations(10).setNullability(true).setNullabilityOpenWorld(true).build()).analyze(ao);
         // setName's parameter may be null from outside, and so may the field it is stored in; 'length' and 't'
-        // dereference their parameter (a precondition); 'greet' still has 's' undecided: explicit @NonNull for 't'
+        // dereference their parameter (a precondition); 'greet' still has 's' undecided: explicit @NonNull for 't'.
+        // 's' is stored, not concatenated: a concatenation tolerates null, which makes it @Nullable (maddi-mod#68)
         assertEquals("""
                 package a.b;
                 import org.jspecify.annotations.NonNull;
@@ -143,7 +144,7 @@ public class TestNullabilityAnnotations extends CommonTest {
                     @Nullable private String name = "";
                     @NullUnmarked public void setName(String name) { this.name = name; }
                     public int length(String s) { return s.length(); }
-                    @NullUnmarked @NonNull public String greet(String s, @NonNull String t) { return t.trim() + s; }
+                    @NullUnmarked @NonNull public String greet(String s, @NonNull String t) { this.name = s; return t.trim(); }
                     @NullUnmarked public String getName() { return name; }
                 }
                 """, print(l, NullabilityDecorator.Options.JSPECIFY_NULL_MARKED));
