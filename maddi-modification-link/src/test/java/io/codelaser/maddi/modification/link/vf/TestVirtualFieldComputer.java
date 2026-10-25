@@ -77,6 +77,19 @@ public class TestVirtualFieldComputer extends CommonTest {
         assertEquals(2, vfc.maxMultiplicityFromMethods(stream));
     }
 
+    @DisplayName("an Iterator subtype yields many elements, like Iterator itself (CodeLaser/maddi-mod#66)")
+    @Test
+    public void listIterator() {
+        VirtualFieldComputer vfc = new VirtualFieldComputer(javaInspector);
+
+        TypeInfo iterator = javaInspector.compiledTypesManager().type(java.util.Iterator.class);
+        assertEquals("§m - E[] §es", vfc.compute(iterator).toString());
+        // next() and previous() return one E; computed from the methods alone, that read multiplicity 1, a single §e
+        TypeInfo listIterator = javaInspector.compiledTypesManager().type(java.util.ListIterator.class);
+        assertEquals(2, vfc.maxMultiplicityFromMethods(listIterator));
+        assertEquals("§m - E[] §es", vfc.compute(listIterator).toString());
+    }
+
     @DisplayName("optional")
     @Test
     public void test4() {

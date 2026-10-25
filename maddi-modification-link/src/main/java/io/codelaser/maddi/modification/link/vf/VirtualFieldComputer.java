@@ -340,6 +340,11 @@ public class VirtualFieldComputer {
     int maxMultiplicityFromMethods(TypeInfo typeInfo) {
         // base for many computations
         if (multi2.contains(typeInfo)) return 2;
+        // a subtype yields many elements too, whatever its own methods return: ListIterator's next() and previous()
+        // return one E, which read multiplicity 1, a single §e, so that a modifying call on the iterator reached the
+        // list's elements (CodeLaser/maddi-mod#66)
+        ParameterizedType pt = typeInfo.asParameterizedType();
+        if (multi2.stream().anyMatch(m2 -> runtime.isAssignableFrom(m2.asParameterizedType(), pt))) return 2;
         int multiplicity = 0;
         for (MethodInfo methodInfo : typeInfo.constructorsAndMethods()) {
             ParameterizedType returnType = methodInfo.returnType();

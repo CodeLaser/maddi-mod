@@ -113,7 +113,6 @@ public class TestModificationThroughView extends CommonTest {
                     it.next();
                     it.remove();
                 }
-                // structurally unmodified now; its content still reads modified (CodeLaser/maddi-mod#66)
                 static <T> int countThroughListIterator(List<T> list) {
                     int n = 0;
                     ListIterator<T> it = list.listIterator();
@@ -173,7 +172,7 @@ public class TestModificationThroughView extends CommonTest {
                 countKeys=true/true
                 addThroughListIterator=false/false
                 removeDescending=false/false
-                countThroughListIterator=false/true
+                countThroughListIterator=true/true
                 countDescending=true/true
                 countDescendingSet=true/true
                 """, sb.toString());
