@@ -3975,6 +3975,45 @@ public final class NullabilityPass {
                 && a.typeInfo().simpleName().equals("ParametricNullness"));
     }
 
+    /*
+     Kotlin: an implementation whose class passes a nullable type argument for the overridden return's type variable
+     ('new Tables.AbstractCell<R, C, @Nullable V>()' in guava's ArrayTable.getCell, over Table.Cell's
+     '@ParametricNullness V getValue()'): its null belongs to that instantiation, which the printer writes as
+     'AbstractCell<R, C, V?>', so 'getValue(): V?' overrides 'getValue(): V' as it is. Without this, the upward edge
+     made Cell.getValue V? and AbstractTable's callers failed (worktree-maddi-all, 2026-10-27). A direct supertype
+     only. Gate NONULLABLEINSTANTIATION.
+     */
+    private static boolean nullableInstantiation(MethodInfo mi, MethodInfo overridden) {
+        ParameterizedType rt = overridden.returnType();
+        if (NULLABLE_INSTANTIATION_OFF.get() || !isClassTypeVariable(rt)
+            || rt.typeParameter().getOwner().getLeft() != overridden.typeInfo()) return false;
+        int index = rt.typeParameter().getIndex();
+        List<ParameterizedType> supertypes = new ArrayList<>();
+        if (mi.typeInfo().parentClass() != null) supertypes.add(mi.typeInfo().parentClass());
+        supertypes.addAll(mi.typeInfo().interfacesImplemented());
+        for (ParameterizedType st : supertypes) {
+            if (st.typeInfo() == null) continue;
+            ParameterizedType formal = st.typeInfo().asParameterizedType();
+            ParameterizedType view = st.typeInfo() == overridden.typeInfo() ? formal
+                    : formal.concreteSuperType(overridden.typeInfo().asParameterizedType());
+            if (view == null || index >= view.parameters().size()) continue;
+            ParameterizedType a = view.parameters().get(index);
+            if (a.arrays() > 0 || a.typeParameter() == null || a.typeParameter().isMethodTypeParameter()
+                || a.typeParameter().getOwner().getLeft() != st.typeInfo()) continue;
+            int j = a.typeParameter().getIndex();
+            if (j >= st.parameters().size()) continue;
+            ParameterizedType argument = st.parameters().get(j);
+            if (argument.nullable() == NullableState.NULLABLE || argument.annotations().stream().anyMatch(ae ->
+                    ae.typeInfo() != null && NullAnnotations.NULLABLE.contains(ae.typeInfo().simpleName()))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // gate NONULLABLEINSTANTIATION: an implementation's null reaches the overridden type-variable return (A/B)
+    private static final Switches.Gate NULLABLE_INSTANTIATION_OFF = Switches.gate("NONULLABLEINSTANTIATION");
+
     // gate NOPARAMETRIC: a '@ParametricNullness' type-variable return's own null reaches every call (A/B)
     private static final Switches.Gate PARAMETRIC_OFF = Switches.gate("NOPARAMETRIC");
 
@@ -4021,7 +4060,8 @@ public final class NullabilityPass {
                 boolean upward = !(policy.callResults() && testCode(mi) && !testCode(overridden));
                 // Kotlin: an override's return may not be wider than its overridden member's, so a null returned
                 // by an implementation makes an analysed type-variable return nullable too ('Holder<T>.get(): T?')
-                if (!isTypeVariable(overridden.returnType()) || policy.callResults() && analysed.contains(overridden)) {
+                if (!isTypeVariable(overridden.returnType())
+                    || policy.callResults() && analysed.contains(overridden) && !nullableInstantiation(mi, overridden)) {
                     addEdge(mi, overridden);
                 }
                 if (policy.callResults() && analysed.contains(overridden)) {
@@ -5316,7 +5356,7 @@ public final class NullabilityPass {
         List<Statement> statements = block.statements();
         for (int i = 0; i < statements.size(); i++) {
             Statement statement = statements.get(i);
-            if (i + 1 < statements.size() && statements.get(i + 1) instanceof ForStatement loop) {
+            {
                 Variable array = null;
                 Expression init = null;
                 if (statement instanceof LocalVariableCreation lvc) {
@@ -5335,7 +5375,9 @@ public final class NullabilityPass {
                 }
                 if (init != null && arrayCreatedWithNulls(init) == 1
                     && NonNullFacts.unwrap(init) instanceof ConstructorCall cc
-                    && fills(loop, array, cc.parameterExpressions().getFirst())) {
+                    && (i + 1 < statements.size() && statements.get(i + 1) instanceof ForStatement loop
+                        && fills(loop, array, cc.parameterExpressions().getFirst())
+                        || !COUNTED_FILLS_OFF.get() && countedFill(statements, i, array, cc.parameterExpressions().getFirst()))) {
                     filledCreations.add(init);
                 }
             }
@@ -5388,6 +5430,110 @@ public final class NullabilityPass {
                 && a.variableTarget() instanceof DependentVariable dv
                 && isVariable(dv.arrayExpression(), array) && isVariable(dv.indexExpression(), index));
     }
+
+    /*
+     'T[] a = new T[c.size()]; ... int k = 0; ... for (X x : c) { ... a[k++] = v; ... }': one element per element of
+     the collection, so the creation leaves no null (guava's RegularImmutableMultiset.create, whose entryArray became
+     Array<ImmutableEntry<E>?> and with it IndexedImmutableSet.get's E?, worktree-maddi-all 2026-10-27). The size is
+     'c.size()' or a local holding it; the statements between do not mention the array, except an
+     'if (size == 0) return ...;' (no element to fill); the counter is a local declared there from 0, written only by
+     the one 'a[k++] = v', a statement of the loop's own body; no break, continue, or return handing out the array.
+     Gate NOCOUNTEDFILLS.
+     */
+    private static boolean countedFill(List<Statement> statements, int creation, Variable array, Expression size) {
+        Expression sizeExpression = NonNullFacts.unwrap(size);
+        Variable sizeLocal = null;
+        if (sizeExpression instanceof VariableExpression sv && sv.variable() instanceof LocalVariable lv
+            && lv.assignmentExpression() != null) {
+            sizeLocal = lv;
+            sizeExpression = NonNullFacts.unwrap(lv.assignmentExpression());
+        }
+        if (!(sizeExpression instanceof MethodCall mc) || !"size".equals(mc.methodInfo().name())
+            || !mc.parameterExpressions().isEmpty()
+            || !(NonNullFacts.unwrap(mc.object()) instanceof VariableExpression cv)) return false;
+        Variable collection = cv.variable();
+        Set<Variable> counters = new HashSet<>();
+        for (int j = creation + 1; j < statements.size(); j++) {
+            Statement st = statements.get(j);
+            if (st instanceof ForEachStatement fe && isVariable(fe.expression(), collection)) {
+                return countedLoop(fe, array, counters);
+            }
+            if (writes(st, collection) || sizeLocal != null && writes(st, sizeLocal)) return false;
+            for (Variable counter : counters) if (writes(st, counter)) return false;
+            if (st instanceof LocalVariableCreation lvc) {
+                for (LocalVariable lv : lvc.localVariableStream().toList()) {
+                    if (lv.parameterizedType().isInt() && lv.assignmentExpression() instanceof
+                            io.codelaser.maddi.cst.api.expression.IntConstant zero && zero.constant() == 0) {
+                        counters.add(lv);
+                    }
+                }
+            }
+            if (mentionsInStatement(st, array) && !emptyReturn(st, sizeLocal, sizeExpression)) return false;
+        }
+        return false;
+    }
+
+    // 'if (n == 0) return ...;' without else: the array has no element yet to fill
+    private static boolean emptyReturn(Statement st, Variable sizeLocal, Expression sizeCall) {
+        if (!(st instanceof io.codelaser.maddi.cst.api.statement.IfElseStatement ifs)
+            || ifs.elseBlock() != null && !ifs.elseBlock().isEmpty()
+            || ifs.block().statements().size() != 1 || !(ifs.block().statements().getFirst() instanceof ReturnStatement)
+            || !(NonNullFacts.unwrap(ifs.expression()) instanceof BinaryOperator bo) || bo.operator() == null
+            || !"==".equals(bo.operator().name())
+            || !(NonNullFacts.unwrap(bo.rhs()) instanceof io.codelaser.maddi.cst.api.expression.IntConstant zero)
+            || zero.constant() != 0) return false;
+        Expression lhs = NonNullFacts.unwrap(bo.lhs());
+        return sizeLocal != null ? isVariable(lhs, sizeLocal) : lhs.equals(sizeCall);
+    }
+
+    private static boolean countedLoop(ForEachStatement loop, Variable array, Set<Variable> counters) {
+        Variable[] counter = {null};
+        for (Statement st : loop.block().statements()) {
+            if (st instanceof ExpressionAsStatement eas && eas.expression() instanceof Assignment a
+                && a.assignmentOperator() == null && a.variableTarget() instanceof DependentVariable dv
+                && isVariable(dv.arrayExpression(), array)
+                && NonNullFacts.unwrap(dv.indexExpression()) instanceof Assignment step
+                && Boolean.FALSE.equals(step.prefixPrimitiveOperator()) && step.assignmentOperatorIsPlus()
+                && counters.contains(step.variableTarget())) {
+                if (counter[0] != null) return false;
+                counter[0] = step.variableTarget();
+            }
+        }
+        if (counter[0] == null) return false;
+        boolean[] escapes = {false};
+        int[] steps = {0};
+        loop.block().visit(e -> {
+            if (e instanceof Lambda) return false;
+            if (e instanceof BreakOrContinueStatement
+                || e instanceof ReturnStatement rs && rs.expression() != null && mentions(rs.expression(), array)) {
+                escapes[0] = true;
+            }
+            if (e instanceof Assignment a && counter[0].equals(a.variableTarget()) && ++steps[0] > 1) escapes[0] = true;
+            return !escapes[0];
+        });
+        return !escapes[0];
+    }
+
+    private static boolean writes(Statement st, Variable v) {
+        boolean[] found = {false};
+        st.visit(e -> {
+            if (e instanceof Assignment a && v.equals(a.variableTarget())) found[0] = true;
+            return !found[0];
+        });
+        return found[0];
+    }
+
+    private static boolean mentionsInStatement(Statement st, Variable v) {
+        boolean[] found = {false};
+        st.visit(e -> {
+            if (e instanceof VariableExpression ve && sameVariable(ve.variable(), v)) found[0] = true;
+            return !found[0];
+        });
+        return found[0];
+    }
+
+    // gate NOCOUNTEDFILLS: a creation filled by a counted for-each keeps its null elements (A/B)
+    private static final Switches.Gate COUNTED_FILLS_OFF = Switches.gate("NOCOUNTEDFILLS");
 
     private static boolean isVariable(Expression e, Variable v) {
         return NonNullFacts.unwrap(e) instanceof VariableExpression ve && ve.variable().equals(v);
