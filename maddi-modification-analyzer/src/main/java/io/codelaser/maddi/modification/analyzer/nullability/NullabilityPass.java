@@ -90,6 +90,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.stream.IntStream;
 
 /**
  * Declaration nullability as reachability over the converged link facts (docs/design/nullability.md §4.1, M3).
@@ -2288,15 +2289,38 @@ public final class NullabilityPass {
      same position. Java picks between them by arity or varargs; Kotlin first by the most specific parameter types,
      where String is more specific than String?: langchain4j's ensureNotNull(object, String name) widened to
      'name: String?', kotlinc resolves ensureNotNull(text, "text") to ensureNotNull(object, String format, Object...
-     args), and the message is "text", not "text cannot be null". A widened constructor needs a cast to be told apart.
+     args), and the message is "text", not "text cannot be null". Only an overload that takes the same arguments
+     counts: the same parameter types followed by one varargs parameter. Overloads of one arity that differ elsewhere
+     (Preconditions' checkArgument(boolean,String,Object,char) and (boolean,String,char,Object)) or in arity
+     (an exception's (String) and (String,Throwable)) are told apart by those arguments in Kotlin too.
      */
     private static boolean overloadedAt(MethodInfo mi, ParameterInfo pi) {
-        ParameterizedType type = pi.parameterizedType();
+        List<ParameterInfo> parameters = mi.parameters();
+        int n = parameters.size();
+        if (pi.isVarArgs()) return false;
         return mi.typeInfo().constructorAndMethodStream()
                 .filter(m -> m != mi && m.isConstructor() == mi.isConstructor() && m.name().equals(mi.name())
-                             && pi.index() < m.parameters().size())
-                .map(m -> m.parameters().get(pi.index()).parameterizedType())
-                .anyMatch(t -> t.typeInfo() != null && t.typeInfo() == type.typeInfo() && t.arrays() == type.arrays());
+                             && m.parameters().size() == n + 1 && m.parameters().get(n).isVarArgs())
+                .anyMatch(m -> IntStream.range(0, n).allMatch(i -> sameErasure(
+                        parameters.get(i).parameterizedType(), m.parameters().get(i).parameterizedType())));
+    }
+
+    /*
+     Each overload has its own type parameters: ensureNotNull's <T> T(T object, String name) and <T> T(T object, String
+     format, Object... args) agree at position 0 by their erasure, Object, not by T == T.
+     */
+    private static boolean sameErasure(ParameterizedType a, ParameterizedType b) {
+        if (a.arrays() != b.arrays()) return false;
+        String ea = erasure(a);
+        return ea != null && ea.equals(erasure(b));
+    }
+
+    private static String erasure(ParameterizedType t) {
+        if (t.typeParameter() != null) {
+            List<ParameterizedType> bounds = t.typeParameter().typeBounds();
+            return bounds.isEmpty() ? "java.lang.Object" : erasure(bounds.getFirst());
+        }
+        return t.typeInfo() == null ? null : t.typeInfo().fullyQualifiedName();
     }
 
     // the body reads the parameter
