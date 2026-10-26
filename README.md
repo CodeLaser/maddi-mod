@@ -62,6 +62,7 @@ the code:
 rustc catches unsound verdicts, not imprecise ones: a `&mut` where `&` would do compiles. Issues #58, #59, #60, #62,
 #63 and #64 came from such rejections, each with a minimal repro, and #65 is a question this check raised.
 To run it on a project: `maddi --translate rust --translate-output out`, then `cargo build` in `out`.
+`scripts/rust-llvm/run.sh` adds a second opinion on precision, which rustc does not judge: LLVM's inferred parameter attributes (`captures`, `readonly`) and clippy's lints (`needless_pass_by_value`, `needless_pass_by_ref_mut`, `ptr_arg`) on the printed Rust, joined with the verdicts per parameter. With `--tests` it runs on the Java inputs of this repository's analyzer and link tests, one crate per input, and also counts rustc's rejections per error code.
 
 ## The annotated APIs
 
