@@ -7435,6 +7435,7 @@ public class TestNullabilityPass extends CommonTest {
                 public static class Listener {
                     public void failed(String from, Throwable failure) { }
                     public void logged(String message) { if (message != null) System.out.println(message.length()); }
+                    public void ignored(String unused) { }
                 }
                 public static class Logging extends Listener {
                     @Override public void failed(String from, Throwable failure) {
@@ -7445,19 +7446,21 @@ public class TestNullabilityPass extends CommonTest {
             """;
 
     /*
-     An empty body tolerates nothing: a parameter the method never reads is no evidence. guava's
+     An empty hook tolerates nothing: a parameter an overridden method never reads is no evidence. guava's
      Service.Listener.failed(from, failure) is a hook to override; its parameters made nullable, the overrides in
      guava's tests no longer matched what kotlinc resolves (J2K, "'failed' overrides nothing"). A body that reads the
      parameter and tolerates its null is #68's case, but not in an override of an analysed method, whose tolerance the
-     family would raise into the hook (guava's ServiceManager listener logging 'failure').
+     family would raise into the hook (guava's ServiceManager listener logging 'failure'). A method nothing analysed
+     overrides ignoring a parameter tolerates its null ('ignored', guava's StringCatcher.methodWithoutAnnotation).
      */
-    @DisplayName("#68: a parameter the body never reads is not tolerant")
+    @DisplayName("#68: a parameter an overridden method never reads is not tolerant")
     @Test
     public void toleratedNullsNotUnread() {
         Map<String, String> v = byName(run("a.b.LS", TOLERANT_UNREAD, NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY));
         assertEquals("String", v.get("a.b.LS.Listener.failed(String,Throwable):0:from"));
         assertEquals("Throwable", v.get("a.b.LS.Listener.failed(String,Throwable):1:failure"));
         assertEquals("String?", v.get("a.b.LS.Listener.logged(String):0:message"));
+        assertEquals("String?", v.get("a.b.LS.Listener.ignored(String):0:unused"));
         assertEquals("Throwable", v.get("a.b.LS.Logging.failed(String,Throwable):1:failure"));
     }
 

@@ -2239,7 +2239,7 @@ public final class NullabilityPass {
      message and cause, and Synchronized's mutex @Nullable because they accept null; no analysed call passes one, so
      the closed world said non-null, and a Kotlin translation would throw at a Java caller guava's API permits.
      Not a type variable (parametric), not a primitive, not a declared non-null contract, not an override of a
-     library method declaring the parameter non-null. Not a parameter an overridable method never reads: an empty
+     library method declaring the parameter non-null. Not a parameter an overridden method never reads: an empty
      hook (guava's Service.Listener.failed) is no evidence. Not a parameter annotated non-null either, also where the policy
      does not hold the annotation as a contract (withoutContracts: a diagnosis checking the annotation): the author has
      declared it, and a defensive null check under it is no null reaching it (diagnostics' TestNullIntoNonNull).
@@ -2265,13 +2265,13 @@ public final class NullabilityPass {
     }
 
     /*
-     An overridable method that ignores a parameter is a hook (guava's Service.Listener.failed(from, failure) { }): its
-     overrides, which may be analysed apart (guava's tests), decide what the parameter needs, and Kotlin wants one
-     nullability along the family ("'failed' overrides nothing"). A static, private or final method, or a constructor,
-     that ignores it tolerates null, as #68 has it.
+     An overridden method that ignores a parameter is a hook (guava's Service.Listener.failed(from, failure) { }): its
+     analysed overrides decide what the parameter needs, and Kotlin wants one nullability along the family ("'failed'
+     overrides nothing"). A method without an analysed override that ignores a parameter tolerates null, as #68 has
+     it: an overridable one too (guava's StringCatcher.methodWithoutAnnotation(string)).
      */
-    private static boolean hook(MethodInfo mi, ParameterInfo pi) {
-        return !mi.isConstructor() && overridable(mi) && !read(mi, pi);
+    private boolean hook(MethodInfo mi, ParameterInfo pi) {
+        return implementations.containsKey(mi) && !read(mi, pi);
     }
 
     /*
