@@ -8,10 +8,11 @@
 #   maddi-mod/scripts/rust-llvm/run.sh <out dir> --tests                       the Java inputs of maddi-mod's tests
 #
 # Default input: the shapes beside this script. --tests extracts the text blocks of the analyzer and link tests, each
-# in a package of its own (extract.py). Every Java package becomes a crate of its own, so that one rustc error loses
-# one input. Needs maddi-dist's CLI (`./gradlew :maddi-cli:installDist`), rustc with clippy-driver, and llvm-cxxfilt
-# (Homebrew llvm, or LLVM_CXXFILT). Writes <out>/{results,translated,maddi.log}, <out>/crates/<module>/ (src, rustc.txt,
-# lib.ll, clippy.json), and <out>/REPORT.txt, compare.py's table.
+# in a package of its own (extract.py). Every Java package becomes a crate of its own, compiled function by function
+# (stub.py): rustc's errors are recorded per function and those bodies stubbed, so that one error loses one function.
+# Needs maddi-dist's CLI (`./gradlew :maddi-cli:installDist`), rustc with clippy-driver, and llvm-cxxfilt (Homebrew
+# llvm, or LLVM_CXXFILT). Writes <out>/{results,translated,maddi.log}, <out>/crates/<module>/ (src, rustc.json, lib.ll,
+# clippy.json), and <out>/REPORT.txt, compare.py's table.
 set -uo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 mkdir -p "$1"
@@ -65,15 +66,15 @@ build() {
   local c="$1" m
   m="$(basename "$c")"
   cd "$c" || return
+  python3 -I "$here/stub.py" "$c" "$m"
   if rustc --edition 2024 --crate-type lib --crate-name "$m" -A warnings -O -C codegen-units=1 \
-      --emit=llvm-ir=lib.ll src/lib.rs 2> rustc.txt; then
-    : > rustc.txt
+      --emit=llvm-ir=lib.ll src/lib.rs 2> /dev/null; then
     "$clippy" --edition 2024 --crate-type lib --crate-name "$m" --emit=metadata=clippy.rmeta --error-format=json \
       -A clippy::all -W clippy::needless_pass_by_ref_mut -W clippy::needless_pass_by_value -W clippy::ptr_arg \
       src/lib.rs 2> clippy.json
   fi
 }
 export -f build
-export clippy
+export clippy here
 printf '%s\n' "$out"/crates/*/ | xargs -P "${JOBS:-8}" -I{} bash -c 'build {}'
 python3 -I "$here/compare.py" "$out" | tee "$out/REPORT.txt"
