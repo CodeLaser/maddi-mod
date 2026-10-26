@@ -18,7 +18,6 @@ import io.codelaser.maddi.modification.analyzer.CommonTest;
 import io.codelaser.maddi.modification.analyzer.IteratingAnalyzer;
 import io.codelaser.maddi.modification.analyzer.impl.GuardAnalyzerImpl;
 import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
-import io.codelaser.maddi.modification.analyzer.impl.StaticSideEffectAnalyzerImpl;
 import io.codelaser.maddi.cst.api.analysis.Message;
 import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
@@ -168,19 +167,13 @@ public class TestGuardIgnoreModifications extends CommonTest {
     @DisplayName("global-escape arm: a static-side-effect call on an ignore-mod field is not confined")
     @Test
     public void testGlobalEscapeIsWarned() throws IOException {
-        boolean saved = StaticSideEffectAnalyzerImpl.ENABLED;
-        StaticSideEffectAnalyzerImpl.ENABLED = true;
-        try {
-            Run run = analyzeWithGuard("a.b.X", GLOBAL_ESCAPE);
-            List<Message> notConfined = run.notConfined();
-            assertEquals(1, notConfined.size(),
-                    "the static-side-effect call on the ignore-mod field must be flagged, have: "
-                    + notConfined.stream().map(Message::message).toList());
-            String msg = notConfined.getFirst().message();
-            assertTrue(msg.contains("record") && msg.contains("static side effect") && msg.contains("sink"), msg);
-        } finally {
-            StaticSideEffectAnalyzerImpl.ENABLED = saved;
-        }
+        Run run = analyzeWithGuard("a.b.X", GLOBAL_ESCAPE);
+        List<Message> notConfined = run.notConfined();
+        assertEquals(1, notConfined.size(),
+                "the static-side-effect call on the ignore-mod field must be flagged, have: "
+                + notConfined.stream().map(Message::message).toList());
+        String msg = notConfined.getFirst().message();
+        assertTrue(msg.contains("record") && msg.contains("static side effect") && msg.contains("sink"), msg);
     }
 
     /**
@@ -214,18 +207,12 @@ public class TestGuardIgnoreModifications extends CommonTest {
     @DisplayName("global-escape via a contracted @StaticSideEffects callee: propagates, then the guard fires")
     @Test
     public void testGlobalEscapeViaContractIsWarned() throws IOException {
-        boolean saved = StaticSideEffectAnalyzerImpl.ENABLED;
-        StaticSideEffectAnalyzerImpl.ENABLED = true;
-        try {
-            Run run = analyzeWithGuard("a.b.X", GLOBAL_ESCAPE_VIA_CONTRACT);
-            List<Message> notConfined = run.notConfined();
-            assertEquals(1, notConfined.size(),
-                    "the propagated static-side-effect call on the ignore-mod field must be flagged, have: "
-                    + notConfined.stream().map(Message::message).toList());
-            String msg = notConfined.getFirst().message();
-            assertTrue(msg.contains("reconfigure") && msg.contains("static side effect") && msg.contains("sink"), msg);
-        } finally {
-            StaticSideEffectAnalyzerImpl.ENABLED = saved;
-        }
+        Run run = analyzeWithGuard("a.b.X", GLOBAL_ESCAPE_VIA_CONTRACT);
+        List<Message> notConfined = run.notConfined();
+        assertEquals(1, notConfined.size(),
+                "the propagated static-side-effect call on the ignore-mod field must be flagged, have: "
+                + notConfined.stream().map(Message::message).toList());
+        String msg = notConfined.getFirst().message();
+        assertTrue(msg.contains("reconfigure") && msg.contains("static side effect") && msg.contains("sink"), msg);
     }
 }

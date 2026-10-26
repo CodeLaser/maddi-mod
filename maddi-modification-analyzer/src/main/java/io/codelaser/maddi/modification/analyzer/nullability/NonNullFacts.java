@@ -70,6 +70,8 @@ public final class NonNullFacts {
     // per call: the facts once the receiver and all arguments are evaluated, when the callee runs
     private final Map<Expression, Set<Variable>> whenCalled = new IdentityHashMap<>();
     private final Map<MethodInfo, Set<Variable>> atExit = new IdentityHashMap<>();
+    // per method walked: the variables some path requires non-null where they are not known to be (demands)
+    private final Map<MethodInfo, Set<Variable>> demands = new IdentityHashMap<>();
     // per method: the fields of this non-null at every normal exit (nonNullAtExit(MethodInfo, FieldInfo))
     private final Map<MethodInfo, Set<Variable>> fieldsAtExit = new IdentityHashMap<>();
     // CodeLaser/maddi-mod#48 A5: per private instance method, the fields of this non-null at every call of it walked
@@ -258,6 +260,16 @@ public final class NonNullFacts {
         return atExit.getOrDefault(methodInfo, Set.of()).contains(parameter);
     }
 
+    /**
+     * The locals and parameters that some path of {@code methodInfo}'s body (its lambdas included) requires to be
+     * non-null where they are not known to be: dereferenced, passed to a parameter that demands non-null, or rejected
+     * ({@code if (v == null) throw ...}). A parameter that is not in here tolerates null in this body
+     * (CodeLaser/maddi-mod#68). Not in {@link #kotlinSmartCasts()}.
+     */
+    public Set<Variable> demands(MethodInfo methodInfo) {
+        return demands.getOrDefault(methodInfo, Set.of());
+    }
+
     /** The locals and parameters known non-null when {@code statement} starts; empty when it was not walked. */
     public Set<Variable> before(Statement statement) {
         return before.getOrDefault(statement, Set.of());
@@ -367,6 +379,9 @@ public final class NonNullFacts {
                 addCondition(elseIn, whenFalse(condition));
                 Out thenOut = block(ifElse.block(), thenIn);
                 Block elseBlock = ifElse.elseBlock();
+                // 'if (v == null) throw ...': a rejection of null, on this path
+                if (endsInThrow(ifElse.block())) whenFalse(condition).forEach(v -> demand(v, facts));
+                if (endsInThrow(elseBlock)) whenTrue(condition).forEach(v -> demand(v, facts));
                 Out elseOut = elseBlock == null || elseBlock.isEmpty() ? new Out(elseIn, true) : block(elseBlock, elseIn);
                 if (thenOut.completes && elseOut.completes) {
                     Set<Variable> joined = new HashSet<>(thenOut.facts);
@@ -397,6 +412,7 @@ public final class NonNullFacts {
             }
             case SynchronizedStatement ss -> {
                 effects(ss.expression(), facts);
+                demandVariable(ss.expression(), facts); // locks on it: a demand only, as a for-each's iterable
                 if (kotlinSmartCasts) {
                     // Kotlin's synchronized(lock) { } is a lambda: a check inside smart-casts nothing after it, and
                     // a variable it assigns is no longer known. guava ListenerCallQueue.PerListenerQueue.run():
@@ -461,6 +477,8 @@ public final class NonNullFacts {
     private Out loop(Statement statement, Set<Variable> in, List<Set<Variable>> backEdges) {
         Set<Variable> facts = new HashSet<>(in);
         if (statement.expression() != null) effects(statement.expression(), facts);
+        // 'for (x : v)' iterates v: a demand only, the facts stay as they were
+        if (statement instanceof ForEachStatement fe) demandVariable(fe.expression(), facts);
         List<Set<Variable>> enclosing = continues;
         continues = backEdges;
         statement.subBlockStream().forEach(sb -> {
@@ -1392,6 +1410,18 @@ public final class NonNullFacts {
                     conditionally(bo.rhs(), facts, whenFalse(bo.lhs()));
                     return false;
                 }
+                case BinaryOperator bo -> {
+                    // an unboxed operand: 'old + 1', 'count == 0'; not 'a == b' of two references (a demand only)
+                    if (!(isOperator(bo, "==") || isOperator(bo, "!=")) || primitive(bo.lhs()) || primitive(bo.rhs())) {
+                        unboxed(bo.lhs(), facts);
+                        unboxed(bo.rhs(), facts);
+                    }
+                    return true;
+                }
+                case UnaryOperator uo -> {
+                    unboxed(uo.expression(), facts);
+                    return true;
+                }
                 case And and -> {
                     sequence(and.expressions(), facts, true);
                     return false;
@@ -1503,8 +1533,35 @@ public final class NonNullFacts {
         atExpression.put(e, Set.copyOf(facts));
     }
 
+    private static boolean endsInThrow(Block block) {
+        return block != null && !block.isEmpty() && block.statements().getLast() instanceof ThrowStatement;
+    }
+
+    private void demand(Variable v, Set<Variable> facts) {
+        if (!kotlinSmartCasts && walking != null && !facts.contains(v)) {
+            demands.computeIfAbsent(walking, _ -> new HashSet<>()).add(v);
+        }
+    }
+
+    private static boolean primitive(Expression e) {
+        ParameterizedType type = e.parameterizedType();
+        return type != null && type.arrays() == 0 && type.isPrimitiveExcludingVoid();
+    }
+
+    private void unboxed(Expression e, Set<Variable> facts) {
+        ParameterizedType type = unwrap(e).parameterizedType();
+        if (type != null && type.arrays() == 0 && type.isBoxedExcludingVoid()) demandVariable(e, facts);
+    }
+
+    private void demandVariable(Expression e, Set<Variable> facts) {
+        if (unwrap(e) instanceof VariableExpression ve && trackable(ve.variable())) demand(ve.variable(), facts);
+    }
+
     private void dereference(Expression scope, Set<Variable> facts) {
-        if (unwrap(scope) instanceof VariableExpression ve && trackable(ve.variable())) facts.add(ve.variable());
+        if (unwrap(scope) instanceof VariableExpression ve && trackable(ve.variable())) {
+            demand(ve.variable(), facts);
+            facts.add(ve.variable());
+        }
         // 'clazz.getSuperclass().equals(X.class)': the same pure call again is non-null (gap 8, #48 B8)
         if (!LOOP_BACK_EDGES_OFF.get() && unwrap(scope) instanceof MethodCall mc && pureCall(mc) instanceof Variable pc) {
             facts.add(pc);
@@ -1519,6 +1576,7 @@ public final class NonNullFacts {
             if (pi.isVarArgs()) break;
             if (parameterContract.apply(pi) == NullableState.NONNULL
                 && unwrap(arguments.get(i)) instanceof VariableExpression ve && trackable(ve.variable())) {
+                demand(ve.variable(), facts);
                 facts.add(ve.variable());
             }
         }
