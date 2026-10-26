@@ -163,6 +163,8 @@ def reading(name, mode, d, ir, cl, body):
     if 'needless_pass_by_value' in cl:
         # moved in to be kept, then copied: the printer's clone, not the verdict
         r.append('printer: an owned parameter cloned' if re.search(r'\b' + name + r'\.clone\(\)', body)
+                 # independent, yet moved in: the printer's reading of the link facts (kept in a new result)
+                 else 'printer: an independent parameter moved in, only borrowed' if ind == 2
                  else 'disagree: maddi kept, clippy: only borrowed')
     if mode == '&mut' and ind != 2 and 'captures(none)' in ir:
         r.append('disagree: maddi dependent, LLVM: not captured')
@@ -213,7 +215,6 @@ crates = sorted(glob.glob(out + '/crates/*/'))
 outcome, functions, stubbed_fns = Counter(), 0, 0
 for crate in crates:
     crate = crate.rstrip('/')
-    module = crate.split('/')[-1]
     if not os.path.exists(crate + '/rustc.json'):
         outcome['not built'] += 1
         continue
@@ -228,16 +229,20 @@ for crate in crates:
     built = os.path.exists(crate + '/lib.ll')
     outcome['compiled as printed' if built and not report['errors'] else
             'compiled with stubs' if built else 'gave up'] += 1
-    orig = crate + f'/src/{module}.rs' + ('.orig' if os.path.exists(crate + f'/src/{module}.rs.orig') else '')
-    lines = open(orig).read().split('\n')
-    fns = rustsrc.functions(lines, module)
-    stubbed = rustsrc.functions(open(crate + f'/src/{module}.rs').read().split('\n'), module) if built else {}
+    modules = sorted(f[:-3] for f in os.listdir(crate + '/src') if f.endswith('.rs') and f not in ('lib.rs', 'jrt.rs'))
+    source, fns, stubbed = {}, {}, {}
+    for module in modules:
+        orig = crate + f'/src/{module}.rs' + ('.orig' if os.path.exists(crate + f'/src/{module}.rs.orig') else '')
+        source[module] = open(orig).read().split('\n')
+        fns.update(rustsrc.functions(source[module], module))
+        if built:
+            stubbed.update(rustsrc.functions(open(crate + f'/src/{module}.rs').read().split('\n'), module))
     llvm, aliases, calls, noreturn = llvm_attributes(crate + '/lib.ll') if built else ({}, {}, {}, set())
     bad = tainted({k for k in per_fn if k in stubbed}, calls, noreturn, aliases)
     lints = clippy_lints(crate + '/clippy.json') if built and os.path.exists(crate + '/clippy.json') else {}
     for key, info in sorted(fns.items()):
         functions += 1
-        body = '\n'.join(lines[info['body'][0]:info['body'][1] + 1]) if info['body'] else ''
+        body = '\n'.join(source[key[0]][info['body'][0]:info['body'][1] + 1]) if info['body'] else ''
         d_method = maddi_methods.get(key, {})
         names = {p[0] for p in info['params']}
         errs = rustc_readings(per_fn.get(key, []), names, lambda n: maddi_params.get(key + (n,), {}), d_method)
@@ -265,7 +270,7 @@ for crate in crates:
                 d = maddi_params.get(key + (pname,), {})
                 v = flags(d, 'unmodifiedParameter', 'structurallyUnmodifiedParameter', 'independentParameter')
             a = 'absent' if ir is None else 'reaches a panic' if key in bad else ir.get(pname, '-')
-            cl = [code for col, code in lints.get((f'{module}.rs', line_now), []) if c0 <= col < c1]
+            cl = [code for col, code in lints.get((f'{key[0]}.rs', line_now), []) if c0 <= col < c1]
             r = [] if key in overloaded or pname == 'self' or abstract else reading(pname, mode, d, a, cl, body)
             tally.update(r)
             if r or show_all:

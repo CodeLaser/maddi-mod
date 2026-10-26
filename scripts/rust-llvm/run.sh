@@ -12,7 +12,8 @@
 # (stub.py): rustc's errors are recorded per function and those bodies stubbed, so that one error loses one function.
 # Needs maddi-dist's CLI (`./gradlew :maddi-cli:installDist`), rustc with clippy-driver, and llvm-cxxfilt (Homebrew
 # llvm, or LLVM_CXXFILT). Writes <out>/{results,translated,maddi.log}, <out>/crates/<module>/ (src, rustc.json, lib.ll,
-# clippy.json), and <out>/REPORT.txt, compare.py's table.
+# clippy.json), and <out>/REPORT.txt, compare.py's table. MADDI_CLASSPATH adds to the class path, MADDI_ARGS (word
+# split) to the CLI's arguments: a corpus's jars and jmods.
 set -uo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 mkdir -p "$1"
@@ -37,7 +38,9 @@ if [[ "${2:-}" == --tests ]]; then
   echo "$(echo "$packages" | tr ',' '\n' | wc -l | tr -d ' ') test inputs javac accepts"
 else
   src="${2:-$here/shapes}"
-  packages="${3:-a.b}"
+  # default: every package of the source tree
+  packages="${3:-$(cd "$src" && find . -name '*.java' ! -name package-info.java ! -name module-info.java \
+    -exec dirname {} \; | sort -u | sed 's|^\./||; s|/|.|g' | paste -sd, -)}"
 fi
 cli="$root/maddi-dist/maddi-cli/build/install/maddi/bin/maddi"
 archive="$root/maddi/maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles"
@@ -45,20 +48,30 @@ archive="$root/maddi/maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aa
 
 rm -rf "$out/results" "$out/translated" "$out/crates"
 JAVA_OPTS="${JAVA_OPTS:--Xmx3g}" "$cli" --source "$src" --source-packages "$packages" --jmod java.base \
-  --classpath "$(echo "$lib"/maddi-annotation-*.jar)" --preload-analysis-results-dirs "$archive/jdk" \
-  --translate rust --translate-output "$out/translated" --analysis-results-dir "$out/results" > "$out/maddi.log" 2>&1
+  --classpath "$(echo "$lib"/maddi-annotation-*.jar)${MADDI_CLASSPATH:+:$MADDI_CLASSPATH}" \
+  --preload-analysis-results-dirs "$archive/jdk" ${MADDI_ARGS:-} --translate rust \
+  --translate-output "$out/translated" --analysis-results-dir "$out/results" > "$out/maddi.log" 2>&1
 [[ -d "$out/translated/src" ]] || { echo "no translation, see $out/maddi.log" >&2; exit 1; }
 
-# one crate per module, with the runtime; every function codegened on its own, attributes and all (small pub
-# functions are otherwise only inlined)
-for rs in "$out"/translated/src/*.rs; do
-  m="$(basename "$rs" .rs)"
-  [[ "$m" == lib || "$m" == jrt ]] && continue
-  mkdir -p "$out/crates/$m/src"
-  cp "$rs" "$out/translated/src/jrt.rs" "$out/crates/$m/src/"
-  printf 'pub mod %s;\npub mod jrt;\n' "$m" > "$out/crates/$m/src/lib.rs"
-  sed -i.orig -E 's/^([[:space:]]*)((pub )?(unsafe )?fn )/\1#[inline(never)]\n\1\2/' "$out/crates/$m/src/$m.rs"
-  rm -f "$out/crates/$m/src/$m.rs.orig"
+# the tests' packages are independent inputs: a crate each, so that what one gets wrong costs only that one; a
+# project's packages refer to each other: one crate. Every function is codegened on its own, attributes and all
+# (small pub functions are otherwise only inlined).
+if [[ "${2:-}" == --tests ]]; then
+  for rs in "$out"/translated/src/*.rs; do
+    m="$(basename "$rs" .rs)"
+    [[ "$m" == lib || "$m" == jrt ]] && continue
+    mkdir -p "$out/crates/$m/src"
+    cp "$rs" "$out/translated/src/jrt.rs" "$out/crates/$m/src/"
+    printf 'pub mod %s;\npub mod jrt;\n' "$m" > "$out/crates/$m/src/lib.rs"
+  done
+else
+  mkdir -p "$out/crates/translated"
+  cp -R "$out/translated/src" "$out/crates/translated/"
+fi
+for rs in "$out"/crates/*/src/*.rs; do
+  [[ "$(basename "$rs")" == lib.rs ]] && continue
+  sed -i.orig -E 's/^([[:space:]]*)((pub )?(unsafe )?fn )/\1#[inline(never)]\n\1\2/' "$rs"
+  rm -f "$rs.orig"
 done
 
 clippy="$(dirname "$(readlink -f "$(command -v cargo-clippy)")")/clippy-driver"
@@ -66,7 +79,7 @@ build() {
   local c="$1" m
   m="$(basename "$c")"
   cd "$c" || return
-  python3 -I "$here/stub.py" "$c" "$m"
+  python3 -I "$here/stub.py" "$c"
   if rustc --edition 2024 --crate-type lib --crate-name "$m" -A warnings -O -C codegen-units=1 \
       --emit=llvm-ir=lib.ll src/lib.rs 2> /dev/null; then
     "$clippy" --edition 2024 --crate-type lib --crate-name "$m" --emit=metadata=clippy.rmeta --error-format=json \

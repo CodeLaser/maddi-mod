@@ -52,7 +52,7 @@ def functions(lines, module):
             ptype = ptype.strip()
             mode = '&mut' if ptype.startswith('&mut ') or re.match(r"&'\w+ mut ", ptype) else \
                 '&' if ptype.startswith('&') else 'owned'
-            params.append((pname.replace('mut ', '').strip(), mode, c0, c1))
+            params.append((pname.replace('mut ', '').strip().removeprefix('r#'), mode, c0, c1))
         fns[(module, impl, m.group(2))] = {'line': i + 1, 'first': first, 'last': last, 'body': body,
                                            'params': params}
     return fns
@@ -64,3 +64,21 @@ def enclosing(fns, line0):
         if f['first'] <= line0 <= f['last']:
             return key, f['body'] is not None and f['body'][0] <= line0 <= f['body'][1]
     return None, False
+
+
+ITEM = re.compile(r'(?:pub(?:\([\w:]+\))? )?(?:unsafe )?(?:struct|enum|impl|trait|static|const|type|use|fn|mod)\b')
+
+
+def item_at(lines, line0):
+    """The 0-based line range of the top-level item holding `line0`, its doc comments and attributes included."""
+    start = next((i for i in range(line0, -1, -1) if ITEM.match(lines[i])), None)
+    if start is None:
+        return None
+    end = start
+    if not lines[start].rstrip().endswith((';', '}')):
+        end = next((j for j in range(start + 1, len(lines)) if lines[j] == '}'), len(lines) - 1)
+    if end < line0:
+        return None
+    while start > 0 and lines[start - 1].startswith(('///', '#[', '#![')):
+        start -= 1
+    return start, end

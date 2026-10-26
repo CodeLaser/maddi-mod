@@ -48,6 +48,7 @@ import io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass;
 import io.codelaser.maddi.modification.analyzer.shadow.ShadowModificationPass;
 import io.codelaser.maddi.modification.common.AnalyzerException;
 import io.codelaser.maddi.modification.common.defaults.ShallowMethodAnalyzer;
+import io.codelaser.maddi.modification.link.impl.LinkFactsImpl;
 import io.codelaser.maddi.modification.link.io.LinkCodec;
 import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
 import io.codelaser.maddi.modification.prepwork.io.AnalysisFingerprint;
@@ -57,6 +58,7 @@ import io.codelaser.maddi.modification.prepwork.io.LoadAnalysisResults;
 import io.codelaser.maddi.modification.prepwork.io.PrepWorkCodec;
 import io.codelaser.maddi.modification.prepwork.io.WriteAnalysisResults;
 import io.codelaser.maddi.cst.impl.analysis.ConsumptionEdgeRecorder;
+import io.codelaser.maddi.cst.impl.analysis.LinkFacts;
 import io.codelaser.maddi.cst.impl.analysis.NullabilityFacts;
 import io.codelaser.maddi.util.Trie;
 import org.slf4j.Logger;
@@ -122,6 +124,12 @@ public class AnalysisEngineImpl implements AnalysisEngine {
             case CSHARP -> new NullabilityPass(NullabilityPass.Policy.KOTLIN.withPreconditionsNonNull()).go(order)
                     .orElse(NullabilityFacts.STORED);
         };
+    }
+
+    @Override
+    public LinkFacts linkFacts(List<Info> order) {
+        // read off the METHOD_LINKS the modification run left on the CST: valid only after it, in the same process
+        return new LinkFactsImpl(order);
     }
 
     @Override
