@@ -2242,6 +2242,7 @@ public final class NullabilityPass {
      hook (guava's Service.Listener.failed) is no evidence. Not a parameter annotated non-null either, also where the policy
      does not hold the annotation as a contract (withoutContracts: a diagnosis checking the annotation): the author has
      declared it, and a defensive null check under it is no null reaching it (diagnostics' TestNullIntoNonNull).
+     Not a parameter an overload shares the position and type of (overloadedAt).
      */
     private void tolerantParameters(List<MethodInfo> methods) {
         // what null reaches without these seeds: a field or a return that is nullable anyway may take the parameter
@@ -2252,7 +2253,7 @@ public final class NullabilityPass {
                 ParameterizedType type = pi.parameterizedType();
                 if (primitive(type) || isTypeVariable(type) || before.contains(pi) || nonNullContracts.contains(pi)
                     || explicitState(pi) == NullableState.NONNULL || libraryNonNullParameter(mi, pi.index())
-                    || hook(mi, pi)) continue;
+                    || hook(mi, pi) || overloadedAt(mi, pi)) continue;
                 if (tolerates(pi, before)) {
                     seedIndirect(pi, mi.fullyQualifiedName() + " tolerates null in " + pi.name()
                                      + ", callable from outside");
@@ -2269,6 +2270,22 @@ public final class NullabilityPass {
      */
     private static boolean hook(MethodInfo mi, ParameterInfo pi) {
         return !mi.isConstructor() && overridable(mi) && !read(mi, pi);
+    }
+
+    /*
+     An overload of the method (same name, a method or a constructor as it is) has a parameter of the same type at the
+     same position. Java picks between them by arity or varargs; Kotlin first by the most specific parameter types,
+     where String is more specific than String?: langchain4j's ensureNotNull(object, String name) widened to
+     'name: String?', kotlinc resolves ensureNotNull(text, "text") to ensureNotNull(object, String format, Object...
+     args), and the message is "text", not "text cannot be null". A widened constructor needs a cast to be told apart.
+     */
+    private static boolean overloadedAt(MethodInfo mi, ParameterInfo pi) {
+        ParameterizedType type = pi.parameterizedType();
+        return mi.typeInfo().constructorAndMethodStream()
+                .filter(m -> m != mi && m.isConstructor() == mi.isConstructor() && m.name().equals(mi.name())
+                             && pi.index() < m.parameters().size())
+                .map(m -> m.parameters().get(pi.index()).parameterizedType())
+                .anyMatch(t -> t.typeInfo() != null && t.typeInfo() == type.typeInfo() && t.arrays() == type.arrays());
     }
 
     // the body reads the parameter
