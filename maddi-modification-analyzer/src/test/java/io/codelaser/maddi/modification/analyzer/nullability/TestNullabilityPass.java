@@ -7427,6 +7427,37 @@ public class TestNullabilityPass extends CommonTest {
     /*
      Without nullTests: a comparison with null would make 'mutex' and 'rejects(s)' nullable on its own.
      */
+    @Language("java")
+    private static final String TOLERANT_ANNOTATED = """
+            package a.b;
+            public class GD {
+                @interface NonNull { }
+                public void guarded(@NonNull String s) { if (s == null) return; System.out.println(s.length()); }
+                public void plain(String s) { if (s == null) return; System.out.println(s.length()); }
+                public void callsGuarded() { guarded("y"); plain("y"); }
+            }
+            """;
+
+    /*
+     A defensive null check under an explicit non-null annotation is not null reaching the parameter, also when the
+     policy does not hold the annotation as a contract (a diagnosis checking it: diagnostics' TestNullIntoNonNull);
+     the same body without the annotation is #68's tolerance.
+     */
+    @DisplayName("#68: a parameter annotated non-null is not tolerant, with or without contracts")
+    @Test
+    public void toleratedNullsAnnotatedNonNull() {
+        // flow only: a null test would seed the parameter by itself; without contracts in a closed world is the policy
+        // of diagnostics' Analyses
+        Map<String, NullabilityPass.Policy> policies = Map.of("GC", NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY,
+                "GW", NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY.withoutContracts()
+                        .withWorld(NullabilityPass.World.CLOSED));
+        policies.forEach((name, policy) -> {
+            Map<String, String> v = byName(run("a.b." + name, TOLERANT_ANNOTATED.replace("GD", name), policy));
+            assertEquals("String", v.get("a.b." + name + ".guarded(String):0:s"), name);
+            assertEquals("String?", v.get("a.b." + name + ".plain(String):0:s"), name);
+        });
+    }
+
     @DisplayName("#68: a visible parameter whose body tolerates null is nullable, whatever the analysed callers pass")
     @Test
     public void toleratedNulls() {

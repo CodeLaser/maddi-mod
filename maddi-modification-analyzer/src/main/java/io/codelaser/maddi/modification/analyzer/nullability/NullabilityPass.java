@@ -2238,7 +2238,9 @@ public final class NullabilityPass {
      message and cause, and Synchronized's mutex @Nullable because they accept null; no analysed call passes one, so
      the closed world said non-null, and a Kotlin translation would throw at a Java caller guava's API permits.
      Not a type variable (parametric), not a primitive, not a declared non-null contract, not an override of a
-     library method declaring the parameter non-null.
+     library method declaring the parameter non-null. Not a parameter annotated non-null either, also where the policy
+     does not hold the annotation as a contract (withoutContracts: a diagnosis checking the annotation): the author has
+     declared it, and a defensive null check under it is no null reaching it (diagnostics' TestNullIntoNonNull).
      */
     private void tolerantParameters(List<MethodInfo> methods) {
         // what null reaches without these seeds: a field or a return that is nullable anyway may take the parameter
@@ -2248,7 +2250,7 @@ public final class NullabilityPass {
             for (ParameterInfo pi : mi.parameters()) {
                 ParameterizedType type = pi.parameterizedType();
                 if (primitive(type) || isTypeVariable(type) || before.contains(pi) || nonNullContracts.contains(pi)
-                    || libraryNonNullParameter(mi, pi.index())) continue;
+                    || explicitState(pi) == NullableState.NONNULL || libraryNonNullParameter(mi, pi.index())) continue;
                 if (tolerates(pi, before)) {
                     seedIndirect(pi, mi.fullyQualifiedName() + " tolerates null in " + pi.name()
                                      + ", callable from outside");
