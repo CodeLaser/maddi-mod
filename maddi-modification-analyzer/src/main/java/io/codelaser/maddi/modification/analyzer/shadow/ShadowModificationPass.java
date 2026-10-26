@@ -809,6 +809,14 @@ public class ShadowModificationPass {
                     for (Object node : project(mi, vd, fr.scopeVariable())) {
                         seedWithOrigin(node, mi, "assignment to " + fr.fullyQualifiedName());
                     }
+                } else if (fr.scope() != null) {
+                    // a field of an expression's result ('requireNonNull(tail).next = node', 'self().next = node'):
+                    // the result's object is modified, and with it what the result stands for, projected as a
+                    // modifying call on that result would be (engine mirror: ExpressionVisitor.assignment's
+                    // expressionScopePrimary, CodeLaser/maddi-mod#71)
+                    for (Object node : projectReceiverChain(mi, vd, fr.scope(), null)) {
+                        seedWithOrigin(node, mi, "assignment to " + fr.fullyQualifiedName());
+                    }
                 }
             }
             case DependentVariable dv -> {
