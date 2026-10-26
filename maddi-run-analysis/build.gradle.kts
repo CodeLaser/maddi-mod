@@ -144,6 +144,16 @@ tasks.withType<Test>().configureEach {
                "-Dmaddi.test.junitVintageClasspath=" + junitVintage.asPath)
     })
 }
+// TEST_LANE=<name>: results and reports of their own, so that two Gradle builds can run ratchets side by side in one
+// checkout (guava's J2K ratchet in one lane, the other corpora in a second) without writing each other's binary
+// results. The ratchets' own output (build/j2k/<corpus>, the oracle's .tsv) is per corpus already.
+System.getenv("TEST_LANE")?.let { lane ->
+    tasks.withType<Test>().configureEach {
+        binaryResultsDirectory.set(layout.buildDirectory.dir("test-results/$name-$lane/binary"))
+        reports.junitXml.outputLocation.set(layout.buildDirectory.dir("test-results/$name-$lane"))
+        reports.html.outputLocation.set(layout.buildDirectory.dir("reports/tests/$name-$lane"))
+    }
+}
 // J2K_COMPILE_ONLY=true: the J2K ratchets translate and compile, and run none of the corpus's tests (a working
 // cycle; see JavaToKotlinRatchet.COMPILE_ONLY)
 tasks.withType<Test>().configureEach {

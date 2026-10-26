@@ -55,7 +55,9 @@ public class KotlinIdioms {
             "nullableParameterTypes", "nullablePropertyTypes", "nullableReturnTypes", "nullableTypeArguments",
             "valProperties", "varProperties", "valLocals", "varLocals", "lateinit",
             "readOnlyCollectionTypes", "mutableCollectionTypes",
-            "runBlocks");
+            "runBlocks",
+            "safeLetBlocks", "letBlocks", "applyBlocks", "alsoBlocks", "assignmentAlsoBlocks", "receiverRunBlocks", "withBlocks",
+            "takeIfCalls");
     // the counts that are not divided by the number of lines
     static final Set<String> NOT_PER_KLOC = Set.of("files", "lines");
 
@@ -212,15 +214,52 @@ public class KotlinIdioms {
                 super.visitNamedFunction(function);
             }
 
+            /*
+             The scope functions, by name and shape: a lambda and no other argument, 'with' taking its receiver in
+             parentheses. Java's 'function.apply(x)' and the like keep their parentheses and are not counted.
+             'runBlocks' is the unqualified 'run { }' a translator writes for a block; 'receiverRunBlocks' is
+             'x.run { }'. A safe call counts once in 'safeCalls' too.
+             */
             @Override
             public void visitCallExpression(KtCallExpression expression) {
                 if (expression.getCalleeExpression() instanceof KtNameReferenceExpression ref
-                        && "run".equals(ref.getReferencedName())
-                        && !(expression.getParent() instanceof KtQualifiedExpression)
                         && !expression.getLambdaArguments().isEmpty()) {
-                    c.inc("runBlocks");
+                    String name = ref.getReferencedName();
+                    int parenthesized = expression.getValueArgumentList() == null ? 0
+                            : expression.getValueArgumentList().getArguments().size();
+                    KtQualifiedExpression qualified = expression.getParent() instanceof KtQualifiedExpression q
+                            && q.getSelectorExpression() == expression ? q : null;
+                    // as before: neither the selector nor the receiver of a qualified expression
+                    if ("run".equals(name) && !(expression.getParent() instanceof KtQualifiedExpression)) {
+                        c.inc("runBlocks");
+                    } else if (parenthesized == 1 && qualified == null && "with".equals(name)) {
+                        c.inc("withBlocks");
+                    } else if (parenthesized == 0 && qualified != null) {
+                        switch (name) {
+                            case "let" -> c.inc(qualified instanceof KtSafeQualifiedExpression
+                                    ? "safeLetBlocks" : "letBlocks");
+                            case "apply" -> c.inc("applyBlocks");
+                            case "also" -> c.inc(isAssignmentOfIt(expression) ? "assignmentAlsoBlocks" : "alsoBlocks");
+                            case "run" -> c.inc("receiverRunBlocks");
+                            case "takeIf", "takeUnless" -> c.inc("takeIfCalls");
+                            default -> {
+                            }
+                        }
+                    }
                 }
                 super.visitCallExpression(expression);
+            }
+
+            // 'f().also { x = it }': how a translator writes Java's assignment used as a value ('(x = f()) > 0'),
+            // not an idiom of its own choosing
+            private static boolean isAssignmentOfIt(KtCallExpression expression) {
+                KtLambdaExpression lambda = expression.getLambdaArguments().getFirst().getLambdaExpression();
+                KtBlockExpression body = lambda == null ? null : lambda.getBodyExpression();
+                if (body == null || body.getStatements().size() != 1) return false;
+                return body.getStatements().getFirst() instanceof KtBinaryExpression assignment
+                       && assignment.getOperationToken() == KtTokens.EQ
+                       && assignment.getRight() instanceof KtNameReferenceExpression right
+                       && "it".equals(right.getReferencedName());
             }
 
             // the declared type of a property, parameter or function: nullable at the top, nullable type arguments,
