@@ -2242,7 +2242,8 @@ public final class NullabilityPass {
      hook (guava's Service.Listener.failed) is no evidence. Not a parameter annotated non-null either, also where the policy
      does not hold the annotation as a contract (withoutContracts: a diagnosis checking the annotation): the author has
      declared it, and a defensive null check under it is no null reaching it (diagnostics' TestNullIntoNonNull).
-     Not a parameter an overload shares the position and type of (overloadedAt).
+     Not a parameter an overload shares the position and type of (overloadedAt), nor one of an override of an
+     analysed method (overridesAnalysed).
      */
     private void tolerantParameters(List<MethodInfo> methods) {
         // what null reaches without these seeds: a field or a return that is nullable anyway may take the parameter
@@ -2253,7 +2254,7 @@ public final class NullabilityPass {
                 ParameterizedType type = pi.parameterizedType();
                 if (primitive(type) || isTypeVariable(type) || before.contains(pi) || nonNullContracts.contains(pi)
                     || explicitState(pi) == NullableState.NONNULL || libraryNonNullParameter(mi, pi.index())
-                    || hook(mi, pi) || overloadedAt(mi, pi)) continue;
+                    || hook(mi, pi) || overloadedAt(mi, pi) || overridesAnalysed(mi)) continue;
                 if (tolerates(pi, before)) {
                     seedIndirect(pi, mi.fullyQualifiedName() + " tolerates null in " + pi.name()
                                      + ", callable from outside");
@@ -2270,6 +2271,16 @@ public final class NullabilityPass {
      */
     private static boolean hook(MethodInfo mi, ParameterInfo pi) {
         return !mi.isConstructor() && overridable(mi) && !read(mi, pi);
+    }
+
+    /*
+     An override of an analysed method takes its parameters' nullability from the family, which Kotlin wants as one: its
+     own tolerance would raise the declaration's (guava's ServiceManager listener logs 'failure', which Logger.log
+     accepts null for, and Service.Listener.failed's empty hook became 'failure: Throwable?'). The declaration's own
+     body decides. An override of a library method only (a Comparator's compare) is #68's case.
+     */
+    private boolean overridesAnalysed(MethodInfo mi) {
+        return mi.overrides().stream().anyMatch(analysed::contains);
     }
 
     /*

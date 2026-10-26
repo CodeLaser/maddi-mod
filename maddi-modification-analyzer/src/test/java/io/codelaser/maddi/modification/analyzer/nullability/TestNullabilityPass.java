@@ -7436,6 +7436,11 @@ public class TestNullabilityPass extends CommonTest {
                     public void failed(String from, Throwable failure) { }
                     public void logged(String message) { if (message != null) System.out.println(message.length()); }
                 }
+                public static class Logging extends Listener {
+                    @Override public void failed(String from, Throwable failure) {
+                        if (failure != null) System.out.println(failure.getMessage());
+                    }
+                }
             }
             """;
 
@@ -7443,7 +7448,8 @@ public class TestNullabilityPass extends CommonTest {
      An empty body tolerates nothing: a parameter the method never reads is no evidence. guava's
      Service.Listener.failed(from, failure) is a hook to override; its parameters made nullable, the overrides in
      guava's tests no longer matched what kotlinc resolves (J2K, "'failed' overrides nothing"). A body that reads the
-     parameter and tolerates its null is #68's case.
+     parameter and tolerates its null is #68's case, but not in an override of an analysed method, whose tolerance the
+     family would raise into the hook (guava's ServiceManager listener logging 'failure').
      */
     @DisplayName("#68: a parameter the body never reads is not tolerant")
     @Test
@@ -7452,6 +7458,7 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("String", v.get("a.b.LS.Listener.failed(String,Throwable):0:from"));
         assertEquals("Throwable", v.get("a.b.LS.Listener.failed(String,Throwable):1:failure"));
         assertEquals("String?", v.get("a.b.LS.Listener.logged(String):0:message"));
+        assertEquals("Throwable", v.get("a.b.LS.Logging.failed(String,Throwable):1:failure"));
     }
 
     @Language("java")
