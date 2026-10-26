@@ -13,6 +13,10 @@
 # 2026-10-26, devel at maddi a147b75f1 / maddi-mod 4b6c7a68, measured on the Mac: 234 unsafe, 1,834 noise, 274
 # undecided. #68 (a parameter that tolerates null prints nullable) and its overload and override rules: 114 parameters
 # that guava annotates @Nullable now agree, and 98 more read nullable where guava's context guarantees a value.
-unsafe	234
+#
+# 2026-10-26, devel at maddi f2cae7ece / maddi-mod b0cd2a7c, measured on the Mac: 229 unsafe, 1,834 noise. An unread
+# parameter loses its tolerance only when the method has an analysed override: StringCatcher's and the four
+# NullPointerTesterTest.OneArg parameters agree again.
+unsafe	229
 noise	1834
 noiseSlack	20
