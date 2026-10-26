@@ -52,7 +52,7 @@ def functions(lines, module):
             ptype = ptype.strip()
             mode = '&mut' if ptype.startswith('&mut ') or re.match(r"&'\w+ mut ", ptype) else \
                 '&' if ptype.startswith('&') else 'owned'
-            params.append((pname.replace('mut ', '').strip(), mode, c0, c1))
+            params.append((pname.replace('mut ', '').strip().removeprefix('r#'), mode, c0, c1))
         fns[(module, impl, m.group(2))] = {'line': i + 1, 'first': first, 'last': last, 'body': body,
                                            'params': params}
     return fns

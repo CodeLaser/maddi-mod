@@ -163,6 +163,8 @@ def reading(name, mode, d, ir, cl, body):
     if 'needless_pass_by_value' in cl:
         # moved in to be kept, then copied: the printer's clone, not the verdict
         r.append('printer: an owned parameter cloned' if re.search(r'\b' + name + r'\.clone\(\)', body)
+                 # independent, yet moved in: the printer's reading of the link facts (kept in a new result)
+                 else 'printer: an independent parameter moved in, only borrowed' if ind == 2
                  else 'disagree: maddi kept, clippy: only borrowed')
     if mode == '&mut' and ind != 2 and 'captures(none)' in ir:
         r.append('disagree: maddi dependent, LLVM: not captured')
