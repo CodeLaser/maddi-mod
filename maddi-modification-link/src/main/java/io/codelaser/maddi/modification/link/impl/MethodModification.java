@@ -106,34 +106,60 @@ public record MethodModification(Runtime runtime, VariableData variableData, Sta
         // depends on the function our caller passes (PassedFunction)
         ParameterInfo functionalReceiver = objectPrimary instanceof ParameterInfo fp
                                            && fp.methodInfo() == currentMethod
-                                           && methodInfo.isAbstract()
-                                           && fp.parameterizedType().isFunctionalInterface() ? fp : null;
+                                           && PassedFunction.sam(methodInfo)
+                                           && PassedFunction.functional(fp) ? fp : null;
         Set<Variable> recordedThroughPassedFunction = new HashSet<>();
         if (!receiverDisclaimed) {
             for (ParameterInfo pi : methodInfo.parameters()) {
-                if (pi.isModified() && !pi.isIgnoreModifications() && !parameterExcusedByCone(pi, receiverType)) {
-                    // deep-modified but structurally unmodified (its elements are modified, it is not): deep-only
-                    boolean structural = !pi.isStructurallyUnmodified();
-                    if (pi.isVarArgs()) {
-                        for (int i = methodInfo.parameters().size() - 1; i < mc.parameterExpressions().size(); i++) {
-                            Result rp = params.get(i);
-                            handleModifiedParameter(mc.parameterExpressions().get(i), rp, modified, structural);
-                        }
-                    } else if (PassedFunction.unmodifiedAtCallSite(pi, mc.parameterExpressions())) {
-                        LOGGER.debug("Argument {} of {} not modified: the function passed leaves it alone", pi.index(),
-                                methodInfo);
+                // an unmodified parameter with entries: it, or an element of it, reaches a function (PassedFunction)
+                boolean throughOnly = !pi.isModified() && !pi.isVarArgs() && PassedFunction.hasEntries(pi);
+                if ((!pi.isModified() && !throughOnly) || pi.isIgnoreModifications()
+                    || parameterExcusedByCone(pi, receiverType)) {
+                    continue;
+                }
+                // deep-modified but structurally unmodified (its elements are modified, it is not): deep-only
+                boolean structural = !pi.isStructurallyUnmodified();
+                if (pi.isVarArgs()) {
+                    for (int i = methodInfo.parameters().size() - 1; i < mc.parameterExpressions().size(); i++) {
+                        Result rp = params.get(i);
+                        handleModifiedParameter(mc.parameterExpressions().get(i), rp, modified, structural);
+                    }
+                    continue;
+                }
+                Result rp = params.get(pi.index());
+                Expression argument = mc.parameterExpressions().get(pi.index());
+                PassedFunction.Effect effect = PassedFunction.effectAtCallSite(pi, mc.parameterExpressions());
+                if (effect == PassedFunction.Effect.UNMODIFIED) {
+                    LOGGER.debug("Argument {} of {} not modified: the function passed leaves it alone", pi.index(),
+                            methodInfo);
+                } else if (effect != null) {
+                    // the callee hands the argument (ANY) or only its elements (ELEMENTS) to functions we pass, and
+                    // one of them may modify it; when those are our own functional parameters, passed on, the entries
+                    // become ours, for our caller to resolve
+                    if (throughPassedFunction == null || !forward(pi, rp)) {
+                        handleModifiedParameter(argument, rp, modified, effect == PassedFunction.Effect.ANY);
+                    }
+                } else if (functionalReceiver != null && throughPassedFunction != null
+                           && rp.links() != null && rp.links().isEmpty()
+                           && rp.links().primary() instanceof ParameterInfo ownParameter
+                           && ownParameter.methodInfo() == currentMethod) {
+                    // our parameter is the SAM's argument: not modified here, whatever this function does to it is
+                    // for our caller to resolve (CodeLaser/maddi-mod#69)
+                    throughPassedFunction.accept(ownParameter,
+                            PassedFunction.entry(functionalReceiver.index(), pi.index()));
+                    recordedThroughPassedFunction.add(ownParameter);
+                } else {
+                    // ... and the same for an element of our parameter (CodeLaser/maddi-mod#67)
+                    Set<ParameterInfo> elementOf = functionalReceiver == null || throughPassedFunction == null
+                            ? Set.of() : PassedFunction.elementOf(rp.links(), variableData, stage, currentMethod);
+                    if (elementOf.isEmpty()) {
+                        handleModifiedParameter(argument, rp, modified, structural);
                     } else {
-                        Result rp = params.get(pi.index());
-                        if (functionalReceiver != null && throughPassedFunction != null
-                            && rp.links() != null && rp.links().isEmpty()
-                            && rp.links().primary() instanceof ParameterInfo ownParameter
-                            && ownParameter.methodInfo() == currentMethod) {
-                            throughPassedFunction.accept(ownParameter,
-                                    PassedFunction.entry(functionalReceiver.index(), pi.index()));
-                            recordedThroughPassedFunction.add(ownParameter);
-                        } else {
-                            handleModifiedParameter(mc.parameterExpressions().get(pi.index()), rp, modified, structural);
+                        for (ParameterInfo owner : elementOf) {
+                            throughPassedFunction.accept(owner,
+                                    PassedFunction.elementEntry(functionalReceiver.index(), pi.index()));
                         }
+                        recordedThroughPassedFunction.add(rp.links().primary());
                     }
                 }
             }
@@ -159,6 +185,27 @@ public record MethodModification(Runtime runtime, VariableData variableData, Sta
             }
         }
         return modified.build();
+    }
+
+    /*
+    The callee's entries for this argument carry over to our own parameter when every function that may modify is one
+    of our functional parameters: as they are when the argument IS our parameter, as element entries when it is an
+    element of our parameter. False when they cannot be carried over.
+     */
+    private boolean forward(ParameterInfo calleeParameter, Result rp) {
+        List<String> forwarded = PassedFunction.forwardedEntries(calleeParameter, mc.parameterExpressions(),
+                currentMethod);
+        if (forwarded == null) return false;
+        if (rp.links() != null && rp.links().isEmpty() && rp.links().primary() instanceof ParameterInfo own
+            && own.methodInfo() == currentMethod) {
+            forwarded.forEach(entry -> throughPassedFunction.accept(own, entry));
+            return true;
+        }
+        Set<ParameterInfo> owners = PassedFunction.elementOf(rp.links(), variableData, stage, currentMethod);
+        for (ParameterInfo owner : owners) {
+            forwarded.forEach(entry -> throughPassedFunction.accept(owner, PassedFunction.asElementEntry(entry)));
+        }
+        return !owners.isEmpty();
     }
 
     /*

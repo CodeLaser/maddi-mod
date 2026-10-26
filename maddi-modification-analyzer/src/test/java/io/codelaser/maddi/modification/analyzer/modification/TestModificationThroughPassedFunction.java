@@ -40,11 +40,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * which does not touch its {@code Iterable}; the unconditional reading marked every {@code toQueue()} receiver
  * modified, and through it {@code List.Cons.tail}.
  * <ul>
- * <li>{@code measure}: the callee; its {@code value} stays modified (it is, for some function).</li>
+ * <li>{@code measure}: the callee; its {@code value} is unmodified, with the entry {@code 1:0}: that {@code f} is
+ *     applied is recorded on {@code f} (CodeLaser/maddi-mod#69).</li>
  * <li>{@code useSize}/{@code useSizeLambda}: a method reference / lambda that does not modify -- {@code in}
  *     unmodified.</li>
  * <li>{@code useClear}: a method reference that does modify -- {@code in} modified.</li>
- * <li>{@code forward}: the caller's own functional parameter, unknown here -- conservatively modified.</li>
+ * <li>{@code forward}: the caller's own functional parameter, passed on: the entry becomes the caller's.</li>
  * <li>{@code useBoth}: the callee also modifies {@code value} unconditionally -- modified whatever is passed.</li>
  * </ul>
  * {@code Fn.apply} is contracted {@code @NotModified} with a {@code @Modified} parameter, the unit-scale stand-in
@@ -136,14 +137,15 @@ public class TestModificationThroughPassedFunction extends CommonTest {
         assertEquals(Set.of("1:0"), through(x, "measure"), "value goes to argument 0 of parameter 1's SAM");
         assertEquals(Set.of(), through(x, "both"), "both also modifies value itself: nothing to specialise");
 
-        assertTrue(modified(x, "measure"), "measure's value IS modified, for some function");
+        assertFalse(modified(x, "measure"), "measure's value is modified only by the function its caller passes");
         assertFalse(modified(x, "size"));
         assertTrue(modified(x, "clearAndCount"));
 
         assertFalse(modified(x, "useSize"), "X::size does not modify in");
         assertFalse(modified(x, "useSizeLambda"), "l -> l.size() does not modify in");
         assertTrue(modified(x, "useClear"), "X::clearAndCount does modify in");
-        assertTrue(modified(x, "forward"), "an unknown function: conservatively modified");
+        assertFalse(modified(x, "forward"), "forward passes its own function on");
+        assertEquals(Set.of("1:0"), through(x, "forward"), "... and takes the entry over");
         assertTrue(modified(x, "useBoth"), "both modifies value itself, whatever the function");
     }
 
@@ -209,8 +211,9 @@ public class TestModificationThroughPassedFunction extends CommonTest {
                     new IteratingAnalyzerImpl.ConfigurationBuilder().setMaxIterations(10)
                             .setModificationViaReachability(modReach).build());
             analyzer.analyze(analysisOrder);
-            assertEquals(Set.of("3:0"), through(y, "toTraversable"), "modReach=" + modReach);
-            assertTrue(modified(y, "toTraversable"), "modReach=" + modReach);
+            // value itself goes to ofAll (3:0), its element to ofElement (2:0:e, CodeLaser/maddi-mod#67)
+            assertEquals(Set.of("2:0:e", "3:0"), through(y, "toTraversable"), "modReach=" + modReach);
+            assertFalse(modified(y, "toTraversable"), "modReach=" + modReach);
             assertFalse(modified(y, "ofAll"), "modReach=" + modReach);
             assertFalse(modified(y, "toList"), "Y::ofAll does not modify in; modReach=" + modReach);
         }

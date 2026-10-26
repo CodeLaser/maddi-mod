@@ -39,14 +39,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * <p>
  * Each verdict is written {@code deep/structural}, by the fixpoint and by the reachability pass.
  * <ul>
- * <li>{@code useReader}, by the fixpoint: an argument handed to the SAM of one of the method's own functional parameters is
- *     "modified for some function" ({@code MODIFIED_THROUGH_PASSED_FUNCTION}), whatever the SAM's own verdict; the
- *     structural twin follows the deep one's pessimism.</li>
+ * <li>{@code useSink}, {@code useReader}: a parameter handed to the SAM of one of the method's own functional parameters
+ *     is unmodified, with an entry in {@code MODIFIED_THROUGH_PASSED_FUNCTION}: each caller resolves it with the
+ *     function it passes (CodeLaser/maddi-mod#69). Both modes agree; before, the fixpoint read it "modified for some
+ *     function" and the pass read {@code Reader.read} from its implementations.</li>
  * <li>The reachability pass follows a local's element link ({@code i ∈ items.§$s}) and a call result's
  *     ({@code m.get(k)}) to the container, deep-only: its structural closure skips those edges. Before, its deep
  *     verdict missed every element-only modification of a parameter in a walkable body (touchAll true/true).</li>
- * <li>{@code useReader} is the one place the two modes differ: the pass has no such rule, it reads
- *     {@code Reader.read} from its implementations, and none of them modifies the list structurally.</li>
  * </ul>
  */
 public class TestStructuralModification extends CommonTest {
@@ -161,10 +160,9 @@ public class TestStructuralModification extends CommonTest {
                                                     + " Holder.items=false/false Holder.touched=false/true"
                                                     + " Holder.add=false/false Holder.touchAll=false/true"
                                                     + " Sink.accept=false/false Reader.read=false/true"
-                                                    + " useSink=false/false useReader=false/false";
+                                                    + " useSink=true/true useReader=true/true";
 
-    private static final String EXPECTED_REACHABILITY = EXPECTED_FIXPOINT
-            .replace("useReader=false/false", "useReader=false/true");
+    private static final String EXPECTED_REACHABILITY = EXPECTED_FIXPOINT;
 
     @DisplayName("structural beside deep: fixpoint")
     @Test
