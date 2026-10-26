@@ -2238,7 +2238,8 @@ public final class NullabilityPass {
      message and cause, and Synchronized's mutex @Nullable because they accept null; no analysed call passes one, so
      the closed world said non-null, and a Kotlin translation would throw at a Java caller guava's API permits.
      Not a type variable (parametric), not a primitive, not a declared non-null contract, not an override of a
-     library method declaring the parameter non-null. Not a parameter annotated non-null either, also where the policy
+     library method declaring the parameter non-null. Not a parameter an overridable method never reads: an empty
+     hook (guava's Service.Listener.failed) is no evidence. Not a parameter annotated non-null either, also where the policy
      does not hold the annotation as a contract (withoutContracts: a diagnosis checking the annotation): the author has
      declared it, and a defensive null check under it is no null reaching it (diagnostics' TestNullIntoNonNull).
      */
@@ -2250,13 +2251,34 @@ public final class NullabilityPass {
             for (ParameterInfo pi : mi.parameters()) {
                 ParameterizedType type = pi.parameterizedType();
                 if (primitive(type) || isTypeVariable(type) || before.contains(pi) || nonNullContracts.contains(pi)
-                    || explicitState(pi) == NullableState.NONNULL || libraryNonNullParameter(mi, pi.index())) continue;
+                    || explicitState(pi) == NullableState.NONNULL || libraryNonNullParameter(mi, pi.index())
+                    || hook(mi, pi)) continue;
                 if (tolerates(pi, before)) {
                     seedIndirect(pi, mi.fullyQualifiedName() + " tolerates null in " + pi.name()
                                      + ", callable from outside");
                 }
             }
         }
+    }
+
+    /*
+     An overridable method that ignores a parameter is a hook (guava's Service.Listener.failed(from, failure) { }): its
+     overrides, which may be analysed apart (guava's tests), decide what the parameter needs, and Kotlin wants one
+     nullability along the family ("'failed' overrides nothing"). A static, private or final method, or a constructor,
+     that ignores it tolerates null, as #68 has it.
+     */
+    private static boolean hook(MethodInfo mi, ParameterInfo pi) {
+        return !mi.isConstructor() && overridable(mi) && !read(mi, pi);
+    }
+
+    // the body reads the parameter
+    private static boolean read(MethodInfo mi, ParameterInfo pi) {
+        boolean[] found = {false};
+        mi.methodBody().visit(e -> {
+            if (e instanceof VariableExpression ve && pi.equals(ve.variable())) found[0] = true;
+            return !found[0];
+        });
+        return found[0];
     }
 
     /*

@@ -923,7 +923,8 @@ public class TestNullabilityPass extends CommonTest {
                 use(): String""", closed);
         // a public parameter no analysed call passes null to: unspecified, and so is what it flows into; the
         // package-private and private methods, and the public method of a package-private type, stay closed-world; an
-        // override of a library method is called by the library. 'compare' ignores both: nullable (maddi-mod#68)
+        // override of a library method is called by the library. 'compare' ignores both: nullable (maddi-mod#68; Hidden
+        // is final, so this is no hook)
         assertEquals("""
                 checked(): String
                 checked(0:s): String?
@@ -7399,7 +7400,7 @@ public class TestNullabilityPass extends CommonTest {
                     if (o == null) return "null";
                     return o.toString();
                 }
-                public void unused(String s) { }
+                public static void unused(String s) { }
                 public int plusOne(Integer i) { return i + 1; }
                 public void locked(Object lock) { synchronized (lock) { System.out.println(); } }
                 public int onOnePath(boolean b, String s) { return b ? s.length() : 0; }
@@ -7427,6 +7428,32 @@ public class TestNullabilityPass extends CommonTest {
     /*
      Without nullTests: a comparison with null would make 'mutex' and 'rejects(s)' nullable on its own.
      */
+    @Language("java")
+    private static final String TOLERANT_UNREAD = """
+            package a.b;
+            public class LS {
+                public static class Listener {
+                    public void failed(String from, Throwable failure) { }
+                    public void logged(String message) { if (message != null) System.out.println(message.length()); }
+                }
+            }
+            """;
+
+    /*
+     An empty body tolerates nothing: a parameter the method never reads is no evidence. guava's
+     Service.Listener.failed(from, failure) is a hook to override; its parameters made nullable, the overrides in
+     guava's tests no longer matched what kotlinc resolves (J2K, "'failed' overrides nothing"). A body that reads the
+     parameter and tolerates its null is #68's case.
+     */
+    @DisplayName("#68: a parameter the body never reads is not tolerant")
+    @Test
+    public void toleratedNullsNotUnread() {
+        Map<String, String> v = byName(run("a.b.LS", TOLERANT_UNREAD, NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY));
+        assertEquals("String", v.get("a.b.LS.Listener.failed(String,Throwable):0:from"));
+        assertEquals("Throwable", v.get("a.b.LS.Listener.failed(String,Throwable):1:failure"));
+        assertEquals("String?", v.get("a.b.LS.Listener.logged(String):0:message"));
+    }
+
     @Language("java")
     private static final String TOLERANT_ANNOTATED = """
             package a.b;
@@ -7507,7 +7534,7 @@ public class TestNullabilityPass extends CommonTest {
     private static final String TOLERANT_HIDDEN = """
             package a.b;
             class TH {
-                public void unused(String s) { }
+                public static void unused(String s) { }
             }
             """;
 
