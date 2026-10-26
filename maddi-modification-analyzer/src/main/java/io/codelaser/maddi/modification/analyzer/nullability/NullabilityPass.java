@@ -2305,8 +2305,22 @@ public final class NullabilityPass {
                         parameters.get(i).parameterizedType(), m.parameters().get(i).parameterizedType())));
     }
 
+    /*
+     Each overload has its own type parameters: ensureNotNull's <T> T(T object, String name) and <T> T(T object, String
+     format, Object... args) agree at position 0 by their erasure, Object, not by T == T.
+     */
     private static boolean sameErasure(ParameterizedType a, ParameterizedType b) {
-        return a.typeInfo() != null && a.typeInfo() == b.typeInfo() && a.arrays() == b.arrays();
+        if (a.arrays() != b.arrays()) return false;
+        String ea = erasure(a);
+        return ea != null && ea.equals(erasure(b));
+    }
+
+    private static String erasure(ParameterizedType t) {
+        if (t.typeParameter() != null) {
+            List<ParameterizedType> bounds = t.typeParameter().typeBounds();
+            return bounds.isEmpty() ? "java.lang.Object" : erasure(bounds.getFirst());
+        }
+        return t.typeInfo() == null ? null : t.typeInfo().fullyQualifiedName();
     }
 
     // the body reads the parameter

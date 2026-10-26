@@ -7472,6 +7472,13 @@ public class TestNullabilityPass extends CommonTest {
                     if (object == null) throw new IllegalArgumentException(String.format(format, args));
                     return object;
                 }
+                public static <T> T ensureGeneric(T object, String name) {
+                    return ensureGeneric(object, "%s cannot be null", name);
+                }
+                public static <T> T ensureGeneric(T object, String format, Object... args) {
+                    if (object == null) throw new IllegalArgumentException(String.format(format, args));
+                    return object;
+                }
                 public void logged(String message) { if (message != null) System.out.println(message.length()); }
                 public void logged(int code) { System.out.println(code); }
                 public static void check(boolean b, String template, Object p1, char p2) {
@@ -7498,6 +7505,8 @@ public class TestNullabilityPass extends CommonTest {
     public void toleratedNullsNotOverloaded() {
         Map<String, String> v = byName(run("a.b.VU", TOLERANT_OVERLOADED, NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY));
         assertEquals("String", v.get("a.b.VU.ensureNotNull(Object,String):1:name"));
+        // each overload's own T: the same erasure, Object
+        assertEquals("String", v.get("a.b.VU.ensureGeneric(Object,String):1:name"));
         assertEquals("String?", v.get("a.b.VU.logged(String):0:message"));
         assertEquals("Object?", v.get("a.b.VU.check(boolean,String,Object,char):2:p1"));
         assertEquals("String?", v.get("a.b.VU.Failed.<init>(String):0:message"));
