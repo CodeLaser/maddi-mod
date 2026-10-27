@@ -550,6 +550,19 @@ public final class NullabilityPass {
         return node instanceof Info info ? info.fullyQualifiedName() : String.valueOf(node);
     }
 
+    // ' chain=' and the nodes the closure reached this one through, back to the seed and its origin
+    private String whyChain(Map<Object, Object> cause, Object node) {
+        StringBuilder sb = new StringBuilder(" chain=");
+        Object n = node;
+        Set<Object> seen = new HashSet<>();
+        while (cause.containsKey(n) && seen.add(n)) {
+            n = cause.get(n);
+            sb.append(" <- ").append(Report.label(n));
+        }
+        String origin = seedOrigin.get(n);
+        return origin == null ? sb.toString() : sb.append(" <- ").append(origin).toString();
+    }
+
     private static void whyLog(String what, Object node, String detail) {
         StringBuilder sb = new StringBuilder("NULLWHY ").append(what).append(' ').append(whyName(node));
         if (detail != null) sb.append(" :: ").append(detail);
@@ -1367,7 +1380,7 @@ public final class NullabilityPass {
         if (policy.callResults()) {
             for (MethodInfo mi : methods) {
                 if (boundedTypeVariableOverride(mi) || overridesKotlinNonNullReturn(mi)
-                    || overridesLibraryNonNullReturn(mi)) nonNullContracts.add(mi);
+                    || overridesLibraryNonNullReturn(mi) || testOverrideOfInstantiatedReturn(mi)) nonNullContracts.add(mi);
             }
             nonNullOverrides(methods);
         }
@@ -1461,6 +1474,11 @@ public final class NullabilityPass {
                 degraded.contains(pi.methodInfo()))));
         for (FieldInfo fi : fields) {
             verdicts.put(fi, contracted(fi, verdict(fi.type(), fi, false)));
+            if (why(fi)) {
+                System.err.println("NULLWHY final " + fi.fullyQualifiedName() + " reached=" + reached.contains(fi)
+                                   + whyChain(cause, fi) + " elements reached=" + reached.contains(new Content(fi))
+                                   + whyChain(cause, new Content(fi)) + " verdict=" + verdicts.get(fi));
+            }
         }
         for (MethodInfo mi : methods) {
             boolean deg = degraded.contains(mi);
@@ -1473,7 +1491,7 @@ public final class NullabilityPass {
             if (why(mi)) {
                 System.err.println("NULLWHY final " + mi.fullyQualifiedName() + " reached=" + reached.contains(mi)
                                    + " seed=" + seedOrigin.get(mi) + " contract=" + nonNullContracts.contains(mi)
-                                   + " degraded=" + deg + " verdict=" + verdicts.get(mi));
+                                   + " degraded=" + deg + " verdict=" + verdicts.get(mi) + whyChain(cause, mi));
             }
         }
         if (policy.callResults()) {
@@ -3435,8 +3453,30 @@ public final class NullabilityPass {
      flow between two array nodes, also one the top-level verdict drops because the array is known non-null there,
      ties their Contents both ways, recursively for nested arrays.
      */
+    /*
+     Kotlin: an array passed where an array of a wider element type is expected ('asImmutableList(entryArray)' with
+     an ImmutableEntry<E>[] for guava's 'asImmutableList(@Nullable Object[] elements)') is cast by the printer
+     ('entryArray as Array<Any?>'): the two are no one Array<T>. Elements flow on from the narrower array into the
+     wider one, but not back, unless the wider one is written through. Without this, the parameter's nullable
+     elements made RegularImmutableMultiset.create's entryArray, and with it entries, getEntry and
+     IndexedImmutableSet.get, nullable (worktree-maddi-all, 2026-10-27). True when 'to' holds a proper subtype of what
+     'from' holds. Gate NOARRAYWIDENING.
+     */
+    private boolean narrowedArray(ParameterizedType from, ParameterizedType to) {
+        if (!policy.callResults() || ARRAY_WIDENING_OFF.get() || from.arrays() != to.arrays()) return false;
+        TypeInfo f = from.copyWithoutArrays().typeInfo();
+        TypeInfo t = to.copyWithoutArrays().typeInfo();
+        if (f == null || t == null || f == t || t.isJavaLangObject()) return false;
+        return f.isJavaLangObject() || t.superTypesExcludingJavaLangObject().contains(f);
+    }
+
+    // gate NOARRAYWIDENING: a wider array parameter's element nulls flow back into the argument (A/B)
+    private static final Switches.Gate ARRAY_WIDENING_OFF = Switches.gate("NOARRAYWIDENING");
+
     private void coupleContent() {
         Set<Object> writtenThrough = writtenThrough(true);
+        // narrowedArray: an element annotation alone writes nothing into the caller's array
+        Set<Object> written = policy.callResults() && !ARRAY_WIDENING_OFF.get() ? writtenThrough(false) : writtenThrough;
         Set<ParameterInfo> readOnlyArrays = readOnlyArrayParameters();
         Deque<List<Object>> queue = new ArrayDeque<>(flows);
         Set<List<Object>> seen = new HashSet<>();
@@ -3456,11 +3496,13 @@ public final class NullabilityPass {
                 // anything else is that reversed link
                 if ((!readOnlyArrayParameter(flow.get(0), readOnlyArrays)
                      || readOnlyArrayParameter(flow.get(1), readOnlyArrays))
-                    && !varargsPasses.contains(List.of(flow.get(1), flow.get(0)))) {
+                    && !varargsPasses.contains(List.of(flow.get(1), flow.get(0)))
+                    && !(narrowedArray(t0, t1) && !written.contains(flow.get(0)))) {
                     successors.computeIfAbsent(c0, _ -> new LinkedHashSet<>()).add(c1);
                 }
                 if (!readOnlyArrayParameter(flow.get(1), readOnlyArrays) && !varargsPasses.contains(flow)
-                    && (policy.assertContentWrites() || writtenThrough.contains(flow.get(1)))) {
+                    && (narrowedArray(t1, t0) ? written.contains(flow.get(1))
+                        : policy.assertContentWrites() || writtenThrough.contains(flow.get(1)))) {
                     successors.computeIfAbsent(c1, _ -> new LinkedHashSet<>()).add(c0);
                 }
                 queue.add(List.of(c0, c1));
@@ -3634,7 +3676,7 @@ public final class NullabilityPass {
      ImmutableMap.Builder.entries, ImmutableList.array, Joiner.join(Object[]) and TypeToken's Type[] one slot.
      */
     private Set<Object> writtenThrough(boolean annotations) {
-        // 'annotations': whether an element annotation counts ('join(@Nullable Object[] parts)'); always, for now
+        // 'annotations': whether an element annotation counts ('join(@Nullable Object[] parts)'); not for narrowedArray
         Set<Object> written = new HashSet<>();
         successors.forEach((from, tos) -> {
             if (from instanceof Content) return;
@@ -3975,6 +4017,73 @@ public final class NullabilityPass {
                 && a.typeInfo().simpleName().equals("ParametricNullness"));
     }
 
+    /*
+     Kotlin: an implementation whose class passes a nullable type argument for the overridden return's type variable
+     ('new Tables.AbstractCell<R, C, @Nullable V>()' in guava's ArrayTable.getCell, over Table.Cell's
+     '@ParametricNullness V getValue()'): its null belongs to that instantiation, which the printer writes as
+     'AbstractCell<R, C, V?>', so 'getValue(): V?' overrides 'getValue(): V' as it is. Without this, the upward edge
+     made Cell.getValue V? and AbstractTable's callers failed (worktree-maddi-all, 2026-10-27). A direct supertype
+     only. Gate NONULLABLEINSTANTIATION.
+     */
+    private static boolean nullableInstantiation(MethodInfo mi, MethodInfo overridden) {
+        if (NULLABLE_INSTANTIATION_OFF.get()) return false;
+        ParameterizedType argument = instantiation(mi, overridden);
+        return argument != null && (argument.nullable() == NullableState.NULLABLE || argument.annotations().stream()
+                .anyMatch(ae -> ae.typeInfo() != null && NullAnnotations.NULLABLE.contains(ae.typeInfo().simpleName())));
+    }
+
+    // the type argument a direct supertype of mi's class passes for the overridden return's class type variable
+    private static ParameterizedType instantiation(MethodInfo mi, MethodInfo overridden) {
+        ParameterizedType rt = overridden.returnType();
+        if (!isClassTypeVariable(rt) || rt.typeParameter().getOwner().getLeft() != overridden.typeInfo()) return null;
+        int index = rt.typeParameter().getIndex();
+        List<ParameterizedType> supertypes = new ArrayList<>();
+        if (mi.typeInfo().parentClass() != null) supertypes.add(mi.typeInfo().parentClass());
+        supertypes.addAll(mi.typeInfo().interfacesImplemented());
+        for (ParameterizedType st : supertypes) {
+            if (st.typeInfo() == null) continue;
+            ParameterizedType formal = st.typeInfo().asParameterizedType();
+            ParameterizedType view = st.typeInfo() == overridden.typeInfo() ? formal
+                    : formal.concreteSuperType(overridden.typeInfo().asParameterizedType());
+            if (view == null || index >= view.parameters().size()) continue;
+            ParameterizedType a = view.parameters().get(index);
+            if (a.arrays() > 0 || a.typeParameter() == null || a.typeParameter().isMethodTypeParameter()
+                || a.typeParameter().getOwner().getLeft() != st.typeInfo()) continue;
+            int j = a.typeParameter().getIndex();
+            if (j < st.parameters().size()) return st.parameters().get(j);
+        }
+        return null;
+    }
+
+    /*
+     Kotlin: a test's override of a main member's type-variable return, in a class that instantiates the variable with
+     a concrete type ('new Tables.AbstractCell<Character, Integer, String>() { String getValue() { return
+     holder.string; } }' in guava's ImmutableTableTest, the field @Nullable): its result is that instantiation's
+     String, non-null, its null value asserted. Without this, the test's null made main's Table.Cell.getValue V? and
+     AbstractTable failed (worktree-maddi-all, 2026-10-27). Not where the test returns a null literal, which the printer
+     cannot assert (the upward edge of buildForMethod keeps that one). Gate NOTESTINSTANTIATION.
+     */
+    private boolean testOverrideOfInstantiatedReturn(MethodInfo mi) {
+        if (TEST_INSTANTIATION_OFF.get() || mi.isConstructor() || mi.returnType().isVoid() || !testCode(mi)
+            || returnsNullLiteral(mi)) return false;
+        for (MethodInfo overridden : overrides(mi)) {
+            if (!analysed.contains(overridden) || testCode(overridden)) continue;
+            ParameterizedType argument = instantiation(mi, overridden);
+            if (argument != null && argument.typeParameter() == null && argument.wildcard() == null
+                && argument.nullable() != NullableState.NULLABLE && argument.annotations().stream().noneMatch(ae ->
+                    ae.typeInfo() != null && NullAnnotations.NULLABLE.contains(ae.typeInfo().simpleName()))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // gate NOTESTINSTANTIATION: a test override's null reaches main's type-variable return (A/B)
+    private static final Switches.Gate TEST_INSTANTIATION_OFF = Switches.gate("NOTESTINSTANTIATION");
+
+    // gate NONULLABLEINSTANTIATION: an implementation's null reaches the overridden type-variable return (A/B)
+    private static final Switches.Gate NULLABLE_INSTANTIATION_OFF = Switches.gate("NONULLABLEINSTANTIATION");
+
     // gate NOPARAMETRIC: a '@ParametricNullness' type-variable return's own null reaches every call (A/B)
     private static final Switches.Gate PARAMETRIC_OFF = Switches.gate("NOPARAMETRIC");
 
@@ -4021,7 +4130,8 @@ public final class NullabilityPass {
                 boolean upward = !(policy.callResults() && testCode(mi) && !testCode(overridden));
                 // Kotlin: an override's return may not be wider than its overridden member's, so a null returned
                 // by an implementation makes an analysed type-variable return nullable too ('Holder<T>.get(): T?')
-                if (!isTypeVariable(overridden.returnType()) || policy.callResults() && analysed.contains(overridden)) {
+                if (!isTypeVariable(overridden.returnType())
+                    || policy.callResults() && analysed.contains(overridden) && !nullableInstantiation(mi, overridden)) {
                     addEdge(mi, overridden);
                 }
                 if (policy.callResults() && analysed.contains(overridden)) {
@@ -5316,7 +5426,7 @@ public final class NullabilityPass {
         List<Statement> statements = block.statements();
         for (int i = 0; i < statements.size(); i++) {
             Statement statement = statements.get(i);
-            if (i + 1 < statements.size() && statements.get(i + 1) instanceof ForStatement loop) {
+            {
                 Variable array = null;
                 Expression init = null;
                 if (statement instanceof LocalVariableCreation lvc) {
@@ -5335,7 +5445,9 @@ public final class NullabilityPass {
                 }
                 if (init != null && arrayCreatedWithNulls(init) == 1
                     && NonNullFacts.unwrap(init) instanceof ConstructorCall cc
-                    && fills(loop, array, cc.parameterExpressions().getFirst())) {
+                    && (i + 1 < statements.size() && statements.get(i + 1) instanceof ForStatement loop
+                        && fills(loop, array, cc.parameterExpressions().getFirst())
+                        || !COUNTED_FILLS_OFF.get() && countedFill(statements, i, array, cc.parameterExpressions().getFirst()))) {
                     filledCreations.add(init);
                 }
             }
@@ -5388,6 +5500,110 @@ public final class NullabilityPass {
                 && a.variableTarget() instanceof DependentVariable dv
                 && isVariable(dv.arrayExpression(), array) && isVariable(dv.indexExpression(), index));
     }
+
+    /*
+     'T[] a = new T[c.size()]; ... int k = 0; ... for (X x : c) { ... a[k++] = v; ... }': one element per element of
+     the collection, so the creation leaves no null (guava's RegularImmutableMultiset.create, whose entryArray became
+     Array<ImmutableEntry<E>?> and with it IndexedImmutableSet.get's E?, worktree-maddi-all 2026-10-27). The size is
+     'c.size()' or a local holding it; the statements between do not mention the array, except an
+     'if (size == 0) return ...;' (no element to fill); the counter is a local declared there from 0, written only by
+     the one 'a[k++] = v', a statement of the loop's own body; no break, continue, or return handing out the array.
+     Gate NOCOUNTEDFILLS.
+     */
+    private static boolean countedFill(List<Statement> statements, int creation, Variable array, Expression size) {
+        Expression sizeExpression = NonNullFacts.unwrap(size);
+        Variable sizeLocal = null;
+        if (sizeExpression instanceof VariableExpression sv && sv.variable() instanceof LocalVariable lv
+            && lv.assignmentExpression() != null) {
+            sizeLocal = lv;
+            sizeExpression = NonNullFacts.unwrap(lv.assignmentExpression());
+        }
+        if (!(sizeExpression instanceof MethodCall mc) || !"size".equals(mc.methodInfo().name())
+            || !mc.parameterExpressions().isEmpty()
+            || !(NonNullFacts.unwrap(mc.object()) instanceof VariableExpression cv)) return false;
+        Variable collection = cv.variable();
+        Set<Variable> counters = new HashSet<>();
+        for (int j = creation + 1; j < statements.size(); j++) {
+            Statement st = statements.get(j);
+            if (st instanceof ForEachStatement fe && isVariable(fe.expression(), collection)) {
+                return countedLoop(fe, array, counters);
+            }
+            if (writes(st, collection) || sizeLocal != null && writes(st, sizeLocal)) return false;
+            for (Variable counter : counters) if (writes(st, counter)) return false;
+            if (st instanceof LocalVariableCreation lvc) {
+                for (LocalVariable lv : lvc.localVariableStream().toList()) {
+                    if (lv.parameterizedType().isInt() && lv.assignmentExpression() instanceof
+                            io.codelaser.maddi.cst.api.expression.IntConstant zero && zero.constant() == 0) {
+                        counters.add(lv);
+                    }
+                }
+            }
+            if (mentionsInStatement(st, array) && !emptyReturn(st, sizeLocal, sizeExpression)) return false;
+        }
+        return false;
+    }
+
+    // 'if (n == 0) return ...;' without else: the array has no element yet to fill
+    private static boolean emptyReturn(Statement st, Variable sizeLocal, Expression sizeCall) {
+        if (!(st instanceof io.codelaser.maddi.cst.api.statement.IfElseStatement ifs)
+            || ifs.elseBlock() != null && !ifs.elseBlock().isEmpty()
+            || ifs.block().statements().size() != 1 || !(ifs.block().statements().getFirst() instanceof ReturnStatement)
+            || !(NonNullFacts.unwrap(ifs.expression()) instanceof BinaryOperator bo) || bo.operator() == null
+            || !"==".equals(bo.operator().name())
+            || !(NonNullFacts.unwrap(bo.rhs()) instanceof io.codelaser.maddi.cst.api.expression.IntConstant zero)
+            || zero.constant() != 0) return false;
+        Expression lhs = NonNullFacts.unwrap(bo.lhs());
+        return sizeLocal != null ? isVariable(lhs, sizeLocal) : lhs.equals(sizeCall);
+    }
+
+    private static boolean countedLoop(ForEachStatement loop, Variable array, Set<Variable> counters) {
+        Variable[] counter = {null};
+        for (Statement st : loop.block().statements()) {
+            if (st instanceof ExpressionAsStatement eas && eas.expression() instanceof Assignment a
+                && a.assignmentOperator() == null && a.variableTarget() instanceof DependentVariable dv
+                && isVariable(dv.arrayExpression(), array)
+                && NonNullFacts.unwrap(dv.indexExpression()) instanceof Assignment step
+                && Boolean.FALSE.equals(step.prefixPrimitiveOperator()) && step.assignmentOperatorIsPlus()
+                && counters.contains(step.variableTarget())) {
+                if (counter[0] != null) return false;
+                counter[0] = step.variableTarget();
+            }
+        }
+        if (counter[0] == null) return false;
+        boolean[] escapes = {false};
+        int[] steps = {0};
+        loop.block().visit(e -> {
+            if (e instanceof Lambda) return false;
+            if (e instanceof BreakOrContinueStatement
+                || e instanceof ReturnStatement rs && rs.expression() != null && mentions(rs.expression(), array)) {
+                escapes[0] = true;
+            }
+            if (e instanceof Assignment a && counter[0].equals(a.variableTarget()) && ++steps[0] > 1) escapes[0] = true;
+            return !escapes[0];
+        });
+        return !escapes[0];
+    }
+
+    private static boolean writes(Statement st, Variable v) {
+        boolean[] found = {false};
+        st.visit(e -> {
+            if (e instanceof Assignment a && v.equals(a.variableTarget())) found[0] = true;
+            return !found[0];
+        });
+        return found[0];
+    }
+
+    private static boolean mentionsInStatement(Statement st, Variable v) {
+        boolean[] found = {false};
+        st.visit(e -> {
+            if (e instanceof VariableExpression ve && sameVariable(ve.variable(), v)) found[0] = true;
+            return !found[0];
+        });
+        return found[0];
+    }
+
+    // gate NOCOUNTEDFILLS: a creation filled by a counted for-each keeps its null elements (A/B)
+    private static final Switches.Gate COUNTED_FILLS_OFF = Switches.gate("NOCOUNTEDFILLS");
 
     private static boolean isVariable(Expression e, Variable v) {
         return NonNullFacts.unwrap(e) instanceof VariableExpression ve && ve.variable().equals(v);
@@ -7144,3 +7360,4 @@ public final class NullabilityPass {
                                                       && !vi.assignments().isEmpty());
     }
 }
+

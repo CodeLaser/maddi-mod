@@ -1533,6 +1533,33 @@ public class TestNullabilityPass extends CommonTest {
                         for (int i = 0; i < n; i++) { out[i] = "x"; }
                         return out;
                     }
+                    static String[] counted(java.util.Collection<String> in) {
+                        int n = in.size();
+                        String[] out = new String[n];
+                        if (n == 0) return out;
+                        int k = 0;
+                        for (String s : in) { String t = s.trim(); out[k++] = t; }
+                        return out;
+                    }
+                    static String[] countedConditional(java.util.Collection<String> in) {
+                        String[] out = new String[in.size()];
+                        int k = 0;
+                        for (String s : in) { if (s.isEmpty()) out[k++] = s; }
+                        return out;
+                    }
+                    static String[] countedOther(java.util.Collection<String> in, java.util.List<String> other) {
+                        String[] out = new String[in.size()];
+                        int k = 0;
+                        for (String s : other) { out[k++] = s; }
+                        return out;
+                    }
+                    static String[] countedRead(java.util.Collection<String> in) {
+                        String[] out = new String[in.size()];
+                        System.out.println(out[0]);
+                        int k = 0;
+                        for (String s : in) { out[k++] = s; }
+                        return out;
+                    }
                     static class Engine {
                         private final String[] workers;
                         private final String[] idle;
@@ -1556,6 +1583,11 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("String?[]", byName.get("a.b.A.conditional(int)"), "not a statement of the body");
         assertEquals("String?[]", byName.get("a.b.A.early(int)"), "a break");
         assertEquals("String?[]", byName.get("a.b.A.later(int)"), "not the next statement");
+        // guava RegularImmutableMultiset.create: a for-each over the collection whose size made the array
+        assertEquals("String[]", byName.get("a.b.A.counted(java.util.Collection)"), "one element per element");
+        assertEquals("String?[]", byName.get("a.b.A.countedConditional(java.util.Collection)"), "not a statement of the body");
+        assertEquals("String?[]", byName.get("a.b.A.countedOther(java.util.Collection,java.util.List)"), "another collection");
+        assertEquals("String?[]", byName.get("a.b.A.countedRead(java.util.Collection)"), "read before the loop");
         // CodeLaser/maddi-mod#22 gap 4: the creation is an assignment, to a local declared before or to a field in the constructor
         assertEquals("String[]", byName.get("a.b.A.assigned(int)"), "assigned after its declaration");
         assertEquals("String[]", byName.get("a.b.A.Engine.workers"), "a field the constructor's loop fills");
@@ -2177,9 +2209,12 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("String[]", s.get("a.b.RA.bounds(String[]):0:upperBounds"), s.toString());
         assertEquals("String[]", s.get("a.b.RA.listed(String[]):0:upper"), "Arrays.asList reads: " + s);
         assertEquals("String[]", s.get("a.b.RA.annotatedBounds(String[]):0:bounds"), "Joiner's shape: " + s);
-        assertEquals("String?[]", s.get("a.b.RA.captured(String[]):0:fns"), "captured: invariant, both ways " + s);
+        // a String[] into an Object[] is cast by the printer (covariantArrayArgument) whatever the elements' states:
+        // the parameter's nulls (nullHashers, kept) are never in the caller's array (narrowedArray, 2026-10-27)
+        assertEquals("String[]", s.get("a.b.RA.captured(String[]):0:fns"), "captured, cast: " + s);
         assertEquals("String?[]", s.get("a.b.RA.written()"), "written through: still both ways " + s);
-        assertEquals("String?[]", s.get("a.b.RA.passKept(String[]):0:names"), "returned: invariant, both ways " + s);
+        // still tied: kept()'s '{null}' reaches held by the links both ways, which writtenThrough counts as a write
+        assertEquals("String?[]", s.get("a.b.RA.passKept(String[]):0:names"), "returned: " + s);
     }
 
     @DisplayName("Kotlin: a varargs parameter takes a copy: its elements do not flow back into the caller's array")
@@ -4119,6 +4154,178 @@ public class TestNullabilityPass extends CommonTest {
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Map<C!, V!>", s.get("a.b.PN.Table.create()"), s + "\n" + explain(report));
         assertEquals("T?", s.get("a.b.PN.Supplier.get()"), "the declaration keeps it; the printer prints T");
+    }
+
+    @DisplayName("Kotlin: a callee writing null into a wider array parameter reaches the caller's narrower array")
+    @Test
+    public void narrowedArrayWrittenThrough() {
+        NullabilityPass.Report report = run("a.b.NW", """
+                package a.b;
+                class NW {
+                    static void clear(Object[] a) { a[0] = null; }
+                    static void read(Object[] a) { System.out.println(a.length); }
+                    static String[] cleared() {
+                        String[] s = new String[] {"x"};
+                        clear(s);
+                        return s;
+                    }
+                    static String[] kept() {
+                        String[] s = new String[] {"x"};
+                        read(s);
+                        return s;
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("String?[]", s.get("a.b.NW.cleared()"), s + "\n" + explain(report));
+        assertEquals("String[]", s.get("a.b.NW.kept()"), s.toString());
+    }
+
+    @DisplayName("Kotlin: guava's RegularImmutableMultiset.create fills its entry array with a counted for-each")
+    @Test
+    public void countedFillGuava() {
+        NullabilityPass.Report report = run("a.b.RM", """
+                package a.b;
+                import java.lang.annotation.ElementType;
+                import java.lang.annotation.Target;
+                import java.util.Collection;
+                class RM<E> {
+                    @Target(ElementType.TYPE_USE) @interface Nullable {}
+                    interface Entry<E> { E getElement(); int getCount(); }
+                    static class ImmutableEntry<E> implements Entry<E> {
+                        private final E element;
+                        private final int count;
+                        ImmutableEntry(E element, int count) { this.element = element; this.count = count; }
+                        @Override public E getElement() { return element; }
+                        @Override public int getCount() { return count; }
+                        @Nullable ImmutableEntry<E> nextInBucket() { return null; }
+                    }
+                    static final class NonTerminalEntry<E> extends ImmutableEntry<E> {
+                        private final ImmutableEntry<E> next;
+                        NonTerminalEntry(E element, int count, ImmutableEntry<E> next) { super(element, count); this.next = next; }
+                        @Override ImmutableEntry<E> nextInBucket() { return next; }
+                    }
+                    private static final ImmutableEntry<?>[] EMPTY_ARRAY = new ImmutableEntry<?>[0];
+                    private final transient ImmutableEntry<E>[] entries;
+                    private final transient @Nullable ImmutableEntry<?>[] hashTable;
+                    private RM(ImmutableEntry<E>[] entries, @Nullable ImmutableEntry<?>[] hashTable) {
+                        this.entries = entries;
+                        this.hashTable = hashTable;
+                    }
+                    static <E> RM<E> create(Collection<? extends Entry<? extends E>> entries) {
+                        int distinct = entries.size();
+                        @SuppressWarnings({"unchecked", "rawtypes"})
+                        ImmutableEntry<E>[] entryArray = new ImmutableEntry[distinct];
+                        if (distinct == 0) {
+                            return new RM<>(entryArray, EMPTY_ARRAY);
+                        }
+                        int tableSize = distinct * 2;
+                        int mask = tableSize - 1;
+                        @SuppressWarnings({"unchecked", "rawtypes"})
+                        @Nullable ImmutableEntry<E>[] hashTable = new @Nullable ImmutableEntry[tableSize];
+                        int index = 0;
+                        int hashCode = 0;
+                        long size = 0;
+                        for (Entry<? extends E> entryWithWildcard : entries) {
+                            @SuppressWarnings("unchecked")
+                            Entry<E> entry = (Entry<E>) entryWithWildcard;
+                            E element = entry.getElement();
+                            int count = entry.getCount();
+                            int hash = element.hashCode();
+                            int bucket = hash & mask;
+                            ImmutableEntry<E> bucketHead = hashTable[bucket];
+                            ImmutableEntry<E> newEntry;
+                            if (bucketHead == null) {
+                                boolean canReuseEntry = entry instanceof ImmutableEntry && !(entry instanceof NonTerminalEntry);
+                                newEntry = canReuseEntry ? (ImmutableEntry<E>) entry : new ImmutableEntry<E>(element, count);
+                            } else {
+                                newEntry = new NonTerminalEntry<>(element, count, bucketHead);
+                            }
+                            hashCode += hash ^ count;
+                            entryArray[index++] = newEntry;
+                            hashTable[bucket] = newEntry;
+                            size += count;
+                        }
+                        return flooded(hashTable) ? asList(entryArray) : new RM<E>(entryArray, hashTable);
+                    }
+                    static boolean flooded(@Nullable ImmutableEntry<?>[] hashTable) { return hashTable.length > 9; }
+                    // guava's ImmutableList.asImmutableList(@Nullable Object[]), stored by asImmutableList(Object[], int)
+                    static <E> RM<E> asList(@Nullable Object[] elements) { return asList(elements, elements.length); }
+                    static <E> RM<E> asList(@Nullable Object[] elements, int length) {
+                        Held h = new Held(elements);
+                        return null;
+                    }
+                    static final class Held {
+                        final @Nullable Object[] array;
+                        Held(@Nullable Object[] array) { this.array = array; }
+                    }
+                    Entry<E> getEntry(int index) { return entries[index]; }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        String why = s + "\n" + explain(report);
+        assertEquals("ImmutableEntry<E!>[]", s.get("a.b.RM.entries"), why);
+        assertEquals("Entry<E!>", s.get("a.b.RM.getEntry(int)"), why);
+    }
+
+    @DisplayName("Kotlin: an implementation for a @Nullable type argument keeps its null from the overridden return")
+    @Test
+    public void nullableInstantiationReturn() {
+        NullabilityPass.Report report = run("a.b.NI", """
+                package a.b;
+                import java.lang.annotation.ElementType;
+                import java.lang.annotation.Retention;
+                import java.lang.annotation.RetentionPolicy;
+                import java.lang.annotation.Target;
+                class NI {
+                    @Retention(RetentionPolicy.CLASS) @interface ParametricNullness {}
+                    @Target(ElementType.TYPE_USE) @interface Nullable {}
+                    interface Cell<V> { @ParametricNullness V getValue(); }
+                    abstract static class AbstractCell<V> implements Cell<V> { }
+                    static final class Immutable<V> extends AbstractCell<V> {
+                        private final V value;
+                        Immutable(V value) { this.value = value; }
+                        @Override public V getValue() { return value; }
+                    }
+                    static final class Table<V> {
+                        private final @Nullable Object[] values = new Object[4];
+                        @SuppressWarnings("unchecked")
+                        @Nullable V at(int i) { return (V) values[i]; }
+                        Cell<@Nullable V> cell(int i) {
+                            return new AbstractCell<@Nullable V>() {
+                                @Override public @Nullable V getValue() { return at(i); }
+                            };
+                        }
+                    }
+                    interface Plain<V> { V get(); }
+                    static final class Absent<V> implements Plain<V> {
+                        @Override public V get() { return null; }
+                    }
+                    static <V> V valueOf(Cell<V> c) { return c.getValue(); }
+                    // guava's ArrayTable.ArrayMap and its Row over ArrayMap<C, @Nullable V>
+                    abstract static class ArrayMap<K, V> {
+                        @ParametricNullness abstract V getValue(int index);
+                        V get(int index) { return getValue(index); }
+                    }
+                    static final class Grid<V> {
+                        private final @Nullable Object[] cells = new Object[4];
+                        @SuppressWarnings("unchecked")
+                        @Nullable V at(int i) { return (V) cells[i]; }
+                        final class Row extends ArrayMap<String, @Nullable V> {
+                            @Override @Nullable V getValue(int index) { return at(index); }
+                        }
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("V!", s.get("a.b.NI.Cell.getValue()"), s + "\n" + explain(report));
+        assertEquals("V?", s.get("a.b.NI.Table.$0.getValue()"), s.toString());
+        assertEquals("V?", s.get("a.b.NI.Plain.get()"), "no nullable type argument: the null reaches the declaration");
+        assertEquals("V!", s.get("a.b.NI.ArrayMap.getValue(int)"), s.toString());
+        assertEquals("V?", s.get("a.b.NI.Grid.Row.getValue(int)"), "the override keeps its own null: " + s);
     }
 
     @DisplayName("Kotlin: what is read from a '?' argument is Any?")
