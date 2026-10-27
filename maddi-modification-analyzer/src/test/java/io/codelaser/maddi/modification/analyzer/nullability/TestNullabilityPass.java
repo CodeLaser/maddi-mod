@@ -4304,6 +4304,19 @@ public class TestNullabilityPass extends CommonTest {
                         @Override public V get() { return null; }
                     }
                     static <V> V valueOf(Cell<V> c) { return c.getValue(); }
+                    // guava's ArrayTable.ArrayMap and its Row over ArrayMap<C, @Nullable V>
+                    abstract static class ArrayMap<K, V> {
+                        @ParametricNullness abstract V getValue(int index);
+                        V get(int index) { return getValue(index); }
+                    }
+                    static final class Grid<V> {
+                        private final @Nullable Object[] cells = new Object[4];
+                        @SuppressWarnings("unchecked")
+                        @Nullable V at(int i) { return (V) cells[i]; }
+                        final class Row extends ArrayMap<String, @Nullable V> {
+                            @Override @Nullable V getValue(int index) { return at(index); }
+                        }
+                    }
                 }
                 """, NullabilityPass.Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
@@ -4311,6 +4324,8 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("V!", s.get("a.b.NI.Cell.getValue()"), s + "\n" + explain(report));
         assertEquals("V?", s.get("a.b.NI.Table.$0.getValue()"), s.toString());
         assertEquals("V?", s.get("a.b.NI.Plain.get()"), "no nullable type argument: the null reaches the declaration");
+        assertEquals("V!", s.get("a.b.NI.ArrayMap.getValue(int)"), s.toString());
+        assertEquals("V?", s.get("a.b.NI.Grid.Row.getValue(int)"), "the override keeps its own null: " + s);
     }
 
     @DisplayName("Kotlin: what is read from a '?' argument is Any?")
