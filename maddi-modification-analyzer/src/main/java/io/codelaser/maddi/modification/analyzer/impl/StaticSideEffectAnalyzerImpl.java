@@ -127,16 +127,16 @@ public class StaticSideEffectAnalyzerImpl {
         Set<TypeInfo> set = sets.get(mi);
         boolean[] waits = {false};
         java.util.function.Predicate<Element> visitor = e -> {
-            // assignment to a static field: 'Other.STATIC = ...', 'count++'; not to an @IgnoreModifications one
-            if (e instanceof Assignment a && a.variableTarget() instanceof FieldReference fr
-                && fr.fieldInfo().isStatic() && !fr.fieldInfo().isIgnoreModifications()) {
+            // assignment to a static field or a field of one: 'Other.STATIC = ...', 'count++', 'Other.STATIC.count
+            // = 5'; not to an @IgnoreModifications one
+            if (e instanceof Assignment a && staticRoot(a.variableTarget()) instanceof FieldReference fr) {
                 set.add(fr.fieldInfo().owner());
             }
-            // modifying call on a static field: 'Other.STATIC.add(...)'. Not on an @IgnoreModifications field
-            // ('System.out.println(...)', road §050), nor of an @IgnoreModifications method ('LOG.info(...)')
+            // modifying call on a static field or a field of one: 'Other.STATIC.add(...)', 'Other.STATIC.list.add(..)'.
+            // Not on an @IgnoreModifications field ('System.out.println(...)', road §050), nor of an
+            // @IgnoreModifications method ('LOG.info(...)')
             if (e instanceof MethodCall mc && mc.object() instanceof VariableExpression ve
-                && ve.variable() instanceof FieldReference fr && fr.fieldInfo().isStatic()
-                && !fr.fieldInfo().isIgnoreModifications() && !mc.methodInfo().isIgnoreModification()) {
+                && staticRoot(ve.variable()) instanceof FieldReference fr && !mc.methodInfo().isIgnoreModification()) {
                 Value.Bool nonModifying = mc.methodInfo().analysis()
                         .getOrNull(PropertyImpl.NON_MODIFYING_METHOD, ValueImpl.BoolImpl.class);
                 if (nonModifying == null && !activateCycleBreaking) waits[0] = true;
@@ -162,6 +162,20 @@ public class StaticSideEffectAnalyzerImpl {
         // an instance field's initializer runs in every constructor, as if written there ('int id = next++;')
         if (mi.isConstructor()) instanceInitializers(mi.typeInfo()).forEach(i -> i.visit(visitor));
         return waits[0];
+    }
+
+    /*
+     The static field a field chain starts from: 'Other.STATIC' for 'Other.STATIC', 'Other.STATIC.count' and
+     'Other.STATIC.list'. A Kotlin object's state is that of its INSTANCE field: 'Settings.level = 5' assigns
+     'Settings.INSTANCE.level'. Null when the chain starts elsewhere, or passes an @IgnoreModifications field.
+     */
+    private static FieldReference staticRoot(io.codelaser.maddi.cst.api.variable.Variable variable) {
+        io.codelaser.maddi.cst.api.variable.Variable v = variable;
+        while (v instanceof FieldReference fr && !fr.fieldInfo().isIgnoreModifications()) {
+            if (fr.fieldInfo().isStatic()) return fr;
+            v = fr.scopeVariable();
+        }
+        return null;
     }
 
     // the initializers of the type's instance fields; a static field's is the construction of the static state

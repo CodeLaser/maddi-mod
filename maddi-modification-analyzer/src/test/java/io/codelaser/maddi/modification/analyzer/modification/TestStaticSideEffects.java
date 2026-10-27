@@ -69,6 +69,41 @@ public class TestStaticSideEffects extends CommonTest {
     }
 
     /**
+     * The state of an object a static field holds is static state too: an assignment to its field, a modifying call
+     * on its field. A Kotlin {@code object}'s properties are such fields of its {@code INSTANCE}: {@code
+     * Settings.level = 5} assigns {@code Settings.INSTANCE.level}, which had no static side effect where {@code
+     * Settings.raise()}, a modifying call on {@code INSTANCE}, had one.
+     */
+    @Language("java")
+    private static final String FIELD_OF_STATIC = """
+            package a.b;
+            import java.util.ArrayList;
+            import java.util.List;
+            public class X {
+                void configure() { Settings.INSTANCE.level = 5; }        // a field of a static field's object -> SSE
+                void addName(String s) { Settings.INSTANCE.names.add(s); } // a modifying call on such a field -> SSE
+                int read() { return Settings.INSTANCE.names.size(); }      // reads only -> not SSE
+            }
+            class Settings {
+                static final Settings INSTANCE = new Settings();
+                int level;
+                final List<String> names = new ArrayList<>();
+            }
+            """;
+
+    @DisplayName("assigning or modifying a field of an object held by another type's static field is a static side effect")
+    @Test
+    public void testFieldOfStatic() throws IOException {
+        TypeInfo X = javaInspector.parse("a.b.X", FIELD_OF_STATIC);
+        List<Info> ao = prepWork(X);
+        analyzer.go(ao);
+
+        assertTrue(sse(X.findUniqueMethod("configure", 0)), "Settings.INSTANCE.level = 5");
+        assertTrue(sse(X.findUniqueMethod("addName", 1)), "Settings.INSTANCE.names.add(s)");
+        assertFalse(sse(X.findUniqueMethod("read", 0)), "a read is no side effect");
+    }
+
+    /**
      * The callee-annotation half (the AAPI safe-surface): a method contracted {@code @StaticSideEffects} (here
      * {@code reconfigure()}, standing in for {@code System.setOut}) whose effect is invisible from its body makes
      * its callers a static-side-effect method too, transitively. {@code SourceContractMaterializer} lifts the
