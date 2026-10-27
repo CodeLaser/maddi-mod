@@ -51,14 +51,16 @@ public class TestModificationThroughCallResult extends CommonTest {
                     Map<String, Node> map;
                     Node self() { return this; }
                     Node either(boolean c) { return c ? this : next; }
+                    Node wrapper() { Node node = this; while (node.type == 1) node = node.parent; return node; }
                 }
                 static void viaSelf(Node parent) { parent.self().data.add("x"); }
                 static void viaEither(Node parent, boolean c) { parent.either(c).data.add("x"); }
-                static void viaLocal(Node parent, boolean c, String key, List<String> xs) {
-                    Node em = parent.either(c).map.get(key);
+                static void viaWrapper(Node parent) { parent.wrapper().data.add("x"); }
+                static void viaLocal(Node parent, String key, List<String> xs) {
+                    Node em = parent.wrapper().map.get(key);
                     for (String x : xs) { if (x != null) em.data.add(x); }
                 }
-                static int reads(Node parent) { return parent.self().data.size(); }
+                static int reads(Node parent) { return parent.wrapper().data.size(); }
             }
             """;
 
@@ -70,7 +72,8 @@ public class TestModificationThroughCallResult extends CommonTest {
         analyzer.go(ao, 3);
         assertFalse(X.findUniqueMethod("viaSelf", 1).parameters().getFirst().isUnmodified(), "viaSelf");
         assertFalse(X.findUniqueMethod("viaEither", 2).parameters().getFirst().isUnmodified(), "viaEither");
-        assertFalse(X.findUniqueMethod("viaLocal", 4).parameters().getFirst().isUnmodified(), "viaLocal");
+        assertFalse(X.findUniqueMethod("viaWrapper", 1).parameters().getFirst().isUnmodified(), "viaWrapper");
+        assertFalse(X.findUniqueMethod("viaLocal", 3).parameters().getFirst().isUnmodified(), "viaLocal");
         assertTrue(X.findUniqueMethod("reads", 1).parameters().getFirst().isUnmodified(), "a read modifies nothing");
     }
 }

@@ -710,11 +710,13 @@ public class TestVarious extends CommonTest {
 
         MethodInfo methodInfo = B.findUniqueMethod("invDctNxN", 2);
 
+        // the loops index with u and v, which their updaters reassign: no longer the constant 1 they hold after one
+        // pass (tmp[1][1]), see #72 4a
         VariableData vd5 = VariableDataImpl.of(methodInfo.methodBody().statements().get(5));
         VariableInfo tmp5 = vd5.variableInfo("tmp");
         assertEquals("""
-                tmp~0:dcts,tmp∋?0:dcts[1],tmp∋∋0:dcts[1][1],tmp[1]∈?0:dcts,tmp[1]∋?0:dcts[1],tmp[1]∋0:dcts[1][1],\
-                tmp[1][1]∈∈0:dcts,tmp[1][1]∈0:dcts[1],tmp[1][1]←0:dcts[1][1],tmp[1][1]∈tmp[1]\
+                tmp~0:dcts,tmp∋?0:dcts[u],tmp∋∋0:dcts[u][v],tmp[u]∈?0:dcts,tmp[u]∋?0:dcts[u],tmp[u]∋0:dcts[u][v],\
+                tmp[u][v]∈∈0:dcts,tmp[u][v]∈0:dcts[u],tmp[u][v]←0:dcts[u][v],tmp[u][v]∈tmp[u]\
                 """, tmp5.linkedVariables().toString());
         Link l0 = tmp5.linkedVariables().link(0);
         assertEquals("tmp~0:dcts", l0.toString());
@@ -727,21 +729,22 @@ public class TestVarious extends CommonTest {
         VariableData vd7 = VariableDataImpl.of(methodInfo.methodBody().statements().get(7));
         VariableInfo tmp7 = vd7.variableInfo("tmp");
         assertEquals("""
-                tmp~0:dcts,tmp∋?0:dcts[1],tmp∋∋0:dcts[1][1],tmp[1]∈?0:dcts,tmp[1]∋?0:dcts[1],tmp[1]∋0:dcts[1][1],\
-                tmp[1][1]∈∈0:dcts,tmp[1][1]∈0:dcts[1],tmp[1][1]←0:dcts[1][1],tmp[1][1]∈tmp[1],tmp~this.nxnTmp,\
-                tmp∋∋this.nxnTmp[1],tmp[1]∈?this.nxnTmp,tmp[1]∋this.nxnTmp[1],tmp[1][1]∈this.nxnTmp,\
-                tmp[1][1]→this.nxnTmp[1]\
+                tmp~0:dcts,tmp∋?0:dcts[u],tmp∋∋0:dcts[u][v],tmp[u]∈?0:dcts,tmp[u]∋?0:dcts[u],tmp[u]∋0:dcts[u][v],\
+                tmp[u][v]∈∈0:dcts,tmp[u][v]∈0:dcts[u],tmp[u][v]←0:dcts[u][v],tmp[u][v]∈tmp[u],tmp~this.nxnTmp,\
+                tmp∋∋this.nxnTmp[u],tmp[u]∈?this.nxnTmp,tmp[u]∋this.nxnTmp[u],tmp[u][v]∈this.nxnTmp,\
+                tmp[u][v]→this.nxnTmp[u]\
                 """, tmp7.linkedVariables().toString());
 
         Statement s8 = methodInfo.methodBody().statements().get(8);
         VariableData vd8 = VariableDataImpl.of(s8);
         VariableInfo tmp8 = vd8.variableInfo("tmp");
         assertEquals("Type double[][]", tmp8.variable().parameterizedType().toString());
+        // no tmp[u][v]←0:dcts[u][v]: statement 7 overwrote every element with a product. The loop fork (#72) joins
+        // the body's state with the state before the loop; it adds tmp[u][v]∈?this.nxnTmp next to the stronger ∈
         assertEquals("""
-                tmp~0:dcts,tmp∋?0:dcts[1],tmp∋∋0:dcts[1][1],tmp~this.nxnTmp,tmp∋∋this.nxnTmp[1],tmp[1]∈?0:dcts,\
-                tmp[1]∋?0:dcts[1],tmp[1]∋0:dcts[1][1],tmp[1]∈?this.nxnTmp,tmp[1]∋this.nxnTmp[1],tmp[1][1]∈∈0:dcts,\
-                tmp[1][1]∈0:dcts[1],tmp[1][1]←0:dcts[1][1],tmp[1][1]∈this.nxnTmp,tmp[1][1]→this.nxnTmp[1],\
-                tmp[1][1]∈tmp[1]\
+                tmp~0:dcts,tmp∋?0:dcts[u],tmp∋∋0:dcts[u][v],tmp~this.nxnTmp,tmp∋∋this.nxnTmp[u],tmp[u]∈?0:dcts,\
+                tmp[u]∋?0:dcts[u],tmp[u]∋0:dcts[u][v],tmp[u]∈?this.nxnTmp,tmp[u]∋this.nxnTmp[u],tmp[u][v]∈∈0:dcts,\
+                tmp[u][v]∈0:dcts[u],tmp[u][v]∈?this.nxnTmp,tmp[u][v]∈this.nxnTmp,tmp[u][v]→this.nxnTmp[u],tmp[u][v]∈tmp[u]\
                 """, tmp8.linkedVariables().toString());
     }
 

@@ -723,6 +723,14 @@ public class Graph {
         return result.stream();
     }
 
+    // another member of 'variable's shared group: it survives clearing 'variable' (a reassignment) and stands for
+    // the same object until then. Null when 'variable' is in no group, or alone in it.
+    public Variable survivingAlias(Variable variable) {
+        return sharedVariables.allShared(variable).stream()
+                .filter(v -> !v.equals(variable) && !(v instanceof IntermediateVariable))
+                .min(Variable::compareTo).orElse(null);
+    }
+
     public boolean isPureAssignmentSource(Variable variable) {
         return sharedVariables.isPureAssignmentSource(variable);
     }

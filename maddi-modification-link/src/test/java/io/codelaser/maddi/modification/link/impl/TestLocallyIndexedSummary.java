@@ -84,9 +84,9 @@ public class TestLocallyIndexedSummary extends CommonTest {
     @DisplayName("a[index++] in a loop: the returned array shares the input's elements' content")
     @Test
     public void postInc() {
-        // without #72 4a's loop fork 'index' is a constant here and the element no vertex of its own; with it, the
-        // lifted link reads 'postInc ∩ 0:in.§$s' on the return value
-        assertEquals("[0:in.§$s∩postInc] --> -  MOD[]", mlv("postInc"));
+        // #72 4a's loop fork makes 'index' non-constant: the element is a vertex of its own, and the lifted link
+        // reads on the return value (without the fork: '[0:in.§$s∩postInc] --> -')
+        assertEquals("[-] --> postInc∩0:in.§$s  MOD[]", mlv("postInc"));
     }
 
     @DisplayName("arr[i] = .. in a for loop: the parameter array shares the input's elements' content")

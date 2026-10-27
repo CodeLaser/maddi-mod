@@ -23,6 +23,7 @@ import io.codelaser.maddi.modification.prepwork.variable.impl.VariableInfoImpl;
 import io.codelaser.maddi.cst.api.analysis.Codec;
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.element.Element;
+import io.codelaser.maddi.cst.api.expression.Assignment;
 import io.codelaser.maddi.cst.api.expression.Expression;
 import io.codelaser.maddi.cst.api.expression.NullConstant;
 import io.codelaser.maddi.cst.api.info.InfoMap;
@@ -549,7 +550,7 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
         private TranslationMap replaceConstants(VariableData vd, Stage stage) {
             TranslateConstants tc = new TranslateConstants(javaInspector.runtime());
             for (LocalVariable lv : variablesRepresentingConstants) {
-                if (!(lv.assignmentExpression() instanceof NullConstant)) {
+                if (!(lv.assignmentExpression() instanceof NullConstant) && !assignedByOpenUpdaters.contains(lv)) {
                     assert lv.parameterizedType().arrays() == 0;
                     tc.put(lv, lv.assignmentExpression());
                 }
@@ -565,7 +566,8 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                                 // array-typed variables stay out of constant propagation (the assert that stood
                                 // here fails on real code: an array local linked ≡ to a constant-holding local)
                                 if (constant != null && !(constant instanceof NullConstant)
-                                    && vi.variable().parameterizedType().arrays() == 0) {
+                                    && vi.variable().parameterizedType().arrays() == 0
+                                    && !assignedByOpenUpdaters.contains(vi.variable())) {
                                     Expression prev = tc.put(vi.variable(), constant);
                                     if (prev != null && !constant.equals(prev)) {
                                         // multiple values...
@@ -1089,25 +1091,57 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                     r = u.addExtra(Map.of(forEachLv, newLinks));
                 } // else: most often: a recursive method, which has an empty result
             }
+            Result updaters = null;
             if (statement instanceof ForStatement fs) {
                 for (Expression updater : fs.updaters()) {
                     Expression sorted = javaInspector.runtime().sortAndSimplify(true, updater);
                     Result u = expressionVisitor.visit(sorted, previousVd, stageOfPrevious);
-                    r = r == null ? u : r.merge(u);
+                    if (isLoopThatMayRunNone(fs)) {
+                        updaters = updaters == null ? u : updaters.merge(u);
+                    } else {
+                        r = r == null ? u : r.merge(u);
+                    }
                 }
+            }
+            // the statement's own variable data keeps the updaters' links, as when they were linked with the
+            // initializers: the nullability pass reads a for loop's updaters there (NullabilityPass.updaterLink)
+            Result withUpdaters = updaters == null ? null : r == null ? updaters : r.merge(updaters);
+            if (updaters != null) {
+                // the updaters run after the body, so their links go in after the snapshot of the state before the
+                // loop, inside the body's alternative (linkAlternatives): 'for (; ..; n = n.next)' keeps the value
+                // from before the loop for the zero-iteration path. Their modifications stay with the statement.
+                Result modificationsOnly = new Result(LinksImpl.EMPTY, LinkedVariablesImpl.EMPTY,
+                        updaters.modified(), updaters.deepOnlyModified(), new ArrayList<>(), new HashMap<>(),
+                        new HashSet<>(), new HashSet<>());
+                r = r == null ? modificationsOnly : r.merge(modificationsOnly);
             }
             TranslationMap replaceConstants;
             if (r != null) {
                 this.variablesRepresentingConstants.addAll(r.variablesRepresentingConstants());
+                if (updaters != null) {
+                    this.variablesRepresentingConstants.addAll(updaters.variablesRepresentingConstants());
+                }
                 replaceConstants = replaceConstants(previousVd, stageOfPrevious);
             } else {
                 replaceConstants = null;
+            }
+            if (updaters != null) {
+                Set<Variable> assigned = new HashSet<>();
+                for (Expression updater : ((ForStatement) statement).updaters()) {
+                    if (updater instanceof Assignment a) assigned.add(a.variableTarget());
+                }
+                assignedByOpenUpdaters.addAll(assigned);
+                pendingUpdaters.put(statement, new PendingUpdaters(updaters.copyLinksToExtra(), replaceConstants,
+                        assigned));
             }
             VariableData vd = VariableDataImpl.of(statement);
             assert vd != null;
             Variable destination;
             if (r != null) {
                 r = r.copyLinksToExtra();
+            }
+            if (withUpdaters != null) {
+                withUpdaters = withUpdaters.copyLinksToExtra();
             }
             // A Kotlin non-local return (CodeLaser/maddi-mod#11), `xs.forEach { if (p(it)) return it }`, returns from the
             // method exitLevels() lambdas up. Its value is assigned to THAT method's return variable, not to the
@@ -1143,10 +1177,13 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                 current.add(LinkNatureImpl.IS_ASSIGNED_FROM, r.links().primary());
             }
             String statementIndex = statement.source().index();
-            if (r != null) {
-                this.erase.addAll(r.erase());
-                linkGraph.compute(statementIndex, r.extra().map(), r.erase(), replaceConstants,
-                        r.modified());
+            // the graph links the updaters only for the variable data written below, then forgets them
+            Graph.State beforeUpdaters = withUpdaters == null ? null : linkGraph.graph().snapshot();
+            Result linked = withUpdaters == null ? r : withUpdaters;
+            if (linked != null) {
+                this.erase.addAll(linked.erase());
+                linkGraph.compute(statementIndex, linked.extra().map(), linked.erase(), replaceConstants,
+                        linked.modified());
             }
             Set<Variable> previouslyModified = computePreviouslyModified(vd, previousVd, stageOfPrevious, false);
             Set<Variable> previouslyStructurallyModified = computePreviouslyModified(vd, previousVd, stageOfPrevious, true);
@@ -1159,8 +1196,12 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                     .forEach(modificationsOutsideStructural::add);
 
             writeCasts(r == null ? new HashMap<>() : r.casts(), previousVd, stageOfPrevious, vd);
+            if (beforeUpdaters != null) {
+                linkGraph.graph().restore(beforeUpdaters);
+                linkGraph.compute(statementIndex, r.extra().map(), r.erase(), replaceConstants, r.modified());
+            }
 
-            if (statement.hasSubBlocks()) {
+            if (statement.hasSubBlocks() || pendingUpdaters.containsKey(statement)) {
                 handleSubBlocks(statement, vd);
             }
             if (r != null) {
@@ -1347,7 +1388,7 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
         private void handleSubBlocks(Statement statement, VariableData vd) {
             List<Block> blocks = subBlocksForLinking(statement).filter(block -> !block.isEmpty()).toList();
             List<VariableData> vds = new ArrayList<>();
-            if (!NO_FORK && isAlternatives(statement) && !blocks.isEmpty()) {
+            if (!NO_FORK && isAlternatives(statement) && (!blocks.isEmpty() || pendingUpdaters.containsKey(statement))) {
                 linkAlternatives(statement, blocks, vd, vds);
             } else {
                 for (Block block : blocks) {
@@ -1386,22 +1427,41 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
         private static final boolean NO_FORK = Gate.isSet("NOFORK");
 
         private static boolean isAlternatives(Statement statement) {
-            return statement instanceof IfElseStatement;
+            return statement instanceof IfElseStatement || isLoopThatMayRunNone(statement);
+        }
+
+        /*
+         A while, for or for-each body may run zero times: the state after the loop is the JOIN of the state in which
+         the body ends and the state before it, as for an if without an else. Linked one after the other, a
+         reassignment in the body ('n = n.next', 'n = other') erased the value from before the loop, so 'Node n =
+         root; while (..) n = n.next; return n;' lost 'return ← this.root' (CodeLaser/maddi-mod#72, 4a). A do-while
+         body runs at least once. Gate NOLOOPFORK: link loop bodies one after the other, as before.
+         */
+        private static final boolean NO_LOOP_FORK = Gate.isSet("NOLOOPFORK");
+
+        private static boolean isLoopThatMayRunNone(Statement statement) {
+            return !NO_FORK && !NO_LOOP_FORK && statement instanceof LoopStatement && !(statement instanceof DoStatement);
         }
 
         // true when control may pass the statement without running any of its non-empty sub-blocks
-        private static boolean mayRunNone(List<Block> blocks) {
-            return blocks.size() < 2;
+        private static boolean mayRunNone(Statement statement, List<Block> blocks) {
+            return blocks.size() < 2 || isLoopThatMayRunNone(statement);
         }
 
         private void linkAlternatives(Statement statement, List<Block> blocks, VariableData vd,
                                       List<VariableData> vds) {
             Graph graph = linkGraph.graph();
-            boolean none = mayRunNone(blocks);
+            boolean none = mayRunNone(statement, blocks);
             Graph.State before = graph.snapshot();
             List<Graph.State> ends = new ArrayList<>(blocks.size() + 1);
+            PendingUpdaters updaters = pendingUpdaters.remove(statement);
             graph.enterAlternatives();
             try {
+                if (blocks.isEmpty()) {
+                    // an empty for body: the updaters are the whole alternative
+                    commitUpdaters(statement, updaters);
+                    ends.add(graph.detach());
+                }
                 for (int i = 0; i < blocks.size(); i++) {
                     if (i > 0) {
                         boolean lastUse = i == blocks.size() - 1 && !none;
@@ -1409,13 +1469,32 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                     }
                     VariableData subVd = doBlock(blocks.get(i), vd);
                     if (subVd != null) vds.add(subVd);
+                    commitUpdaters(statement, updaters);
                     ends.add(graph.detach());
                 }
             } finally {
                 graph.leaveAlternatives();
+                if (updaters != null) assignedByOpenUpdaters.removeAll(updaters.assigned());
             }
             if (none) ends.add(before);
             graph.join(ends, statement.source().index());
+        }
+
+        // a for statement's updaters, linked after its body: see the statement's evaluation
+        private record PendingUpdaters(Result result, TranslationMap replaceConstants, Set<Variable> assigned) {
+        }
+
+        private final Map<Statement, PendingUpdaters> pendingUpdaters = new HashMap<>();
+        // the variables a for statement's updaters assign, while its body is linked: they vary in the body, so they
+        // are not replaced by the constant of their initializer ('for (int i = 0; ..; i++) .. array[i] ..')
+        private final Set<Variable> assignedByOpenUpdaters = new HashSet<>();
+
+        private void commitUpdaters(Statement statement, PendingUpdaters updaters) {
+            if (updaters == null) return;
+            this.erase.addAll(updaters.result().erase());
+            // its own index: the updaters' assignments are not part of the initializers' (multi-valued) assignment
+            linkGraph.compute(statement.source().index() + ".u", updaters.result().extra().map(),
+                    updaters.result().erase(), updaters.replaceConstants(), updaters.result().modified());
         }
 
         // The CST's subBlockStream() does not include try-with-resources declarations. Those 'res = expr'
