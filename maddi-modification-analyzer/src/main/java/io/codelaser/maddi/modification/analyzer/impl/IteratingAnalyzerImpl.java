@@ -360,6 +360,16 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                         v = "type immutable=" + b + " eventual=" + ev + " independent=" + ind;
                     } else continue;
                     pw.println(v + " " + info.fullyQualifiedName());
+                    // TEMPORARY (#72 4a A/B): FPDUMP_MLV=<substr>,<substr>: the method's links and modified set
+                    String mlvFilter = System.getenv("FPDUMP_MLV");
+                    if (mlvFilter != null && info instanceof io.codelaser.maddi.cst.api.info.MethodInfo mi
+                        && java.util.Arrays.stream(mlvFilter.split(",")).anyMatch(mi.fullyQualifiedName()::contains)) {
+                        var mlv = mi.analysis().getOrNull(
+                                io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl.METHOD_LINKS,
+                                io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl.class);
+                        pw.println("mlv " + mi.fullyQualifiedName() + " :: "
+                                   + (mlv == null ? "null" : mlv + "  MOD[" + mlv.sortedModifiedString() + "]"));
+                    }
                     // FPDUMP_PARAMS: parameter-level lines (separate gate so the A/B corpus format is unchanged)
                     if (System.getenv("FPDUMP_PARAMS") != null
                         && info instanceof io.codelaser.maddi.cst.api.info.MethodInfo mi) {
