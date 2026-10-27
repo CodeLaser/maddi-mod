@@ -35,11 +35,14 @@
 # directly or further up, instantiates the overridden T nullable (ArrayTable's Row and cells), no `!!` on a
 # star-projected read into the callee's type variable (AbstractTable.CellSet), and maddi-null's test-override and
 # narrowed-array rules: AbstractTable compiles, 608 files compiling (3 type errors), 493 to class files, no test lost.
+# 2026-10-27, maddi 1a1671e42 (maddi#173): kotlinc compiles each source set at its Java release, guava's main at 9,
+# where Comparator has no min/max for Ordering's to hide: 609 files compiling (1 type error, IndexedImmutableSet,
+# maddi-mod#74).
 types	610
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	610
-compilingFiles	608
+compilingFiles	609
 bytecodeFiles	493
 testsPassing	861616
 testBytecodeFiles	341
