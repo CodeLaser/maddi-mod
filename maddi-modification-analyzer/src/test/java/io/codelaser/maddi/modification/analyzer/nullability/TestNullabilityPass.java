@@ -4153,6 +4153,85 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("T?", s.get("a.b.PN.Supplier.get()"), "the declaration keeps it; the printer prints T");
     }
 
+    @DisplayName("Kotlin: guava's RegularImmutableMultiset.create fills its entry array with a counted for-each")
+    @Test
+    public void countedFillGuava() {
+        NullabilityPass.Report report = run("a.b.RM", """
+                package a.b;
+                import java.lang.annotation.ElementType;
+                import java.lang.annotation.Target;
+                import java.util.Collection;
+                class RM<E> {
+                    @Target(ElementType.TYPE_USE) @interface Nullable {}
+                    interface Entry<E> { E getElement(); int getCount(); }
+                    static class ImmutableEntry<E> implements Entry<E> {
+                        private final E element;
+                        private final int count;
+                        ImmutableEntry(E element, int count) { this.element = element; this.count = count; }
+                        @Override public E getElement() { return element; }
+                        @Override public int getCount() { return count; }
+                        @Nullable ImmutableEntry<E> nextInBucket() { return null; }
+                    }
+                    static final class NonTerminalEntry<E> extends ImmutableEntry<E> {
+                        private final ImmutableEntry<E> next;
+                        NonTerminalEntry(E element, int count, ImmutableEntry<E> next) { super(element, count); this.next = next; }
+                        @Override ImmutableEntry<E> nextInBucket() { return next; }
+                    }
+                    private static final ImmutableEntry<?>[] EMPTY_ARRAY = new ImmutableEntry<?>[0];
+                    private final transient ImmutableEntry<E>[] entries;
+                    private final transient @Nullable ImmutableEntry<?>[] hashTable;
+                    private RM(ImmutableEntry<E>[] entries, @Nullable ImmutableEntry<?>[] hashTable) {
+                        this.entries = entries;
+                        this.hashTable = hashTable;
+                    }
+                    static <E> RM<E> create(Collection<? extends Entry<? extends E>> entries) {
+                        int distinct = entries.size();
+                        @SuppressWarnings({"unchecked", "rawtypes"})
+                        ImmutableEntry<E>[] entryArray = new ImmutableEntry[distinct];
+                        if (distinct == 0) {
+                            return new RM<>(entryArray, EMPTY_ARRAY);
+                        }
+                        int tableSize = distinct * 2;
+                        int mask = tableSize - 1;
+                        @SuppressWarnings({"unchecked", "rawtypes"})
+                        @Nullable ImmutableEntry<E>[] hashTable = new @Nullable ImmutableEntry[tableSize];
+                        int index = 0;
+                        int hashCode = 0;
+                        long size = 0;
+                        for (Entry<? extends E> entryWithWildcard : entries) {
+                            @SuppressWarnings("unchecked")
+                            Entry<E> entry = (Entry<E>) entryWithWildcard;
+                            E element = entry.getElement();
+                            int count = entry.getCount();
+                            int hash = element.hashCode();
+                            int bucket = hash & mask;
+                            ImmutableEntry<E> bucketHead = hashTable[bucket];
+                            ImmutableEntry<E> newEntry;
+                            if (bucketHead == null) {
+                                boolean canReuseEntry = entry instanceof ImmutableEntry && !(entry instanceof NonTerminalEntry);
+                                newEntry = canReuseEntry ? (ImmutableEntry<E>) entry : new ImmutableEntry<E>(element, count);
+                            } else {
+                                newEntry = new NonTerminalEntry<>(element, count, bucketHead);
+                            }
+                            hashCode += hash ^ count;
+                            entryArray[index++] = newEntry;
+                            hashTable[bucket] = newEntry;
+                            size += count;
+                        }
+                        return flooded(hashTable) ? asList(entryArray) : new RM<E>(entryArray, hashTable);
+                    }
+                    static boolean flooded(@Nullable ImmutableEntry<?>[] hashTable) { return hashTable.length > 9; }
+                    static <E> RM<E> asList(@Nullable Object[] elements) { return null; }
+                    Entry<E> getEntry(int index) { return entries[index]; }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        String why = s + "\n" + explain(report);
+        assertEquals("ImmutableEntry<E!>[]", s.get("a.b.RM.entries"), why);
+        assertEquals("Entry<E!>", s.get("a.b.RM.getEntry(int)"), why);
+    }
+
     @DisplayName("Kotlin: an implementation for a @Nullable type argument keeps its null from the overridden return")
     @Test
     public void nullableInstantiationReturn() {

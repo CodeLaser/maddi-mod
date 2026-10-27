@@ -550,6 +550,19 @@ public final class NullabilityPass {
         return node instanceof Info info ? info.fullyQualifiedName() : String.valueOf(node);
     }
 
+    // ' chain=' and the nodes the closure reached this one through, back to the seed and its origin
+    private String whyChain(Map<Object, Object> cause, Object node) {
+        StringBuilder sb = new StringBuilder(" chain=");
+        Object n = node;
+        Set<Object> seen = new HashSet<>();
+        while (cause.containsKey(n) && seen.add(n)) {
+            n = cause.get(n);
+            sb.append(" <- ").append(Report.label(n));
+        }
+        String origin = seedOrigin.get(n);
+        return origin == null ? sb.toString() : sb.append(" <- ").append(origin).toString();
+    }
+
     private static void whyLog(String what, Object node, String detail) {
         StringBuilder sb = new StringBuilder("NULLWHY ").append(what).append(' ').append(whyName(node));
         if (detail != null) sb.append(" :: ").append(detail);
@@ -1461,6 +1474,11 @@ public final class NullabilityPass {
                 degraded.contains(pi.methodInfo()))));
         for (FieldInfo fi : fields) {
             verdicts.put(fi, contracted(fi, verdict(fi.type(), fi, false)));
+            if (why(fi)) {
+                System.err.println("NULLWHY final " + fi.fullyQualifiedName() + " reached=" + reached.contains(fi)
+                                   + whyChain(cause, fi) + " elements reached=" + reached.contains(new Content(fi))
+                                   + whyChain(cause, new Content(fi)) + " verdict=" + verdicts.get(fi));
+            }
         }
         for (MethodInfo mi : methods) {
             boolean deg = degraded.contains(mi);
@@ -1473,7 +1491,7 @@ public final class NullabilityPass {
             if (why(mi)) {
                 System.err.println("NULLWHY final " + mi.fullyQualifiedName() + " reached=" + reached.contains(mi)
                                    + " seed=" + seedOrigin.get(mi) + " contract=" + nonNullContracts.contains(mi)
-                                   + " degraded=" + deg + " verdict=" + verdicts.get(mi));
+                                   + " degraded=" + deg + " verdict=" + verdicts.get(mi) + whyChain(cause, mi));
             }
         }
         if (policy.callResults()) {
