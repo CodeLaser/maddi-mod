@@ -2383,6 +2383,10 @@ public final class NullabilityPass {
                     if (!before.contains(n)) return false;
                     continue; // nullable anyway: what it flows into is decided without this parameter
                 }
+                case Content _, Arg _ when declaredSlot(n) && !TOLERANT_SLOTS_OFF.get() -> {
+                    if (!before.contains(n)) return false;
+                    continue;
+                }
                 default -> {
                 }
             }
@@ -2392,6 +2396,25 @@ public final class NullabilityPass {
         }
         return true;
     }
+
+    /*
+     An element slot of a field, of a return or of a class's own supertype is part of that declaration, as the field
+     itself is: 'public void add(String item) { items.add(item); }' does not tolerate null in item when 'items' is a
+     List<String> nothing writes null into; the null would make it a List<String?>. A parameter's or a local's slot
+     is followed on (checkArgument's message arguments go into lenientFormat's varargs). Gate NOTOLERANTSLOTS: every
+     slot followed on, as before (the maddi-java-demo's public adders and setters all came out nullable, 2026-10-27).
+     */
+    private static boolean declaredSlot(Object node) {
+        Object holder = node;
+        while (true) {
+            if (holder instanceof Content c) holder = c.of();
+            else if (holder instanceof Arg a) holder = a.of();
+            else break;
+        }
+        return holder instanceof FieldInfo || holder instanceof MethodInfo || holder instanceof AnonymousThis;
+    }
+
+    private static final Switches.Gate TOLERANT_SLOTS_OFF = Switches.gate("NOTOLERANTSLOTS");
 
     // a demand in m's body, or in the body of the method that encloses m's lambda or local class
     private boolean demanded(MethodInfo m, java.util.function.Predicate<Variable> variable) {
