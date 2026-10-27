@@ -1380,7 +1380,7 @@ public final class NullabilityPass {
         if (policy.callResults()) {
             for (MethodInfo mi : methods) {
                 if (boundedTypeVariableOverride(mi) || overridesKotlinNonNullReturn(mi)
-                    || overridesLibraryNonNullReturn(mi)) nonNullContracts.add(mi);
+                    || overridesLibraryNonNullReturn(mi) || testOverrideOfInstantiatedReturn(mi)) nonNullContracts.add(mi);
             }
             nonNullOverrides(methods);
         }
@@ -3453,8 +3453,30 @@ public final class NullabilityPass {
      flow between two array nodes, also one the top-level verdict drops because the array is known non-null there,
      ties their Contents both ways, recursively for nested arrays.
      */
+    /*
+     Kotlin: an array passed where an array of a wider element type is expected ('asImmutableList(entryArray)' with
+     an ImmutableEntry<E>[] for guava's 'asImmutableList(@Nullable Object[] elements)') is cast by the printer
+     ('entryArray as Array<Any?>'): the two are no one Array<T>. Elements flow on from the narrower array into the
+     wider one, but not back, unless the wider one is written through. Without this, the parameter's nullable
+     elements made RegularImmutableMultiset.create's entryArray, and with it entries, getEntry and
+     IndexedImmutableSet.get, nullable (worktree-maddi-all, 2026-10-27). True when 'to' holds a proper subtype of what
+     'from' holds. Gate NOARRAYWIDENING.
+     */
+    private boolean narrowedArray(ParameterizedType from, ParameterizedType to) {
+        if (!policy.callResults() || ARRAY_WIDENING_OFF.get() || from.arrays() != to.arrays()) return false;
+        TypeInfo f = from.copyWithoutArrays().typeInfo();
+        TypeInfo t = to.copyWithoutArrays().typeInfo();
+        if (f == null || t == null || f == t || t.isJavaLangObject()) return false;
+        return f.isJavaLangObject() || t.superTypesExcludingJavaLangObject().contains(f);
+    }
+
+    // gate NOARRAYWIDENING: a wider array parameter's element nulls flow back into the argument (A/B)
+    private static final Switches.Gate ARRAY_WIDENING_OFF = Switches.gate("NOARRAYWIDENING");
+
     private void coupleContent() {
         Set<Object> writtenThrough = writtenThrough(true);
+        // narrowedArray: an element annotation alone writes nothing into the caller's array
+        Set<Object> written = policy.callResults() && !ARRAY_WIDENING_OFF.get() ? writtenThrough(false) : writtenThrough;
         Set<ParameterInfo> readOnlyArrays = readOnlyArrayParameters();
         Deque<List<Object>> queue = new ArrayDeque<>(flows);
         Set<List<Object>> seen = new HashSet<>();
@@ -3474,11 +3496,13 @@ public final class NullabilityPass {
                 // anything else is that reversed link
                 if ((!readOnlyArrayParameter(flow.get(0), readOnlyArrays)
                      || readOnlyArrayParameter(flow.get(1), readOnlyArrays))
-                    && !varargsPasses.contains(List.of(flow.get(1), flow.get(0)))) {
+                    && !varargsPasses.contains(List.of(flow.get(1), flow.get(0)))
+                    && !(narrowedArray(t0, t1) && !written.contains(flow.get(0)))) {
                     successors.computeIfAbsent(c0, _ -> new LinkedHashSet<>()).add(c1);
                 }
                 if (!readOnlyArrayParameter(flow.get(1), readOnlyArrays) && !varargsPasses.contains(flow)
-                    && (policy.assertContentWrites() || writtenThrough.contains(flow.get(1)))) {
+                    && (narrowedArray(t1, t0) ? written.contains(flow.get(1))
+                        : policy.assertContentWrites() || writtenThrough.contains(flow.get(1)))) {
                     successors.computeIfAbsent(c1, _ -> new LinkedHashSet<>()).add(c0);
                 }
                 queue.add(List.of(c0, c1));
@@ -3652,7 +3676,7 @@ public final class NullabilityPass {
      ImmutableMap.Builder.entries, ImmutableList.array, Joiner.join(Object[]) and TypeToken's Type[] one slot.
      */
     private Set<Object> writtenThrough(boolean annotations) {
-        // 'annotations': whether an element annotation counts ('join(@Nullable Object[] parts)'); always, for now
+        // 'annotations': whether an element annotation counts ('join(@Nullable Object[] parts)'); not for narrowedArray
         Set<Object> written = new HashSet<>();
         successors.forEach((from, tos) -> {
             if (from instanceof Content) return;
@@ -4002,9 +4026,16 @@ public final class NullabilityPass {
      only. Gate NONULLABLEINSTANTIATION.
      */
     private static boolean nullableInstantiation(MethodInfo mi, MethodInfo overridden) {
+        if (NULLABLE_INSTANTIATION_OFF.get()) return false;
+        ParameterizedType argument = instantiation(mi, overridden);
+        return argument != null && (argument.nullable() == NullableState.NULLABLE || argument.annotations().stream()
+                .anyMatch(ae -> ae.typeInfo() != null && NullAnnotations.NULLABLE.contains(ae.typeInfo().simpleName())));
+    }
+
+    // the type argument a direct supertype of mi's class passes for the overridden return's class type variable
+    private static ParameterizedType instantiation(MethodInfo mi, MethodInfo overridden) {
         ParameterizedType rt = overridden.returnType();
-        if (NULLABLE_INSTANTIATION_OFF.get() || !isClassTypeVariable(rt)
-            || rt.typeParameter().getOwner().getLeft() != overridden.typeInfo()) return false;
+        if (!isClassTypeVariable(rt) || rt.typeParameter().getOwner().getLeft() != overridden.typeInfo()) return null;
         int index = rt.typeParameter().getIndex();
         List<ParameterizedType> supertypes = new ArrayList<>();
         if (mi.typeInfo().parentClass() != null) supertypes.add(mi.typeInfo().parentClass());
@@ -4019,15 +4050,36 @@ public final class NullabilityPass {
             if (a.arrays() > 0 || a.typeParameter() == null || a.typeParameter().isMethodTypeParameter()
                 || a.typeParameter().getOwner().getLeft() != st.typeInfo()) continue;
             int j = a.typeParameter().getIndex();
-            if (j >= st.parameters().size()) continue;
-            ParameterizedType argument = st.parameters().get(j);
-            if (argument.nullable() == NullableState.NULLABLE || argument.annotations().stream().anyMatch(ae ->
+            if (j < st.parameters().size()) return st.parameters().get(j);
+        }
+        return null;
+    }
+
+    /*
+     Kotlin: a test's override of a main member's type-variable return, in a class that instantiates the variable with
+     a concrete type ('new Tables.AbstractCell<Character, Integer, String>() { String getValue() { return
+     holder.string; } }' in guava's ImmutableTableTest, the field @Nullable): its result is that instantiation's
+     String, non-null, its null value asserted. Without this, the test's null made main's Table.Cell.getValue V? and
+     AbstractTable failed (worktree-maddi-all, 2026-10-27). Not where the test returns a null literal, which the printer
+     cannot assert (the upward edge of buildForMethod keeps that one). Gate NOTESTINSTANTIATION.
+     */
+    private boolean testOverrideOfInstantiatedReturn(MethodInfo mi) {
+        if (TEST_INSTANTIATION_OFF.get() || mi.isConstructor() || mi.returnType().isVoid() || !testCode(mi)
+            || returnsNullLiteral(mi)) return false;
+        for (MethodInfo overridden : overrides(mi)) {
+            if (!analysed.contains(overridden) || testCode(overridden)) continue;
+            ParameterizedType argument = instantiation(mi, overridden);
+            if (argument != null && argument.typeParameter() == null && argument.wildcard() == null
+                && argument.nullable() != NullableState.NULLABLE && argument.annotations().stream().noneMatch(ae ->
                     ae.typeInfo() != null && NullAnnotations.NULLABLE.contains(ae.typeInfo().simpleName()))) {
                 return true;
             }
         }
         return false;
     }
+
+    // gate NOTESTINSTANTIATION: a test override's null reaches main's type-variable return (A/B)
+    private static final Switches.Gate TEST_INSTANTIATION_OFF = Switches.gate("NOTESTINSTANTIATION");
 
     // gate NONULLABLEINSTANTIATION: an implementation's null reaches the overridden type-variable return (A/B)
     private static final Switches.Gate NULLABLE_INSTANTIATION_OFF = Switches.gate("NONULLABLEINSTANTIATION");
@@ -7308,3 +7360,4 @@ public final class NullabilityPass {
                                                       && !vi.assignments().isEmpty());
     }
 }
+

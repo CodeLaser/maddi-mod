@@ -2209,9 +2209,12 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("String[]", s.get("a.b.RA.bounds(String[]):0:upperBounds"), s.toString());
         assertEquals("String[]", s.get("a.b.RA.listed(String[]):0:upper"), "Arrays.asList reads: " + s);
         assertEquals("String[]", s.get("a.b.RA.annotatedBounds(String[]):0:bounds"), "Joiner's shape: " + s);
-        assertEquals("String?[]", s.get("a.b.RA.captured(String[]):0:fns"), "captured: invariant, both ways " + s);
+        // a String[] into an Object[] is cast by the printer (covariantArrayArgument) whatever the elements' states:
+        // the parameter's nulls (nullHashers, kept) are never in the caller's array (narrowedArray, 2026-10-27)
+        assertEquals("String[]", s.get("a.b.RA.captured(String[]):0:fns"), "captured, cast: " + s);
         assertEquals("String?[]", s.get("a.b.RA.written()"), "written through: still both ways " + s);
-        assertEquals("String?[]", s.get("a.b.RA.passKept(String[]):0:names"), "returned: invariant, both ways " + s);
+        // still tied: kept()'s '{null}' reaches held by the links both ways, which writtenThrough counts as a write
+        assertEquals("String?[]", s.get("a.b.RA.passKept(String[]):0:names"), "returned: " + s);
     }
 
     @DisplayName("Kotlin: a varargs parameter takes a copy: its elements do not flow back into the caller's array")
@@ -4153,6 +4156,32 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("T?", s.get("a.b.PN.Supplier.get()"), "the declaration keeps it; the printer prints T");
     }
 
+    @DisplayName("Kotlin: a callee writing null into a wider array parameter reaches the caller's narrower array")
+    @Test
+    public void narrowedArrayWrittenThrough() {
+        NullabilityPass.Report report = run("a.b.NW", """
+                package a.b;
+                class NW {
+                    static void clear(Object[] a) { a[0] = null; }
+                    static void read(Object[] a) { System.out.println(a.length); }
+                    static String[] cleared() {
+                        String[] s = new String[] {"x"};
+                        clear(s);
+                        return s;
+                    }
+                    static String[] kept() {
+                        String[] s = new String[] {"x"};
+                        read(s);
+                        return s;
+                    }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        assertEquals("String?[]", s.get("a.b.NW.cleared()"), s + "\n" + explain(report));
+        assertEquals("String[]", s.get("a.b.NW.kept()"), s.toString());
+    }
+
     @DisplayName("Kotlin: guava's RegularImmutableMultiset.create fills its entry array with a counted for-each")
     @Test
     public void countedFillGuava() {
@@ -4221,7 +4250,16 @@ public class TestNullabilityPass extends CommonTest {
                         return flooded(hashTable) ? asList(entryArray) : new RM<E>(entryArray, hashTable);
                     }
                     static boolean flooded(@Nullable ImmutableEntry<?>[] hashTable) { return hashTable.length > 9; }
-                    static <E> RM<E> asList(@Nullable Object[] elements) { return null; }
+                    // guava's ImmutableList.asImmutableList(@Nullable Object[]), stored by asImmutableList(Object[], int)
+                    static <E> RM<E> asList(@Nullable Object[] elements) { return asList(elements, elements.length); }
+                    static <E> RM<E> asList(@Nullable Object[] elements, int length) {
+                        Held h = new Held(elements);
+                        return null;
+                    }
+                    static final class Held {
+                        final @Nullable Object[] array;
+                        Held(@Nullable Object[] array) { this.array = array; }
+                    }
                     Entry<E> getEntry(int index) { return entries[index]; }
                 }
                 """, NullabilityPass.Policy.KOTLIN);
