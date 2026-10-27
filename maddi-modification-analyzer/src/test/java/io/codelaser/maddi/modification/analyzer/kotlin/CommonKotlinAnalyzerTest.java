@@ -97,6 +97,11 @@ public abstract class CommonKotlinAnalyzerTest {
      prep, and analyze.
      */
     protected static Analyzed analyze(List<String> kotlin, List<String> java) {
+        return analyze(kotlin, java, false);
+    }
+
+    /* with `modificationViaReachability`: the reachability pass (MODREACH) after the fixpoint, as the IDE daemon runs */
+    protected static Analyzed analyze(List<String> kotlin, List<String> java, boolean modificationViaReachability) {
         try {
             Path root = Files.createTempDirectory("analyzer-kotlin");
             Path kDir = root.resolve("kotlin");
@@ -137,6 +142,7 @@ public abstract class CommonKotlinAnalyzerTest {
             List<Info> order = new ComputeAnalysisOrder().go(callGraph);
             new IteratingAnalyzerImpl(parsed.getJavaInspector(), new IteratingAnalyzerImpl.ConfigurationBuilder()
                     .setMaxIterations(30).setStopWhenCycleDetectedAndNoImprovements(true).setFaultTolerant(true)
+                    .setModificationViaReachability(modificationViaReachability)
                     .build()).analyze(order, callGraph);
             return new Analyzed(runtime, parsed.getKotlinTypes(), parsed.getJavaTypes());
         } catch (IOException e) {
