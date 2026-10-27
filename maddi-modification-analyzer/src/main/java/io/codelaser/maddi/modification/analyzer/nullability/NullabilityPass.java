@@ -1406,6 +1406,7 @@ public final class NullabilityPass {
             // [3] a link of a method's summary (no statement): kept as before, unless guarded somewhere
             boolean slot = edge.get(1) instanceof Arg || edge.get(1) instanceof Content;
             if (policy.callResults() && !DIFFERENT_SHAPES_OFF.get() && differentShapes(edge.get(0), edge.get(1))) return;
+            if (liftedIntoNarrower(edge.get(0), edge.get(1))) return;
             if (count[1] > 0 || count[2] > 0 || count[0] == 0 && slot) {
                 addEdge(edge.get(0), edge.get(1));
             } else {
@@ -2525,7 +2526,11 @@ public final class NullabilityPass {
         // 2026-10-18). Gate NOPRIMITIVECUTS.
         if (policy.callResults() && !PRIMITIVE_CUTS_OFF.get() && !(from instanceof Content) && primitive(typeOf(from))) return;
         flows.add(List.of(from, to));
-        successors.computeIfAbsent(from, _ -> new LinkedHashSet<>()).add(to);
+        if (successors.computeIfAbsent(from, _ -> new LinkedHashSet<>()).add(to) && to instanceof Content c
+            && why(c.of())) {
+            whyLog(from instanceof Content ? "content edge" : "element write", c.of(),
+                    "from " + whyName(from) + " (" + from.getClass().getSimpleName() + ")");
+        }
     }
 
     private static boolean primitive(ParameterizedType type) {
@@ -3502,11 +3507,13 @@ public final class NullabilityPass {
                     && !varargsPasses.contains(List.of(flow.get(1), flow.get(0)))
                     && !(narrowedArray(t0, t1) && !written.contains(flow.get(0)))) {
                     successors.computeIfAbsent(c0, _ -> new LinkedHashSet<>()).add(c1);
+                    if (why(c1.of())) whyLog("coupled forward", c1.of(), "from " + whyName(c0.of()) + " " + t0 + " -> " + t1);
                 }
                 if (!readOnlyArrayParameter(flow.get(1), readOnlyArrays) && !varargsPasses.contains(flow)
                     && (narrowedArray(t1, t0) ? written.contains(flow.get(1))
                         : policy.assertContentWrites() || writtenThrough.contains(flow.get(1)))) {
                     successors.computeIfAbsent(c1, _ -> new LinkedHashSet<>()).add(c0);
+                    if (why(c0.of())) whyLog("coupled back", c0.of(), "from " + whyName(c1.of()) + " " + t1 + " -> " + t0);
                 }
                 queue.add(List.of(c0, c1));
             } else if (t0.arrays() == 0 && t1.arrays() == 0 && !t0.parameters().isEmpty()
@@ -3681,26 +3688,99 @@ public final class NullabilityPass {
     private Set<Object> writtenThrough(boolean annotations) {
         // 'annotations': whether an element annotation counts ('join(@Nullable Object[] parts)'); not for narrowedArray
         Set<Object> written = new HashSet<>();
+        // NULLWHY: why a node is written, its downstream node or the write itself
+        Map<Object, String> because = NULL_WHY == null ? null : new HashMap<>();
         successors.forEach((from, tos) -> {
-            if (from instanceof Content) return;
-            for (Object to : tos) if (to instanceof Content c) written.add(c.of());
+            // narrowedArray: nor is an element "written" from a lifted field ('RegularImmutableList.array ∋
+            // RegularImmutableList.element'), the links' stand-in for any element, not code writing into the array
+            if (from instanceof Content || !annotations && liftedField(from)) return;
+            for (Object to : tos) {
+                if (to instanceof Content c && written.add(c.of()) && because != null) {
+                    because.put(c.of(), "written from " + whyName(from));
+                }
+            }
         });
         seedOrigin.forEach((node, origin) -> {
             if (node instanceof Content c && !origin.startsWith("array created") && !origin.startsWith("null in an array initializer")
                 && (annotations || !origin.startsWith("annotated"))) {
-                written.add(c.of());
+                if (written.add(c.of()) && because != null) because.put(c.of(), "seed " + origin);
             }
         });
         Map<Object, List<Object>> upstream = new HashMap<>();
         for (List<Object> flow : flows) upstream.computeIfAbsent(flow.get(1), _ -> new ArrayList<>()).add(flow.get(0));
         Deque<Object> queue = new ArrayDeque<>(written);
         while (!queue.isEmpty()) {
-            for (Object up : upstream.getOrDefault(queue.removeFirst(), List.of())) {
-                if (written.add(up)) queue.add(up);
+            Object down = queue.removeFirst();
+            if (!annotations && (liftedField(down) || library(down))) {
+                if (because != null && why(down)) System.err.println("NULLWHY written(false) stops at " + whyName(down));
+                continue;
+            }
+            for (Object up : upstream.getOrDefault(down, List.of())) {
+                // narrowedArray: an array is written through arrays only, not through a type argument's slot, a
+                // return value or a call's argument that happens to link to it
+                if (!annotations && !LIFTED_WRITES_OFF.get() && !(isArray(up) && isArray(down))) continue;
+                if (written.add(up)) {
+                    queue.add(up);
+                    if (because != null) because.put(up, "flows into " + whyName(down));
+                }
+            }
+        }
+        // narrowedArray: nor is the lifted field itself written, nor does it pass its elements on as if it were
+        if (!annotations) written.removeIf(NullabilityPass::liftedField);
+        if (because != null) {
+            for (Object node : written) {
+                if (!why(node)) continue;
+                StringBuilder sb = new StringBuilder("NULLWHY written(" + annotations + ") " + whyName(node)
+                        + (liftedField(node) ? " (lifted)" : ""));
+                Object n = node;
+                for (int i = 0; i < 40 && because.get(n) != null; i++) {
+                    String b = because.get(n);
+                    sb.append("\n    ").append(b);
+                    if (!b.startsWith("flows into ")) break;
+                    n = written.stream().filter(w -> whyName(w).equals(b.substring(11))).findFirst().orElse(null);
+                    if (n == null) break;
+                }
+                System.err.println(sb);
             }
         }
         return written;
     }
+
+    /*
+     Kotlin, for narrowedArray: a write booked on a field its owner does not declare does not travel upstream to what
+     flows into it. Such a field is the link engine's lift of a subtype's field onto a supertype
+     (VariableTranslationAllowHierarchy): 'ImmutableList.array' for RegularImmutableList.array, the content of every
+     list of the type. So 'ImmutableList.of(e1, ..)' filling its own array before that became a list would count as a
+     write into every array passed in, guava's 'asImmutableList(@Nullable Object[], int)' included: it made
+     RegularImmutableMultiset.create's entryArray, and with it entries and IndexedImmutableSet.get, nullable
+     (CodeLaser/maddi-mod#74). For the same reason the lifted field is not written itself, and its elements, linked
+     into a narrower array, are not that array's (liftedIntoNarrower): they are what the other arrays of the type
+     hold. Nor does a write travel upstream out of a library method's parameter, which ties together the arrays of
+     all its callers (as in coupleContent), or through anything but arrays. The declared field, written through,
+     still counts. Gate NOLIFTEDWRITES.
+     */
+    private static boolean liftedField(Object node) {
+        Object root = node;
+        while (root instanceof Content c) root = c.of(); // also its elements, at any depth
+        return root instanceof FieldInfo fi && !LIFTED_WRITES_OFF.get() && fi.owner() != null
+               && !fi.owner().fields().contains(fi);
+    }
+
+    private boolean isArray(Object node) {
+        if (node instanceof Content || node instanceof Arg) return false;
+        ParameterizedType t = typeOf(node);
+        return t != null && t.arrays() > 0;
+    }
+
+    // the elements of a lifted field (liftedField) linked into a narrower array: what other arrays of the type hold
+    private boolean liftedIntoNarrower(Object from, Object to) {
+        if (!(from instanceof Content cf) || !(to instanceof Content ct) || !liftedField(cf)) return false;
+        ParameterizedType tf = typeOf(cf.of());
+        ParameterizedType tt = typeOf(ct.of());
+        return tf != null && tt != null && narrowedArray(tf, tt);
+    }
+
+    private static final Switches.Gate LIFTED_WRITES_OFF = Switches.gate("NOLIFTEDWRITES");
 
     // no type variable among the type arguments (or an array's element), at any depth
     private static boolean concreteArguments(ParameterizedType pt) {

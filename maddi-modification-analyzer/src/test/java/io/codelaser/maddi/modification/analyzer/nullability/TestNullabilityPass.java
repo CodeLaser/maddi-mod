@@ -4260,6 +4260,23 @@ public class TestNullabilityPass extends CommonTest {
                         final @Nullable Object[] array;
                         Held(@Nullable Object[] array) { this.array = array; }
                     }
+                    // guava's ImmutableList.Builder: a second caller of asList(@Nullable Object[], int), with an array
+                    // of its own that it writes into; that write is not one into create's entryArray (#74)
+                    static final class Builder<E> {
+                        @Nullable Object[] contents = new @Nullable Object[4];
+                        int size;
+                        void add(E element) {
+                            if (size == contents.length) contents = java.util.Arrays.copyOf(contents, size * 2);
+                            contents[size++] = element;
+                        }
+                        void reset() { contents[0] = null; size = 0; }
+                        private void add(@Nullable Object[] elements, int n) {
+                            System.arraycopy(elements, 0, contents, size, n);
+                            size += n;
+                        }
+                        Builder<E> combine(Builder<E> builder) { add(builder.contents, builder.size); return this; }
+                        RM<E> build() { return asList(contents, size); }
+                    }
                     Entry<E> getEntry(int index) { return entries[index]; }
                 }
                 """, NullabilityPass.Policy.KOTLIN);
@@ -4268,6 +4285,58 @@ public class TestNullabilityPass extends CommonTest {
         String why = s + "\n" + explain(report);
         assertEquals("ImmutableEntry<E!>[]", s.get("a.b.RM.entries"), why);
         assertEquals("Entry<E!>", s.get("a.b.RM.getEntry(int)"), why);
+    }
+
+    /*
+     CodeLaser/maddi-mod#74: guava's 'asImmutableList(@Nullable Object[], int)' stores its argument in a
+     RegularImmutableList. The links lift that field onto ImmutableList ('IList.array' here), one field for the
+     content of every list. 'of(e1, e2)' filling its own array before it becomes a list is a write booked on that
+     field, not one into the array 'create' passes in.
+     */
+    @DisplayName("Kotlin: a write booked on a field lifted onto a supertype is no write into another array passed in")
+    @Test
+    public void narrowedArrayThroughLiftedField() {
+        NullabilityPass.Report report = run("a.b.GL", """
+                package a.b;
+                import java.lang.annotation.ElementType;
+                import java.lang.annotation.Target;
+                class GL {
+                    @Target(ElementType.TYPE_USE) @interface Nullable {}
+                    abstract static class IList<E> {
+                        abstract E get(int i);
+                        static <E> IList<E> of(E e1, E e2) {
+                            Object[] array = new Object[2];
+                            array[0] = e1;
+                            array[1] = e2;
+                            return asList(array, 2);
+                        }
+                        static <E> IList<E> asList(@Nullable Object[] elements, int length) {
+                            Object[] kept = length < elements.length ? java.util.Arrays.copyOf(elements, length) : elements;
+                            return new RList<>(kept);
+                        }
+                    }
+                    static final class RList<E> extends IList<E> {
+                        final Object[] array;
+                        RList(Object[] array) { this.array = array; }
+                        @SuppressWarnings("unchecked") @Override E get(int i) { return (E) array[i]; }
+                    }
+                    static final class Entry { }
+                    private final Entry[] entries;
+                    private GL(Entry[] entries) { this.entries = entries; }
+                    static GL create(int n, Entry e) {
+                        Entry[] entryArray = new Entry[n];
+                        for (int i = 0; i < n; i++) entryArray[i] = e;
+                        IList<Entry> asList = IList.asList(entryArray, n);
+                        return new GL(entryArray);
+                    }
+                    Entry entry(int i) { return entries[i]; }
+                }
+                """, NullabilityPass.Policy.KOTLIN);
+        Map<String, String> s = new java.util.TreeMap<>();
+        report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
+        String why = s + "\n" + explain(report);
+        assertEquals("Entry[]", s.get("a.b.GL.entries"), why);
+        assertEquals("Entry", s.get("a.b.GL.entry(int)"), why);
     }
 
     @DisplayName("Kotlin: an implementation for a @Nullable type argument keeps its null from the overridden return")
