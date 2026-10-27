@@ -72,11 +72,24 @@ public class LinkGraph {
      Ensure that v1 == v2 also means that v1.ts == v2.ts, v1.$m == v2.$m, so that these connections can be made.
      Filtering out ? links is done in followGraph.
      */
+    // TEMPORARY (#72 4a diagnostic): OLDVALUETRACE=<method fqn substring>
+    public String traceMethod;
+    private String traceStatement;
+    private static final String OLDVALUETRACE = System.getenv("OLDVALUETRACE");
+
+    private void traceOldValue(String what, Variable target, Variable alias, Map<Variable, Links> before,
+                               Map<Variable, Links> after) {
+        if (OLDVALUETRACE == null || traceMethod == null || !traceMethod.contains(OLDVALUETRACE)) return;
+        System.out.println("OLDVALUE " + what + " " + traceMethod + " @" + traceStatement + " " + target + " -> " + alias
+                           + "\n  before: " + before + "\n  after:  " + after);
+    }
+
     public void compute(String statementIndex,
                         Map<Variable, Links> newLinks,
                         Set<Variable> toRemove,
                         TranslationMap replaceConstants,
                         Map<Variable, Set<MethodInfo>> modifiedInThisEvaluation) {
+        traceStatement = statementIndex;
         graph.dropDetached(toRemove);
         Set<Variable> allToRemove = graph.variables().stream()
                 .filter(v -> toRemove.contains(Util.firstRealVariable(v)))
@@ -188,6 +201,7 @@ public class LinkGraph {
                     next.put(key, e.getValue().translate(oldValue));
                 }
             }
+            traceOldValue("direct", target, alias, res, next);
             res = next;
         }
         return res;
@@ -246,6 +260,7 @@ public class LinkGraph {
                 graph.markFreshObjectReturn(Util.primary(target));
             }
         }
+        if (oldValue != null) traceOldValue("reduce", target, oldValueAlias, newLinks, res);
         return new Reduce(res, target);
     }
 
