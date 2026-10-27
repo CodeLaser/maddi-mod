@@ -110,14 +110,30 @@ public class TypeModIndyAnalyzerImpl extends CommonAnalyzerImpl implements TypeM
         }
     }
 
+    // gate NOALLVALUESFLUENT: fluent when any return link reaches this (the old rule, A/B)
+    private static final boolean ALL_VALUES_FLUENT_OFF = System.getenv("NOALLVALUESFLUENT") != null;
+
+    private static boolean isThis(MethodInfo methodInfo, Variable v) {
+        return v instanceof This thisVar
+               && (thisVar.typeInfo() == methodInfo.typeInfo()
+                   || thisVar.typeInfo().typeHierarchyExcludingJLOStream().anyMatch(h -> h.equals(methodInfo.typeInfo())));
+    }
+
     private void doFluentAnalysis(MethodInfo methodInfo, MethodLinkedVariables mlv) {
         boolean identityFluent;
         if (methodInfo.hasReturnValue() && !mlv.ofReturnValue().isEmpty()) {
-            identityFluent = mlv.ofReturnValue().stream()
-                    .anyMatch(v -> v.to() instanceof This thisVar
-                                   && (thisVar.typeInfo() == methodInfo.typeInfo()
-                                       || thisVar.typeInfo().typeHierarchyExcludingJLOStream()
-                                               .anyMatch(h -> h.equals(methodInfo.typeInfo()))));
+            if (ALL_VALUES_FLUENT_OFF) {
+                identityFluent = mlv.ofReturnValue().stream().anyMatch(v -> isThis(methodInfo, v.to()));
+            } else {
+                // fluent: every value the method returns is 'this'. Not 'c ? this : next' ('←this.next,←this'),
+                // nor a field of this ('getWrapper ≺ this'), nor a face of the result ('either.next ← this.next')
+                Variable rv = mlv.ofReturnValue().primary();
+                List<Variable> values = mlv.ofReturnValue().stream()
+                        .filter(v -> v.from().equals(rv)
+                                     && (v.linkNature().isIdenticalTo() || v.linkNature().isAssignedFrom()))
+                        .map(Link::to).toList();
+                identityFluent = !values.isEmpty() && values.stream().allMatch(v -> isThis(methodInfo, v));
+            }
         } else {
             identityFluent = false;
         }

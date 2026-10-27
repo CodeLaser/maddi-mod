@@ -115,4 +115,29 @@ public class TestFluent extends CommonTest {
             assertTrue(setI2.isFluent());
         }
     }
+
+    @Language("java")
+    private static final String INPUT2 = """
+            package a.b;
+            class N {
+                N next;
+                N parent;
+                int type;
+                N either(boolean c) { return c ? this : next; }
+                N walk() { N node = this; while (node.type == 1) node = node.parent; return node; }
+                N always(boolean c) { if (c) { return this; } N self = this; return self; }
+            }
+            """;
+
+    @DisplayName("fluent: every value returned is this, not just one of them")
+    @Test
+    public void test2() {
+        TypeInfo N = javaInspector.parse("a.b.N", INPUT2);
+        List<Info> ao = prepWork(N);
+        analyzer.go(ao);
+        // 'c ? this : next', and a walk that may stop at this (#72): this is one of the values, not the only one
+        assertSame(FALSE, N.findUniqueMethod("either", 1).analysis().getOrDefault(PropertyImpl.FLUENT_METHOD, FALSE));
+        assertSame(FALSE, N.findUniqueMethod("walk", 0).analysis().getOrDefault(PropertyImpl.FLUENT_METHOD, FALSE));
+        assertSame(TRUE, N.findUniqueMethod("always", 1).analysis().getOrDefault(PropertyImpl.FLUENT_METHOD, FALSE));
+    }
 }
