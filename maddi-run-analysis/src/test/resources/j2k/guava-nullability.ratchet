@@ -31,12 +31,16 @@
 # Java does (Iterators.filter, removeAll): 606 files compiling (5 type errors), 491 to class files, 861,616 tests pass.
 # 2026-10-27, maddi 7300e1919: on a raw receiver, an argument into a ? super parameter is cast to Any? (TypeToken):
 # 607 files compiling (4 type errors).
+# 2026-10-27, maddi dfcf8e167 / maddi-mod 525bd7da (maddi-null), on laser1: an override returns T? where a supertype,
+# directly or further up, instantiates the overridden T nullable (ArrayTable's Row and cells), no `!!` on a
+# star-projected read into the callee's type variable (AbstractTable.CellSet), and maddi-null's test-override and
+# narrowed-array rules: AbstractTable compiles, 608 files compiling (3 type errors), 493 to class files, no test lost.
 types	610
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	610
-compilingFiles	607
-bytecodeFiles	491
+compilingFiles	608
+bytecodeFiles	493
 testsPassing	861616
 testBytecodeFiles	341
 translatedTestsPassing	861589
