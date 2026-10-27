@@ -1,6 +1,5 @@
 package io.codelaser.maddi.modification.link.impl.linkgraph;
 
-import io.codelaser.maddi.modification.link.impl.Gate;
 import io.codelaser.maddi.modification.link.impl.LinkNatureImpl;
 import io.codelaser.maddi.modification.link.impl.graph.DegradedAnalysisException;
 import io.codelaser.maddi.modification.link.impl.localvar.IntermediateVariable;
@@ -72,24 +71,11 @@ public class LinkGraph {
      Ensure that v1 == v2 also means that v1.ts == v2.ts, v1.$m == v2.$m, so that these connections can be made.
      Filtering out ? links is done in followGraph.
      */
-    // TEMPORARY (#72 4a diagnostic): OLDVALUETRACE=<method fqn substring>
-    public String traceMethod;
-    private String traceStatement;
-    private static final String OLDVALUETRACE = System.getenv("OLDVALUETRACE");
-
-    private void traceOldValue(String what, Variable target, Variable alias, Map<Variable, Links> before,
-                               Map<Variable, Links> after) {
-        if (OLDVALUETRACE == null || traceMethod == null || !traceMethod.contains(OLDVALUETRACE)) return;
-        System.out.println("OLDVALUE " + what + " " + traceMethod + " @" + traceStatement + " " + target + " -> " + alias
-                           + "\n  before: " + before + "\n  after:  " + after);
-    }
-
     public void compute(String statementIndex,
                         Map<Variable, Links> newLinks,
                         Set<Variable> toRemove,
                         TranslationMap replaceConstants,
                         Map<Variable, Set<MethodInfo>> modifiedInThisEvaluation) {
-        traceStatement = statementIndex;
         graph.dropDetached(toRemove);
         Set<Variable> allToRemove = graph.variables().stream()
                 .filter(v -> toRemove.contains(Util.firstRealVariable(v)))
@@ -108,7 +94,7 @@ public class LinkGraph {
         if (r != null && r.clear != null) {
             graph.clear(r.clear, statementIndex);
         }
-        Map<Variable, Links> newLinks2 = r == null ? respellSelfReassignment(newLinks) : r.newLinks;
+        Map<Variable, Links> newLinks2 = r == null ? newLinks : r.newLinks;
         newLinks2.entrySet()
                 .stream()
                 .filter(e -> !(e.getKey() instanceof This))
@@ -165,48 +151,6 @@ public class LinkGraph {
 
     private final Set<IntermediateVariable> intermediateVariablesRemoved = new HashSet<>();
 
-    /*
-     The direct form of reduceLinks' old-value respelling: 'n = n.next' arrives as 'n ← n.next' (no intermediate to
-     reduce), and mergeEdgeBi takes 'n' out of its group before it looks at 'n.next'. Every spelling of n's faces
-     on a right-hand side, and every other entry about them, is the OLD value: respell those on a sibling of n's
-     group. n's own left-hand faces ('n.§m' as a from) are the NEW value and stay.
-     */
-    private Map<Variable, Links> respellSelfReassignment(Map<Variable, Links> newLinks) {
-        if (Gate.isSet("NOOLDVALUE")) return newLinks;
-        Map<Variable, Links> res = newLinks;
-        for (Map.Entry<Variable, Links> entry : newLinks.entrySet()) {
-            Variable target = entry.getKey();
-            boolean selfAssigned = false;
-            for (Link l : entry.getValue().linkSet()) {
-                selfAssigned |= l.linkNature() == LinkNatureImpl.IS_ASSIGNED_FROM && l.from().equals(target)
-                                && !l.to().equals(target) && Util.isPartOf(target, l.to());
-            }
-            if (!selfAssigned) continue;
-            Variable alias = graph.survivingAlias(target);
-            if (alias == null) continue;
-            VariableTranslationMap oldValue = new VariableTranslationMap(runtime).put(target, alias);
-            Map<Variable, Links> next = new HashMap<>();
-            for (Map.Entry<Variable, Links> e : res.entrySet()) {
-                if (e.getKey().equals(target)) {
-                    Links.Builder builder = new LinksImpl.Builder(target);
-                    for (Link l : e.getValue().linkSet()) {
-                        Variable to = Util.isPartOf(target, l.to()) ? oldValue.translateVariableRecursively(l.to())
-                                : l.to();
-                        builder.add(l.from(), l.linkNature(), to, l.mediated());
-                    }
-                    next.put(target, builder.build());
-                } else {
-                    Variable key = Util.isPartOf(target, e.getKey())
-                            ? oldValue.translateVariableRecursively(e.getKey()) : e.getKey();
-                    next.put(key, e.getValue().translate(oldValue));
-                }
-            }
-            traceOldValue("direct", target, alias, res, next);
-            res = next;
-        }
-        return res;
-    }
-
     private record Reduce(Map<Variable, Links> newLinks, Variable clear) {
     }
 
@@ -231,25 +175,11 @@ public class LinkGraph {
             }
         }
         if (source == null) return null;
-        // 'node = node.next': until the reduction below, every spelling of 'target' (and of its faces) in this
-        // statement's links is the OLD value, the new one is still the intermediate. compute() clears 'target'
-        // before the links go in, so those spellings would land on fresh vertices, unrelated to anything: the
-        // walk loses where it came from (CodeLaser/maddi-mod#72, 4a). Respell them on a sibling of target's
-        // shared group, which survives the clear and carries the same facts.
-        Variable oldValueAlias = Gate.isSet("NOOLDVALUE") ? null : graph.survivingAlias(target);
-        VariableTranslationMap oldValue = oldValueAlias == null ? null
-                : new VariableTranslationMap(runtime).put(target, oldValueAlias);
         Map<Variable, Links> res = new HashMap<>();
         for (Map.Entry<Variable, Links> entry : newLinks.entrySet()) {
             if (skip != entry.getValue()) {
-                Variable key = entry.getKey();
-                Links old = entry.getValue();
-                if (oldValue != null && key != source && Util.isPartOf(target, key)) {
-                    key = oldValue.translateVariableRecursively(key);
-                }
-                if (oldValue != null) old = old.translate(oldValue);
-                Variable v = key == source ? target : key;
-                Links links = old.translate(vtm);
+                Variable v = entry.getKey() == source ? target : entry.getKey();
+                Links links = entry.getValue().translate(vtm);
                 res.put(v, links);
             } else if (source instanceof IntermediateVariable iv && iv.isNewObject()
                        && Util.primary(target) instanceof ReturnVariable) {
@@ -260,7 +190,6 @@ public class LinkGraph {
                 graph.markFreshObjectReturn(Util.primary(target));
             }
         }
-        if (oldValue != null) traceOldValue("reduce", target, oldValueAlias, newLinks, res);
         return new Reduce(res, target);
     }
 
