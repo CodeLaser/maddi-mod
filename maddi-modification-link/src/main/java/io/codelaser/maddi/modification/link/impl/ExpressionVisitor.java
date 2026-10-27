@@ -55,6 +55,9 @@ public record ExpressionVisitor(Runtime runtime,
     }
 
     private static final Logger LOGGER = LoggerFactory.getLogger(ExpressionVisitor.class);
+    // gate NOEXPRSCOPEFIELD: a field of an expression's result is not linked to that result (variableExpression)
+    static final boolean NO_EXPRESSION_SCOPE_FIELD = Gate.isSet("NOEXPRSCOPEFIELD");
+
     static final Result EMPTY = new Result(LinksImpl.EMPTY, LinkedVariablesImpl.EMPTY, Map.of(), Set.of(), List.of(),
             Map.of(), Set.of(), Set.of());
 
@@ -522,6 +525,16 @@ public record ExpressionVisitor(Runtime runtime,
                         fr.parameterizedType()));
             } else {
                 newVE = ve;
+            }
+            if (expressionScopePrimary != null && !NO_EXPRESSION_SCOPE_FIELD
+                && !Util.scopeVariables(newVE.variable()).contains(expressionScopePrimary)) {
+                // and it holds the field: a modification of 'parent.self().data' ('.add(x)') reaches the result,
+                // and through its links 'parent'. The variable's scope chain stops at the call, so without this
+                // link the modification stopped there (CodeLaser/maddi-mod#72). Not when the scope already is that
+                // result's variable (an inlined getter, 'parent.next.data'). Gate NOEXPRSCOPEFIELD.
+                Links holds = new LinksImpl.Builder(expressionScopePrimary)
+                        .add(LinkNatureImpl.CONTAINS_AS_FIELD, newVE.variable()).build();
+                extra = extra.merge(new LinkedVariablesImpl(Map.of(expressionScopePrimary, holds)));
             }
         } else {
             newVE = ve;
