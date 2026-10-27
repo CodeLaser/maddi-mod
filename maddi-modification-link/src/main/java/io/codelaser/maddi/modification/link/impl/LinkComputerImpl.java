@@ -587,6 +587,8 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                                   || !vd.isKnown(returnVariable.fullyQualifiedName())
                     ? LinksImpl.EMPTY
                     : emptyIfOnlySomeValue(vd.variableInfo(returnVariable).linkedVariables());
+            if (ofReturnValue.primary() != null) ofReturnValue = liftLocallyIndexed(ofReturnValue, Set.of());
+            ofReturnValue = withLiftedIntoReturnValue(ofReturnValue, vd);
             if (Gate.isSet("BTRACE") && methodInfo.name().contains(Gate.get("BTRACE"))) {
                 System.out.println("BTRACE go() raw=" + (vd == null || returnVariable == null
                                                          || !vd.isKnown(returnVariable.fullyQualifiedName())
@@ -835,6 +837,7 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
             VariableInfo vi = vic.best();
             Links viLinks = vi.linkedVariables();
             if (viLinks == null || viLinks.primary() == null) return LinksImpl.EMPTY;
+            viLinks = liftLocallyIndexed(viLinks, inClosure);
             // a local of the ENCLOSING method (a lambda's, a local or anonymous class's closure) is not this method's
             // local: a parameter's link to it -- `x -> r.element = x`, the Ref holder of a Kotlin var the lambda
             // assigns -- is the lambda's effect on its creator, and applying the lambda must carry it there (CodeLaser/maddi#94)
@@ -853,6 +856,115 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                                              || isParameterOfStrictlyEnclosed(v));
             }
             return links.removeIfTo(this::isParameterOfStrictlyEnclosed);
+        }
+
+        /*
+         An element at a local index ('0:in.§$s ∩ postInc[index++]', 'a[i]' in a loop) is nothing a caller can resolve,
+         but its array is: the link is lifted through 'X[i] ∈ X' (and 'X[i].f ≺ X[i]' on the way up) instead of being
+         dropped with the local. Extraction prefers the element form and blocks the array form as redundant, so dropping
+         lost the link altogether ('Entry[] a = ..; for (..) a[i] = new Entry(s); return a;' exported nothing about
+         'in'). CodeLaser/maddi-mod#72 4a exposed it for 'a[index++]': once 'index' is no constant across the loop, the
+         element became a vertex of its own. Gate NOLIFTINDEX.
+         */
+        private static final boolean NO_LIFT_INDEX = Gate.isSet("NOLIFTINDEX");
+
+        private static Links liftLocallyIndexed(Links links, Set<Variable> inClosure) {
+            if (NO_LIFT_INDEX || links.stream().noneMatch(l -> locallyIndexed(l.from()) || locallyIndexed(l.to()))) {
+                return links;
+            }
+            Links.Builder builder = new LinksImpl.Builder(links.primary());
+            for (Link link : links) {
+                Link lifted = liftOne(link, links.primary(), inClosure);
+                if (lifted != null && !builder.contains(lifted.from(), lifted.linkNature(), lifted.to())) {
+                    builder.add(lifted.from(), lifted.linkNature(), lifted.to(), lifted.mediated(), lifted.derived());
+                }
+            }
+            return builder.build();
+        }
+
+        // the link itself when neither end is locally indexed; null when the lift composes to nothing
+        private static Link liftOne(Link link, Variable primary, Set<Variable> inClosure) {
+            Variable from = link.from();
+            Variable to = link.to();
+            LinkNature nature = link.linkNature();
+            while (nature.valid() && locallyIndexed(to) && !isInClosure(to, inClosure)) {
+                nature = nature.combine(upNature(to));
+                to = upVariable(to);
+            }
+            while (nature.valid() && locallyIndexed(from) && !isInClosure(from, inClosure) && !from.equals(primary)) {
+                nature = upNature(from).reverse().combine(nature);
+                from = upVariable(from);
+            }
+            if (from == link.from() && to == link.to()) return link;
+            // a §m face lifted past its field is no §m link any more: dropped, as before the lift
+            if (!nature.valid() || from.equals(to)
+                || Util.isVirtualModification(from) != Util.isVirtualModification(to)) {
+                return null;
+            }
+            return new LinksImpl.LinkImpl(from, nature, to, link.mediated(), true);
+        }
+
+        /*
+         The return value's own extraction never sees an element at a local index ('create.entries[index++]'); the
+         parameter does ('0:in.§$s ∩ create.entries[index++]'). Lifted, that link targets the return value, and
+         filteredPi drops a parameter's links into the return value once the parameter is in it (they are read there).
+         So the lifted link goes to the return value, reversed: 'create.entries ∩ 0:in.§$s'.
+         */
+        private Links withLiftedIntoReturnValue(Links ofReturnValue, VariableData vd) {
+            if (NO_LIFT_INDEX || vd == null || returnVariable == null) return ofReturnValue;
+            Links.Builder builder = null;
+            for (ParameterInfo pi : methodInfo.parameters()) {
+                VariableInfoContainer vic = vd.variableInfoContainerOrNull(pi.fullyQualifiedName());
+                if (vic == null) continue;
+                Links links = vic.best().linkedVariables();
+                if (links == null || links.primary() == null
+                    || links.stream().noneMatch(l -> locallyIndexed(l.to()) && rootedAtReturn(l.to()))) {
+                    continue;
+                }
+                for (Link original : links) {
+                    if (!locallyIndexed(original.to()) || !rootedAtReturn(original.to())) continue;
+                    Link link = liftOne(original, links.primary(), Set.of());
+                    if (link == null || !LinkVariable.acceptForLinkedVariables(link.to())
+                        || !LinkVariable.acceptForLinkedVariables(link.from())) {
+                        continue;
+                    }
+                    if (builder == null) {
+                        builder = ofReturnValue.primary() == null ? new LinksImpl.Builder(returnVariable)
+                                : new LinksImpl.Builder(ofReturnValue);
+                    }
+                    LinkNature reverse = link.linkNature().reverse();
+                    if (!builder.contains(link.to(), reverse, link.from())) {
+                        builder.add(link.to(), reverse, link.from(), link.mediated(), true);
+                    }
+                }
+            }
+            return builder == null ? ofReturnValue : builder.build();
+        }
+
+        private boolean rootedAtReturn(Variable v) {
+            return returnVariable.equals(Util.primary(v));
+        }
+
+        // not acceptable for the summary, but below an array element whose index is (part of) the reason
+        private static boolean locallyIndexed(Variable v) {
+            if (LinkVariable.acceptForLinkedVariables(v)) return false;
+            for (Variable x = v; x != null; x = upVariable(x)) {
+                if (x instanceof DependentVariable dv && dv.arrayVariable() != null
+                    && LinkVariable.acceptForLinkedVariables(dv.arrayVariable())) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static Variable upVariable(Variable v) {
+            if (v instanceof DependentVariable dv) return dv.arrayVariable();
+            if (v instanceof FieldReference fr) return fr.scopeVariable();
+            return null;
+        }
+
+        private static LinkNature upNature(Variable v) {
+            return v instanceof DependentVariable ? LinkNatureImpl.IS_ELEMENT_OF : LinkNatureImpl.IS_FIELD_OF;
         }
 
         /** Whether every local variable [v] is made of belongs to the closure: the enclosing method's. */
