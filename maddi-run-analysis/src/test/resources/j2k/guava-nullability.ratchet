@@ -25,12 +25,16 @@
 # test classes they can change, and the original classes' run is a kept baseline: some 32 minutes on laser1.
 # 2026-10-24, maddi b8f892a7b: a raw cast of a typed library result keeps the target's type arguments (Multisets'
 # entrySet), 603 files compiling, 12 type errors.
+# 2026-10-27, maddi fb47f92e8 / maddi-mod 2396a6a6, on laser1: an enclosing instance is never raw (HashBiMap,
+# ImmutableMultiset), a written vararg element and a nullable type argument returned (Iterators), a raw cast into a
+# ? super argument (TypeToken), an enclosing method's type variable and a wildcard collection's lookup take null as
+# Java does (Iterators.filter, removeAll): 606 files compiling (5 type errors), 491 to class files, 861,616 tests pass.
 types	610
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	610
-compilingFiles	603
-bytecodeFiles	490
-testsPassing	861124
+compilingFiles	606
+bytecodeFiles	491
+testsPassing	861616
 testBytecodeFiles	341
-translatedTestsPassing	861097
+translatedTestsPassing	861588
