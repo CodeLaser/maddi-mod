@@ -22,7 +22,9 @@ import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.runtime.Runtime;
+import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.modification.common.defaults.ContractReader;
 
 import java.util.Map;
@@ -109,14 +111,19 @@ public class ContractResolution {
      * implementations' parameter at the same index, so one modifying implementation reconstructs — and
      * contradicts — the declaration the author wrote on the interface. The inherited contract is the one on the
      * overridden method's parameter at the SAME INDEX.
+     * <p>
+     * {@code @Container} on the declaring type is a contract on each of its methods' parameters: "no method modifies
+     * its arguments" is what it says, and {@code GuardAnalyzerImpl.guardContainer} checks it parameter by parameter.
+     * Without this the reachability pass, which leaves a contracted parameter alone, wrote an interface's parameter
+     * modified through a violating implementation, and the re-derivation then took {@code @Container} off the type.
      */
     public Outcome resolve(ParameterInfo parameterInfo, Property property) {
         return cached(parameterInfo, property, _ -> {
-            Value own = contractOf(parameterInfo, property);
+            Value own = parameterContract(parameterInfo, property);
             Inherited inherited = strongestInherited(parameterInfo.methodInfo(), property, parent -> {
                 // a bridge/erasure override can differ in arity; index out of range means "not this declaration"
                 if (parameterInfo.index() >= parent.parameters().size()) return null;
-                return contractOf(parent.parameters().get(parameterInfo.index()), property);
+                return parameterContract(parent.parameters().get(parameterInfo.index()), property);
             });
             return adjudicate(own, inherited);
         });
@@ -162,6 +169,15 @@ public class ContractResolution {
         if (info.annotations().isEmpty()) return null;
         Map<Property, Value> contracts = contractReader.contracts(info);
         return contracts.get(property);
+    }
+
+    /** the parameter's own annotation, else, for {@code UNMODIFIED_PARAMETER}, its declaring type's {@code @Container} */
+    private Value parameterContract(ParameterInfo parameterInfo, Property property) {
+        Value own = contractOf(parameterInfo, property);
+        if (own != null || property != PropertyImpl.UNMODIFIED_PARAMETER) return own;
+        TypeInfo declaringType = parameterInfo.methodInfo().typeInfo();
+        return contractOf(declaringType, PropertyImpl.CONTAINER_TYPE) instanceof Value.Bool container
+               && container.isTrue() ? container : null;
     }
 
     /** {@code overwriteAllowed} is the lattice's own "may be refined to": b may be refined to a ⇒ a is stronger */
