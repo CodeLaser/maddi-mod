@@ -96,9 +96,12 @@ public class TestGuardImmutable extends CommonTest {
         List<Message> violations = violations(analyzeWithGuard("a.b.X", RULE_1));
         assertFalse(violations.isEmpty(), "expected a violation for the modified field");
         Message v = violations.getFirst();
-        assertEquals("a.b.X.ModifiesField.list", v.info().fullyQualifiedName());
+        // located at the culprit, 'list.add(s)' in add, not at the field
+        assertEquals("a.b.X.ModifiesField.add(String)", v.info().fullyQualifiedName());
         assertTrue(v.message().contains("rule 1"), v.message());
-        assertTrue(v.message().contains("is modified"), v.message());
+        assertTrue(v.message().contains("Method 'add' modifies field 'list' ('list.add(...)')"), v.message());
+        assertEquals(1, violations.size(), "size() does not modify: " + violations);
+        assertEquals("a.b.X.ModifiesField.list", v.causes().getFirst().info().fullyQualifiedName());
     }
 
     @Language("java")
@@ -154,15 +157,17 @@ public class TestGuardImmutable extends CommonTest {
         List<Message> violations = violations(analyzeWithGuard("a.b.X", RULE_3));
         assertFalse(violations.isEmpty(), "expected a violation for the exposed field");
         Message v = violations.getFirst();
-        assertEquals("a.b.X.ExposesViaGetter.data", v.info().fullyQualifiedName());
+        // located at the culprit, the getter's return, not at the field
+        assertEquals("a.b.X.ExposesViaGetter.getSet()", v.info().fullyQualifiedName());
         assertTrue(v.message().contains("rule 3"), v.message());
-        assertTrue(v.message().contains("dependent"), v.message());
-
-        // the constructor copies, so the only link out is the getter's return value
+        assertTrue(v.message().contains("Method 'getSet' returns field 'data': the caller can modify it"),
+                v.message());
+        // the constructor copies, so the getter is the only culprit
+        assertEquals(1, violations.size(), violations.toString());
         assertEquals(2, v.causes().size(), v.causes().stream().map(Message::message).toList().toString());
-        Message blame = v.causes().getFirst();
-        assertTrue(blame.message().contains("linked to the return value of method 'getSet'"), blame.message());
-        assertNotNull(blame.source());
+        Message field = v.causes().getFirst();
+        assertEquals("a.b.X.ExposesViaGetter.data", field.info().fullyQualifiedName());
+        assertNotNull(v.source());
     }
 
     @Language("java")
@@ -188,12 +193,41 @@ public class TestGuardImmutable extends CommonTest {
         List<Message> violations = violations(analyzeWithGuard("a.b.X", RULE_3_VIEW));
         assertFalse(violations.isEmpty(), "expected a violation for the field exposed through a view");
         Message v = violations.getFirst();
-        assertEquals("a.b.X.ExposesView.items", v.info().fullyQualifiedName());
+        assertEquals("a.b.X.ExposesView.get()", v.info().fullyQualifiedName());
         assertTrue(v.message().contains("rule 3"), v.message());
+        assertTrue(v.message().contains("Method 'get' returns a view of field 'items': the caller can modify it"),
+                v.message());
         assertEquals(2, v.causes().size(), v.causes().stream().map(Message::message).toList().toString());
-        Message blame = v.causes().getFirst();
-        assertTrue(blame.message().contains("linked to the return value of method 'get'"), blame.message());
-        assertNotNull(blame.source());
+        assertEquals("a.b.X.ExposesView.items", v.causes().getFirst().info().fullyQualifiedName());
+    }
+
+    @Language("java")
+    private static final String RULE_3_TWO_GETTERS = """
+            package a.b;
+            import io.codelaser.maddi.annotation.Immutable;
+            import java.util.ArrayList;
+            import java.util.List;
+
+            public class X {
+                @Immutable
+                static final class ExposesTwice {
+                    private final List<String> items = new ArrayList<>();
+
+                    public List<String> all() { return items; }
+
+                    public int size() { return items.size(); }
+
+                    public List<String> head() { return items.subList(0, 1); }
+                }
+            }
+            """;
+
+    @DisplayName("rule 3: every method that hands the field out gets its own violation")
+    @Test
+    public void testRule3EveryCulprit() throws IOException {
+        List<Message> violations = violations(analyzeWithGuard("a.b.X", RULE_3_TWO_GETTERS));
+        assertEquals(List.of("a.b.X.ExposesTwice.all()", "a.b.X.ExposesTwice.head()"),
+                violations.stream().map(v -> v.info().fullyQualifiedName()).sorted().toList());
     }
 
     @Language("java")
