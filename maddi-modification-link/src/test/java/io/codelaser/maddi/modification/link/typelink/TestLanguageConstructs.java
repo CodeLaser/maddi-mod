@@ -371,8 +371,9 @@ public class TestLanguageConstructs extends CommonTest {
                 }
                 """;
         // sv precision gain: 'r = null' can never reach the return (a do-while body always executes),
-        // so the old m←$_ce1 / 0:arr∋$_ce1 merge faces are gone
-        assertEquals("[-] --> m∈0:arr,m←0:arr[0]", link("a.b.C", src, "m"));
+        // so the old m←$_ce1 / 0:arr∋$_ce1 merge faces are gone. No 'm←0:arr[0]': 'i++' in the body makes 'i' no
+        // constant there (CodeLaser/maddi-mod#79)
+        assertEquals("[-] --> m∈0:arr", link("a.b.C", src, "m"));
     }
 
     @DisplayName("instanceof pattern binding links the returned variable to the tested expression")

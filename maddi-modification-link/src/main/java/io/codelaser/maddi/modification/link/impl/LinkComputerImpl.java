@@ -550,7 +550,7 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
         private TranslationMap replaceConstants(VariableData vd, Stage stage) {
             TranslateConstants tc = new TranslateConstants(javaInspector.runtime());
             for (LocalVariable lv : variablesRepresentingConstants) {
-                if (!(lv.assignmentExpression() instanceof NullConstant) && !assignedByOpenUpdaters.contains(lv)) {
+                if (!(lv.assignmentExpression() instanceof NullConstant) && !variesInLoop(lv)) {
                     assert lv.parameterizedType().arrays() == 0;
                     tc.put(lv, lv.assignmentExpression());
                 }
@@ -567,7 +567,7 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                                 // here fails on real code: an array local linked ≡ to a constant-holding local)
                                 if (constant != null && !(constant instanceof NullConstant)
                                     && vi.variable().parameterizedType().arrays() == 0
-                                    && !assignedByOpenUpdaters.contains(vi.variable())) {
+                                    && !variesInLoop(vi.variable())) {
                                     Expression prev = tc.put(vi.variable(), constant);
                                     if (prev != null && !constant.equals(prev)) {
                                         // multiple values...
@@ -1388,13 +1388,19 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
         private void handleSubBlocks(Statement statement, VariableData vd) {
             List<Block> blocks = subBlocksForLinking(statement).filter(block -> !block.isEmpty()).toList();
             List<VariableData> vds = new ArrayList<>();
-            if (!NO_FORK && isAlternatives(statement) && (!blocks.isEmpty() || pendingUpdaters.containsKey(statement))) {
-                linkAlternatives(statement, blocks, vd, vds);
-            } else {
-                for (Block block : blocks) {
-                    VariableData subVd = doBlock(block, vd);
-                    if (subVd != null) vds.add(subVd);
+            Set<LocalVariable> varied = !NO_LOOP_VARIED && statement instanceof LoopStatement ? variedIn(blocks) : Set.of();
+            variedInOpenLoops.addAll(varied);
+            try {
+                if (!NO_FORK && isAlternatives(statement) && (!blocks.isEmpty() || pendingUpdaters.containsKey(statement))) {
+                    linkAlternatives(statement, blocks, vd, vds);
+                } else {
+                    for (Block block : blocks) {
+                        VariableData subVd = doBlock(block, vd);
+                        if (subVd != null) vds.add(subVd);
+                    }
                 }
+            } finally {
+                varied.forEach(variedInOpenLoops::remove);
             }
             Set<Variable> toRemove = new HashSet<>();
             for (VariableData subVd : vds) {
@@ -1406,6 +1412,7 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
             }
             handleSubBlocks(vds, vd, toRemove);
             LOGGER.debug("Removing {}", toRemove);
+            linkGraph.graph().liftElementsLeavingScope(toRemove, statement.source().index());
             linkGraph.graph().remove(toRemove);
         }
 
@@ -1488,6 +1495,33 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
         // the variables a for statement's updaters assign, while its body is linked: they vary in the body, so they
         // are not replaced by the constant of their initializer ('for (int i = 0; ..; i++) .. array[i] ..')
         private final Set<Variable> assignedByOpenUpdaters = new HashSet<>();
+
+        /*
+         The same holds for a local declared before a loop and assigned anywhere in its body ('int index = 0; for (..)
+         { a[index] = ..; index++; }'): from the second iteration on, it is no longer its initializer's constant, so
+         'a[index]' is not 'a[0]' (CodeLaser/maddi-mod#79). A local declared in the body starts afresh each iteration
+         and keeps its constant. A multiset: nested loops can both assign the same local. Gate NOLOOPVARIED.
+         */
+        private static final boolean NO_LOOP_VARIED = Gate.isSet("NOLOOPVARIED");
+        private final List<LocalVariable> variedInOpenLoops = new ArrayList<>();
+
+        private static Set<LocalVariable> variedIn(List<Block> blocks) {
+            Set<LocalVariable> assigned = new HashSet<>();
+            Set<LocalVariable> declared = new HashSet<>();
+            for (Block block : blocks) {
+                block.visit(e -> {
+                    if (e instanceof Assignment a && a.variableTarget() instanceof LocalVariable lv) assigned.add(lv);
+                    if (e instanceof LocalVariableCreation lvc) declared.addAll(lvc.newLocalVariables());
+                    return true;
+                });
+            }
+            assigned.removeAll(declared);
+            return assigned;
+        }
+
+        private boolean variesInLoop(Variable variable) {
+            return assignedByOpenUpdaters.contains(variable) || variedInOpenLoops.contains(variable);
+        }
 
         private void commitUpdaters(Statement statement, PendingUpdaters updaters) {
             if (updaters == null) return;

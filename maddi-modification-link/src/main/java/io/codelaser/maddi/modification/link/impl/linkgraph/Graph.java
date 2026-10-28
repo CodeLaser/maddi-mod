@@ -1093,6 +1093,76 @@ public class Graph {
         engine.recompute(affected, statementIndex, acceptRemoval);
     }
 
+    /*
+     An element at an index that goes out of scope ('for (int i = 0; ..; i++) a[i] = new Entry(in.get(i)); return a;')
+     is dropped with its index, and so are its links: the returned array exported nothing about 'in'. Before the
+     removal, each link of such an element to a variable that stays is lifted to the array through 'a[i] ∈ a', as the
+     summary does for an element at a local index (LinkComputerImpl.liftLocallyIndexed). CodeLaser/maddi-mod#79.
+     Gate NOSCOPELIFT.
+     */
+    private static final boolean NO_SCOPE_LIFT = Gate.isSet("NOSCOPELIFT");
+
+    public void liftElementsLeavingScope(Set<Variable> toRemove, String statementIndex) {
+        if (NO_SCOPE_LIFT || toRemove.isEmpty()) return;
+        List<Link> lifted = new ArrayList<>();
+        Set<Variable> vertices = variables();
+        for (Variable removed : toRemove) {
+            if (!(removed instanceof DependentVariable dv) || dv.arrayVariable() == null || dv.indexVariable() == null
+                || !toRemove.contains(dv.indexVariable()) || toRemove.contains(dv.arrayVariable())
+                || !vertices.contains(removed)) {
+                continue;
+            }
+            Variable array = dv.arrayVariable();
+            // the element and what holds the same object: its shared group's rep ('a[i] ← $__sv_a[i]')
+            Set<Variable> same = new HashSet<>();
+            same.add(removed);
+            closureStream(removed).filter(e -> e.getValue().isIdenticalToOrAssignedFromTo())
+                    .forEach(e -> same.add(e.getKey()));
+            for (Variable vertex : vertices) {
+                // up the vertex's field chain to the object ('$__sv_a[i].e ≺ $__sv_a[i]'), then into the array
+                LinkNature fieldUp = null;
+                Variable cur = vertex;
+                while (!same.contains(cur) && cur instanceof FieldReference fr && fr.scopeVariable() != null) {
+                    fieldUp = fieldUp == null ? LinkNatureImpl.IS_FIELD_OF.reverse()
+                            : LinkNatureImpl.IS_FIELD_OF.reverse().combine(fieldUp);
+                    cur = fr.scopeVariable();
+                }
+                if (!same.contains(cur)) continue;
+                LinkNature up = fieldUp == null ? LinkNatureImpl.IS_ELEMENT_OF.reverse()
+                        : LinkNatureImpl.IS_ELEMENT_OF.reverse().combine(fieldUp);
+                if (!engine.isValid(up)) continue;
+                closureStream(vertex).forEach(e -> {
+                    Variable to = e.getKey();
+                    if (same.contains(to) || to.equals(array) || Util.isPartOf(array, to)
+                        || expandRepToMembers(to).allMatch(m -> leavesScope(m, toRemove))) {
+                        return;
+                    }
+                    LinkNature nature = up.combine(e.getValue());
+                    if (engine.isValid(nature)) lifted.add(new LinksImpl.LinkImpl(array, nature, to, false, true));
+                });
+            }
+        }
+        // the graph has no ∩ between a real variable and hidden content ('a ∩ in.§$s', invalidEdge): of the rest, the
+        // finer link speaks for the coarser
+        lifted.removeIf(l -> invalidEdge(l.from(), l.linkNature(), l.to()));
+        lifted.removeIf(l -> lifted.stream().anyMatch(f -> f.from().equals(l.from()) && !f.to().equals(l.to())
+                                                          && Util.isPartOf(l.to(), f.to())));
+        lifted.forEach(l -> simpleAddToGraph(l.from(), l.linkNature(), l.to(), statementIndex, false));
+    }
+
+    // the variable, or a scope or index on its chain, is being removed
+    private static boolean leavesScope(Variable v, Set<Variable> toRemove) {
+        for (Variable cur = v; cur != null; ) {
+            if (toRemove.contains(cur)) return true;
+            if (cur instanceof FieldReference fr) cur = fr.scopeVariable();
+            else if (cur instanceof DependentVariable dv) {
+                if (dv.indexVariable() != null && toRemove.contains(dv.indexVariable())) return true;
+                cur = dv.arrayVariable();
+            } else cur = null;
+        }
+        return false;
+    }
+
     public void remove(Set<Variable> toRemove) {
         engine.removeVertices(toRemove);
         mediatedPairs.removeIf(pair -> {
