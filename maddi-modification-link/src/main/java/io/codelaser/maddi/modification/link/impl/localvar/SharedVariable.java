@@ -229,4 +229,11 @@ public class SharedVariable extends LocalVariableImpl implements LinkVariable {
         data.assignments.removeIf(a -> variable.equals(a.from()) || variable.equals(a.to()));
         invalidate();
     }
+
+    // see SharedVariables.evictSource: the records it received go, those it was the source of stay
+    public void removeMemberKeepSourceRecords(Variable variable) {
+        data.variables.remove(variable);
+        data.assignments.removeIf(a -> variable.equals(a.from()));
+        invalidate();
+    }
 }

@@ -207,6 +207,29 @@ public class Graph {
         assigned.forEach(sharedVariables::dropDetached);
     }
 
+    /*
+     The variables a statement assigns that are a source of their group leave it BEFORE any of the statement's links
+     go in (CodeLaser/maddi-mod#77, see mergeEdgeBi). Done at the assignment link alone, the store
+     'hashTable[b] = newEntry' first added 'hashTable[b] ∈ hashTable' onto the OLD group (bucketHead's), and the new
+     entry never became an element: 'entries ~ table' was lost.
+     */
+    public void evictReassignedSources(Set<Variable> assigned, String statementIndex) {
+        if (NO_SRC_EVICT) return;
+        for (Variable v : assigned) {
+            if (sharedVariables.isKnown(v) && sharedVariables.isSourceAtOtherStatement(v, statementIndex)
+                && !sharedVariables.isReassignment(v, statementIndex)
+                && !(v instanceof io.codelaser.maddi.cst.api.info.ParameterInfo)
+                && !sharedVariables.groupHoldsReturnValue(v)) {
+                clearRepExpansionCache();
+                touchVariable(v);
+                Variable rep = sharedVariables.translateForward(v);
+                if (rep != v) touchVariable(rep);
+                touchAll(sharedVariables.allShared(v));
+                sharedVariables.evictSource(v);
+            }
+        }
+    }
+
     public void enterAlternatives() {
         sharedVariables.enterAlternatives();
     }
@@ -762,6 +785,8 @@ public class Graph {
     // diagnostic: NOSV=1 in the environment disables the shared-variable collapse (assignments stay first-class
     // edges), so the O(N^2) part-of link explosion is not bounded. Used to demonstrate what sv prevents.
     private static final boolean NOSV = Gate.isSet("NOSV");
+    // CodeLaser/maddi-mod#77: gate NOSRCEVICT restores the rep edge for a reassigned source
+    private static final boolean NO_SRC_EVICT = Gate.isSet("NOSRCEVICT");
 
     boolean mergeEdgeBi(Variable from, LinkNature linkNature, Variable to, String statementIndex) {
         if (Gate.isSet("TRACEVAR")
@@ -813,6 +838,16 @@ public class Graph {
                 // reassignment — removing it abandons the group rep carrying the first path's knowledge.
                 sharedVariables.remove(from);
                 // TODO what with fromInGraph?
+            } else if (!NO_SRC_EVICT && fromInGroups && sharedVariables.isSourceAtOtherStatement(from, statementIndex)
+                       && !(from instanceof io.codelaser.maddi.cst.api.info.ParameterInfo)
+                       && !sharedVariables.groupHoldsReturnValue(from)) {
+                // a source is assigned a new value: the group keeps the old one. The rep edge below made every
+                // other member hold the new value as well ('x = h.next; h.next = y; return x' read '← 1:y', and
+                // guava's 'bucketHead = hashTable[b]; .. hashTable[b] = newEntry' made bucketHead the new entry,
+                // CodeLaser/maddi-mod#77). Only a return value accumulates: it is assigned on several paths. A
+                // parameter keeps the rep edge for now: evicted, its new value ('0:p ← 1:y') would read as the
+                // caller's.
+                sharedVariables.evictSource(from);
             } else if (!Gate.isSet("NORSRC")
                        && fromInGroups && sharedVariables.isSourceAtOtherStatement(from, statementIndex)) {
                 // 'from' was a pure SOURCE in its group ('method ← 1:num' at an earlier statement) and is now

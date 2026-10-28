@@ -77,6 +77,7 @@ public class LinkGraph {
                         TranslationMap replaceConstants,
                         Map<Variable, Set<MethodInfo>> modifiedInThisEvaluation) {
         graph.dropDetached(toRemove);
+        graph.evictReassignedSources(toRemove, statementIndex);
         Set<Variable> allToRemove = graph.variables().stream()
                 .filter(v -> toRemove.contains(Util.firstRealVariable(v)))
                 .collect(Collectors.toUnmodifiableSet());
