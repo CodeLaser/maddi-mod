@@ -600,6 +600,8 @@ public final class NullabilityPass {
     private static final Switches.Gate GAP9_OFF = Switches.gate("NOGAP9");
     // NODIRECT: read the closure's products (Link.derived()) as before, for an A/B against the direct links only
     private static final Switches.Gate DERIVED_LINKS = Switches.gate("NODIRECT");
+    // see the element-slot identity rule in the link walk
+    private static final Switches.Gate SLOT_IDENTITY = Switches.gate("NOSLOTIDENTITY");
     // a parameter the body assigns (CodeLaser/maddi-mod#22 gap 5, #9): the parameter node is the caller's value only; what
     // the body assigns goes to a shadow local of the same name (the Kotlin printer's `var p = p`), which the parameter
     // flows into, and which reads after the first assignment resolve to (from the loop's start, for an assignment
@@ -4370,6 +4372,15 @@ public final class NullabilityPass {
             // a type argument's slot is written by an assignment ('b.t ← null') or at a call site, never by identity:
             // a '≡' between a local and a slot's value runs both ways and would carry the local's other sources in
             if (from instanceof Arg && link.linkNature().isIdenticalTo()) continue;
+            // the same for an element slot facing another: 'hashTable[b] ≡ entryArray[i]' after both were assigned
+            // 'newEntry' is one slot each, not the arrays' elements at large -- the pass keeps one Content per array,
+            // so the '≡' carried hashTable's null slots into entryArray (guava RegularImmutableMultiset.create, once
+            // CodeLaser/maddi-mod#77 put the stored slot in its value's group). The assignments carry the value.
+            // Gate NOSLOTIDENTITY.
+            if (from instanceof Content && link.linkNature().isIdenticalTo() && !SLOT_IDENTITY.get()
+                && node(mi, scope, link.to()) instanceof Content) {
+                continue;
+            }
             if (link.linkNature().isIdenticalTo() || link.linkNature().isAssignedFrom()) {
                 if (isNullMarker(link.to())) {
                     // a return whose value is known non-null returns no null, whatever '≡' links it to: in 'var d =
