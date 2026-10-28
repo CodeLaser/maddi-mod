@@ -38,12 +38,17 @@
 # 2026-10-27, maddi 1a1671e42 (maddi#173): kotlinc compiles each source set at its Java release, guava's main at 9,
 # where Comparator has no min/max for Ordering's to hide: 609 files compiling (1 type error, IndexedImmutableSet,
 # maddi-mod#74).
+# 2026-10-28, devel at maddi 71f1bf3b2 / maddi-mod 7c4e53f4, on laser1: maddi-null's lifted-field rule for written
+# arrays (maddi-mod 2764b973, #74) makes IndexedImmutableSet compile; the printer numbers same-named local classes of a
+# method's overloads (maddi 74039b947, Streams' four Splitr) and writes this.x for a member field a captured local
+# would hide (maddi fed0a5ba2, Splitr's fromSpliterator): all 610 files compiling (0 type errors), 495 to class
+# files, no test lost.
 types	610
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	610
-compilingFiles	609
-bytecodeFiles	493
+compilingFiles	610
+bytecodeFiles	495
 testsPassing	861616
 testBytecodeFiles	341
 translatedTestsPassing	861589
