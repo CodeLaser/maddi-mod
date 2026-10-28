@@ -26,6 +26,7 @@ import io.codelaser.maddi.cst.api.element.Element;
 import io.codelaser.maddi.cst.api.expression.Assignment;
 import io.codelaser.maddi.cst.api.expression.Expression;
 import io.codelaser.maddi.cst.api.expression.NullConstant;
+import io.codelaser.maddi.cst.api.expression.VariableExpression;
 import io.codelaser.maddi.cst.api.info.InfoMap;
 import io.codelaser.maddi.cst.api.info.InfoMapView;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
@@ -1391,8 +1392,13 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
             Set<LocalVariable> varied = !NO_LOOP_VARIED && statement instanceof LoopStatement ? variedIn(blocks) : Set.of();
             variedInOpenLoops.addAll(varied);
             try {
-                if (!NO_FORK && isAlternatives(statement) && (!blocks.isEmpty() || pendingUpdaters.containsKey(statement))) {
-                    linkAlternatives(statement, blocks, vd, vds);
+                List<Block> cases = NO_FORK || NO_SWITCH_FORK || !(statement instanceof SwitchStatementOldStyle ss)
+                        ? null : casesWithoutFallThrough(ss);
+                if (cases != null) {
+                    linkAlternatives(statement, cases, !hasDefault((SwitchStatementOldStyle) statement), vd, vds);
+                } else if (!NO_FORK && isAlternatives(statement)
+                           && (!blocks.isEmpty() || pendingUpdaters.containsKey(statement))) {
+                    linkAlternatives(statement, blocks, mayRunNone(statement, blocks), vd, vds);
                 } else {
                     for (Block block : blocks) {
                         VariableData subVd = doBlock(block, vd);
@@ -1455,10 +1461,9 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
             return blocks.size() < 2 || isLoopThatMayRunNone(statement);
         }
 
-        private void linkAlternatives(Statement statement, List<Block> blocks, VariableData vd,
+        private void linkAlternatives(Statement statement, List<Block> blocks, boolean none, VariableData vd,
                                       List<VariableData> vds) {
             Graph graph = linkGraph.graph();
-            boolean none = mayRunNone(statement, blocks);
             Graph.State before = graph.snapshot();
             List<Graph.State> ends = new ArrayList<>(blocks.size() + 1);
             PendingUpdaters updaters = pendingUpdaters.remove(statement);
@@ -1485,6 +1490,62 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
             }
             if (none) ends.add(before);
             graph.join(ends, statement.source().index());
+        }
+
+        /*
+         The cases of an old-style switch are alternatives too. Linked one after the other, the paths of different
+         cases composed: 'switch (n) { case 1: return of(a[0]); default: return construct(b); }' joined the first
+         return's 'element ← a[0]' with the second's 'array[0] → element' into 'b ~ a' and 'return.element → a[0]'
+         (guava's ImmutableList.copyOf(E[]), whose element then flowed into Invokable.getParameters' annotations:
+         CodeLaser/maddi-mod#72 4a). The body is one block, the labels are positions in it: each run of statements
+         between labels is an alternative, when none falls through into the next (each non-empty run ends in a
+         return, throw, break or continue) and no run reads a local declared in an earlier one. Without a default,
+         no case may run. Anything else stays linked one after the other. Gate NOSWITCHFORK.
+         */
+        private static final boolean NO_SWITCH_FORK = Gate.isSet("NOSWITCHFORK");
+
+        private static boolean hasDefault(SwitchStatementOldStyle ss) {
+            return ss.switchLabels().stream().anyMatch(l -> l.literal().isEmpty() && l.patternVariable() == null);
+        }
+
+        private List<Block> casesWithoutFallThrough(SwitchStatementOldStyle ss) {
+            List<Statement> statements = ss.block().statements();
+            java.util.TreeSet<Integer> starts = new java.util.TreeSet<>();
+            ss.switchLabels().forEach(l -> starts.add(l.startFromPosition()));
+            starts.add(statements.size());
+            List<Block> cases = new ArrayList<>();
+            Set<Variable> declaredEarlier = new HashSet<>();
+            Integer from = null;
+            for (int to : starts) {
+                if (from != null && from < to) {
+                    List<Statement> run = statements.subList(from, to);
+                    Statement last = run.getLast();
+                    if (!(last instanceof ReturnStatement || last instanceof ThrowStatement
+                          || last instanceof BreakOrContinueStatement)) {
+                        return null;
+                    }
+                    AtomicBoolean readsEarlier = new AtomicBoolean();
+                    if (!declaredEarlier.isEmpty()) {
+                        for (Statement st : run) {
+                            st.visit(e -> {
+                                if (e instanceof VariableExpression ve && declaredEarlier.contains(ve.variable())) {
+                                    readsEarlier.set(true);
+                                }
+                                return !readsEarlier.get();
+                            });
+                        }
+                    }
+                    if (readsEarlier.get()) return null;
+                    for (Statement st : run) {
+                        if (st instanceof LocalVariableCreation lvc) declaredEarlier.addAll(lvc.newLocalVariables());
+                    }
+                    Block.Builder bb = javaInspector.runtime().newBlockBuilder();
+                    bb.addStatements(run);
+                    cases.add(bb.build());
+                }
+                from = to;
+            }
+            return cases.size() < 2 ? null : cases;
         }
 
         // a for statement's updaters, linked after its body: see the statement's evaluation

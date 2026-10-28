@@ -230,6 +230,37 @@ public class Graph {
         }
     }
 
+    /*
+     An assigned variable's faces (its fields and elements, 'r.element') that are members of a group describe its OLD
+     object. They are no graph vertices, so the removal of every vertex rooted at the variable (LinkGraph.compute)
+     missed them, and 'r = new Singleton<>(a[0]); r = new Regular<>(b); return r' read 'return.element ← 0:a[0]'.
+     guava's ImmutableList.copyOf(E[]) switches between of(elements[0]) and construct(..): its summary had the
+     list's element flow INTO the argument's, and Invokable.getParameters' annotations elements turned nullable
+     (CodeLaser/maddi-mod#72 4a). As for the variable itself (mergeEdgeBi): a face that is a source at another
+     statement is evicted, its records stay; any other face leaves its group. Gate NOFACEDROP.
+     */
+    private static final boolean NO_FACE_DROP = Gate.isSet("NOFACEDROP");
+
+    public void dropReassignedFaces(Set<Variable> assigned, String statementIndex) {
+        if (NO_FACE_DROP) return;
+        for (Variable v : assigned) {
+            for (Variable face : List.copyOf(sharedVariables.membersRootedAt(v))) {
+                if (face.equals(v)) continue;
+                clearRepExpansionCache();
+                touchVariable(face);
+                Variable rep = sharedVariables.translateForward(face);
+                if (rep != face) touchVariable(rep);
+                touchAll(sharedVariables.allShared(face));
+                if (sharedVariables.isSourceAtOtherStatement(face, statementIndex)
+                    && !sharedVariables.groupHoldsReturnValue(face)) {
+                    sharedVariables.evictSource(face);
+                } else {
+                    sharedVariables.remove(face);
+                }
+            }
+        }
+    }
+
     public void enterAlternatives() {
         sharedVariables.enterAlternatives();
     }
