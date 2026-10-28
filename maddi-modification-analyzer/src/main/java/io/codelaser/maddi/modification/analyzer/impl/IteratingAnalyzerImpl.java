@@ -54,6 +54,9 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
     // is the sole starting-state-dependent step, so if it never fired the framework is confluent. See
     // ModificationAnalysisResource#incrementalAnalyze.
     private boolean certifiedWithoutFrozenValues;
+    // how many reachability rounds threw and were skipped: the run goes on with the fixpoint's verdicts, so without
+    // this count a corpus A/B of a MODREACH change compares fixpoint verdicts on both sides (CodeLaser/maddi-mod#75)
+    private int modReachFailures;
 
     private io.codelaser.maddi.analysis.api.AnalysisValueFeed valueFeed;
 
@@ -403,6 +406,11 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
         return certifiedWithoutFrozenValues;
     }
 
+    /** The reachability rounds of the last {@link #analyze} that threw, and whose verdicts were therefore not written. */
+    public int modReachFailures() {
+        return modReachFailures;
+    }
+
     @Override
     public void analyze(List<Info> analysisOrder) {
         analyze(analysisOrder, null);
@@ -459,6 +467,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
         int iterations = 0;
         int maxIterations = configuration.maxIterations(); // extended per MODREACH re-derivation round
         int modReachRounds = 0; // P2.5: pass <-> re-derivation to joint fixpoint, bounded
+        modReachFailures = 0;
         int eventualDeferralRounds = 0; // terminal-phase re-derivation of the eventual family, once
         SingleIterationAnalyzer singleIterationAnalyzer = new SingleIterationAnalyzerImpl(javaInspector, configuration);
         this.lastRun = singleIterationAnalyzer;
@@ -747,6 +756,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                         }
                         LOGGER.info("MODREACH joint fixpoint after {} round(s)", modReachRounds);
                     } catch (RuntimeException | AssertionError | StackOverflowError e) {
+                        modReachFailures++;
                         LOGGER.error("MODREACH pass failed; modification properties keep their "
                                      + "fixpoint values (unfrozen)", e);
                     }

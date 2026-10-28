@@ -964,6 +964,16 @@ public class ShadowModificationPass {
     private final Map<MethodInfo, Map<io.codelaser.maddi.cst.api.expression.Expression, Map<MethodInfo, Set<Object>>>>
             receiverChainCache = new HashMap<>();
 
+    // A chain can lead back to itself: a view local projects onto the view's argument (projectViewLocal), and that
+    // argument's links onto the local again (CodeLaser/maddi-mod#75, a StackOverflowError on langchain4j-core). An entry
+    // is marked in progress (its depth) before it is computed; a re-entry returns nothing, the outer computation
+    // collecting the rest. A result that read an entry still in progress below it is incomplete and is not cached:
+    // only the outermost entry of such a cycle, which has seen all of it, is.
+    private final Map<MethodInfo, Map<io.codelaser.maddi.cst.api.expression.Expression, Map<MethodInfo, Integer>>>
+            receiverChainInProgress = new HashMap<>();
+    private int receiverChainDepth;
+    private int receiverChainLowestReentry = Integer.MAX_VALUE;
+
     private Set<Object> projectReceiverChain(MethodInfo mi, VariableData vd,
                                              io.codelaser.maddi.cst.api.expression.Expression receiver,
                                              MethodInfo outer) {
@@ -972,8 +982,30 @@ public class ShadowModificationPass {
                 .computeIfAbsent(receiver, _ -> new HashMap<>());
         Set<Object> cached = cache.get(outer);
         if (cached != null) return cached;
-        Set<Object> result = computeReceiverChain(mi, vd, receiver, outer);
-        cache.put(outer, result);
+        Map<MethodInfo, Integer> inProgress = receiverChainInProgress.computeIfAbsent(mi, _ -> new IdentityHashMap<>())
+                .computeIfAbsent(receiver, _ -> new HashMap<>());
+        Integer depth = inProgress.get(outer);
+        if (depth != null) {
+            receiverChainLowestReentry = Math.min(receiverChainLowestReentry, depth);
+            return Set.of();
+        }
+        int ownDepth = ++receiverChainDepth;
+        int enclosingLowest = receiverChainLowestReentry;
+        receiverChainLowestReentry = Integer.MAX_VALUE;
+        inProgress.put(outer, ownDepth);
+        Set<Object> result;
+        try {
+            result = computeReceiverChain(mi, vd, receiver, outer);
+        } finally {
+            inProgress.remove(outer);
+            receiverChainDepth--;
+        }
+        int lowest = receiverChainLowestReentry;
+        if (lowest >= ownDepth) {
+            cache.put(outer, result);
+            lowest = Integer.MAX_VALUE;
+        }
+        receiverChainLowestReentry = Math.min(enclosingLowest, lowest);
         return result;
     }
 
