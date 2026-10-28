@@ -577,6 +577,8 @@ public final class NullabilityPass {
     }
     // (method, null marker): a return statement guarded the marker's link into the method's return (linksOf)
     private final Set<List<Object>> guardedReturnMarkers = new HashSet<>();
+    // the same for a local: (method, marker, local) whose every assignment carrying the marker was guarded
+    private final Set<List<Object>> guardedLocalMarkers = new HashSet<>();
     // (method, null marker): a statement carried the marker's link into the method's return (linksOf)
     private final Set<List<Object>> returnMarkersSeen = new HashSet<>();
     // the analysed method a local belongs to (a lambda's local: the method the lambda is in)
@@ -4428,6 +4430,26 @@ public final class NullabilityPass {
                     if (slot && deepFace(link.from()) && !mi.equals(nullOwner(((LocalVariable) link.to()).assignmentExpression()))) {
                         continue;
                     }
+                    // a local assigned a value known non-null takes no null, whatever the closure links it to: in
+                    // 'Object o = null; for (..) o = b.call(o); Integer c = o instanceof Integer ? (Integer) o : 0;'
+                    // 'c ← o ← null' holds in the graph, but neither branch can be null (jenkins
+                    // CLIRegisterer.main, once CodeLaser/maddi-mod#72 4a let the zero-iteration null reach 'o').
+                    // As for a return above. Gate NOASSIGNEDNONNULL.
+                    // The method's own data repeats the link without a statement: skipped once an assignment guarded
+                    // it, as an unguarded one has carried the null in at its own statement.
+                    if (!slot && !(fromVar instanceof ReturnVariable) && !ASSIGNED_NON_NULL_OFF.get()) {
+                        List<Object> key = List.of(mi, link.to(), fromVar);
+                        if (statement == null) {
+                            if (guardedLocalMarkers.contains(key)) continue;
+                        } else {
+                            Expression assigned = assignedValue(statement, fromVar);
+                            if (assigned != null && !(NonNullFacts.unwrap(assigned) instanceof NullConstant)
+                                && facts.nonNull(assigned, facts.before(statement))) {
+                                guardedLocalMarkers.add(key);
+                                continue;
+                            }
+                        }
+                    }
                     if (slot || statement == null || fromVar instanceof ReturnVariable
                         || assignsHere(statement, fromVar)) {
                         nullMarker(mi, link.to(), from, "null in " + mi.fullyQualifiedName());
@@ -7144,6 +7166,7 @@ public final class NullabilityPass {
     private static final Switches.Gate RECEIVER_LAMBDAS_OFF = Switches.gate("NORECEIVERLAMBDAS");
     private static final Switches.Gate COLLECT_CONTAINERS_OFF = Switches.gate("NOCOLLECTCONTAINERS");
     private static final Switches.Gate RETURN_NULL_LITERALS_OFF = Switches.gate("NORETURNNULLLITERALS");
+    private static final Switches.Gate ASSIGNED_NON_NULL_OFF = Switches.gate("NOASSIGNEDNONNULL");
 
     /*
      Kotlin: a method that returns its parameter filtered of nulls ('<T> Iterator<T> removeNull(Iterator<T> itr) {
