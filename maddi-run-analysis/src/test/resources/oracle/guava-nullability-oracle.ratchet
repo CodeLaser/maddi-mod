@@ -24,6 +24,11 @@
 # tolerated null at a field's element slot (gate NOTOLERANTSLOTS), so that public adders and setters stop printing
 # @Nullable. Guava's own declaration is inconsistent here: a @Nullable String goes into a List<String> in null-marked
 # code.
-unsafe	230
-noise	1834
+#
+# 2026-10-28, maddi 71f1bf3b2 / maddi-mod 5f62d3c2, on laser1: 229 unsafe, 1,829 noise, 278 undecided. The
+# reachability pass runs on guava again: it had failed silently in every round since at least 2026-10-27 (a
+# StackOverflowError in the view-local projection, CodeLaser/maddi-mod#75, fixed in 3dfb9820), so the numbers above
+# were the fixpoint's. Ordering.allEqual()'s return now agrees; five Funnels factory returns leave noise.
+unsafe	229
+noise	1829
 noiseSlack	20
