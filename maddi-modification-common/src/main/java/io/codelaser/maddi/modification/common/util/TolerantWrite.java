@@ -191,6 +191,10 @@ public final class TolerantWrite {
         MODIFICATION_FROZEN = false;
     }
 
+    public static boolean modificationPropertiesFrozen() {
+        return MODIFICATION_FROZEN;
+    }
+
     public static <V extends Value> boolean setAllowControlledOverwrite(PropertyValueMap analysis,
                                                                         Property property,
                                                                         V value) {

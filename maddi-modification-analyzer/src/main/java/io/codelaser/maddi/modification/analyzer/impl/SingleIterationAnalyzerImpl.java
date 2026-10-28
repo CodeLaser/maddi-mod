@@ -21,7 +21,9 @@ import io.codelaser.maddi.modification.common.util.TolerantWrite;
 import io.codelaser.maddi.modification.analyzer.*;
 import io.codelaser.maddi.modification.common.defaults.ShallowTypeAnalyzer;
 import io.codelaser.maddi.modification.link.LinkComputer;
+import io.codelaser.maddi.modification.link.impl.Gate;
 import io.codelaser.maddi.modification.link.impl.LinkComputerImpl;
+import io.codelaser.maddi.modification.link.impl.ReceiverLevel;
 import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
 import io.codelaser.maddi.modification.prepwork.variable.MethodLinkedVariables;
 import io.codelaser.maddi.modification.prepwork.variable.VariableData;
@@ -35,6 +37,7 @@ import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.runtime.Runtime;
+import io.codelaser.maddi.cst.impl.analysis.AnalysisAccessRecorder;
 import io.codelaser.maddi.cst.impl.analysis.MessageImpl;
 import io.codelaser.maddi.inspection.api.integration.JavaInspector;
 import org.slf4j.Logger;
@@ -127,6 +130,23 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
     private AnalysisBudget budget;
     private final AtomicInteger elementsDoneInPass = new AtomicInteger();
 
+    /*
+    CodeLaser/maddi-mod#76: a method's links are a deterministic function of the analysis values its computation
+    reads. Each computation is recorded (AnalysisAccessRecorder); a later pass skips it when every value read is
+    unchanged and every value written is still in place: recomputing would write the same values again. Most of a
+    re-derivation pass after MODREACH's clear, and of every late fixpoint pass, is exactly that. NOLINKCACHE
+    computes every time; LINKCACHECHECK computes anyway on a hit and reports a hit whose result would differ.
+     */
+    private static final boolean LINK_CACHE = !Gate.isSet("NOLINKCACHE");
+    private static final boolean LINK_CACHE_CHECK = Gate.isSet("LINKCACHECHECK");
+    private final java.util.Map<MethodInfo, AnalysisAccessRecorder.Recording> linkRecordings =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private final AtomicInteger linkCacheHits = new AtomicInteger();
+    private final java.util.Map<String, AtomicInteger> linkCacheMisses = new java.util.concurrent.ConcurrentHashMap<>();
+    private final AtomicInteger linkCacheCheckFailures = new AtomicInteger();
+    // LINKCACHECHECK: hits that are recomputed, to compare with the recording they would have replaced
+    private final Set<MethodInfo> linkCheckPending = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
     void setBudget(AnalysisBudget budget) {
         this.budget = budget;
     }
@@ -141,6 +161,7 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
         // sv-integration gave LinkComputerImpl a TestVisitor parameter; production passes null
         linkComputer = new LinkComputerImpl(javaInspector, configuration.linkComputerOptions(), propertiesChanged,
                 null);
+        if (LINK_CACHE) AnalysisAccessRecorder.arm();
         Runtime runtime = javaInspector.runtime();
         fieldAnalyzer = new FieldAnalyzerImpl(runtime, configuration, propertiesChanged, messages);
         typeModIndyAnalyzer = new TypeModIndyAnalyzerImpl(configuration, propertiesChanged, messages);
@@ -369,6 +390,13 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
         long end = System.currentTimeMillis();
         LOGGER.info("Phase timing: main loop {} ms, abstract batch {} ms, 2nd type pass {} ms",
                 endLoop - startLoop, startSecondPass - startAbstract, end - startSecondPass);
+        if (linkCacheEnabled()) {
+            java.util.Map<String, Integer> misses = new java.util.TreeMap<>();
+            linkCacheMisses.forEach((k, v) -> misses.put(k, v.get()));
+            LOGGER.info("Link cache: {} hit(s), {} check failure(s), misses by first changed property {}",
+                    linkCacheHits.getAndSet(0), linkCacheCheckFailures.getAndSet(0), misses);
+            linkCacheMisses.clear();
+        }
         unionInWriteTargets();
     }
 
@@ -460,6 +488,68 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
         }
     }
 
+    private boolean linkCacheEnabled() {
+        return LINK_CACHE && !flattenVariableData;
+    }
+
+    /**
+     * @return true when the method's previous link computation can stand for this one (see LINK_CACHE). Under
+     * LINKCACHECHECK, a hit is recomputed, and its recording compared afterwards in linkCacheStore.
+     */
+    private boolean linkCacheHit(MethodInfo methodInfo, boolean firstIteration) {
+        if (!linkCacheEnabled() || firstIteration) return false;
+        AnalysisAccessRecorder.Recording previous = linkRecordings.get(methodInfo);
+        String change = previous == null ? "new" : previous.firstChange(linkCacheContext());
+        if (change != null) {
+            linkCacheMisses.computeIfAbsent(change, _ -> new AtomicInteger()).incrementAndGet();
+            return false;
+        }
+        linkCacheHits.incrementAndGet();
+        if (LINK_CACHE_CHECK) {
+            linkCheckPending.add(methodInfo);
+            return false;
+        }
+        return true;
+    }
+
+    /*
+    the state outside the analysis maps that a link computation depends on: a frozen modification property refuses
+    the computation's write without reading the map; ReceiverLevel is a gate that tests switch at runtime. The
+    recursion-prevention stack is not part of it: a hit replaces a top-level computation, which always starts from
+    an empty stack, and nested on-demand computations recorded inside it see the same stack each time.
+     */
+    private static Object linkCacheContext() {
+        return List.of(TolerantWrite.modificationPropertiesFrozen(),
+                ReceiverLevel.enabled());
+    }
+
+    private void linkCacheStore(MethodInfo methodInfo, AnalysisAccessRecorder.Recording recording, boolean completed) {
+        if (!completed) {
+            AnalysisAccessRecorder.abandon(recording);
+            linkRecordings.remove(methodInfo);
+            return;
+        }
+        AnalysisAccessRecorder.stop(recording);
+        recording.setContext(linkCacheContext());
+        if (recording.unusable() != null) {
+            linkCacheMisses.computeIfAbsent("not stored: " + recording.unusable(), _ -> new AtomicInteger())
+                    .incrementAndGet();
+        }
+        AnalysisAccessRecorder.Recording previous = recording.unusable() == null
+                ? linkRecordings.put(methodInfo, recording) : linkRecordings.remove(methodInfo);
+        if (linkCheckPending.remove(methodInfo) && previous != null) {
+            // variablesLinkedToObject lands on a call expression the computation itself creates (LinkComputerImpl:
+            // "write-once on a fresh expression"), so every computation writes a slot no other one can see
+            String difference = previous.differenceFrom(recording,
+                    Set.of(LinkComputerImpl.VARIABLES_LINKED_TO_OBJECT.key()));
+            if (difference != null) {
+                linkCacheCheckFailures.incrementAndGet();
+                LOGGER.warn("LINKCACHECHECK: a cache hit on {} would differ from its computation: {}", methodInfo,
+                        difference);
+            }
+        }
+    }
+
     private void processElement(Info info, boolean activateCycleBreaking, boolean firstIteration,
                                 Set<TypeInfo> abstractTypes) {
         // G43: OUTSIDE the fault-tolerant try below — a spent budget is not this element's crash, and must not be
@@ -476,33 +566,41 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
                 if (firstIteration && methodInfo.isAbstract() && abstractTypes.add(info.typeInfo())) {
                     shallowTypeAnalyzer.analyze(info.typeInfo());
                 }
-                if (!firstIteration || !methodInfo.analysis().haveAnalyzedValueFor(METHOD_LINKS)) {
-                    MethodLinkedVariables mlv = linkComputer.doMethod(methodInfo);
-                    // methodLinks IS the method's summary: pass the target so the change reaches
-                    // summaryChangedInfos and dirties dependents (the 3-arg overload's "?" context did not,
-                    // leaving the worklist 0-dirty after a verification pass found methodLinks changes)
-                    // This is the method's analysis-order SLOT: for a source method the latest computation wins
-                    // over an equal-keyed value with other content (TolerantWrite.setLatestWins). A source
-                    // abstract method's links are a pure function of its CURRENT independence (the union over
-                    // implementations): the DEPENDENT default before the fold decides -- first iteration, and
-                    // again after MODREACH's clearDerivedFamily -- gives 'it.§m ≡ this.§m' + content, the
-                    // decided 'except' gives the sparser 'it.§m ☷{remove} this.§m'; and every caller's first
-                    // computation carries that pessimism as extra links. "Equal primary, richer wins" kept the
-                    // early value for good (EC O4, booleanIterator; dogfood: 29 methods stuck @Dependent).
-                    // A library method's shallow links are a function of its annotations: ordinary retention.
-                    boolean source = !methodInfo.typeInfo().compilationUnit().externalLibrary();
-                    boolean written = source
-                            ? TolerantWrite.setLatestWins(methodInfo.analysis(), METHOD_LINKS, mlv, methodInfo)
-                            : TolerantWrite.setAllowControlledOverwrite(methodInfo.analysis(), METHOD_LINKS, mlv,
-                            methodInfo);
-                    if (written) propertiesChanged.incrementAndGet();
-                    // flatten-snapshot Phase 5: this method is fully linked (summary written), so flatten
-                    // its last-statement VD and drop the intermediates RIGHT HERE — concurrently, inside
-                    // the giant SCC wave, which is the only place the peak can actually be bounded. Safe
-                    // because the last-statement replacement is an atomic overwrite (a parallel
-                    // FieldAnalyzer read sees the old chained or new flattened VD, both valid) and nothing
-                    // cross-method reads this method's intermediate statements.
-                    if (flattenVariableData) flattenMethod(methodInfo);
+                if ((!firstIteration || !methodInfo.analysis().haveAnalyzedValueFor(METHOD_LINKS))
+                    && !linkCacheHit(methodInfo, firstIteration)) {
+                    AnalysisAccessRecorder.Recording recording = linkCacheEnabled() ? AnalysisAccessRecorder.start() : null;
+                    boolean completed = false;
+                    try {
+                        MethodLinkedVariables mlv = linkComputer.doMethod(methodInfo);
+                        // methodLinks IS the method's summary: pass the target so the change reaches
+                        // summaryChangedInfos and dirties dependents (the 3-arg overload's "?" context did not,
+                        // leaving the worklist 0-dirty after a verification pass found methodLinks changes)
+                        // This is the method's analysis-order SLOT: for a source method the latest computation wins
+                        // over an equal-keyed value with other content (TolerantWrite.setLatestWins). A source
+                        // abstract method's links are a pure function of its CURRENT independence (the union over
+                        // implementations): the DEPENDENT default before the fold decides -- first iteration, and
+                        // again after MODREACH's clearDerivedFamily -- gives 'it.§m ≡ this.§m' + content, the
+                        // decided 'except' gives the sparser 'it.§m ☷{remove} this.§m'; and every caller's first
+                        // computation carries that pessimism as extra links. "Equal primary, richer wins" kept the
+                        // early value for good (EC O4, booleanIterator; dogfood: 29 methods stuck @Dependent).
+                        // A library method's shallow links are a function of its annotations: ordinary retention.
+                        boolean source = !methodInfo.typeInfo().compilationUnit().externalLibrary();
+                        boolean written = source
+                                ? TolerantWrite.setLatestWins(methodInfo.analysis(), METHOD_LINKS, mlv, methodInfo)
+                                : TolerantWrite.setAllowControlledOverwrite(methodInfo.analysis(), METHOD_LINKS, mlv,
+                                methodInfo);
+                        if (written) propertiesChanged.incrementAndGet();
+                        // flatten-snapshot Phase 5: this method is fully linked (summary written), so flatten
+                        // its last-statement VD and drop the intermediates RIGHT HERE — concurrently, inside
+                        // the giant SCC wave, which is the only place the peak can actually be bounded. Safe
+                        // because the last-statement replacement is an atomic overwrite (a parallel
+                        // FieldAnalyzer read sees the old chained or new flattened VD, both valid) and nothing
+                        // cross-method reads this method's intermediate statements.
+                        if (flattenVariableData) flattenMethod(methodInfo);
+                        completed = true;
+                    } finally {
+                        if (recording != null) linkCacheStore(methodInfo, recording, completed);
+                    }
                 }
             } else if (info instanceof FieldInfo fieldInfo) {
                 sourceContractMaterializer.materialize(fieldInfo);

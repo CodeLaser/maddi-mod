@@ -27,12 +27,13 @@ import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.variable.LocalVariable;
 import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
+import io.codelaser.maddi.cst.impl.analysis.AnalysisAccessRecorder;
 import io.codelaser.maddi.cst.impl.analysis.PropertyValueMapImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 
 import java.util.Set;
 
-public class VariableInfoImpl implements VariableInfo {
+public class VariableInfoImpl implements VariableInfo, AnalysisAccessRecorder.Owner {
     public static final Property UNMODIFIED_VARIABLE = new PropertyImpl("unmodifiedVariable");
     /**
      * The structural twin of {@link #UNMODIFIED_VARIABLE}: the variable's object is not modified itself, its hidden
@@ -45,6 +46,11 @@ public class VariableInfoImpl implements VariableInfo {
             ValueImpl.SetOfTypeInfoImpl.EMPTY);
 
     private Links linkedVariables;
+    /*
+    CodeLaser/maddi-mod#76: the link computer writes a variable's links here, outside the analysis maps, and reads
+    them back in its next computation of the method; the link cache must see both
+     */
+    private static final Object LINKED_VARIABLES = "linkedVariables";
 
     private final PropertyValueMap analysis = new PropertyValueMapImpl();
 
@@ -62,6 +68,7 @@ public class VariableInfoImpl implements VariableInfo {
 
     public void setLinkedVariables(Links linkedVariables) {
         assert linkedVariables != null;
+        if (AnalysisAccessRecorder.active()) AnalysisAccessRecorder.write(this, LINKED_VARIABLES);
         if (this.linkedVariables == null) {
             this.linkedVariables = linkedVariables;
         } else if (this.linkedVariables.equals(linkedVariables)) {
@@ -105,12 +112,24 @@ public class VariableInfoImpl implements VariableInfo {
 
     @Override
     public Links linkedVariables() {
+        if (AnalysisAccessRecorder.active()) AnalysisAccessRecorder.read(this, LINKED_VARIABLES, linkedVariables);
         return linkedVariables;
     }
 
     @Override
     public Links linkedVariablesOrEmpty() {
+        if (AnalysisAccessRecorder.active()) AnalysisAccessRecorder.read(this, LINKED_VARIABLES, linkedVariables);
         return linkedVariables == null ? LinksImpl.EMPTY : linkedVariables;
+    }
+
+    @Override
+    public Object peek(Object key) {
+        return linkedVariables;
+    }
+
+    @Override
+    public boolean sameValue(Object key, Object a, Object b) {
+        return a.equals(b) && sameContent((Links) a, (Links) b);
     }
 
     @Override
