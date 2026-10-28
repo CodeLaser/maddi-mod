@@ -166,6 +166,37 @@ public class TestGuardImmutable extends CommonTest {
     }
 
     @Language("java")
+    private static final String RULE_3_VIEW = """
+            package a.b;
+            import io.codelaser.maddi.annotation.Immutable;
+            import java.util.ArrayList;
+            import java.util.List;
+
+            public class X {
+                @Immutable
+                static final class ExposesView {
+                    private final List<String> items = new ArrayList<>();
+
+                    public List<String> get() { return items.subList(0, 10); } // a view: modifying it modifies items
+                }
+            }
+            """;
+
+    @DisplayName("rule 3: a field exposed through a view (subList) is reported, blaming the getter")
+    @Test
+    public void testRule3View() throws IOException {
+        List<Message> violations = violations(analyzeWithGuard("a.b.X", RULE_3_VIEW));
+        assertFalse(violations.isEmpty(), "expected a violation for the field exposed through a view");
+        Message v = violations.getFirst();
+        assertEquals("a.b.X.ExposesView.items", v.info().fullyQualifiedName());
+        assertTrue(v.message().contains("rule 3"), v.message());
+        assertEquals(2, v.causes().size(), v.causes().stream().map(Message::message).toList().toString());
+        Message blame = v.causes().getFirst();
+        assertTrue(blame.message().contains("linked to the return value of method 'get'"), blame.message());
+        assertNotNull(blame.source());
+    }
+
+    @Language("java")
     private static final String CONFORMING = """
             package a.b;
             import io.codelaser.maddi.annotation.Immutable;

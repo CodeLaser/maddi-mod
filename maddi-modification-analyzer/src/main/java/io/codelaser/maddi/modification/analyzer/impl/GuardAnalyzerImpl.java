@@ -993,12 +993,14 @@ public class GuardAnalyzerImpl extends CommonAnalyzerImpl implements GuardAnalyz
         for (Link link : links) {
             Value.Independent toIndependent = independenceOfLink(link, links, independentOfType);
             if (toIndependent == null || !toIndependent.isDependent()) continue;
-            if (link.to() instanceof ParameterInfo pi && !pi.methodInfo().access().isPrivate()
+            // this.items.§m ≡ get.§m: the view's holder, as computeIndependent reaches it
+            Variable to = LinkToField.sharesModification(link) ? Util.primary(link.to()) : link.to();
+            if (to instanceof ParameterInfo pi && !pi.methodInfo().access().isPrivate()
                 && owner.inHierarchyOf(pi.typeInfo())) {
                 return MessageImpl.cause(pi, "the field is linked to parameter '" + pi.simpleName() + "' of "
                                              + describe(pi.methodInfo()) + ": the caller keeps a reference to it");
             }
-            if (link.to() instanceof ReturnVariable rv && !rv.methodInfo().access().isPrivate()
+            if (to instanceof ReturnVariable rv && !rv.methodInfo().access().isPrivate()
                 && owner.inHierarchyOf(rv.methodInfo().typeInfo())) {
                 return MessageImpl.cause(rv.methodInfo(), "the field is linked to the return value of "
                                                           + describe(rv.methodInfo())
@@ -1019,6 +1021,9 @@ public class GuardAnalyzerImpl extends CommonAnalyzerImpl implements GuardAnalyz
     private Value.Independent independenceOfLink(Link link, Links links, Value.Independent independentOfType) {
         if (link.from().equals(links.primary()) && link.linkNature().isIdenticalToOrAssignedFromTo()) {
             return independentOfType;
+        }
+        if (LinkToField.sharesModification(link)) {
+            return independentOfType; // a view of the field: the whole field is handed out
         }
         if (!link.linkNature().isDecoration()) {
             return analysisHelper.typeIndependentFromImmutableOrNull(link.to().parameterizedType());
