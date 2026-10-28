@@ -422,6 +422,11 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
     // Opt out with NOWORKLIST=1 (e.g. for baseline A/B runs).
     private static final boolean WORKLIST = System.getenv("NOWORKLIST") == null;
 
+    // CodeLaser/maddi-mod#76: a MODREACH round that only strengthened re-derives through the worklist instead of
+    // clearing the derived family. Gate NOINCREDERIVE restores the full clear (the A/B baseline).
+    private static final boolean INCREMENTAL_REDERIVATION =
+            !io.codelaser.maddi.modification.link.impl.Gate.isSet("NOINCREDERIVE");
+
     @Override
     public void analyze(List<Info> analysisOrder, io.codelaser.maddi.graph.G<Info> dependencyGraph) {
         analyze(analysisOrder, dependencyGraph, null, null);
@@ -733,6 +738,38 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                         TolerantWrite.freezeModificationProperties();
                         LOGGER.info("MODREACH round {}: {}", modReachRounds, counts.summary());
                         LOGGER.info("MODREACH round {}: {}", modReachRounds, report.summary());
+                        if (INCREMENTAL_REDERIVATION && !counts.weakened() && !counts.changed().isEmpty()
+                            && dependersOf != null) {
+                            // CodeLaser/maddi-mod#76: this round only strengthened (FALSE->TRUE, null->TRUE). What was
+                            // derived from the old values can only strengthen in turn, which the controlled overwrite
+                            // allows, so nothing needs clearing: the worklist re-derives from the changed elements and
+                            // their dependents, and the full verification pass still certifies. A full clear cost a
+                            // whole re-derivation (12-13 full iterations) for a round of 5 or 23 upgrades.
+                            java.util.Set<Info> seeds = new java.util.HashSet<>();
+                            for (Info c : counts.changed()) {
+                                Info owner = c instanceof io.codelaser.maddi.cst.api.info.ParameterInfo pi
+                                        ? pi.methodInfo() : c;
+                                Info mc = mapToOrderElement(owner, orderSet);
+                                if (mc != null) seeds.add(mc);
+                                java.util.Set<Info> deps = dependersOf.get(owner);
+                                if (deps != null) {
+                                    for (Info d : deps) {
+                                        Info md = mapToOrderElement(d, orderSet);
+                                        if (md != null) seeds.add(md);
+                                    }
+                                }
+                            }
+                            LOGGER.info("MODREACH round {}: only strengthened; re-deriving {} element(s) from {} "
+                                        + "changed, without clearing", modReachRounds, seeds.size(),
+                                    counts.changed().size());
+                            // the eventual family is write-once: the deferral round re-derives it over the new state
+                            eventualDeferralRounds = 0;
+                            dirty = seeds;
+                            verifying = false;
+                            previousPropertiesChanged = Integer.MAX_VALUE;
+                            maxIterations += configuration.maxIterations();
+                            continue;
+                        }
                         if (counts.downgraded() + counts.decidedFalse() + counts.decidedTrue()
                             + counts.reverseUpgraded() > 0) {
                             // P2.3b: the immutability family was derived from the pre-pass optimistic

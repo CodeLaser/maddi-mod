@@ -1365,8 +1365,14 @@ public class ShadowModificationPass {
 
     // ------------------------------------------------------------------ cutover writer (P2.3)
 
+    /**
+     * @param changed  every element a write changed, the structural twins' writes included (they are not counted)
+     * @param weakened some write lowered or decided a value FALSE, structural twins included: what was derived from
+     *                 the old value may now be too strong, and only a cleared re-derivation can lower it
+     */
     public record WriteCounts(int downgraded, int decidedFalse, int decidedTrue,
-                              int leftUndecided, int reverseUpgraded, int reverseKept, int contractKept) {
+                              int leftUndecided, int reverseUpgraded, int reverseKept, int contractKept,
+                              Set<Info> changed, boolean weakened) {
         public String summary() {
             return "modreach wrote: " + downgraded + " TRUE->FALSE downgrades, "
                    + decidedFalse + " null->FALSE, " + decidedTrue + " null->TRUE, "
@@ -1419,41 +1425,57 @@ public class ShadowModificationPass {
                                      java.util.function.Predicate<Info> contracted) {
         AnalysisHelper analysisHelper = new AnalysisHelper();
         int[] counts = new int[8]; // indexed by the write-result constants
+        Set<Info> changed = new LinkedHashSet<>();
+        boolean[] weakened = {false};
+        java.util.function.BiConsumer<Info, Integer> track = (element, result) -> {
+            if (result == DOWNGRADED || result == DECIDED_FALSE) weakened[0] = true;
+            if (result == DOWNGRADED || result == DECIDED_FALSE || result == DECIDED_TRUE
+                || result == REVERSE_UPGRADED) {
+                changed.add(element);
+            }
+        };
         for (Info info : analysisOrder) {
             switch (info) {
                 case MethodInfo mi -> {
-                    counts[write(mi.analysis(), PropertyImpl.NON_MODIFYING_METHOD,
+                    int r = write(mi.analysis(), PropertyImpl.NON_MODIFYING_METHOD,
                             report.reached().contains(mi), report.frontierIncomplete().contains(mi), false, mi,
-                            contracted.test(mi))]++;
-                    // the structural twin (#25), from the structural closure; not counted
-                    write(mi.analysis(), PropertyImpl.STRUCTURALLY_NON_MODIFYING_METHOD,
-                            report.reachedStructural().contains(mi), report.frontierIncomplete().contains(mi), false, mi,
                             contracted.test(mi));
+                    counts[r]++;
+                    track.accept(mi, r);
+                    // the structural twin (#25), from the structural closure; not counted
+                    track.accept(mi, write(mi.analysis(), PropertyImpl.STRUCTURALLY_NON_MODIFYING_METHOD,
+                            report.reachedStructural().contains(mi), report.frontierIncomplete().contains(mi), false, mi,
+                            contracted.test(mi)));
                     for (ParameterInfo pi : mi.parameters()) {
                         boolean immutable = immutableForModification(pi.parameterizedType());
-                        counts[write(pi.analysis(), PropertyImpl.UNMODIFIED_PARAMETER,
+                        int rp = write(pi.analysis(), PropertyImpl.UNMODIFIED_PARAMETER,
                                 report.reached().contains(pi), report.frontierIncomplete().contains(pi), immutable, pi,
-                                contracted.test(pi))]++;
-                        write(pi.analysis(), PropertyImpl.STRUCTURALLY_UNMODIFIED_PARAMETER,
+                                contracted.test(pi));
+                        counts[rp]++;
+                        track.accept(pi, rp);
+                        track.accept(pi, write(pi.analysis(), PropertyImpl.STRUCTURALLY_UNMODIFIED_PARAMETER,
                                 report.reachedStructural().contains(pi), report.frontierIncomplete().contains(pi),
-                                immutable, pi, contracted.test(pi));
+                                immutable, pi, contracted.test(pi)));
                     }
                 }
                 case FieldInfo fi -> {
                     boolean immutable = immutableForModification(fi.type());
-                    counts[write(fi.analysis(), PropertyImpl.UNMODIFIED_FIELD,
+                    int r = write(fi.analysis(), PropertyImpl.UNMODIFIED_FIELD,
                             report.reached().contains(fi), report.frontierIncomplete().contains(fi), immutable, fi,
-                            false)]++;
-                    write(fi.analysis(), PropertyImpl.STRUCTURALLY_UNMODIFIED_FIELD,
+                            false);
+                    counts[r]++;
+                    track.accept(fi, r);
+                    track.accept(fi, write(fi.analysis(), PropertyImpl.STRUCTURALLY_UNMODIFIED_FIELD,
                             report.reachedStructural().contains(fi), report.frontierIncomplete().contains(fi), immutable,
-                            fi, false);
+                            fi, false));
                 }
                 default -> {
                 }
             }
         }
         return new WriteCounts(counts[DOWNGRADED], counts[DECIDED_FALSE], counts[DECIDED_TRUE],
-                counts[LEFT_UNDECIDED], counts[REVERSE_UPGRADED], counts[REVERSE_KEPT], counts[CONTRACT_KEPT]);
+                counts[LEFT_UNDECIDED], counts[REVERSE_UPGRADED], counts[REVERSE_KEPT], counts[CONTRACT_KEPT],
+                changed, weakened[0]);
     }
 
     private static final int NO_CHANGE = 0, DOWNGRADED = 1, DECIDED_FALSE = 2, DECIDED_TRUE = 3,
