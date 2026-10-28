@@ -132,7 +132,7 @@ class LinkToField {
     }
 
     /** {@code view.§m ≡ this.list.§m}: the two share the field's modification, a plain ≡ (no pass set) */
-    private static boolean sharesModification(Link link) {
+    static boolean sharesModification(Link link) {
         return link.linkNature().isIdenticalTo() && link.linkNature().pass().isEmpty()
                && Util.isVirtualModification(link.from()) && Util.isVirtualModification(link.to());
     }
