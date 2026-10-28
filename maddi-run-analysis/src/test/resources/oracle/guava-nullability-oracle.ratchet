@@ -17,6 +17,13 @@
 # 2026-10-26, devel at maddi f2cae7ece / maddi-mod b0cd2a7c, measured on the Mac: 229 unsafe, 1,834 noise. An unread
 # parameter loses its tolerance only when the method has an analysed override: StringCatcher's and the four
 # NullPointerTesterTest.OneArg parameters agree again.
-unsafe	229
+#
+# 2026-10-28, devel at maddi 71f1bf3b2 / maddi-mod 7c4e53f4, on laser1: 230 unsafe, 1,834 noise, 274 undecided.
+# Accepted by Bart. The one new unsafe row is guava's test class eventbus.StringCatcher.hereHaveAString(@Nullable
+# String string), which only does `events.add(string)` into a private List<String>. maddi-mod 7d05682c stops a
+# tolerated null at a field's element slot (gate NOTOLERANTSLOTS), so that public adders and setters stop printing
+# @Nullable. Guava's own declaration is inconsistent here: a @Nullable String goes into a List<String> in null-marked
+# code.
+unsafe	230
 noise	1834
 noiseSlack	20
