@@ -22,6 +22,7 @@ import io.codelaser.maddi.modification.analyzer.IteratingAnalyzer;
 import io.codelaser.maddi.modification.analyzer.TypeModIndyAnalyzer;
 import io.codelaser.maddi.modification.common.AnalysisHelper;
 import io.codelaser.maddi.modification.link.impl.LinkNatureImpl;
+import io.codelaser.maddi.modification.common.util.Culprits;
 import io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl;
 import io.codelaser.maddi.modification.prepwork.Util;
 import io.codelaser.maddi.modification.prepwork.variable.Link;
@@ -357,6 +358,9 @@ public class TypeModIndyAnalyzerImpl extends CommonAnalyzerImpl implements TypeM
             handleSetter(methodInfo, fieldValue, independentFromType);
         } else {
             handleGetter(methodInfo, independentFromType);
+            if (Culprits.ENABLED && independentFromType.isDependent()) {
+                DependentCulprit.writeForGetter(methodInfo, fieldValue.field());
+            }
         }
     }
 
@@ -427,6 +431,9 @@ normal methods: does a modification to the return value imply any modification i
                 DECIDE.debug("MI: Decide independent of method {} = {}", methodInfo, independentMethod);
                 propertyChanges.incrementAndGet();
             }
+            if (Culprits.ENABLED && independentMethod.isDependent()) {
+                DependentCulprit.writeForMethod(methodInfo, mlv, analysisHelper);
+            }
         } else if (cycleBreakingActive) {
             // only break a cycle for a value that never decided: an undecided RE-derivation (a link to a field
             // whose immutability was cleared and not yet re-decided) must not erase a stored honest verdict
@@ -445,6 +452,7 @@ normal methods: does a modification to the return value imply any modification i
                     DECIDE.debug("MI: Decide independent of parameter {} = {}", pi, independent);
                     propertyChanges.incrementAndGet();
                 }
+                if (Culprits.ENABLED && independent.isDependent()) DependentCulprit.writeForParameter(pi, mlv, analysisHelper);
             } else if (cycleBreakingActive) {
                 // same rule as the method above: cycle breaking decides the never-decided, it does not overwrite
                 if (pi.analysis().getOrNull(PropertyImpl.INDEPENDENT_PARAMETER, ValueImpl.IndependentImpl.class) == null
