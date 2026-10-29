@@ -19,6 +19,7 @@ package io.codelaser.maddi.modification.analyzer.modification;
 
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.info.Info;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
@@ -60,6 +61,7 @@ public class TestStaticAndSelfFields extends CommonTest {
     @Language("java")
     private static final String INPUT = """
             package a.b;
+            import io.codelaser.maddi.annotation.rare.IgnoreModifications;
             import java.util.ArrayList;
             import java.util.List;
             import java.util.concurrent.atomic.AtomicInteger;
@@ -77,6 +79,36 @@ public class TestStaticAndSelfFields extends CommonTest {
                     String getK() {
                         counter.getAndIncrement();
                         return k;
+                    }
+                }
+
+                // an assignment counts as a modifying call does: area() is @Modified
+                record Circle(double radius) {
+                    private static int cntCalls;
+
+                    double area() {
+                        ++cntCalls;
+                        return Math.PI * radius * radius;
+                    }
+                }
+
+                // the book's second CountAccess: the field disclaims its modifications
+                static final class CountIgnored {
+                    @IgnoreModifications
+                    private static final AtomicInteger counter = new AtomicInteger();
+                    private final String k;
+
+                    CountIgnored(String k) {
+                        this.k = k;
+                    }
+
+                    String getK() {
+                        counter.getAndIncrement();
+                        return k;
+                    }
+
+                    static int countAccessToK() {
+                        return counter.get();
                     }
                 }
 
@@ -175,6 +207,10 @@ public class TestStaticAndSelfFields extends CommonTest {
             }
             """;
 
+    private static boolean nonModifying(MethodInfo mi) {
+        return mi.analysis().getOrDefault(PropertyImpl.NON_MODIFYING_METHOD, ValueImpl.BoolImpl.FALSE).isTrue();
+    }
+
     @DisplayName("statics count like instance fields; a self-referencing field is skipped")
     @Test
     public void test() throws IOException {
@@ -193,6 +229,13 @@ public class TestStaticAndSelfFields extends CommonTest {
 
         assertFalse(immutable(x.findSubType("CountAccess")).isAtLeastImmutableHC(),
                 "the book's CountAccess modifies its own static counter");
+        assertFalse(nonModifying(x.findSubType("CountAccess").findUniqueMethod("getK", 0)),
+                "the book's CountAccess.getK() is @Modified");
+        assertFalse(nonModifying(x.findSubType("Circle").findUniqueMethod("area", 0)), "++cntCalls");
+        assertTrue(nonModifying(x.findSubType("CountIgnored").findUniqueMethod("getK", 0)), "@IgnoreModifications");
+        assertTrue(nonModifying(x.findSubType("CountIgnored").findUniqueMethod("countAccessToK", 0)));
+        assertTrue(nonModifying(x.findSubType("WithStaticList").findUniqueMethod("count", 0)), "reads only");
+        assertTrue(nonModifying(x.findSubType("Single").findUniqueMethod("instance", 0)), "reads only");
         assertSame(ValueImpl.ImmutableImpl.IMMUTABLE, immutable(x.findSubType("WithStaticString")));
         assertSame(ValueImpl.ImmutableImpl.IMMUTABLE_HC, immutable(x.findSubType("WithStaticList")),
                 "a static List field allows hidden content");

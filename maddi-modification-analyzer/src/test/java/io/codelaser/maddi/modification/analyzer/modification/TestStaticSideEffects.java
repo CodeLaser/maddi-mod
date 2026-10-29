@@ -55,6 +55,10 @@ public class TestStaticSideEffects extends CommonTest {
             }
             """;
 
+    private static boolean nonModifying(MethodInfo mi) {
+        return mi.analysis().getOrDefault(PropertyImpl.NON_MODIFYING_METHOD, ValueImpl.BoolImpl.FALSE).isTrue();
+    }
+
     private static boolean sse(MethodInfo mi) {
         return mi.analysis().getOrDefault(PropertyImpl.STATIC_SIDE_EFFECTS_METHOD, ValueImpl.BoolImpl.FALSE).isTrue();
     }
@@ -232,6 +236,18 @@ public class TestStaticSideEffects extends CommonTest {
         // System.out is an @IgnoreModifications field, Logger.info an @IgnoreModifications method
         assertEquals(Set.of(), modified(type(parsed, "Service").findUniqueMethod("work", 0)));
         assertFalse(sse(client.findUniqueMethod("callsService", 0)));
+
+        // modifying the own static state is a modification (road §050); another type's is a static side effect only
+        for (String name : List.of("next", "nextTwice", "instanceNext")) {
+            assertFalse(nonModifying(counter.findUniqueMethod(name, 0)), name);
+        }
+        assertFalse(nonModifying(counter.findUniqueMethod("recursive", 1)));
+        assertTrue(nonModifying(counter.findUniqueMethod("read", 0)));
+        for (String name : List.of("twice", "viaRecursion", "create", "createChild", "indirect", "numbered", "reads",
+                "callsService", "reference", "factory")) {
+            assertTrue(nonModifying(client.findUniqueMethod(name, 0)), name);
+        }
+        assertTrue(nonModifying(type(parsed, "Service").findUniqueMethod("work", 0)));
     }
 
     private static TypeInfo type(TypeInfo primary, String simpleName) {

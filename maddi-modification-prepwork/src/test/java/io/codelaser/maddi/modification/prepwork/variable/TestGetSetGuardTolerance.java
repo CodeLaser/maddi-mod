@@ -121,4 +121,52 @@ public class TestGetSetGuardTolerance extends CommonTest {
         assertNull(X.findUniqueMethod("readsField", 0).getSetField().field(), "guard reads a field");
         assertNull(X.findUniqueMethod("callsOnThis", 0).getSetField().field(), "guard calls a method on this");
     }
+
+    // the type's own static state is state like any other (road §050, the book's CountAccess.getK() is @Modified):
+    // a guard that modifies it is a second behaviour. A nested type's static state is the primary type's own too; a
+    // disclaimed field's is ignored, so that guard stays inert
+    @Language("java")
+    private static final String STATIC = """
+            package a.b;
+            import io.codelaser.maddi.annotation.rare.IgnoreModifications;
+            import java.util.concurrent.atomic.AtomicInteger;
+            class X {
+                static class Other { static int count; }
+                private static int count;
+                private static final AtomicInteger COUNTER = new AtomicInteger();
+                @IgnoreModifications
+                private static final AtomicInteger IGNORED = new AtomicInteger();
+                private int f;
+
+                int assignsOwnStatic() {
+                    count++;
+                    return f;
+                }
+                int callsOnOwnStatic() {
+                    COUNTER.getAndIncrement();
+                    return f;
+                }
+                int assignsNestedStatic() {
+                    Other.count++;
+                    return f;
+                }
+                int callsOnIgnoredStatic() {
+                    IGNORED.getAndIncrement();
+                    return f;
+                }
+            }
+            """;
+
+    @DisplayName("a guard that modifies the type's own static state defeats recognition")
+    @Test
+    public void testOwnStaticState() {
+        TypeInfo X = javaInspector.parse("a.b.X", STATIC);
+        new PrepAnalyzer(runtime).doPrimaryType(X);
+        FieldInfo f = X.getFieldByName("f", true);
+
+        assertNull(X.findUniqueMethod("assignsOwnStatic", 0).getSetField().field(), "count++");
+        assertNull(X.findUniqueMethod("callsOnOwnStatic", 0).getSetField().field(), "COUNTER.getAndIncrement()");
+        assertNull(X.findUniqueMethod("assignsNestedStatic", 0).getSetField().field(), "Other.count++");
+        assertSame(f, X.findUniqueMethod("callsOnIgnoredStatic", 0).getSetField().field(), "@IgnoreModifications");
+    }
 }

@@ -1,6 +1,7 @@
 package io.codelaser.maddi.modification.link.impl;
 
 import io.codelaser.maddi.modification.common.defaults.ShallowMethodAnalyzer;
+import io.codelaser.maddi.modification.common.util.OwnStaticState;
 import io.codelaser.maddi.modification.common.util.TolerantWrite;
 import io.codelaser.maddi.modification.link.LinkComputer;
 import io.codelaser.maddi.modification.link.impl.graph.DegradedAnalysisException;
@@ -23,7 +24,9 @@ import io.codelaser.maddi.modification.prepwork.variable.impl.VariableInfoImpl;
 import io.codelaser.maddi.cst.api.analysis.Codec;
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.element.Element;
+import io.codelaser.maddi.cst.api.expression.Assignment;
 import io.codelaser.maddi.cst.api.expression.Expression;
+import io.codelaser.maddi.cst.api.expression.MethodCall;
 import io.codelaser.maddi.cst.api.expression.NullConstant;
 import io.codelaser.maddi.cst.api.info.InfoMap;
 import io.codelaser.maddi.cst.api.info.InfoMapView;
@@ -755,6 +758,12 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                     if (structural) paramsStructurallyModified[pi.index()] = true;
                 }
             }
+            // the type's own static state is state like any other: 'modifications are modifications' (road §050,
+            // the book's CountAccess.getK() is @Modified)
+            if (!methodModified && modifiesOwnStaticState(methodInfo)) {
+                methodModified = true;
+                methodStructurallyModified = true;
+            }
             // handed to one of our own functional parameters, whole or an element of it: recorded, not marked; its
             // callers resolve the entry with the function they pass (PassedFunction, CodeLaser/maddi-mod#67, #69)
             Value.Bool nonModifying = ValueImpl.BoolImpl.from(!methodModified);
@@ -784,6 +793,50 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
         private boolean inCurrentHierarchy(TypeInfo typeInfo) {
             return typeInfo.equals(methodInfo.typeInfo())
                    || methodInfo.typeInfo().superTypesExcludingJavaLangObject().contains(typeInfo);
+        }
+
+        /*
+         Does the method modify the static state its type owns (OwnStaticState)? A constructor is modifying already; a
+         static initializer block is the static state's constructor, and so is exempt.
+
+         STATIC_STATE_MODIFIED_METHOD says, once the static side effect analyzer has decided it, at the end of the
+         method's type. A method is linked before that, and its NON_MODIFYING_METHOD may not go from true to false
+         later, so until then the body gives the same evidence directly: an assignment to an own static field or a
+         field of one ('++count'), a modifying call on one ('COUNTER.incrementAndGet()'), a callee whose decided set
+         holds an own type, or an own static method already known to modify.
+         */
+        private static boolean modifiesOwnStaticState(MethodInfo methodInfo) {
+            if (methodInfo.isConstructor() || methodInfo.isStaticInitializer() || methodInfo.isAbstract()) return false;
+            Value.SetOfTypeInfo decided = methodInfo.analysis().getOrNull(PropertyImpl.STATIC_STATE_MODIFIED_METHOD,
+                    ValueImpl.SetOfTypeInfoImpl.class);
+            if (decided != null) {
+                return decided.typeInfoSet().stream().anyMatch(t -> OwnStaticState.owns(methodInfo, t));
+            }
+            if (methodInfo.methodBody() == null || methodInfo.methodBody().isEmpty()) return false;
+            AtomicBoolean found = new AtomicBoolean();
+            methodInfo.methodBody().visit(e -> {
+                if (found.get()) return false;
+                if (e instanceof Assignment a && OwnStaticState.assigns(methodInfo, a)
+                    || e instanceof MethodCall mc && (OwnStaticState.callOn(methodInfo, mc) && modifying(mc.methodInfo())
+                                                      || mc.methodInfo() != methodInfo
+                                                         && calleeModifiesOwnStaticState(methodInfo, mc.methodInfo()))) {
+                    found.set(true);
+                }
+                return true;
+            });
+            return found.get();
+        }
+
+        private static boolean modifying(MethodInfo callee) {
+            return callee.analysis().getOrDefault(PropertyImpl.NON_MODIFYING_METHOD, ValueImpl.BoolImpl.TRUE).isFalse();
+        }
+
+        private static boolean calleeModifiesOwnStaticState(MethodInfo methodInfo, MethodInfo callee) {
+            Value.SetOfTypeInfo set = callee.analysis().getOrNull(PropertyImpl.STATIC_STATE_MODIFIED_METHOD,
+                    ValueImpl.SetOfTypeInfoImpl.class);
+            if (set != null) return set.typeInfoSet().stream().anyMatch(t -> OwnStaticState.owns(methodInfo, t));
+            // not decided yet: a method of the same type. Without a receiver, a static one modifies static state only
+            return callee.isStatic() && OwnStaticState.owns(methodInfo, callee.typeInfo()) && modifying(callee);
         }
 
         private Links emptyIfOnlySomeValue(Links links) {

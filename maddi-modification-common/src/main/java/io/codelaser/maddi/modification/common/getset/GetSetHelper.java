@@ -37,6 +37,7 @@ import io.codelaser.maddi.cst.api.variable.This;
 import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
+import io.codelaser.maddi.modification.common.util.OwnStaticState;
 
 import static io.codelaser.maddi.inspection.api.util.CreateSyntheticFieldsForGetSet.*;
 
@@ -85,12 +86,16 @@ public class GetSetHelper {
          decision independent of the object's state);
       4. makes no call *on* `this` -- a recursively-'this' receiver could mutate the object's own state.
 
+      5. writes no static state the type owns, and makes no call on it (OwnStaticState): road-to-immutability
+         section 050 counts that as a modification ('modifications are modifications', the book's CountAccess.getK()
+         is @Modified), and a call site that reads the field instead of calling would lose it.
+
     A call that merely *passes* `this` to a static/other-object method (`record(this)`) is allowed: its only
-    possible effect is on state the object does not own -- a disclaimed static side effect in the sense of
-    road-to-immutability section 050 (@StaticSideEffects / @IgnoreModifications), which by construction cannot cap
-    the object's immutability, so dropping it at the call site corrupts no verdict. What is deliberately NOT
-    tolerated: a guard that reads/writes an own field, calls a method on `this`, or can exit early -- those are a
-    second behaviour, not a getter with a benign prelude.
+    possible effect is on state the object does not own -- a static side effect in the sense of road-to-immutability
+    section 050 (@StaticSideEffects), which by construction cannot cap the object's immutability, so dropping it at
+    the call site corrupts no verdict. What is deliberately NOT tolerated: a guard that reads/writes an own field,
+    calls a method on `this`, modifies the type's own static state, or can exit early -- those are a second
+    behaviour, not a getter with a benign prelude.
      */
     public static boolean doGetSetAnalysis(MethodInfo methodInfo, Block methodBody) {
         assert methodBody != null;
@@ -103,7 +108,7 @@ public class GetSetHelper {
         }
         return methodInfo.analysis().getOrCreate(PropertyImpl.GET_SET_FIELD, () -> {
             // peel a prefix of inert guard statements; recognition then runs on the first non-inert statement
-            int guards = leadingInertGuardCount(methodBody);
+            int guards = leadingInertGuardCount(methodInfo, methodBody);
             java.util.List<Statement> statements = methodBody.statements();
             if (guards >= statements.size()) return null; // only guards, no return/assignment: not an accessor
             Statement s0 = statements.get(guards);
@@ -198,19 +203,19 @@ public class GetSetHelper {
      * The number of leading statements of {@code methodBody} that are inert guards (see the class comment):
      * scanning stops at the first non-inert statement, which is where getter/setter recognition then begins.
      */
-    private static int leadingInertGuardCount(Block methodBody) {
+    private static int leadingInertGuardCount(MethodInfo methodInfo, Block methodBody) {
         int n = methodBody.size();
         int g = 0;
-        while (g < n && isInertGuard(methodBody.statements().get(g))) g++;
+        while (g < n && isInertGuard(methodInfo, methodBody.statements().get(g))) g++;
         return g;
     }
 
     /**
-     * Is this leading statement immaterial to get/set recognition? See the class comment for the four
+     * Is this leading statement immaterial to get/set recognition? See the class comment for the five
      * requirements and the soundness argument. Checked purely syntactically over the statement's whole subtree,
      * because at this point (PrepAnalyzer) no modification/link verdict exists yet.
      */
-    private static boolean isInertGuard(Statement s) {
+    private static boolean isInertGuard(MethodInfo methodInfo, Statement s) {
         boolean[] inert = {true};
         s.visit(e -> {
             if (!inert[0]) return false;
@@ -234,6 +239,14 @@ public class GetSetHelper {
             //    a call that merely passes 'this' as an argument -- record(this) -- is allowed (see class comment)
             if (e instanceof MethodCall mc && mc.object() instanceof VariableExpression ove
                 && ove.variable() instanceof This) {
+                inert[0] = false;
+                return false;
+            }
+            // 5. no write to, and no call on, the static state the type owns: that is a modification of the method
+            //    (road §050), which a call site reading the field instead would lose. A call there may be read-only,
+            //    but no verdict says so yet
+            if (e instanceof Assignment a && OwnStaticState.assigns(methodInfo, a)
+                || e instanceof MethodCall mc && OwnStaticState.callOn(methodInfo, mc)) {
                 inert[0] = false;
                 return false;
             }
