@@ -92,7 +92,9 @@ public class TestKotlinLinkTypes extends CommonKotlinLinkTest {
                 p.javaLinks("copyD"));
         // the copy's `b` now depends on `d.b`, as in Java. The rest is the bridge's conservatism: `$mask` is not
         // evaluated, so each property links to BOTH its argument and the original's field, and the omitted `b`
-        // keeps its null placeholder ($_ce0) as a second source.
+        // keeps its null placeholder ($_ce0) as a second source. The bridge's 'a = d.a' reads as '1:a → 0:d.a', the
+        // reverse, through the group of the copy's property with both its sources: a property (a field path) is no
+        // recipient of alternatives (Graph.markMultiValuedRecipients), only a whole variable is.
         assertEquals("[0:d*.b.§m≡$_ce0*.§m, 1:a*.§m≡0:d*.a.§m,1:a*→0:d*.a] --> "
                      + "copyD.a.§m≡0:d*.a.§m,copyD.a.§m≡1:a*.§m,copyD.b.§m≡$_ce0*.§m,copyD.b.§m≡0:d*.b.§m,"
                      + "copyD.a←0:d*.a,copyD.a←1:a*,copyD.b→$_ce0*,copyD.b←0:d*.b",

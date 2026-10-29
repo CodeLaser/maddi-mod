@@ -303,12 +303,26 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                 System.out.println("LT >>> " + methodInfo.fullyQualifiedName());
             }
             SourceMethodComputer computer = new SourceMethodComputer(methodInfo);
+            // this method's own attempt: callees computed inside it save and restore their own
+            boolean altSourcesOff = Graph.altSourcesOff();
+            boolean altSourcesUsed = Graph.altSourcesUsed();
+            Graph.setAltSources(false, false);
             try {
                 try {
                     if (DEGRADE_FOR_TESTING != null && DEGRADE_FOR_TESTING.test(methodInfo)) {
                         throw new DegradedAnalysisException(DegradedAnalysisException.Reason.WORK_CEILING);
                     }
-                    tlv = computer.go();
+                    try {
+                        tlv = computer.go();
+                    } catch (DegradedAnalysisException dae) {
+                        if (!Graph.altSourcesUsed()) throw dae;
+                        // alternatives as plain edges cost too much here: as before them, with groups (Graph)
+                        LOGGER.info("Work ceiling with alternatives in {} [{}]; again without them", methodInfo,
+                                dae.reason().label());
+                        Graph.setAltSources(true, false);
+                        computer = new SourceMethodComputer(methodInfo);
+                        tlv = computer.go();
+                    }
                     reportWork(methodInfo, computer, false);
                     if (write) {
                         if (TolerantWrite.setAllowControlledOverwrite(methodInfo.analysis(), METHOD_LINKS, tlv, methodInfo)) {
@@ -333,6 +347,7 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                     tlv = doMethod(methodInfo, true, write, writeShallow);
                 }
             } finally {
+                Graph.setAltSources(altSourcesOff, altSourcesUsed);
                 recursionPrevention.doneSource(methodInfo);
                 if (trace) {
                     io.codelaser.maddi.modification.link.impl.graph.IncrementalFixpointEngine.TRACE = false;

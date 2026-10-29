@@ -6,6 +6,7 @@ import io.codelaser.maddi.modification.link.impl.graph.Fact;
 import io.codelaser.maddi.modification.link.impl.graph.IncrementalFixpointEngine;
 import io.codelaser.maddi.modification.link.impl.graph.LabeledGraph;
 import io.codelaser.maddi.modification.prepwork.variable.ReturnVariable;
+import io.codelaser.maddi.modification.link.impl.graph.DegradedAnalysisException;
 import io.codelaser.maddi.modification.link.impl.localvar.IntermediateVariable;
 import io.codelaser.maddi.modification.link.impl.localvar.MarkerVariable;
 import io.codelaser.maddi.modification.link.impl.localvar.SharedVariable;
@@ -827,6 +828,105 @@ public class Graph {
     // CodeLaser/maddi-mod#77: gate NOSRCEVICT restores the rep edge for a reassigned source
     private static final boolean NO_SRC_EVICT = Gate.isSet("NOSRCEVICT");
 
+    /*
+     Alternatives are not aliases. A recipient assigned several values in one statement ('m = c ? a : b'; a call
+     result whose summary returns one of two arguments, 'newType ← 0:ownerType, newType ← 1:rawType') may hold either
+     value, but the values are not each other. Collapsing them into one group claimed they were: expanding the rep for
+     one source handed it the other's edges, and guava's TypeResolver.resolveParameterizedType read the conditional's
+     null on resolvedRawType ('(owner?.let { resolveType(it) })!!', CodeLaser/maddi-mod#72). The join of a statement's
+     alternatives already evicts such members (SharedVariables.planJoin); within one statement the recipient now
+     keeps its sources as plain edges onto their reps, and forms no group with them. Marked per statement by
+     LinkGraph.compute, from the statement's own links. Gate NOALTSOURCES.
+     */
+    private static final boolean NO_ALT_SOURCES = Gate.isSet("NOALTSOURCES");
+    private final Set<Variable> multiValued = new HashSet<>();
+
+    /*
+    Plain edges cost more than a group, and some shapes cost more than the work ceiling allows (guava's
+    ImmutableMapTest.testEquals, fernflower's StructClass.create). LinkComputerImpl.doMethod then computes the method
+    once more with alternatives off, as before this change, rather than degrading it: per thread, because one method's
+    links are computed on one thread, and saved and restored per method, because a method's computation computes its
+    callees'. ALT_SOURCES_USED says whether an attempt marked any alternatives, i.e. whether a retry differs.
+     */
+    private static final ThreadLocal<Boolean> ALT_SOURCES_OFF = ThreadLocal.withInitial(() -> false);
+    private static final ThreadLocal<Boolean> ALT_SOURCES_USED = ThreadLocal.withInitial(() -> false);
+    // the work ceiling, as soon as a statement marks alternatives: TestAlternativeSources' retry test
+    public static volatile boolean DEGRADE_ON_ALT_SOURCES_FOR_TESTING;
+
+    public static boolean altSourcesOff() {
+        return ALT_SOURCES_OFF.get();
+    }
+
+    public static boolean altSourcesUsed() {
+        return ALT_SOURCES_USED.get();
+    }
+
+    public static void setAltSources(boolean off, boolean used) {
+        ALT_SOURCES_OFF.set(off);
+        ALT_SOURCES_USED.set(used);
+    }
+
+    void markMultiValuedRecipients(List<Link> statementLinks) {
+        multiValued.clear();
+        if (NO_ALT_SOURCES || ALT_SOURCES_OFF.get()) return;
+        // the whole-object sources of each recipient in this statement, as the collapse sees them. A source that is
+        // part of the recipient ('node ← node.parent', a loop's updater) is the chain's next value, not an
+        // alternative: the loop reconstruction needs the group ('child.parent → node'). Only a whole variable (a local,
+        // a call result, a field of this) is a recipient of alternatives: the parts of a call result take what the
+        // callee's summary composes for them ('$rv.array[0] ← $rv9.array, ← $rv9.element, ← 4[0], ..', guava's
+        // FluentIterableTest.testFrom), shapes the group absorbs and plain edges expand path by path without end.
+        // An element of an array without a variable ('requireElements()[i] = value') has no primary: not whole either.
+        Map<Variable, Set<Variable>> sources = new LinkedHashMap<>();
+        for (Link link : statementLinks) {
+            if (link.linkNature().isAssignedFrom() && !(link.to() instanceof MarkerVariable)
+                && link.from().equals(Util.primary(link.from()))
+                && !Util.virtual(link.from()) && !Util.virtual(link.to()) && !Util.isPartOf(link.from(), link.to())) {
+                sources.computeIfAbsent(link.from(), _ -> new LinkedHashSet<>()).add(link.to());
+            }
+        }
+        // two sources are one value when they are already grouped ('r.i ← $_ce1, r.i ← b.j' after 'b.setJ(3)'), or
+        // when this statement's own single-source assignments connect them ('copyD.a ← 1:a, copyD.a ← 0:d.a' with
+        // the default '1:a ← 0:d.a'): union-find over the reps, along the single-source assignments
+        Map<Variable, Variable> parent = new HashMap<>();
+        java.util.function.Function<Variable, Variable> find = new java.util.function.Function<>() {
+            @Override
+            public Variable apply(Variable v) {
+                Variable rep = sharedVariables.translateForward(v);
+                Variable p = parent.getOrDefault(rep, rep);
+                while (!p.equals(parent.getOrDefault(p, p))) p = parent.get(p);
+                parent.put(rep, p);
+                return p;
+            }
+        };
+        sources.forEach((recipient, set) -> {
+            if (set.size() == 1) {
+                Variable a = find.apply(recipient);
+                Variable b = find.apply(set.iterator().next());
+                if (!a.equals(b)) parent.put(a, b);
+            }
+        });
+        Map<Variable, Set<Variable>> candidates = new LinkedHashMap<>();
+        sources.forEach((recipient, set) -> {
+            Set<Variable> values = set.stream().map(find).collect(Collectors.toCollection(LinkedHashSet::new));
+            if (values.size() > 1) candidates.put(recipient, values);
+        });
+        // recipients sharing an alternative keep their group: the values a callee's summary composes are the same
+        // variables at every call ('$rv3 ← RegularImmutableMap.EMPTY, ← oc:170, ← oc:87' for each of the 28 maps of
+        // guava's ImmutableMapTest.testEquals); as plain edges every pair of results connects through them, and the
+        // closure grows past the work ceiling. The group aliases those results, as before.
+        Map<Variable, Integer> uses = new HashMap<>();
+        candidates.values().forEach(values -> values.forEach(v -> uses.merge(v, 1, Integer::sum)));
+        candidates.forEach((recipient, values) -> {
+            if (values.stream().allMatch(v -> uses.get(v) == 1)) multiValued.add(recipient);
+        });
+        if (!multiValued.isEmpty()) {
+            ALT_SOURCES_USED.set(true);
+            if (DEGRADE_ON_ALT_SOURCES_FOR_TESTING) {
+                throw new DegradedAnalysisException(DegradedAnalysisException.Reason.WORK_CEILING);
+            }
+        }
+    }
+
     boolean mergeEdgeBi(Variable from, LinkNature linkNature, Variable to, String statementIndex) {
         if (Gate.isSet("TRACEVAR")
             && (from.toString().contains(Gate.get("TRACEVAR")) || to.toString().contains(Gate.get("TRACEVAR")))) {
@@ -893,6 +993,14 @@ public class Graph {
                 // being assigned ('num = amb'): its past source-participation stays valid for the OLD value, but
                 // the new value must not join the group as an alias. Keep the edge as a plain graph edge onto the
                 // rep: extraction then yields both 'method ← 1:num' (intra-group) and 'method ← 0:amb' (rep edge).
+                Variable tFromR = sharedVariables.translateForward(from);
+                Variable tToR = sharedVariables.translateForward(to);
+                if (tFromR.equals(tToR)) return engine.addVertex(tFromR);
+                return engine.addSymmetricEdge(tFromR, tToR, linkNature, statementIndex) > 0;
+            }
+            if (multiValued.contains(from)) {
+                // one of several values assigned in this statement: a plain edge onto the source's rep, no group
+                // (see markMultiValuedRecipients)
                 Variable tFromR = sharedVariables.translateForward(from);
                 Variable tToR = sharedVariables.translateForward(to);
                 if (tFromR.equals(tToR)) return engine.addVertex(tFromR);
