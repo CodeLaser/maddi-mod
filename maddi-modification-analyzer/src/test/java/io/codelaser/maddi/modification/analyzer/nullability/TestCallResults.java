@@ -887,4 +887,45 @@ public class TestCallResults extends NullabilityFixtures {
         assertEquals("Callable<T!>", s.get("a.b.LR.call(java.util.concurrent.Callable):0:action"), s.toString());
         assertEquals("String", s.get("a.b.LR.named()"), s.toString());
     }
+
+    @DisplayName("a for loop's init clause and updaters seed as assignments do (guava TypeResolver.resolveInternal)")
+    @Test
+    public void forClauses() {
+        Report report = run("a.b.FC", """
+                package a.b;
+                import java.util.*;
+                class FC {
+                    static final class Key { }
+                    static final class Var { final Key key = new Key(); }
+                    private final Map<Key, Var> mappings = new HashMap<>();
+                    static Key forLookup(Var v) { return v.key; }
+                    static Key forAny(Var v) { return v == null ? null : v.key; }
+                    Var resolve(Var var) {
+                        Var x = var;
+                        for (Var t = x; t != null; t = mappings.remove(forLookup(t))) {
+                            x = t;
+                        }
+                        return x;
+                    }
+                    Var unguarded(Var var, int n) {
+                        Var x = var;
+                        for (Var t = x; n > 0; t = mappings.remove(forAny(t))) {
+                            x = t;
+                            n--;
+                        }
+                        return x;
+                    }
+                }
+                """);
+        String locals = locals(report);
+        // the updater assigns t the library null of Map.remove (gate NOFORCLAUSES)
+        assertTrue(locals.contains("resolve.t: Var?"), locals);
+        assertTrue(locals.contains("unguarded.t: Var?"), locals);
+        String v = verdicts(report);
+        // the updater runs after a body that ran under 't != null': forLookup takes no null from t
+        // (gate NOFORUPDATERFACTS)
+        assertTrue(v.contains("forLookup(0:v): Var\n"), v);
+        // the control: the condition tests nothing, the null reaches forAny
+        assertTrue(v.contains("forAny(0:v): Var?"), v);
+    }
 }
