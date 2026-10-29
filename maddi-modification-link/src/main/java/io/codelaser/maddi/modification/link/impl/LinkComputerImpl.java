@@ -806,12 +806,8 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
          holds an own type, or an own static method already known to modify.
          */
         private static boolean modifiesOwnStaticState(MethodInfo methodInfo) {
-            if (methodInfo.isConstructor() || methodInfo.isStaticInitializer() || methodInfo.isAbstract()) return false;
-            Value.SetOfTypeInfo decided = methodInfo.analysis().getOrNull(PropertyImpl.STATIC_STATE_MODIFIED_METHOD,
-                    ValueImpl.SetOfTypeInfoImpl.class);
-            if (decided != null) {
-                return decided.typeInfoSet().stream().anyMatch(t -> OwnStaticState.owns(methodInfo, t));
-            }
+            Boolean decided = OwnStaticState.decidedModifiesOwn(methodInfo);
+            if (decided != null) return decided;
             if (methodInfo.methodBody() == null || methodInfo.methodBody().isEmpty()) return false;
             AtomicBoolean found = new AtomicBoolean();
             methodInfo.methodBody().visit(e -> {

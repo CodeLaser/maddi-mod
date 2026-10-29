@@ -18,6 +18,7 @@
 package io.codelaser.maddi.modification.analyzer.modification;
 
 import io.codelaser.maddi.modification.analyzer.CommonTest;
+import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
 import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
@@ -188,6 +189,7 @@ public class TestStaticSideEffects extends CommonTest {
                 static void callsService() { Service.work(); }
                 static java.util.function.IntSupplier reference() { return Counter::next; }
                 static java.util.function.Supplier<HasUniqueIdentifier> factory() { return HasUniqueIdentifier::new; }
+                static int use(Counter c) { return c.instanceNext(); }
             }
             """;
 
@@ -248,6 +250,35 @@ public class TestStaticSideEffects extends CommonTest {
             assertTrue(nonModifying(client.findUniqueMethod(name, 0)), name);
         }
         assertTrue(nonModifying(type(parsed, "Service").findUniqueMethod("work", 0)));
+    }
+
+    // the same verdicts with the modification reachability pass, the CLI's and the IDE daemon's default and then the
+    // single writer of NON_MODIFYING_METHOD; and through it, a caller's argument is modified
+    @DisplayName("own static state is a modification under the reachability pass too")
+    @Test
+    public void testOwnStateUnderReachability() throws IOException {
+        TypeInfo parsed = javaInspector.parse("a.b.Client", OWN_STATE);
+        List<Info> ao = prepAnalyzer.doPrimaryTypes(Set.copyOf(parsed.compilationUnit().types()));
+        new IteratingAnalyzerImpl(javaInspector, new IteratingAnalyzerImpl.ConfigurationBuilder()
+                .setMaxIterations(10)
+                .setModificationViaReachability(true)
+                .build()).analyze(ao);
+        TypeInfo client = type(parsed, "Client");
+        TypeInfo counter = type(parsed, "Counter");
+
+        for (String name : List.of("next", "nextTwice", "instanceNext")) {
+            assertFalse(nonModifying(counter.findUniqueMethod(name, 0)), name);
+        }
+        assertFalse(nonModifying(counter.findUniqueMethod("recursive", 1)));
+        assertTrue(nonModifying(counter.findUniqueMethod("read", 0)));
+        for (String name : List.of("twice", "viaRecursion", "create", "createChild", "indirect", "numbered", "reads",
+                "callsService", "reference", "factory")) {
+            assertTrue(nonModifying(client.findUniqueMethod(name, 0)), name);
+        }
+        MethodInfo use = client.findUniqueMethod("use", 1);
+        assertTrue(nonModifying(use), "Counter's state, not Client's");
+        assertEquals(ValueImpl.BoolImpl.FALSE, use.parameters().getFirst().analysis()
+                .getOrNull(PropertyImpl.UNMODIFIED_PARAMETER, ValueImpl.BoolImpl.class), "c.instanceNext() modifies c");
     }
 
     private static TypeInfo type(TypeInfo primary, String simpleName) {

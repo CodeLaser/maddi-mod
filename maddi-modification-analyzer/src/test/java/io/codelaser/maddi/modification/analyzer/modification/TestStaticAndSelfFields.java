@@ -214,11 +214,24 @@ public class TestStaticAndSelfFields extends CommonTest {
     @DisplayName("statics count like instance fields; a self-referencing field is skipped")
     @Test
     public void test() throws IOException {
+        run(false);
+    }
+
+    // with the modification reachability pass (MODREACH, the CLI's and the IDE daemon's default), the single writer of
+    // NON_MODIFYING_METHOD when it runs
+    @DisplayName("statics count like instance fields, under the reachability pass")
+    @Test
+    public void testReachability() throws IOException {
+        run(true);
+    }
+
+    private void run(boolean reachability) throws IOException {
         AnalyzerBundle bundle = buildAnalyzerBundle();
         TypeInfo x = bundle.javaInspector().parse("a.b.X", INPUT);
         List<Info> analysisOrder = bundle.prepAnalyzer().doPrimaryType(x);
         IteratingAnalyzer analyzer = new IteratingAnalyzerImpl(bundle.javaInspector(),
-                new IteratingAnalyzerImpl.ConfigurationBuilder().setMaxIterations(10).build());
+                new IteratingAnalyzerImpl.ConfigurationBuilder().setMaxIterations(10)
+                        .setModificationViaReachability(reachability).build());
         analyzer.analyze(analysisOrder);
         for (String name : List.of("CountAccess", "WithStaticList", "WithStaticString", "Cell", "Node", "Link",
                 "Single")) {

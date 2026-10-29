@@ -19,6 +19,7 @@
 package io.codelaser.maddi.modification.common.util;
 
 import io.codelaser.maddi.annotation.rare.IgnoreModifications;
+import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.expression.Assignment;
 import io.codelaser.maddi.cst.api.expression.MethodCall;
 import io.codelaser.maddi.cst.api.expression.VariableExpression;
@@ -27,6 +28,8 @@ import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.cst.api.variable.Variable;
+import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
+import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 
 /**
  * The static state a method's type owns: that of its primary type (a nested type included) and of its parent types.
@@ -38,6 +41,19 @@ public final class OwnStaticState {
     private static final String IGNORE_MODIFICATIONS_FQN = IgnoreModifications.class.getCanonicalName();
 
     private OwnStaticState() {
+    }
+
+    /**
+     * From {@code STATIC_STATE_MODIFIED_METHOD}: does the method modify the static state its type owns? Null while the
+     * static side effect analyzer has not decided it. Never for a constructor, which is modifying already, nor for a
+     * static initializer block, the static state's constructor.
+     */
+    public static Boolean decidedModifiesOwn(MethodInfo methodInfo) {
+        if (methodInfo.isConstructor() || methodInfo.isStaticInitializer() || methodInfo.isAbstract()) return false;
+        Value.SetOfTypeInfo set = methodInfo.analysis().getOrNull(PropertyImpl.STATIC_STATE_MODIFIED_METHOD,
+                ValueImpl.SetOfTypeInfoImpl.class);
+        if (set == null) return null;
+        return set.typeInfoSet().stream().anyMatch(t -> owns(methodInfo, t));
     }
 
     /** The complement of {@code StaticSideEffectAnalyzerImpl.escapes}. */

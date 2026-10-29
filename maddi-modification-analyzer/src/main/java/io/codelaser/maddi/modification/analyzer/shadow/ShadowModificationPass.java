@@ -1,6 +1,7 @@
 package io.codelaser.maddi.modification.analyzer.shadow;
 
 import io.codelaser.maddi.modification.common.AnalysisHelper;
+import io.codelaser.maddi.modification.common.util.OwnStaticState;
 import io.codelaser.maddi.modification.link.LinkComputer;
 import io.codelaser.maddi.modification.link.impl.LinkVariable;
 import io.codelaser.maddi.modification.link.impl.LinkComputerImpl;
@@ -359,6 +360,11 @@ public class ShadowModificationPass {
                 seeds.stream().filter(sd -> !seedOrigin.containsKey(sd))
                         .forEach(sd -> seedOrigin.put(sd, mi.fullyQualifiedName() + " modified " + v));
             }
+        }
+        // the static state the type owns is state like any other (road §050): no receiver-rooted variable carries its
+        // modification, so it seeds the method itself (STATIC_STATE_MODIFIED_METHOD, converged by now)
+        if (Boolean.TRUE.equals(OwnStaticState.decidedModifiesOwn(mi))) {
+            seedWithOrigin(mi, mi, "modifies its type's own static state");
         }
         // E3: field -> parameter linked to that field, with the ENGINE's OWN nature filter
         // (TypeModIndyAnalyzerImpl.relevantLinkForModification): identicalTo with virtual-
