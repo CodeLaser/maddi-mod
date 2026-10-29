@@ -41,7 +41,8 @@ annotation says otherwise (ASSUMED_DEFAULTS). Each is either a gap (ThreadLocal.
 nobody wrote down; annotating it, either way, takes it off the list.
 
 The counts per package are a ratchet: a new unannotated method raises one, annotating lowers one; both fail until the
-table below is updated. The full list is written to build/assumed-defaults.txt, ready to work through. The JDK's API
+table below is updated. The full list is written to build/assumed-defaults.txt, ready to work through, each with
+the line of its declaration in the hints, or "undeclared". The JDK's API
 differs per release (java.security on 26), so the table holds only on the release the jdk results were compiled on
 (CompileAnalysisHints.JDK_RELEASE_FILE); elsewhere the list is still written.
  */
@@ -49,41 +50,41 @@ public class TestAssumedDefaults extends CommonTest {
 
     // package -> {modifying methods, modified parameters} assumed by default
     private static final Map<String, List<Integer>> EXPECTED = new TreeMap<>(Map.ofEntries(
-            Map.entry("java.awt", List.of(273, 176)),
+            Map.entry("java.awt", List.of(178, 176)),
             Map.entry("java.awt.event", List.of(1, 1)),
             Map.entry("java.awt.image", List.of(7, 1)),
-            Map.entry("java.io", List.of(519, 152)),
-            Map.entry("java.lang", List.of(172, 57)),
+            Map.entry("java.io", List.of(129, 152)),
+            Map.entry("java.lang", List.of(127, 57)),
             Map.entry("java.lang.annotation", List.of(0, 3)),
             Map.entry("java.lang.constant", List.of(16, 10)),
             Map.entry("java.lang.invoke", List.of(5, 0)),
-            Map.entry("java.lang.ref", List.of(12, 4)),
-            Map.entry("java.lang.reflect", List.of(117, 15)),
-            Map.entry("java.net", List.of(248, 73)),
+            Map.entry("java.lang.ref", List.of(6, 4)),
+            Map.entry("java.lang.reflect", List.of(104, 15)),
+            Map.entry("java.net", List.of(182, 73)),
             Map.entry("java.net.http", List.of(23, 22)),
             Map.entry("java.nio.charset", List.of(0, 2)),
-            Map.entry("java.nio.file", List.of(13, 34)),
-            Map.entry("java.security", List.of(173, 110)),
+            Map.entry("java.nio.file", List.of(11, 34)),
+            Map.entry("java.security", List.of(139, 110)),
             Map.entry("java.time", List.of(16, 5)),
             Map.entry("java.time.chrono", List.of(34, 8)),
-            Map.entry("java.time.format", List.of(40, 6)),
+            Map.entry("java.time.format", List.of(9, 6)),
             Map.entry("java.time.temporal", List.of(31, 2)),
-            Map.entry("java.util", List.of(695, 323)),
-            Map.entry("java.util.concurrent", List.of(577, 75)),
-            Map.entry("java.util.concurrent.atomic", List.of(93, 1)),
+            Map.entry("java.util", List.of(266, 323)),
+            Map.entry("java.util.concurrent", List.of(227, 75)),
+            Map.entry("java.util.concurrent.atomic", List.of(6, 1)),
             Map.entry("java.util.function", List.of(41, 0)),
-            Map.entry("java.util.jar", List.of(25, 8)),
-            Map.entry("java.util.logging", List.of(90, 7)),
-            Map.entry("java.util.random", List.of(80, 5)),
-            Map.entry("java.util.regex", List.of(22, 4)),
+            Map.entry("java.util.jar", List.of(19, 8)),
+            Map.entry("java.util.logging", List.of(62, 7)),
+            Map.entry("java.util.random", List.of(63, 5)),
+            Map.entry("java.util.regex", List.of(12, 4)),
             Map.entry("java.util.stream", List.of(175, 4)),
-            Map.entry("java.util.zip", List.of(133, 69)),
+            Map.entry("java.util.zip", List.of(56, 69)),
             Map.entry("javax.accessibility", List.of(83, 15)),
             Map.entry("javax.security.auth", List.of(2, 0)),
-            Map.entry("javax.swing", List.of(315, 157)),
+            Map.entry("javax.swing", List.of(130, 157)),
             Map.entry("javax.swing.event", List.of(17, 17)),
-            Map.entry("javax.swing.table", List.of(16, 7)),
-            Map.entry("javax.swing.text", List.of(54, 38)),
+            Map.entry("javax.swing.table", List.of(3, 7)),
+            Map.entry("javax.swing.text", List.of(19, 38)),
             Map.entry("org.junit.jupiter.api", List.of(0, 92)),
             Map.entry("org.junit.jupiter.api.function", List.of(2, 0)),
             Map.entry("org.slf4j", List.of(52, 0))
@@ -100,12 +101,12 @@ public class TestAssumedDefaults extends CommonTest {
             typeInfo.constructorAndMethodStream().forEach(mi -> {
                 if (assumed(mi, NON_MODIFYING_METHOD)) {
                     c[0]++;
-                    lines.add("M " + mi.fullyQualifiedName());
+                    lines.add("M " + mi.fullyQualifiedName() + " " + where(mi));
                 }
                 for (ParameterInfo pi : mi.parameters()) {
                     if (assumed(pi, UNMODIFIED_PARAMETER)) {
                         c[1]++;
-                        lines.add("P " + mi.fullyQualifiedName() + " " + pi.name());
+                        lines.add("P " + mi.fullyQualifiedName() + " " + pi.name() + " " + where(mi));
                     }
                 }
             });
@@ -121,6 +122,14 @@ public class TestAssumedDefaults extends CommonTest {
                 "the table holds on the JDK release of the jdk results only");
         assertEquals(table(EXPECTED), table(actual), "assumed modifying methods and modified parameters per package;"
                 + " see build/assumed-defaults.txt");
+    }
+
+    // where the hints declare the method, to annotate it there; "undeclared" when a declaration has to be added
+    private static String where(MethodInfo mi) {
+        MethodInfo declaration = hintsParser.declaration(mi);
+        if (declaration == null || declaration.source() == null) return "undeclared";
+        String uri = declaration.typeInfo().compilationUnit().uri().toString();
+        return uri.substring(uri.lastIndexOf('/') + 1) + ":" + declaration.source().beginLine();
     }
 
     private static boolean assumed(Info info, Property property) {

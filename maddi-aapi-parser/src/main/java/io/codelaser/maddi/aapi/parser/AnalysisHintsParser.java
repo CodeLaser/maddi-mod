@@ -53,6 +53,8 @@ public class AnalysisHintsParser implements AnnotationProvider {
 
     private final List<TypeInfo> typesParsed = new ArrayList<>();
     private final Map<Element, Data> infoMap = new LinkedHashMap<>();
+    // the hint declaration (in the X$ shadow) of a target method or constructor
+    private final Map<MethodInfo, MethodInfo> declarations = new HashMap<>();
     private final JavaInspectorFactory javaInspectorFactory;
     private int warnings;
     private int annotatedTypes;
@@ -218,6 +220,7 @@ public class AnalysisHintsParser implements AnnotationProvider {
                     annotations += sourceMethod.annotations().size();
                     Data methodData = makeData(sourceMethod);
                     infoMap.put(targetMethod, methodData);
+                    declarations.put(targetMethod, sourceMethod);
                     doParameters(sourceMethod, targetMethod);
                 } else {
                     LOGGER.warn("Ignoring method '{}', not found in target type '{}'", sourceMethod, targetType);
@@ -232,6 +235,7 @@ public class AnalysisHintsParser implements AnnotationProvider {
                     annotations += sourceMethod.annotations().size();
                     Data methodData = makeData(sourceMethod);
                     infoMap.put(targetMethod, methodData);
+                    declarations.put(targetMethod, sourceMethod);
                     doParameters(sourceMethod, targetMethod);
                 } else {
                     LOGGER.warn("Ignoring constructor '{}', not found in target type '{}'", sourceMethod, targetType);
@@ -410,6 +414,11 @@ public class AnalysisHintsParser implements AnnotationProvider {
 
     public List<TypeInfo> typesParsed() {
         return typesParsed;
+    }
+
+    /** The declaration in the hints of a method or constructor, null when the hints do not declare it. */
+    public MethodInfo declaration(MethodInfo target) {
+        return declarations.get(target);
     }
 
     public Data data(Element info) {

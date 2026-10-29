@@ -53,6 +53,7 @@ public class CommonTest {
     private static CompiledTypesManager compiledTypesManager;
 
     static List<TypeInfo> allTypes;
+    static AnalysisHintsParser hintsParser;
     static List<TypeInfo> sorted;
     static G<TypeInfo> graph;
     private static Runtime runtime;
@@ -76,6 +77,7 @@ public class CommonTest {
         ((Logger) LoggerFactory.getLogger("io.codelaser.maddi.aapi")).setLevel(Level.DEBUG);
 
         AnalysisHintsParser analysisHintsParser = createAnalysisHintsParser();
+        hintsParser = analysisHintsParser;
         AnalysisHints test = new AnalysisHints.Builder()
                 .setLibraryName("test")
                 .setAnalysisResultsDir(Path.of("build/"))
