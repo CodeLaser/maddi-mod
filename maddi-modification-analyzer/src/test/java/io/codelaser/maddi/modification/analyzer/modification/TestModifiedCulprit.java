@@ -89,14 +89,14 @@ public class TestModifiedCulprit extends CommonTest {
             TypeInfo bag = analyze();
             MethodInfo add = bag.findUniqueMethod("add", 1);
             assertFalse(add.isNonModifying());
-            assertEquals("9 calls store(..) <- 12 calls items.add(..), a modifying method outside the analysis"
-                         + " (no annotation: the default)", culprit(add));
+            assertEquals("9 calls store(..) <- 12 calls items.add(..), a modifying method outside the analysis",
+                    culprit(add));
             assertEquals("14 assigns this.count", culprit(bag.findUniqueMethod("bump", 0)));
             MethodInfo fill = bag.findUniqueMethod("fill", 1);
             assertEquals("15 calls bag.add(..) <- 9 calls store(..) <- 12 calls items.add(..), a modifying method"
-                         + " outside the analysis (no annotation: the default)", culprit(fill.parameters().getFirst()));
+                         + " outside the analysis", culprit(fill.parameters().getFirst()));
             assertNull(culprit(bag.findUniqueMethod("size", 0)), "not modified, no culprit");
-            // neither Collection.add nor Reference.get has an annotation in the JDK hints: the why says so
+            // Collection.add is @Modified in the JDK hints; Reference.get has no annotation, and the why says so
             assertEquals("18 calls ref.get(..), a modifying method outside the analysis (no annotation: the default)",
                     culprit(bag.findUniqueMethod("peek", 0)));
         } finally {
