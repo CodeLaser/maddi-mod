@@ -137,34 +137,63 @@ public class TestReassignedLocalFaces extends CommonTest {
                 mlv("newThenNew"));
     }
 
+    // the switch fork is opt-in (SWITCHFORK, see LinkComputerImpl.NO_SWITCH_FORK) until the older defects it exposes
+    // are fixed; both modes are pinned
+    private static final boolean SWITCH_FORK = Gate.isSet("SWITCHFORK");
+
     @DisplayName("r = of(elements[0]); r = construct(other): no link between the parameters")
     @Test
     public void ofThenConstruct() {
         // was '0:elements ~ 1:other', '1:other[0] → 0:elements[0]', 'ofThenConstruct.element → 0:elements[0]'
-        assertEquals("[-, -] --> ofThenConstruct.array←1:other,ofThenConstruct.array∋1:other[0],"
-                     + "ofThenConstruct.element∈1:other,ofThenConstruct.element←1:other[0],"
-                     + "ofThenConstruct.array.§m≡1:other.§m  MOD[]", mlv("ofThenConstruct"));
+        // (the face drop); 'construct' holds a switch, so the fork changes its summary
+        if (SWITCH_FORK) {
+            assertEquals("[-, -] --> ofThenConstruct.array←1:other,ofThenConstruct.array∋1:other[0],"
+                         + "ofThenConstruct.element∈1:other,ofThenConstruct.element←1:other[0],"
+                         + "ofThenConstruct.array.§m≡1:other.§m  MOD[]", mlv("ofThenConstruct"));
+        } else {
+            assertEquals("[-, -] --> ofThenConstruct.array←1:other,ofThenConstruct.array∋1:other[0],"
+                         + "ofThenConstruct.array[0]∈1:other,ofThenConstruct.array[0]←1:other[0],"
+                         + "ofThenConstruct.element←1:other[0],"
+                         + "ofThenConstruct.array.§m≡1:other.§m  MOD[]", mlv("ofThenConstruct"));
+        }
     }
 
     @DisplayName("switch cases returning of(elements[0]) and construct(other): as the if-else")
     @Test
     public void switchReturns() {
-        // was '0:elements ~ 1:other', 'switchReturns.element → 0:elements[0]': the cases composed (gate NOSWITCHFORK)
-        assertEquals(mlv("ifReturns").replace("ifReturns", "switchReturns"), mlv("switchReturns"));
-        assertEquals("[-, -] --> switchReturns.element∈0:elements,switchReturns.element←0:elements[0],"
-                     + "switchReturns.array∋switchReturns.element,switchReturns.array←1:other,"
-                     + "switchReturns.array∋1:other[0],switchReturns.array[0]←1:other[0],"
-                     + "switchReturns.element∈1:other,switchReturns.element←1:other[0],"
-                     + "switchReturns.array.§m≡1:other.§m  MOD[]", mlv("switchReturns"));
+        if (SWITCH_FORK) {
+            assertEquals(mlv("ifReturns").replace("ifReturns", "switchReturns"), mlv("switchReturns"));
+            assertEquals("[-, -] --> switchReturns.element∈0:elements,switchReturns.element←0:elements[0],"
+                         + "switchReturns.array∋switchReturns.element,switchReturns.array←1:other,"
+                         + "switchReturns.array∋1:other[0],switchReturns.array[0]←1:other[0],"
+                         + "switchReturns.element∈1:other,switchReturns.element←1:other[0],"
+                         + "switchReturns.array.§m≡1:other.§m  MOD[]", mlv("switchReturns"));
+        } else {
+            // the cases composed: '0:elements ~ 1:other', 'switchReturns.element → 0:elements[0]'
+            assertEquals("[0:elements~1:other,0:elements∋1:other[0],0:elements[0]∈1:other,0:elements[0]←1:other[0],"
+                         + " 1:other~0:elements,1:other∋0:elements[0],1:other[0]∈0:elements,1:other[0]→0:elements[0]]"
+                         + " --> switchReturns.array~0:elements,switchReturns.array∋0:elements[0],"
+                         + "switchReturns.array←1:other,switchReturns.array∋1:other[0],"
+                         + "switchReturns.array[0]∈switchReturns.array,switchReturns.array[0]→switchReturns.element,"
+                         + "switchReturns.array[0]∈0:elements,switchReturns.array[0]→0:elements[0],"
+                         + "switchReturns.array[0]∈1:other,switchReturns.array[0]←1:other[0],"
+                         + "switchReturns.element→switchReturns.array[0],switchReturns.element←1:other[0],"
+                         + "switchReturns.array.§m≡1:other.§m  MOD[]", mlv("switchReturns"));
+        }
     }
 
     @DisplayName("switch cases returning a constant and a new object: as the if-else")
     @Test
     public void switchEmpty() {
-        // was without 'switchEmpty ← C.EMPTY': the second return erased the first
-        assertEquals(mlv("ifEmpty").replace("ifEmpty", "switchEmpty"), mlv("switchEmpty"));
-        assertEquals("[-] --> switchEmpty←C.EMPTY,switchEmpty.element∈0:elements,switchEmpty.element←0:elements[0]"
-                     + "  MOD[]", mlv("switchEmpty"));
+        if (SWITCH_FORK) {
+            assertEquals(mlv("ifEmpty").replace("ifEmpty", "switchEmpty"), mlv("switchEmpty"));
+            assertEquals("[-] --> switchEmpty←C.EMPTY,switchEmpty.element∈0:elements,"
+                         + "switchEmpty.element←0:elements[0]  MOD[]", mlv("switchEmpty"));
+        } else {
+            // without 'switchEmpty ← C.EMPTY': the second return erased the first
+            assertEquals("[-] --> switchEmpty.element∈0:elements,switchEmpty.element←0:elements[0]  MOD[]",
+                    mlv("switchEmpty"));
+        }
     }
 
     @DisplayName("a case falling through is still linked one after the other")

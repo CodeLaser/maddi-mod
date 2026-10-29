@@ -1500,9 +1500,14 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
          CodeLaser/maddi-mod#72 4a). The body is one block, the labels are positions in it: each run of statements
          between labels is an alternative, when none falls through into the next (each non-empty run ends in a
          return, throw, break or continue) and no run reads a local declared in an earlier one. Without a default,
-         no case may run. Anything else stays linked one after the other. Gate NOSWITCHFORK.
+         no case may run. Anything else stays linked one after the other.
+
+         Opt-in (SWITCHFORK) until the two older defects its more complete flow exposes are fixed: two alternative
+         sources of one call result exchanging their links (guava TypeResolver.resolveParameterizedType), and #68's
+         tolerance walk failing at the return of a library override (guava Joiner); with the fork on, guava's oracle
+         gained 15 unsafe parameters and 167 reflection tests threw (worktree-maddi-all, 2026-10-29).
          */
-        private static final boolean NO_SWITCH_FORK = Gate.isSet("NOSWITCHFORK");
+        private static final boolean NO_SWITCH_FORK = !Gate.isSet("SWITCHFORK");
 
         private static boolean hasDefault(SwitchStatementOldStyle ss) {
             return ss.switchLabels().stream().anyMatch(l -> l.literal().isEmpty() && l.patternVariable() == null);
