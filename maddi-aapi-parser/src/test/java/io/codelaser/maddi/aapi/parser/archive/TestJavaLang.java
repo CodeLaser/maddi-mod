@@ -228,6 +228,25 @@ public class TestJavaLang extends CommonTest {
         assertTrue(methodInfo.isModifying());
     }
 
+    // the 2026-10-29 java.lang audit: a query left unannotated defaulted to modifying, its argument to modified
+    @Test
+    public void testThreadLocal() {
+        TypeInfo typeInfo = compiledTypesManager().typeIfLoaded(ThreadLocal.class);
+        assertFalse(typeInfo.findUniqueMethod("get", 0).isModifying(), "the initial value goes to the thread's map");
+        assertTrue(typeInfo.findUniqueMethod("set", 1).isModifying());
+        assertTrue(typeInfo.findUniqueMethod("remove", 0).isModifying());
+    }
+
+    @Test
+    public void testStringValueOfCharArray() {
+        TypeInfo typeInfo = compiledTypesManager().typeIfLoaded(String.class);
+        MethodInfo valueOf = typeInfo.methodStream()
+                .filter(m -> "valueOf".equals(m.name()) && m.parameters().size() == 1
+                             && m.parameters().getFirst().parameterizedType().arrays() == 1)
+                .findFirst().orElseThrow();
+        assertSame(TRUE, valueOf.parameters().getFirst().analysis().getOrDefault(UNMODIFIED_PARAMETER, FALSE));
+    }
+
     @Test
     public void testThrowableConstructor2() {
         TypeInfo typeInfo = compiledTypesManager().typeIfLoaded(Throwable.class);
