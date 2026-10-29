@@ -59,6 +59,8 @@ public record ExpressionVisitor(Runtime runtime,
     static final boolean NO_EXPRESSION_SCOPE_FIELD = Gate.isSet("NOEXPRSCOPEFIELD");
     // gate NOCALLRESULTFIELD: a call result its callee calls a field of the receiver is no genuine containment
     private static final boolean NO_CALL_RESULT_FIELD = Gate.isSet("NOCALLRESULTFIELD");
+    // gate NOGETTERRECEIVER: an inlined getter drops its receiver expression's links and modifications
+    private static final boolean NO_GETTER_RECEIVER = Gate.isSet("NOGETTERRECEIVER");
 
     static final Result EMPTY = new Result(LinksImpl.EMPTY, LinkedVariablesImpl.EMPTY, Map.of(), Set.of(), List.of(),
             Map.of(), Set.of(), Set.of());
@@ -843,7 +845,12 @@ public record ExpressionVisitor(Runtime runtime,
                 VariableExpression ve = runtime.newVariableExpression(
                         runtime.newFieldReference(fv.field(),
                                 runtime.newVariableExpression(objectPrimary), mc.concreteReturnType()));
-                return variableExpression(ve, variableData, stage);
+                Result getter = variableExpression(ve, variableData, stage);
+                // a getter on a call result ('parent.getWrapper().getH()', inlined as '$__rv0.h'): keep what the
+                // receiver evaluation knows, its links ('$__rv0 ≺ 0:parent') and its modifications. Dropped, a
+                // modification through the field stopped at the result (CodeLaser/maddi-mod#80). Gate NOGETTERRECEIVER
+                if (!NO_GETTER_RECEIVER && !(mc.object() instanceof VariableExpression)) return getter.merge(object);
+                return getter;
             }
         }
 

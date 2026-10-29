@@ -64,6 +64,26 @@ public class TestCallResultFieldOfReceiver extends CommonTest {
                 static void viaChain(Node parent) { parent.getWrapper().x = 1; }
                 static void viaCall(Node parent) { parent.getWrapper().set(1); }
                 static void viaLocalCall(Node parent) { Wrapper w = parent.getWrapper(); w.set(1); }
+                static class Holder {
+                    java.util.List<Wrapper> list = new java.util.ArrayList<>();
+                    Wrapper first() { return list.get(0); }
+                }
+                static class W2 { Holder h = new Holder(); Holder getH() { return h; } }
+                static class N2 {
+                    W2 wrapper;
+                    int type;
+                    N2 parent;
+                    W2 getWrapper() {
+                        N2 node = this;
+                        while (node.type == 1) {
+                            node = node.parent;
+                        }
+                        return node.wrapper;
+                    }
+                }
+                static void viaGetter(N2 parent) { parent.getWrapper().getH().list.clear(); }
+                static void viaElement(N2 parent) { Wrapper w = parent.getWrapper().getH().first(); w.x = 1; }
+                static void viaElementField(N2 parent) { Wrapper w = parent.wrapper.getH().first(); w.x = 1; }
                 static int readOnly(Node parent) { Wrapper w = parent.getWrapper(); return w.x; }
             }
             """;
@@ -100,6 +120,20 @@ public class TestCallResultFieldOfReceiver extends CommonTest {
                      + "  MOD[a.b.C.viaChain(a.b.C.Node):0:parent]", mlv("viaChain"));
         assertEquals("[-] --> -  MOD[$_ce1, a.b.C.viaCall(a.b.C.Node):0:parent]", mlv("viaCall"));
         assertEquals("[-] --> -  MOD[$_ce1, a.b.C.viaLocalCall(a.b.C.Node):0:parent]", mlv("viaLocalCall"));
+    }
+
+    @DisplayName("a getter on the result, and an element of a collection on the result held in a local")
+    @Test
+    public void deeper() {
+        // was 'MOD[]': the inlined getter dropped its receiver's links (gate NOGETTERRECEIVER)
+        assertEquals("[-] --> -  MOD[a.b.C.viaGetter(a.b.C.N2):0:parent]", mlv("viaGetter"));
+        // KNOWN GAP, fernflower's setLambdaVars ('parent.getWrapper().getMethods().getWithKey(..)', then a modification
+        // of it): the element held in 'w' only gets '0:parent.parent ≥ w', and a modification does not travel back
+        // over ≥. Letting it travel (deep-only, as ∈) also reads a list iterated read-only as modified, since the
+        // iterator sits in its object graph (TestModificationThroughView), so it needs a sharper link than ≤ here
+        assertEquals("[-] --> -  MOD[]", mlv("viaElement"));
+        assertEquals("[-] --> -  MOD[a.b.C.viaElementField(a.b.C.N2):0:parent, parent.wrapper, parent.wrapper.h]",
+                mlv("viaElementField"));
     }
 
     @DisplayName("as through the field itself, or through a getter returning it")
