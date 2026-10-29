@@ -32,6 +32,7 @@ import io.codelaser.maddi.cst.api.analysis.Message;
 import io.codelaser.maddi.cst.api.analysis.Property;
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.element.Element;
+import io.codelaser.maddi.cst.api.element.Source;
 import io.codelaser.maddi.cst.api.expression.Assignment;
 import io.codelaser.maddi.cst.api.expression.ConstructorCall;
 import io.codelaser.maddi.cst.api.expression.Expression;
@@ -53,6 +54,7 @@ import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
@@ -481,10 +483,17 @@ public class GuardAnalyzerImpl extends CommonAnalyzerImpl implements GuardAnalyz
             Value.Independent independent = fieldInfo.analysis().getOrNull(INDEPENDENT_FIELD,
                     ValueImpl.IndependentImpl.class);
             if (independent != null && independent.isDependent()) {
-                reportViolation(fieldInfo, blameFieldDependent(fieldInfo), contractLocation,
-                        "field '" + fieldInfo.name() + "' of " + contractHolder.fullyQualifiedName()
-                        + " is dependent: external modifications can reach the accessible content of the type,"
-                        + " violating the @Independent contract on " + contractHolder.fullyQualifiedName());
+                String suffix = ", violating the @Independent contract on " + contractHolder.fullyQualifiedName();
+                List<Culprit> culprits = culpritsExposing(fieldInfo);
+                if (!culprits.isEmpty()) {
+                    reportAtCulprits(culprits, MessageImpl.cause(fieldInfo, "field '" + fieldInfo.name() + "' of "
+                            + contractHolder.fullyQualifiedName() + " is dependent"), contractLocation, suffix);
+                } else {
+                    reportViolation(fieldInfo, null, contractLocation,
+                            "field '" + fieldInfo.name() + "' of " + contractHolder.fullyQualifiedName()
+                            + " is dependent: external modifications can reach the accessible content of the type"
+                            + suffix);
+                }
             }
         }
     }
@@ -539,6 +548,18 @@ public class GuardAnalyzerImpl extends CommonAnalyzerImpl implements GuardAnalyz
         if (rule < 0) return;
         String prefix = "field '" + fieldInfo.name() + "' of " + contractHolder.fullyQualifiedName();
         String suffix = " of the @Immutable contract on " + contractHolder.fullyQualifiedName();
+        // Rules 1 and 3 are broken elsewhere than at the field: by the statement that modifies it, by the method that
+        // hands it out. The error goes THERE, one per culprit, because that is where one reads and fixes it; the field
+        // becomes a cause. Only when no culprit is found does the field carry the error itself.
+        List<Culprit> culprits = rule == 1 ? culpritsModifying(contractHolder, fieldInfo)
+                : rule == 3 ? culpritsExposing(fieldInfo) : List.of();
+        if (!culprits.isEmpty()) {
+            String ruleText = rule == 1 ? "rule 1 (all fields @NotModified)"
+                    : "rule 3 (no parameter or return value dependent on the fields)";
+            reportAtCulprits(culprits, MessageImpl.cause(fieldInfo, prefix + (rule == 1 ? " is modified"
+                    : " is dependent")), contractLocation, ", violating " + ruleText + suffix);
+            return;
+        }
         String core = switch (rule) {
             case 0 -> " is assignable after construction, violating rule 0 (all fields effectively final)";
             case 1 -> " is modified, violating rule 1 (all fields @NotModified)";
@@ -547,8 +568,20 @@ public class GuardAnalyzerImpl extends CommonAnalyzerImpl implements GuardAnalyz
             default -> " is dependent: it is exposed to, or shared with, the outside world, violating rule 3"
                        + " (no parameter or return value dependent on the fields)";
         };
-        Message blame = rule == 3 ? blameFieldDependent(fieldInfo) : null;
-        reportViolation(fieldInfo, blame, contractLocation, prefix + core + suffix);
+        reportViolation(fieldInfo, null, contractLocation, prefix + core + suffix);
+    }
+
+    /** Where a contract is broken: the method, the statement in it (or the method itself), and what it does. */
+    private record Culprit(MethodInfo method, Source source, String what) {
+    }
+
+    /** One error per culprit, located at it; the field and the contract are its causes. */
+    private void reportAtCulprits(List<Culprit> culprits, Message fieldCause, Message contractLocation,
+                                  String suffix) {
+        for (Culprit culprit : culprits) {
+            analyzerMessages.add(new MessageImpl(culprit.source(), culprit.method(), Message.Severity.ERROR,
+                    culprit.what() + suffix, CONTRACT_VIOLATION, List.of(fieldCause, contractLocation)));
+        }
     }
 
     /**
@@ -984,28 +1017,156 @@ public class GuardAnalyzerImpl extends CommonAnalyzerImpl implements GuardAnalyz
      * {@code null} when the links are undecided, or when no single link explains it.
      */
     private Message blameFieldDependent(FieldInfo fieldInfo) {
+        List<Culprit> culprits = culpritsExposing(fieldInfo);
+        if (culprits.isEmpty()) return null;
+        Culprit first = culprits.getFirst();
+        return MessageImpl.cause(first.source(), first.method(), first.what());
+    }
+
+    /**
+     * Every non-private method that makes the field dependent, with the statement that does it: a {@code return}
+     * handing the field (or a view of it, or an object linked to it) to the caller, or the assignment storing a
+     * parameter the caller keeps. One per method, the first link that explains it; read from the field's links as
+     * {@link #blameFieldDependent} describes.
+     */
+    private List<Culprit> culpritsExposing(FieldInfo fieldInfo) {
         Links links = fieldInfo.analysis().getOrNull(LinksImpl.LINKS, LinksImpl.class);
-        if (links == null) return null;
+        if (links == null) return List.of();
         TypeInfo owner = fieldInfo.owner();
         Value.Independent independentOfType = analysisHelper.typeIndependentFromImmutableOrNull(owner,
                 fieldInfo.type());
-        if (independentOfType == null) return null;
+        if (independentOfType == null) return List.of();
+        String field = "field '" + fieldInfo.name() + "'";
+        Map<MethodInfo, Culprit> culprits = new LinkedHashMap<>();
         for (Link link : links) {
             Value.Independent toIndependent = independenceOfLink(link, links, independentOfType);
             if (toIndependent == null || !toIndependent.isDependent()) continue;
-            if (link.to() instanceof ParameterInfo pi && !pi.methodInfo().access().isPrivate()
+            // this.items.§m ≡ get.§m: the view's holder, as computeIndependent reaches it
+            boolean view = LinkToField.sharesModification(link);
+            Variable to = view ? Util.primary(link.to()) : link.to();
+            if (to instanceof ParameterInfo pi && !pi.methodInfo().access().isPrivate()
                 && owner.inHierarchyOf(pi.typeInfo())) {
-                return MessageImpl.cause(pi, "the field is linked to parameter '" + pi.simpleName() + "' of "
-                                             + describe(pi.methodInfo()) + ": the caller keeps a reference to it");
-            }
-            if (link.to() instanceof ReturnVariable rv && !rv.methodInfo().access().isPrivate()
-                && owner.inHierarchyOf(rv.methodInfo().typeInfo())) {
-                return MessageImpl.cause(rv.methodInfo(), "the field is linked to the return value of "
-                                                          + describe(rv.methodInfo())
-                                                          + ": it is handed to the caller");
+                MethodInfo mi = pi.methodInfo();
+                Source where = firstAssignmentTo(mi, fieldInfo);
+                culprits.putIfAbsent(mi, new Culprit(mi, where != null ? where : pi.source(),
+                        capitalize(describe(mi)) + " stores parameter '" + pi.simpleName() + "' in " + field
+                        + ": the caller keeps a reference to it"));
+            } else if (to instanceof ReturnVariable rv && !rv.methodInfo().access().isPrivate()
+                       && owner.inHierarchyOf(rv.methodInfo().typeInfo())) {
+                MethodInfo mi = rv.methodInfo();
+                Source where = firstReturnOf(mi, fieldInfo);
+                String what = view ? "a view of " + field
+                        : link.from().equals(links.primary()) ? field : "an object linked to " + field;
+                culprits.putIfAbsent(mi, new Culprit(mi, where != null ? where : mi.source(),
+                        capitalize(describe(mi)) + " returns " + what + ": the caller can modify it"));
             }
         }
-        return null;
+        return List.copyOf(culprits.values());
+    }
+
+    /**
+     * Rule 1's culprits: per method other than a constructor, the first statement that modifies the field — a
+     * modifying call on it, the field passed to a parameter the callee modifies, or an assignment into it
+     * ({@code items[i] = x}, {@code this.box.value = x}). The evidence {@link #blameParameterModified} uses.
+     */
+    private List<Culprit> culpritsModifying(TypeInfo owner, FieldInfo fieldInfo) {
+        List<Culprit> culprits = new ArrayList<>();
+        String field = "field '" + fieldInfo.name() + "'";
+        owner.methods().stream().filter(mi -> !mi.methodBody().isEmpty()).forEach(mi -> {
+            AtomicReference<Culprit> found = new AtomicReference<>();
+            mi.methodBody().visit(e -> {
+                if (found.get() != null) return false;
+                if (e instanceof MethodCall mc) {
+                    if (isField(mc.object(), fieldInfo) && isModifyingMethod(mc.methodInfo())) {
+                        found.set(new Culprit(mi, e.source(), capitalize(describe(mi)) + " modifies " + field
+                                + " ('" + fieldInfo.name() + "." + mc.methodInfo().name() + "(...)')"));
+                        return false;
+                    }
+                    List<Expression> args = mc.parameterExpressions();
+                    List<ParameterInfo> params = mc.methodInfo().parameters();
+                    for (int k = 0; k < args.size() && k < params.size(); k++) {
+                        if (isField(args.get(k), fieldInfo) && isModifiedParameter(params.get(k))) {
+                            found.set(new Culprit(mi, e.source(), capitalize(describe(mi)) + " passes " + field
+                                    + " to '" + mc.methodInfo().name() + "', which modifies it"));
+                            return false;
+                        }
+                    }
+                } else if (e instanceof Assignment asg && rootedInField(asg.variableTarget(), fieldInfo)) {
+                    found.set(new Culprit(mi, e.source(), capitalize(describe(mi)) + " assigns into " + field));
+                    return false;
+                }
+                return true;
+            });
+            if (found.get() != null) culprits.add(found.get());
+        });
+        return culprits;
+    }
+
+    /** The first {@code return} in {@code mi} whose value mentions the field; {@code null} when there is none. */
+    private static Source firstReturnOf(MethodInfo mi, FieldInfo fieldInfo) {
+        if (mi.methodBody().isEmpty()) return null;
+        AtomicReference<Source> found = new AtomicReference<>();
+        mi.methodBody().visit(e -> {
+            if (found.get() != null) return false;
+            if (e instanceof ReturnStatement rs && rs.expression() != null && mentions(rs.expression(), fieldInfo)) {
+                found.set(rs.source());
+                return false;
+            }
+            return true;
+        });
+        return found.get();
+    }
+
+    /** The first assignment to the field itself in {@code mi}; {@code null} when there is none. */
+    private static Source firstAssignmentTo(MethodInfo mi, FieldInfo fieldInfo) {
+        if (mi.methodBody().isEmpty()) return null;
+        AtomicReference<Source> found = new AtomicReference<>();
+        mi.methodBody().visit(e -> {
+            if (found.get() != null) return false;
+            if (e instanceof Assignment asg && asg.variableTarget() instanceof FieldReference fr
+                && fr.fieldInfo() == fieldInfo) {
+                found.set(e.source());
+                return false;
+            }
+            return true;
+        });
+        return found.get();
+    }
+
+    private static boolean mentions(Expression expression, FieldInfo fieldInfo) {
+        AtomicReference<Boolean> found = new AtomicReference<>(false);
+        expression.visit(e -> {
+            if (found.get()) return false;
+            if (e instanceof Expression ex && isField(ex, fieldInfo)) {
+                found.set(true);
+                return false;
+            }
+            return true;
+        });
+        return found.get();
+    }
+
+    private static boolean isField(Expression e, FieldInfo fieldInfo) {
+        return e instanceof VariableExpression ve && ve.variable() instanceof FieldReference fr
+               && fr.fieldInfo() == fieldInfo && fr.scopeIsRecursivelyThis();
+    }
+
+    /** {@code this.items[i]}, {@code this.box.value}: a target strictly inside the field. */
+    private static boolean rootedInField(Variable target, FieldInfo fieldInfo) {
+        Variable current = target;
+        Variable root = rootOf(current);
+        while (root != current) {
+            if (root instanceof FieldReference fr && fr.fieldInfo() == fieldInfo && fr.scopeIsRecursivelyThis()) {
+                return true;
+            }
+            current = root;
+            root = rootOf(current);
+        }
+        return false;
+    }
+
+    private static String capitalize(String s) {
+        return s.isEmpty() ? s : Character.toUpperCase(s.charAt(0)) + s.substring(1);
     }
 
     /** A constructor's {@code name()} is {@code <init>}; name it after its type instead. */
@@ -1019,6 +1180,9 @@ public class GuardAnalyzerImpl extends CommonAnalyzerImpl implements GuardAnalyz
     private Value.Independent independenceOfLink(Link link, Links links, Value.Independent independentOfType) {
         if (link.from().equals(links.primary()) && link.linkNature().isIdenticalToOrAssignedFromTo()) {
             return independentOfType;
+        }
+        if (LinkToField.sharesModification(link)) {
+            return independentOfType; // a view of the field: the whole field is handed out
         }
         if (!link.linkNature().isDecoration()) {
             return analysisHelper.typeIndependentFromImmutableOrNull(link.to().parameterizedType());

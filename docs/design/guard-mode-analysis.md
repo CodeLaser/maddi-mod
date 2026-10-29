@@ -348,6 +348,26 @@ hardening work). ~500 files differ, mostly kotlin parsing; the guard-relevant de
   dead channel, alongside `FINAL_TYPE` and `ANALYZER_ERROR`.
 - 18 guard tests over 5 classes; analyzer + common green (187).
 
+
+### Done (2026-10-28 — violations located at their culprits)
+
+- **Rules 1 and 3 of `@Immutable`, and the `@Independent` contract, report at the culprit, not at the field.** A
+  field breaks these rules somewhere else: in the statement that modifies it, in the method that hands it out or
+  stores a parameter the caller keeps. The error now sits there, one per culprit method, with the field and the
+  contract location as its causes: "Method 'get' returns a view of field 'items': the caller can modify it,
+  violating rule 3 ...", located at the `return`; "The constructor of 'X' stores parameter 'set' in field 'set'
+  ...", located at the assignment; "Method 'add' modifies field 'items' ('items.add(...)') ...". When no culprit is
+  found, the field carries the error as before. Rules 0 and 2 stay on the field, which is where they are broken.
+- **Every culprit, not the first.** `culpritsExposing` keeps one per method from the field's `LINKS` (the same
+  links `computeIndependent` folds); `culpritsModifying` scans each non-constructor method for the first statement
+  that modifies the field, with the evidence `blameParameterModified` uses. A class handing its list out through
+  two getters gets two errors; the near-miss hints still take the first as their cause (`blameFieldDependent`).
+- **Why:** in the IDE, the editor underlines a finding's own location, and its causes go to the tooltip and the
+  tool window only. Located at the field, a getter that broke the contract was invisible where one reads and fixes
+  it. Reported on the Java demo's `WrongImmutable` with `get() { return items.subList(0, 10); }`, which also
+  exposed that the field side and this blame missed the `§m ≡ §m` view link (maddi-mod `f8647641`, `8a7097a0`).
+- Tests: `TestGuardImmutable` (`testRule1`, `testRule3`, `testRule3View`, `testRule3EveryCulprit`),
+  `TestGuardIndependentType`.
 ### Done (2026-07-15, kotlin trunk — method blame from METHOD_LINKS too)
 
 - **`blameMethodDependent` reads `METHOD_LINKS`**, replacing its CST `return <field>` scan.

@@ -62,21 +62,24 @@ public class TestGuardIndependentType extends CommonTest {
         assertFalse(violations.isEmpty(), "expected a violation for the dependent field");
         Message v = violations.getFirst();
         assertTrue(v.level().isError());
-        assertEquals("a.b.X.HoldsSomeoneElsesSet.set", v.info().fullyQualifiedName());
-        assertTrue(v.message().contains("is dependent"), v.message());
+        // located at the culprit, the constructor's 'this.set = set', not at the field
+        assertEquals("a.b.X.HoldsSomeoneElsesSet.<init>(java.util.Set)", v.info().fullyQualifiedName());
+        assertEquals(10, v.source().beginLine());
+        assertEquals(51, v.source().beginPos(), "at the assignment, not the constructor");
+        assertTrue(v.message().contains("The constructor of 'HoldsSomeoneElsesSet' stores parameter 'set' in field"
+                                        + " 'set': the caller keeps a reference to it"), v.message());
         assertTrue(v.message().contains("@Independent contract on a.b.X.HoldsSomeoneElsesSet"), v.message());
 
-        // the why-chain: [ blame, contract location ]. The blame comes from the field's computed LINKS, the same
-        // data FieldAnalyzerImpl used to decide the field is dependent: it is linked to the constructor parameter.
+        // the why-chain: [ the field, contract location ]. The culprit comes from the field's computed LINKS, the
+        // same data FieldAnalyzerImpl used to decide the field is dependent.
         assertEquals(2, v.causes().size(), v.causes().stream().map(Message::message).toList().toString());
-        Message blame = v.causes().getFirst();
-        assertTrue(blame.message().contains("linked to parameter 'set' of the constructor of 'HoldsSomeoneElsesSet'"),
-                blame.message());
-        assertTrue(blame.message().contains("the caller keeps a reference to it"), blame.message());
-        assertNotNull(blame.source(), "the blame must be located at the parameter");
+        Message field = v.causes().getFirst();
+        assertEquals("a.b.X.HoldsSomeoneElsesSet.set", field.info().fullyQualifiedName());
+        assertTrue(field.message().contains("is dependent"), field.message());
         assertTrue(v.causes().get(1).message().contains("@Independent contracted on HoldsSomeoneElsesSet"),
                 v.causes().get(1).message());
     }
+
 
     @Language("java")
     private static final String INDIRECT_ASSIGNMENT = """
@@ -104,13 +107,11 @@ public class TestGuardIndependentType extends CommonTest {
         List<Message> violations = violations(analyzeWithGuard("a.b.X", INDIRECT_ASSIGNMENT));
         assertFalse(violations.isEmpty(), "expected a violation: the field still holds the caller's set");
         Message v = violations.getFirst();
-        assertEquals("a.b.X.ViaRequireNonNull.set", v.info().fullyQualifiedName());
         // a CST scan for 'this.f = <parameter>' would find nothing here (the RHS is a MethodCall) and blame nothing;
-        // the link engine computes the exact assignment, so the parameter is still named.
+        // the link engine computes the exact assignment, so the constructor is still the culprit.
+        assertEquals("a.b.X.ViaRequireNonNull.<init>(java.util.Set)", v.info().fullyQualifiedName());
+        assertTrue(v.message().contains("stores parameter 'set' in field 'set'"), v.message());
         assertEquals(2, v.causes().size(), v.causes().stream().map(Message::message).toList().toString());
-        Message blame = v.causes().getFirst();
-        assertTrue(blame.message().contains("linked to parameter 'set' of the constructor of 'ViaRequireNonNull'"),
-                blame.message());
     }
 
     @Language("java")

@@ -353,7 +353,10 @@ public class FieldAnalyzerImpl extends CommonAnalyzerImpl implements FieldAnalyz
                 // a real field of a parameter or return value counts as the variable itself: the field holding
                 // 'holder.list' (this.element ← 0:holder.list) shares the caller's object as much as one holding
                 // 'holder' (activemq's SchedulerBroker.systemUsage = brokerService.getSystemUsage())
-                Variable toPrimary = realFieldPathRoot(link.to());
+                // a shared modification marker (this.items.§m ≡ get.§m) reaches the variable that holds it, past
+                // the virtual field realFieldPathRoot stops at
+                boolean sharesModification = LinkToField.sharesModification(link);
+                Variable toPrimary = sharesModification ? Util.primary(link.to()) : realFieldPathRoot(link.to());
                 if (toPrimary instanceof ParameterInfo pi
                     && (!pi.methodInfo().access().isPrivate() || escapesAsFunctionalInterface(pi.methodInfo()))
                     && owner.inHierarchyOf(pi.typeInfo())
@@ -363,6 +366,13 @@ public class FieldAnalyzerImpl extends CommonAnalyzerImpl implements FieldAnalyz
                     if (link.from().equals(links.primary()) && link.linkNature().isIdenticalToOrAssignedFromTo()) {
                         // direct link
                         toIndependent = independentOfType;//already computed
+                    } else if (sharesModification) {
+                        // this.items.§m ≡ get.§m: a view of the field (subList, unmodifiableList's backing) is
+                        // modified with it, so it hands out the whole field, as the method side judges it
+                        // (LinkToField.linkedType, CodeLaser/maddi-mod#60). Read as transported content, the §m
+                        // marker's own type decided instead, and a getter returning items.subList(..) left the
+                        // field, and the type, @Independent
+                        toIndependent = independentOfType;
                     } else if (!link.linkNature().isDecoration()) {
                         // a part of the field is linked to a parameter or return value. The
                         // TRANSPORTED CONTENT decides dependence, not the container: a content-tier
