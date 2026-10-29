@@ -314,8 +314,8 @@ public class TestStaticSideEffects extends CommonTest {
     @DisplayName("culprits: the first responsible statement, followed into the callee to the assignment")
     @Test
     public void testCulprit() throws IOException {
-        boolean before = io.codelaser.maddi.modification.analyzer.impl.StaticSideEffectAnalyzerImpl.CULPRITS;
-        io.codelaser.maddi.modification.analyzer.impl.StaticSideEffectAnalyzerImpl.CULPRITS = true;
+        boolean before = io.codelaser.maddi.modification.common.util.Culprits.ENABLED;
+        io.codelaser.maddi.modification.common.util.Culprits.ENABLED = true;
         try {
             TypeInfo X = javaInspector.parse("a.b.Big", CULPRIT);
             List<Info> ao = prepWork(X);
@@ -328,24 +328,24 @@ public class TestStaticSideEffects extends CommonTest {
             assertFalse(sse(register), "its own static state");
             assertNull(culprit(register), "no static side effect, no culprit");
         } finally {
-            io.codelaser.maddi.modification.analyzer.impl.StaticSideEffectAnalyzerImpl.CULPRITS = before;
+            io.codelaser.maddi.modification.common.util.Culprits.ENABLED = before;
         }
     }
 
     @DisplayName("culprits: a call of a contracted @StaticSideEffects method ends the chain")
     @Test
     public void testCulpritContract() throws IOException {
-        boolean before = io.codelaser.maddi.modification.analyzer.impl.StaticSideEffectAnalyzerImpl.CULPRITS;
-        io.codelaser.maddi.modification.analyzer.impl.StaticSideEffectAnalyzerImpl.CULPRITS = true;
+        boolean before = io.codelaser.maddi.modification.common.util.Culprits.ENABLED;
+        io.codelaser.maddi.modification.common.util.Culprits.ENABLED = true;
         try {
             TypeInfo X = javaInspector.parse("a.b.X", PROPAGATION);
             List<Info> ao = prepWork(X);
             analyzer.go(ao);
 
-            assertEquals("6 calls X.direct(..) <- 5 calls X.reconfigure(..), contracted @StaticSideEffects",
+            assertEquals("6 calls direct(..) <- 5 calls reconfigure(..), contracted @StaticSideEffects",
                     culprit(X.findUniqueMethod("indirect", 0)));
         } finally {
-            io.codelaser.maddi.modification.analyzer.impl.StaticSideEffectAnalyzerImpl.CULPRITS = before;
+            io.codelaser.maddi.modification.common.util.Culprits.ENABLED = before;
         }
     }
 
@@ -368,8 +368,8 @@ public class TestStaticSideEffects extends CommonTest {
     @DisplayName("culprits: a recursive call is no culprit; the walk goes on to the statement that is")
     @Test
     public void testCulpritRecursive() throws IOException {
-        boolean before = io.codelaser.maddi.modification.analyzer.impl.StaticSideEffectAnalyzerImpl.CULPRITS;
-        io.codelaser.maddi.modification.analyzer.impl.StaticSideEffectAnalyzerImpl.CULPRITS = true;
+        boolean before = io.codelaser.maddi.modification.common.util.Culprits.ENABLED;
+        io.codelaser.maddi.modification.common.util.Culprits.ENABLED = true;
         try {
             TypeInfo rec = javaInspector.parse("a.b.Rec", RECURSIVE);
             List<Info> ao = prepWork(rec);
@@ -377,7 +377,7 @@ public class TestStaticSideEffects extends CommonTest {
 
             assertEquals("6 assigns Registry2.count", culprit(rec.findUniqueMethod("process", 1)));
         } finally {
-            io.codelaser.maddi.modification.analyzer.impl.StaticSideEffectAnalyzerImpl.CULPRITS = before;
+            io.codelaser.maddi.modification.common.util.Culprits.ENABLED = before;
         }
     }
 

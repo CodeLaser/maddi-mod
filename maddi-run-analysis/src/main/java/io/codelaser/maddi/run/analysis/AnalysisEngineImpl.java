@@ -149,16 +149,16 @@ public class AnalysisEngineImpl implements AnalysisEngine {
         ModificationOptions o = request.options();
         boolean sseBefore = StaticSideEffectAnalyzerImpl.ENABLED;
         boolean clusterBefore = EventualCluster.ENABLED;
-        boolean culpritsBefore = StaticSideEffectAnalyzerImpl.CULPRITS;
+        boolean culpritsBefore = io.codelaser.maddi.modification.common.util.Culprits.ENABLED;
         if (o.staticSideEffects() != null) StaticSideEffectAnalyzerImpl.ENABLED = o.staticSideEffects();
         if (o.eventualCluster() != null) EventualCluster.ENABLED = o.eventualCluster();
-        if (o.culprits() != null) StaticSideEffectAnalyzerImpl.CULPRITS = o.culprits();
+        if (o.culprits() != null) io.codelaser.maddi.modification.common.util.Culprits.ENABLED = o.culprits();
         try {
             return modificationWithSwitchesSet(request);
         } finally {
             StaticSideEffectAnalyzerImpl.ENABLED = sseBefore;
             EventualCluster.ENABLED = clusterBefore;
-            StaticSideEffectAnalyzerImpl.CULPRITS = culpritsBefore;
+            io.codelaser.maddi.modification.common.util.Culprits.ENABLED = culpritsBefore;
         }
     }
 

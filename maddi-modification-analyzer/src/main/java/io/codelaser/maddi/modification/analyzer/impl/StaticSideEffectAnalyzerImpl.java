@@ -17,6 +17,7 @@
 
 package io.codelaser.maddi.modification.analyzer.impl;
 
+import io.codelaser.maddi.modification.common.util.Culprits;
 import io.codelaser.maddi.modification.common.util.OwnStaticState;
 import io.codelaser.maddi.modification.common.util.TolerantWrite;
 import io.codelaser.maddi.cst.api.analysis.Value;
@@ -67,11 +68,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class StaticSideEffectAnalyzerImpl {
     // non-final: a run's ModificationOptions can switch it off
     public static boolean ENABLED = true;
-    /*
-     Off by default: a run's ModificationOptions.culprits switches on STATIC_SIDE_EFFECTS_CULPRIT_METHOD, the first
-     statement responsible for a static side effect, followed into the callees (the IDE daemon asks for it).
-     */
-    public static boolean CULPRITS = false;
     // how far a culprit is followed into the callees
     private static final int CULPRIT_DEPTH = 6;
 
@@ -126,7 +122,7 @@ public class StaticSideEffectAnalyzerImpl {
                     ValueImpl.BoolImpl.from(sse), mi)) {
                 propertyChanges.incrementAndGet();
             }
-            if (sse && CULPRITS && !mi.analysis().haveAnalyzedValueFor(PropertyImpl.STATIC_SIDE_EFFECTS_CULPRIT_METHOD)) {
+            if (sse && Culprits.ENABLED && !mi.analysis().haveAnalyzedValueFor(PropertyImpl.STATIC_SIDE_EFFECTS_CULPRIT_METHOD)) {
                 List<Value.Culprit.Step> steps = culprit(mi, owner -> escapes(mi, owner), sets, 0, new HashSet<>());
                 // display data: not a verdict, so not counted as a property change
                 if (!steps.isEmpty()) {
@@ -152,7 +148,7 @@ public class StaticSideEffectAnalyzerImpl {
             FieldReference direct = directStaticModification(e);
             if (direct != null && wanted.test(direct.fieldInfo().owner())) {
                 String what = e instanceof Assignment ? "assigns " : "modifies ";
-                found.add(step(mi, e, what + name(direct)));
+                found.add(Culprits.step(mi, e, what + name(direct)));
                 return false;
             }
             MethodInfo callee = callee(e);
@@ -161,7 +157,7 @@ public class StaticSideEffectAnalyzerImpl {
                 TypeInfo owner = set.stream().filter(wanted).findFirst().orElse(null);
                 if (owner != null) {
                     if (!computable(callee)) {
-                        found.add(step(mi, e, describeCall(e, callee) + ", contracted @StaticSideEffects"));
+                        found.add(Culprits.step(mi, e, Culprits.describeCall(e, callee) + ", contracted @StaticSideEffects"));
                         return false;
                     }
                     // a call whose callee yields no chain is no culprit: a recursive call (the callee is already
@@ -169,7 +165,7 @@ public class StaticSideEffectAnalyzerImpl {
                     // depth. The walk goes on to the next statement.
                     List<Value.Culprit.Step> inCallee = culprit(callee, owner::equals, group, depth + 1, visited);
                     if (!inCallee.isEmpty()) {
-                        found.add(step(mi, e, describeCall(e, callee)));
+                        found.add(Culprits.step(mi, e, Culprits.describeCall(e, callee)));
                         found.addAll(inCallee);
                         return false;
                     }
@@ -182,25 +178,8 @@ public class StaticSideEffectAnalyzerImpl {
         return found;
     }
 
-    private static Value.Culprit.Step step(MethodInfo in, Element e, String text) {
-        io.codelaser.maddi.cst.api.element.Source source = e.source();
-        java.net.URI uri = in.compilationUnit() == null ? null : in.compilationUnit().uri();
-        return new Value.Culprit.Step(uri == null ? null : uri.toString(),
-                source == null ? 0 : source.beginLine(), source == null ? 0 : source.beginPos(), text);
-    }
-
     private static String name(FieldReference fr) {
         return fr.fieldInfo().owner().simpleName() + "." + fr.fieldInfo().name();
-    }
-
-    private static String describeCall(Element e, MethodInfo callee) {
-        String type = callee.typeInfo().simpleName();
-        return switch (e) {
-            case ConstructorCall _ -> "new " + type + "(..)";
-            case ExplicitConstructorInvocation _ -> "calls " + type + "'s constructor";
-            case MethodReference _ -> "references " + type + "::" + callee.name();
-            default -> "calls " + type + "." + callee.name() + "(..)";
-        };
     }
 
     /*

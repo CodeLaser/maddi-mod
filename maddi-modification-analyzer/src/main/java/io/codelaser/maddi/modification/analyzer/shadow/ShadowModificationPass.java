@@ -1,6 +1,7 @@
 package io.codelaser.maddi.modification.analyzer.shadow;
 
 import io.codelaser.maddi.modification.common.AnalysisHelper;
+import io.codelaser.maddi.modification.common.util.Culprits;
 import io.codelaser.maddi.modification.common.util.OwnStaticState;
 import io.codelaser.maddi.modification.link.LinkComputer;
 import io.codelaser.maddi.modification.link.impl.LinkVariable;
@@ -16,6 +17,7 @@ import io.codelaser.maddi.modification.prepwork.variable.impl.VariableInfoImpl;
 import io.codelaser.maddi.modification.prepwork.variable.ObjectCreationVariable;
 import io.codelaser.maddi.cst.api.analysis.PropertyValueMap;
 import io.codelaser.maddi.cst.api.analysis.Value;
+import io.codelaser.maddi.cst.api.element.Element;
 import io.codelaser.maddi.cst.api.element.SourceSet;
 import io.codelaser.maddi.cst.api.expression.AnnotationExpression;
 import io.codelaser.maddi.cst.api.expression.Assignment;
@@ -176,6 +178,21 @@ public class ShadowModificationPass {
     private final Set<TypeInfo> orderPrimaryTypes = new HashSet<>();
     private int methods, methodsWithoutLinks, edgeCount, callSitesWithoutArgumentLinks, unprojectedReceivers;
 
+    /*
+     Culprits (Culprits.ENABLED, off by default): where each edge and seed came from, the first time it was built, so
+     the cause chain of a modified element can be told as statements. 'in' is the method whose body holds 'element';
+     'element' is null for a seed from a summary, and 'why' is the seed's reason (null for an edge).
+     */
+    private record Site(Info in, Element element, String why) {
+    }
+
+    private final boolean recordSites = Culprits.ENABLED;
+    private final Map<Object, Map<Object, Site>> edgeSites = new HashMap<>();
+    private final Map<Object, Site> seedSites = new HashMap<>();
+    // the statement-level element the walk is at (handleBlock), and its method; null outside the walk
+    private Element currentSite;
+    private MethodInfo currentSiteMethod;
+
     public Report go(List<Info> analysisOrder) {
         List<MethodInfo> methodInfos = analysisOrder.stream()
                 .filter(i -> i instanceof MethodInfo).map(i -> (MethodInfo) i).toList();
@@ -292,7 +309,11 @@ public class ShadowModificationPass {
         Value.Bool degraded = mi.analysis().getOrNull(PropertyImpl.DEGRADED_ANALYSIS_METHOD, ValueImpl.BoolImpl.class);
         if (degraded != null && degraded.isTrue()) {
             seed(mi, true);
-            mi.parameters().forEach(pi -> seed(pi, true));
+            seedSite(mi, mi, "its analysis was abandoned: taken as modifying");
+            mi.parameters().forEach(pi -> {
+                seed(pi, true);
+                seedSite(pi, mi, "its analysis was abandoned: taken as modifying");
+            });
         }
         MethodLinkedVariables mlv = mi.analysis().getOrNull(MethodLinkedVariablesImpl.METHOD_LINKS,
                 MethodLinkedVariablesImpl.class);
@@ -358,7 +379,10 @@ public class ShadowModificationPass {
             seedVariable(mi, v, skipReceiverRooted, !mlv.deepOnlyModified().contains(v));
             if (seeds.size() > before) {
                 seeds.stream().filter(sd -> !seedOrigin.containsKey(sd))
-                        .forEach(sd -> seedOrigin.put(sd, mi.fullyQualifiedName() + " modified " + v));
+                        .forEach(sd -> {
+                            seedOrigin.put(sd, mi.fullyQualifiedName() + " modified " + v);
+                            seedSite(sd, mi, "modifies " + v.simpleName());
+                        });
             }
         }
         // the static state the type owns is state like any other (road §050): no receiver-rooted variable carries its
@@ -502,6 +526,11 @@ public class ShadowModificationPass {
         if (structural) structuralSeeds.add(node);
     }
 
+    /** A seed without a statement: from a summary, or the method as a whole. */
+    private void seedSite(Object node, MethodInfo mi, String why) {
+        if (recordSites) seedSites.putIfAbsent(node, new Site(mi, null, why));
+    }
+
     /** engine mirror (FieldAnalyzerImpl.computeUnmodified): a hidden-content field is never modified, so it is no
      *  node -- a node would carry one instance's modification to every value ever stored in the field */
     private static boolean isFieldNode(FieldInfo fieldInfo) {
@@ -520,6 +549,10 @@ public class ShadowModificationPass {
         }
         if (seeds.add(node)) seedOrigin.put(node, mi.fullyQualifiedName() + " " + why);
         if (structural) structuralSeeds.add(node);
+        if (recordSites) {
+            seedSites.putIfAbsent(node, currentSite != null ? new Site(currentSiteMethod, currentSite, why)
+                    : new Site(mi, null, why));
+        }
     }
 
     /**
@@ -686,6 +719,10 @@ public class ShadowModificationPass {
                     if (!subBlocks.contains(b)) handleBlock(mi, b);
                     return false;
                 }
+                if (e instanceof Assignment || e instanceof MethodCall || e instanceof ConstructorCall) {
+                    currentSite = e;
+                    currentSiteMethod = mi;
+                }
                 if (e instanceof Assignment a && a.variableTarget() != null) {
                     seedAssignmentTarget(mi, vd, a.variableTarget());
                 }
@@ -744,6 +781,7 @@ public class ShadowModificationPass {
                 }
                 return true;
             });
+            currentSite = null;
         }
     }
 
@@ -1360,6 +1398,10 @@ public class ShadowModificationPass {
     private void addEdge(Object from, Object to) {
         Object node = unwrap(to);
         if (from == node) return;
+        if (recordSites && currentSite != null) {
+            edgeSites.computeIfAbsent(from, k -> new HashMap<>())
+                    .putIfAbsent(node, new Site(currentSiteMethod, currentSite, null));
+        }
         if (successors.computeIfAbsent(from, k -> new HashSet<>()).add(node)) {
             edgeCount++;
             if (to instanceof DeepOnly) deepOnlySuccessors.computeIfAbsent(from, k -> new HashSet<>()).add(node);
@@ -1447,6 +1489,7 @@ public class ShadowModificationPass {
                             report.reached().contains(mi), report.frontierIncomplete().contains(mi), false, mi,
                             contracted.test(mi));
                     counts[r]++;
+                    writeCulprit(mi, PropertyImpl.NON_MODIFYING_METHOD, report);
                     track.accept(mi, r);
                     // the structural twin (#25), from the structural closure; not counted
                     track.accept(mi, write(mi.analysis(), PropertyImpl.STRUCTURALLY_NON_MODIFYING_METHOD,
@@ -1459,6 +1502,7 @@ public class ShadowModificationPass {
                                 contracted.test(pi));
                         counts[rp]++;
                         track.accept(pi, rp);
+                        writeCulprit(pi, PropertyImpl.UNMODIFIED_PARAMETER, report);
                         track.accept(pi, write(pi.analysis(), PropertyImpl.STRUCTURALLY_UNMODIFIED_PARAMETER,
                                 report.reachedStructural().contains(pi), report.frontierIncomplete().contains(pi),
                                 immutable, pi, contracted.test(pi)));
@@ -1471,6 +1515,7 @@ public class ShadowModificationPass {
                             false);
                     counts[r]++;
                     track.accept(fi, r);
+                    writeCulprit(fi, PropertyImpl.UNMODIFIED_FIELD, report);
                     track.accept(fi, write(fi.analysis(), PropertyImpl.STRUCTURALLY_UNMODIFIED_FIELD,
                             report.reachedStructural().contains(fi), report.frontierIncomplete().contains(fi), immutable,
                             fi, false));
@@ -1482,6 +1527,112 @@ public class ShadowModificationPass {
         return new WriteCounts(counts[DOWNGRADED], counts[DECIDED_FALSE], counts[DECIDED_TRUE],
                 counts[LEFT_UNDECIDED], counts[REVERSE_UPGRADED], counts[REVERSE_KEPT], counts[CONTRACT_KEPT],
                 changed, weakened[0]);
+    }
+
+    /*
+     Culprits: a reached element whose property is now FALSE gets its cause chain, as statements. Overwritten each
+     round: a later MODREACH round can reach it along another chain. An element left unmodified keeps a stale one
+     from an earlier round, if any, which the consumers ignore (they show a why only beside its annotation).
+     */
+    private void writeCulprit(Info info, io.codelaser.maddi.cst.api.analysis.Property property, Report report) {
+        if (!recordSites || !report.reached().contains(info)) return;
+        Value.Bool value = info.analysis().getOrNull(property, ValueImpl.BoolImpl.class);
+        if (value == null || !value.isFalse()) return;
+        List<Value.Culprit.Step> steps = culprit(info, report);
+        if (steps.isEmpty()) return;
+        ValueImpl.CulpritImpl culprit = new ValueImpl.CulpritImpl(steps);
+        if (info.analysis().haveAnalyzedValueFor(PropertyImpl.MODIFIED_CULPRIT)) {
+            info.analysis().overwrite(PropertyImpl.MODIFIED_CULPRIT, culprit);
+        } else {
+            info.analysis().set(PropertyImpl.MODIFIED_CULPRIT, culprit);
+        }
+    }
+
+    /*
+     The cause chain from a reached node back to its seed, the node's own statement first: each edge at the
+     statement that built it (a call implicating the receiver, an argument), then the seed, the modification itself.
+     An edge built outside the walk is told by what it stands for (a field a parameter is stored in, an
+     implementation); one that says nothing is left out.
+     */
+    private List<Value.Culprit.Step> culprit(Object node, Report report) {
+        List<Value.Culprit.Step> steps = new ArrayList<>();
+        Object at = node;
+        for (int guard = 0; report.cause().containsKey(at) && guard < 64; guard++) {
+            Object from = report.cause().get(at);
+            Site site = edgeSites.getOrDefault(from, Map.of()).get(at);
+            Value.Culprit.Step step = site != null
+                    ? Culprits.step(site.in(), site.element(), describe(site.element()))
+                    : sitelessEdge(from);
+            if (step != null) Culprits.add(steps, step);
+            at = from;
+        }
+        Site seed = seedSites.get(at);
+        if (seed != null && sharedCalleeSeed(seed.why()) && !steps.isEmpty()) {
+            // a callee outside the analysis, seeded once for all its callers: the site recorded may be anyone's call,
+            // so the reason goes with the call this chain went through
+            Value.Culprit.Step last = steps.getLast();
+            steps.set(steps.size() - 1, new Value.Culprit.Step(last.uri(), last.line(), last.column(),
+                    last.text() + ", " + reason(seed.why())));
+        } else if (seed != null) {
+            String text = seed.element() == null ? reason(seed.why())
+                    : describe(seed.element()) + suffix(seed.why());
+            Culprits.add(steps, Culprits.step(seed.in(), seed.element() != null ? seed.element() : seed.in(), text));
+        }
+        return steps;
+    }
+
+    private static String describe(Element e) {
+        return switch (e) {
+            case Assignment a when a.variableTarget() != null -> "assigns " + targetName(a.variableTarget());
+            case MethodCall mc when mc.methodInfo() != null -> Culprits.describeCall(mc, mc.methodInfo());
+            case ConstructorCall cc when cc.constructor() != null -> Culprits.describeCall(cc, cc.constructor());
+            default -> "modifies";
+        };
+    }
+
+    private static String targetName(Variable v) {
+        return switch (v) {
+            case FieldReference fr when fr.scopeIsRecursivelyThis() -> "this." + fr.fieldInfo().name();
+            case FieldReference fr when fr.scopeVariable() != null ->
+                    fr.scopeVariable().simpleName() + "." + fr.fieldInfo().name();
+            case FieldReference fr -> fr.fieldInfo().name();
+            case DependentVariable dv -> dv.arrayVariable().simpleName() + "[..]";
+            default -> v.simpleName();
+        };
+    }
+
+    // an edge built outside the walk: E3 (a field into the parameters stored in it), E6 (an implementation)
+    private static Value.Culprit.Step sitelessEdge(Object from) {
+        return switch (from) {
+            case FieldInfo fi -> Culprits.step(fi, fi, "stored in field " + fi.name() + ", which is modified");
+            case MethodInfo mi -> Culprits.step(mi, mi, "implementation " + mi.typeInfo().simpleName() + "."
+                                                       + mi.name() + " modifies");
+            case ParameterInfo pi -> Culprits.step(pi.methodInfo(), pi, "implementation "
+                    + pi.methodInfo().typeInfo().simpleName() + "." + pi.methodInfo().name() + " modifies "
+                    + pi.name());
+            default -> null;
+        };
+    }
+
+    private static boolean sharedCalleeSeed(String why) {
+        return why != null && (why.startsWith("non-analyzed") || why.startsWith("undecided abstract callee"));
+    }
+
+    // a seed's reason after its statement's own description
+    private static String suffix(String why) {
+        if (why == null || why.startsWith("assignment to") || why.startsWith("array-element assignment")) return "";
+        return ", " + reason(why);
+    }
+
+    private static String reason(String why) {
+        if (why == null) return "modified";
+        if (why.equals("non-analyzed modifying callee")) return "a modifying method outside the analysis";
+        if (why.equals("non-analyzed @Modified parameter")) return "which modifies that argument";
+        if (why.startsWith("undecided abstract callee")) return "undecided, taken as modifying";
+        if (why.startsWith("statement-level unmodified FALSE on ")) {
+            return "modifies " + why.substring("statement-level unmodified FALSE on ".length());
+        }
+        return why;
     }
 
     private static final int NO_CHANGE = 0, DOWNGRADED = 1, DECIDED_FALSE = 2, DECIDED_TRUE = 3,
