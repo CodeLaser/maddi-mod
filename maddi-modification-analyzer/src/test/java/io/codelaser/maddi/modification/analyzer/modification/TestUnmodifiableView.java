@@ -81,6 +81,9 @@ public class TestUnmodifiableView extends CommonTest {
                     List<String> both(boolean b) { return b ? java.util.Collections.unmodifiableList(list) : null; }
                     View asView() { return new View(list); }
                     List<String> chained() { return view(); }
+                    // null is neutral: alone it proves nothing (a placeholder an override replaces)
+                    List<String> none() { return null; }
+                    List<String> noneEither(boolean b) { return b ? null : (List<String>) null; }
                 }
                 // a bodiless declaration with implementations: the fold
                 interface Src2 { List<String> get(); }
@@ -148,6 +151,8 @@ public class TestUnmodifiableView extends CommonTest {
                 unmodifiableView(method(wraps, "view")), unmodifiableView(method(wraps, "copy")),
                 unmodifiableView(method(wraps, "both")), unmodifiableView(method(wraps, "asView")),
                 unmodifiableView(method(wraps, "chained"))));
+        assertEquals("false/false", unmodifiableView(method(wraps, "none")) + "/"
+                                    + unmodifiableView(method(wraps, "noneEither")));
         assertEquals("true", unmodifiableView(method(views.findSubType("Impl"), "get")));
         assertEquals("true", unmodifiableView(method(views.findSubType("Src2"), "get")));
 

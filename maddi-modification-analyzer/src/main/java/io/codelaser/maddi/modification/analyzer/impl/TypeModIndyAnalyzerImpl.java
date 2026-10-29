@@ -131,8 +131,10 @@ public class TypeModIndyAnalyzerImpl extends CommonAnalyzerImpl implements TypeM
      * UNMODIFIABLE_VIEW_METHOD (CodeLaser/maddi-mod#52), computed from the values the body returns: every one is an
      * unmodifiable view (a call of a method with the property), an instance of an UNMODIFIABLE_TYPE, at least
      * immutable-HC (its type, or a call whose result is, as DynamicImmutabilityInference reads it), a field that
-     * provably holds one, or null. A source callee not yet decided delays the verdict; under cycle breaking it is
-     * FALSE, the safe side. Mirrors nothing about the container aspect, and never writes IMMUTABLE_METHOD.
+     * provably holds one, or null. Null is neutral, not sufficient: a body that returns only null is FALSE, or every
+     * {@code return null;} default an override replaces would claim a view (fernflower's
+     * {@code Exprent.checkExprTypeBounds}). A source callee not yet decided delays the verdict; under cycle breaking
+     * it is FALSE, the safe side. Mirrors nothing about the container aspect, and never writes IMMUTABLE_METHOD.
      */
     private void doUnmodifiableView(boolean cycleBreakingActive, MethodInfo methodInfo) {
         if (methodInfo.isConstructor() || !methodInfo.hasReturnValue() || methodInfo.returnType().isPrimitiveExcludingVoid()
@@ -148,11 +150,11 @@ public class TypeModIndyAnalyzerImpl extends CommonAnalyzerImpl implements TypeM
             }
             return true;
         });
-        Boolean result = returned.isEmpty() ? Boolean.FALSE : Boolean.TRUE;
-        for (io.codelaser.maddi.cst.api.expression.Expression e : returned) {
-            Boolean one = unmodifiableValue(e, 0);
+        Boolean result = returned.stream().allMatch(TypeModIndyAnalyzerImpl::onlyNull) ? Boolean.FALSE : Boolean.TRUE;
+        for (int i = 0; !Boolean.FALSE.equals(result) && i < returned.size(); i++) {
+            Boolean one = unmodifiableValue(returned.get(i), 0);
             if (one == null) result = null;
-            else if (!one) { result = false; break; }
+            else if (!one) result = false;
         }
         if (result == null && cycleBreakingActive) result = false;
         if (result == null) {
@@ -164,6 +166,16 @@ public class TypeModIndyAnalyzerImpl extends CommonAnalyzerImpl implements TypeM
             DECIDE.debug("MI: Decide @UnmodifiableView of {} = {}", methodInfo, result);
             propertyChanges.incrementAndGet();
         }
+    }
+
+    /** Whether every value the expression can take is the null constant (true for an empty stream of returns). */
+    private static boolean onlyNull(io.codelaser.maddi.cst.api.expression.Expression value) {
+        return switch (value) {
+            case io.codelaser.maddi.cst.api.expression.EnclosedExpression ee -> onlyNull(ee.inner());
+            case io.codelaser.maddi.cst.api.expression.Cast cast -> onlyNull(cast.expression());
+            case io.codelaser.maddi.cst.api.expression.InlineConditional ic -> onlyNull(ic.ifTrue()) && onlyNull(ic.ifFalse());
+            default -> value.isNullConstant();
+        };
     }
 
     /** TRUE, FALSE, or null when a source callee has not been decided yet. */
