@@ -59,8 +59,8 @@ public class TestModifiedCulprit extends CommonTest {
                 void bump() { count = count + 1; }
                 static void fill(Bag bag) { bag.add("x"); }
                 int size() { return items.size(); }
-                private final java.lang.ref.WeakReference<String> ref = new java.lang.ref.WeakReference<>("x");
-                String peek() { return ref.get(); }
+                private java.lang.ref.Cleaner.Cleanable cleanable;
+                void release() { cleanable.clean(); }
             }
             """;
 
@@ -96,9 +96,10 @@ public class TestModifiedCulprit extends CommonTest {
             assertEquals("15 calls bag.add(..) <- 9 calls store(..) <- 12 calls items.add(..), a modifying method"
                          + " outside the analysis", culprit(fill.parameters().getFirst()));
             assertNull(culprit(bag.findUniqueMethod("size", 0)), "not modified, no culprit");
-            // Collection.add is @Modified in the JDK hints; Reference.get has no annotation, and the why says so
-            assertEquals("18 calls ref.get(..), a modifying method outside the analysis (no annotation: the default)",
-                    culprit(bag.findUniqueMethod("peek", 0)));
+            // Collection.add is @Modified in the JDK hints; Cleaner.Cleanable.clean has no annotation, and the why
+            // says so
+            assertEquals("18 calls cleanable.clean(..), a modifying method outside the analysis (no annotation: the"
+                         + " default)", culprit(bag.findUniqueMethod("release", 0)));
         } finally {
             Culprits.ENABLED = before;
         }
