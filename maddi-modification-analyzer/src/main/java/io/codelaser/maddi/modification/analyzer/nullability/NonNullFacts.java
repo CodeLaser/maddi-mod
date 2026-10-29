@@ -482,8 +482,15 @@ public final class NonNullFacts {
         if (statement.expression() != null) effects(statement.expression(), facts);
         // 'for (x : v)' iterates v: a demand only, the facts stay as they were
         if (statement instanceof ForEachStatement fe) demandVariable(fe.expression(), facts);
+        // a for's updaters run on every way back to the condition: after the body completes, and after each of its
+        // continues. Evaluated with what every way back has, so that a call in them sees the condition's facts: in
+        // 'for (T x = arg; x != null; x = mappings.remove(key(x)))' key's parameter takes no null from x (guava
+        // TypeResolver, once the init clause and the updaters seeded x; CodeLaser/maddi-mod#72). Gate NOFORUPDATERFACTS.
+        List<Expression> updaters = statement instanceof ForStatement fs && !FOR_UPDATER_FACTS_OFF.get()
+                ? fs.updaters() : List.of();
+        List<Set<Variable>> waysBack = backEdges != null ? backEdges : updaters.isEmpty() ? null : new ArrayList<>();
         List<Set<Variable>> enclosing = continues;
-        continues = backEdges;
+        continues = waysBack;
         statement.subBlockStream().forEach(sb -> {
             Set<Variable> blockIn = new HashSet<>(facts);
             if (statement.expression() != null) addCondition(blockIn, whenTrue(statement.expression()));
@@ -492,12 +499,23 @@ public final class NonNullFacts {
                 if (present != null) blockIn.add(present);
             }
             Out out = block(sb, blockIn);
-            if (backEdges != null && out.completes) backEdges.add(Set.copyOf(out.facts));
+            if (waysBack != null && out.completes) waysBack.add(Set.copyOf(out.facts));
         });
         continues = enclosing;
+        if (!updaters.isEmpty() && waysBack != null && !waysBack.isEmpty()) {
+            Set<Variable> atUpdaters = null;
+            for (Set<Variable> back : waysBack) {
+                if (atUpdaters == null) atUpdaters = new HashSet<>(back);
+                else atUpdaters.retainAll(back);
+            }
+            for (Expression updater : updaters) effects(updater, atUpdaters);
+        }
         // the condition is evaluated on every way out (but the last evaluation's 'false' is not known here)
         return new Out(facts, true);
     }
+
+    // gate NOFORUPDATERFACTS: a for's updaters are not evaluated; a call in them sees the loop's entry facts (A/B)
+    private static final Switches.Gate FOR_UPDATER_FACTS_OFF = Switches.gate("NOFORUPDATERFACTS");
 
     /*
      CodeLaser/maddi-mod#48 B8, nacos RequestHandlerRegistry: 'while (!clazz.getSuperclass().equals(H.class)) { if

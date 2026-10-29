@@ -5067,6 +5067,27 @@ public final class NullabilityPass {
             callResult(target, a.value());
             seedCreated(target, a.value(), mi);
             constructorCopies(mi, scope, target, a.value());
+        } else if (statement instanceof ForStatement fs && !FOR_CLAUSES_OFF.get()) {
+            // 'for (Type x = arg; x != null; x = mappings.remove(key(x)))': the init clause and the updaters assign as
+            // statements of their own would, which the walk does not visit. Missed, the library null of Map.remove
+            // never reached x, and guava's TypeResolver.kt printed 'x = mappings.remove(..)!!' (CodeLaser/maddi-mod#72)
+            for (Element init : fs.initializers()) {
+                if (init instanceof LocalVariableCreation lvc) {
+                    lvc.localVariableStream().forEach(lv -> {
+                        Object local = local(mi, scope, lv.simpleName());
+                        if (lv.assignmentExpression() instanceof NullConstant) {
+                            seed(local, "initialized null in " + mi.fullyQualifiedName(), mi.typeInfo());
+                        }
+                        callResult(local, lv.assignmentExpression());
+                        seedCreated(local, lv.assignmentExpression(), mi);
+                    });
+                } else if (init instanceof Assignment a) {
+                    forClauseAssignment(mi, scope, a);
+                }
+            }
+            for (Expression updater : fs.updaters()) {
+                if (NonNullFacts.unwrap(updater) instanceof Assignment a) forClauseAssignment(mi, scope, a);
+            }
         } else if (statement instanceof ForEachStatement fe && fe.initializer() != null) {
             // for (T x : array): the elements flow into x
             Expression iterated = NonNullFacts.unwrap(fe.expression());
@@ -5090,6 +5111,17 @@ public final class NullabilityPass {
                 });
             }
         }
+    }
+
+    // gate NOFORCLAUSES: a for loop's init clause and updaters seed nothing (A/B)
+    private static final Switches.Gate FOR_CLAUSES_OFF = Switches.gate("NOFORCLAUSES");
+
+    private void forClauseAssignment(MethodInfo mi, Scope scope, Assignment a) {
+        if (a.variableTarget() == null || a.assignmentOperator() != null) return;
+        Object target = assignmentTarget(mi, scope, a.variableTarget());
+        if (a.value() instanceof NullConstant) seed(target, "assigned null in " + mi.fullyQualifiedName(), mi.typeInfo());
+        callResult(target, a.value());
+        seedCreated(target, a.value(), mi);
     }
 
     // an assignment inside an expression: 'if ((res = isHead(h)) != null)', 'while ((x = next()) != null)'
