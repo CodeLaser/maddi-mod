@@ -140,7 +140,8 @@ public class StaticSideEffectAnalyzerImpl {
      The first statement of mi's body (in visiting order) that modifies the static state of a type 'wanted' accepts:
      an assignment to, or a modifying call on, such a static field, or a call of a method or constructor whose set
      holds one. A call is followed into the callee for the type it contributes, so the chain ends at the
-     assignment or modifying call itself, or at a callee without a body (a contract). Empty when nothing is found.
+     assignment or modifying call itself, or at a callee without a body (a contract); a call whose callee yields no
+     chain is passed over. Empty when nothing is found.
      */
     private List<Value.Culprit.Step> culprit(MethodInfo mi, java.util.function.Predicate<TypeInfo> wanted,
                                             Map<MethodInfo, Set<TypeInfo>> group, int depth, Set<MethodInfo> visited) {
@@ -159,10 +160,19 @@ public class StaticSideEffectAnalyzerImpl {
                 Set<TypeInfo> set = group.containsKey(callee) ? group.get(callee) : modified(callee);
                 TypeInfo owner = set.stream().filter(wanted).findFirst().orElse(null);
                 if (owner != null) {
-                    boolean contract = !computable(callee);
-                    found.add(step(mi, e, describeCall(e, callee) + (contract ? ", contracted @StaticSideEffects" : "")));
-                    if (!contract) found.addAll(culprit(callee, owner::equals, group, depth + 1, visited));
-                    return false;
+                    if (!computable(callee)) {
+                        found.add(step(mi, e, describeCall(e, callee) + ", contracted @StaticSideEffects"));
+                        return false;
+                    }
+                    // a call whose callee yields no chain is no culprit: a recursive call (the callee is already
+                    // being walked, LambdaProcessor.processClass(child) first in its own body), or one past the
+                    // depth. The walk goes on to the next statement.
+                    List<Value.Culprit.Step> inCallee = culprit(callee, owner::equals, group, depth + 1, visited);
+                    if (!inCallee.isEmpty()) {
+                        found.add(step(mi, e, describeCall(e, callee)));
+                        found.addAll(inCallee);
+                        return false;
+                    }
                 }
             }
             return true;

@@ -349,6 +349,38 @@ public class TestStaticSideEffects extends CommonTest {
         }
     }
 
+    /** fernflower's LambdaProcessor.processClass: the recursive call comes first, the culprit later. */
+    @Language("java")
+    private static final String RECURSIVE = """
+            package a.b;
+            import java.util.List;
+            public class Rec {
+                void process(List<Rec> nested) {
+                    for (Rec child : nested) process(List.of());
+                    Registry2.count = 3;
+                }
+            }
+            class Registry2 {
+                static int count;
+            }
+            """;
+
+    @DisplayName("culprits: a recursive call is no culprit; the walk goes on to the statement that is")
+    @Test
+    public void testCulpritRecursive() throws IOException {
+        boolean before = io.codelaser.maddi.modification.analyzer.impl.StaticSideEffectAnalyzerImpl.CULPRITS;
+        io.codelaser.maddi.modification.analyzer.impl.StaticSideEffectAnalyzerImpl.CULPRITS = true;
+        try {
+            TypeInfo rec = javaInspector.parse("a.b.Rec", RECURSIVE);
+            List<Info> ao = prepWork(rec);
+            analyzer.go(ao);
+
+            assertEquals("6 assigns Registry2.count", culprit(rec.findUniqueMethod("process", 1)));
+        } finally {
+            io.codelaser.maddi.modification.analyzer.impl.StaticSideEffectAnalyzerImpl.CULPRITS = before;
+        }
+    }
+
     @DisplayName("culprits are off by default")
     @Test
     public void testNoCulpritByDefault() throws IOException {
