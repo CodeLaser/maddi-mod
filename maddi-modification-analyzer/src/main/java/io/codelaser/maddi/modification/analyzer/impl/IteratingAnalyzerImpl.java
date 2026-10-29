@@ -451,6 +451,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
             if (configuration.nullabilityOpenWorld()) {
                 policy = policy.withWorld(io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass.World.OPEN);
             }
+            feed(f -> f.stage("nullability"));
             var pass = new io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass(policy);
             io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass.write(pass.go(analysisOrder));
         }
@@ -540,6 +541,8 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
         java.util.Set<Info> dirty = initialDirty; // null = analyze everything; a seed = incremental early-cutoff
         java.util.Set<Info> orderSet = java.util.Set.copyOf(analysisOrder);
         boolean verifying = false; // worklist ran dry -> one full pass certifies (0 changes = true fixpoint)
+        // for the feed's passStarted: why the next pass runs, when its dirty set and flags do not say it
+        String nextPassKind = incremental ? "incremental" : null;
         // strata-parallel first iteration (PARALLEL=n): dependency waves from the same call graph
         java.util.List<java.util.List<java.util.List<Info>>> firstIterationWaves;
         if (!incremental && SingleIterationAnalyzerImpl.PARALLEL_THREADS > 1 && dependencyGraph != null
@@ -565,6 +568,17 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                 LOGGER.info("Worklist: {} of {} elements dirty", subset.size(), analysisOrder.size());
             }
             if (budget != null) budget.startPass(iterations, subset.size());
+            {
+                String kind = nextPassKind != null ? nextPassKind
+                        : dirty != null ? "worklist"
+                        : iterations == 1 ? "first"
+                        : verifying ? "verification" : "full";
+                nextPassKind = null;
+                int it = iterations;
+                int max = maxIterations;
+                int size = subset.size();
+                feed(f -> f.passStarted(it, max, kind, size, analysisOrder.size()));
+            }
             if (incremental && beforeFirstRecompute != null) {
                 // clear-before-recompute: newly-dirtied elements (never analysed before in this run) may be carried
                 // types whose stale cross-type-derived values must be cleared before the fresh, possibly-lowering
@@ -615,6 +629,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                 && singleIterationAnalyzer instanceof SingleIterationAnalyzerImpl sia
                 && sia.eventualCluster().typeLevelWarmUp()) {
                 LOGGER.info("Warm-up window open at certification point: forcing a full next iteration");
+                nextPassKind = "warm-up";
                 done = false;
                 dirty = null;
                 previousPropertiesChanged = Integer.MAX_VALUE;
@@ -655,6 +670,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                     LOGGER.info("Certification point, but {} types immutability-undecided: activating cycle breaking",
                             undecided);
                     cycleBreakingActive = true;
+                    nextPassKind = "cycle breaking";
                     {
                         int it = iterations;
                         feed(f -> f.phase(io.codelaser.maddi.analysis.api.AnalysisValueFeed.Phase
@@ -692,6 +708,10 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                     // pass re-runs after each re-derivation until a round writes nothing (joint
                     // fixpoint; guava measured 2 second-round downgrades, fernflower 0), bounded.
                     modReachRounds++;
+                    {
+                        int round = modReachRounds;
+                        feed(f -> f.stage("MODREACH round " + round));
+                    }
                     try {
                         var pass = new io.codelaser.maddi.modification.analyzer.shadow.ShadowModificationPass();
                         var report = pass.go(analysisOrder);
@@ -764,6 +784,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                                     counts.changed().size());
                             // the eventual family is write-once: the deferral round re-derives it over the new state
                             eventualDeferralRounds = 0;
+                            nextPassKind = "re-derivation after MODREACH round " + modReachRounds;
                             dirty = seeds;
                             verifying = false;
                             previousPropertiesChanged = Integer.MAX_VALUE;
@@ -784,6 +805,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                             LOGGER.info("MODREACH cleared {} derived values; re-deriving with modification frozen",
                                     cleared);
                             eventualDeferralRounds = 0; // the eventual family was cleared too: re-arm the deferral
+                            nextPassKind = "re-derivation after MODREACH round " + modReachRounds;
                             cycleBreakingActive = false;
                             dirty = null;
                             verifying = false;
@@ -820,6 +842,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                     sia.eventualCluster().openWarmUpWindow();
                     LOGGER.info("EVENTUAL deferral: cleared {} eventual value(s) at the terminal "
                                 + "certification point; re-deriving over the settled state", cleared);
+                    nextPassKind = "eventual re-derivation";
                     dirty = null;
                     verifying = false;
                     previousPropertiesChanged = Integer.MAX_VALUE;
@@ -848,6 +871,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                     logVerdictFingerprint(analysisOrder);
                     if (configuration.guardContracts() || configuration.warnNearMisses()) {
                         // values are final now: verify user-written contracts, and/or warn on near-misses
+                        feed(f -> f.stage("contract checks"));
                         new GuardAnalyzerImpl(javaInspector.runtime(), configuration, guardMessages).go(analysisOrder);
                     }
                 } finally {
@@ -903,6 +927,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                                 iterations);
                         logVerdictFingerprint(analysisOrder);
                         if (configuration.guardContracts() || configuration.warnNearMisses()) {
+                            feed(f -> f.stage("contract checks"));
                             new GuardAnalyzerImpl(javaInspector.runtime(), configuration, guardMessages).go(analysisOrder);
                         }
                         return;
@@ -925,6 +950,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                                 iterations);
                         logVerdictFingerprint(analysisOrder);
                         if (configuration.guardContracts() || configuration.warnNearMisses()) {
+                            feed(f -> f.stage("contract checks"));
                             new GuardAnalyzerImpl(javaInspector.runtime(), configuration, guardMessages).go(analysisOrder);
                         }
                         return;

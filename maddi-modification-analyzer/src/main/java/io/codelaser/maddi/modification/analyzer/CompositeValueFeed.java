@@ -76,6 +76,28 @@ public class CompositeValueFeed implements AnalysisValueFeed {
     }
 
     @Override
+    public void passStarted(int iteration, int maxIterations, String kind, int elements, int totalElements) {
+        for (AnalysisValueFeed d : delegates) {
+            try {
+                d.passStarted(iteration, maxIterations, kind, elements, totalElements);
+            } catch (RuntimeException | AssertionError | StackOverflowError e) {
+                LOGGER.warn("value feed {} threw on passStarted; ignoring", d.getClass().getSimpleName(), e);
+            }
+        }
+    }
+
+    @Override
+    public void stage(String description) {
+        for (AnalysisValueFeed d : delegates) {
+            try {
+                d.stage(description);
+            } catch (RuntimeException | AssertionError | StackOverflowError e) {
+                LOGGER.warn("value feed {} threw on stage; ignoring", d.getClass().getSimpleName(), e);
+            }
+        }
+    }
+
+    @Override
     public void phase(Phase phase, int iteration) {
         for (AnalysisValueFeed d : delegates) {
             try {
