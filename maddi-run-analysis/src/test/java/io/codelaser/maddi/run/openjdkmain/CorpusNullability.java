@@ -11,7 +11,6 @@ import io.codelaser.maddi.cst.print.csharp.CSharpFacts;
 import io.codelaser.maddi.cst.print.csharp.CSharpProgram;
 import io.codelaser.maddi.cst.print.kotlin.KotlinPrintOptions;
 import io.codelaser.maddi.inspection.api.integration.JavaInspector;
-import io.codelaser.maddi.modification.analyzer.IteratingAnalyzer;
 import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
 import io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass;
 import io.codelaser.maddi.run.analysis.AnalysisEngineImpl;
@@ -67,7 +66,7 @@ final class CorpusNullability {
         PrepOutcome prep = engine.prep(new PrepRequest(javaInspector.runtime(), Set.copyOf(types),
                 parseResult.sourceSetToModuleInfoMap().values(), _ -> false, true, true));
         List<Info> order = new ComputeAnalysisOrder().go(prep.callGraph().graph(), true);
-        IteratingAnalyzer analyzer = new IteratingAnalyzerImpl(javaInspector,
+        IteratingAnalyzerImpl analyzer = new IteratingAnalyzerImpl(javaInspector,
                 new IteratingAnalyzerImpl.ConfigurationBuilder()
                         .setMaxIterations(30)
                         .setStopWhenCycleDetectedAndNoImprovements(true)
@@ -76,6 +75,12 @@ final class CorpusNullability {
                         .setNullability(true)
                         .build());
         analyzer.analyze(order, prep.callGraph().graph());
+        // the reachability pass catches its own failures and leaves the fixpoint's verdicts: a run where it did not
+        // run measures something else (CodeLaser/maddi-mod#75)
+        if (analyzer.modReachFailures() > 0) {
+            throw new AssertionError("the reachability pass failed in " + analyzer.modReachFailures()
+                                     + " round(s): MODREACH pass failed in the log");
+        }
         return policies.stream().map(policy -> new NullabilityPass(policy).go(order)).toList();
     }
 

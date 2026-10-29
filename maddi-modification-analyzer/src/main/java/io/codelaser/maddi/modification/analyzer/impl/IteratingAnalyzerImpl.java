@@ -54,6 +54,9 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
     // is the sole starting-state-dependent step, so if it never fired the framework is confluent. See
     // ModificationAnalysisResource#incrementalAnalyze.
     private boolean certifiedWithoutFrozenValues;
+    // how many reachability rounds threw and were skipped: the run goes on with the fixpoint's verdicts, so without
+    // this count a corpus A/B of a MODREACH change compares fixpoint verdicts on both sides (CodeLaser/maddi-mod#75)
+    private int modReachFailures;
 
     private io.codelaser.maddi.analysis.api.AnalysisValueFeed valueFeed;
 
@@ -403,6 +406,11 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
         return certifiedWithoutFrozenValues;
     }
 
+    /** The reachability rounds of the last {@link #analyze} that threw, and whose verdicts were therefore not written. */
+    public int modReachFailures() {
+        return modReachFailures;
+    }
+
     @Override
     public void analyze(List<Info> analysisOrder) {
         analyze(analysisOrder, null);
@@ -413,6 +421,11 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
     // certified fixpoints on timefold + langchain4j, verdict dumps identical to full re-analysis.
     // Opt out with NOWORKLIST=1 (e.g. for baseline A/B runs).
     private static final boolean WORKLIST = System.getenv("NOWORKLIST") == null;
+
+    // CodeLaser/maddi-mod#76: a MODREACH round that only strengthened re-derives through the worklist instead of
+    // clearing the derived family. Gate NOINCREDERIVE restores the full clear (the A/B baseline).
+    private static final boolean INCREMENTAL_REDERIVATION =
+            !io.codelaser.maddi.modification.link.impl.Gate.isSet("NOINCREDERIVE");
 
     @Override
     public void analyze(List<Info> analysisOrder, io.codelaser.maddi.graph.G<Info> dependencyGraph) {
@@ -459,6 +472,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
         int iterations = 0;
         int maxIterations = configuration.maxIterations(); // extended per MODREACH re-derivation round
         int modReachRounds = 0; // P2.5: pass <-> re-derivation to joint fixpoint, bounded
+        modReachFailures = 0;
         int eventualDeferralRounds = 0; // terminal-phase re-derivation of the eventual family, once
         SingleIterationAnalyzer singleIterationAnalyzer = new SingleIterationAnalyzerImpl(javaInspector, configuration);
         this.lastRun = singleIterationAnalyzer;
@@ -724,6 +738,38 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                         TolerantWrite.freezeModificationProperties();
                         LOGGER.info("MODREACH round {}: {}", modReachRounds, counts.summary());
                         LOGGER.info("MODREACH round {}: {}", modReachRounds, report.summary());
+                        if (INCREMENTAL_REDERIVATION && !counts.weakened() && !counts.changed().isEmpty()
+                            && dependersOf != null) {
+                            // CodeLaser/maddi-mod#76: this round only strengthened (FALSE->TRUE, null->TRUE). What was
+                            // derived from the old values can only strengthen in turn, which the controlled overwrite
+                            // allows, so nothing needs clearing: the worklist re-derives from the changed elements and
+                            // their dependents, and the full verification pass still certifies. A full clear cost a
+                            // whole re-derivation (12-13 full iterations) for a round of 5 or 23 upgrades.
+                            java.util.Set<Info> seeds = new java.util.HashSet<>();
+                            for (Info c : counts.changed()) {
+                                Info owner = c instanceof io.codelaser.maddi.cst.api.info.ParameterInfo pi
+                                        ? pi.methodInfo() : c;
+                                Info mc = mapToOrderElement(owner, orderSet);
+                                if (mc != null) seeds.add(mc);
+                                java.util.Set<Info> deps = dependersOf.get(owner);
+                                if (deps != null) {
+                                    for (Info d : deps) {
+                                        Info md = mapToOrderElement(d, orderSet);
+                                        if (md != null) seeds.add(md);
+                                    }
+                                }
+                            }
+                            LOGGER.info("MODREACH round {}: only strengthened; re-deriving {} element(s) from {} "
+                                        + "changed, without clearing", modReachRounds, seeds.size(),
+                                    counts.changed().size());
+                            // the eventual family is write-once: the deferral round re-derives it over the new state
+                            eventualDeferralRounds = 0;
+                            dirty = seeds;
+                            verifying = false;
+                            previousPropertiesChanged = Integer.MAX_VALUE;
+                            maxIterations += configuration.maxIterations();
+                            continue;
+                        }
                         if (counts.downgraded() + counts.decidedFalse() + counts.decidedTrue()
                             + counts.reverseUpgraded() > 0) {
                             // P2.3b: the immutability family was derived from the pre-pass optimistic
@@ -747,6 +793,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                         }
                         LOGGER.info("MODREACH joint fixpoint after {} round(s)", modReachRounds);
                     } catch (RuntimeException | AssertionError | StackOverflowError e) {
+                        modReachFailures++;
                         LOGGER.error("MODREACH pass failed; modification properties keep their "
                                      + "fixpoint values (unfrozen)", e);
                     }
