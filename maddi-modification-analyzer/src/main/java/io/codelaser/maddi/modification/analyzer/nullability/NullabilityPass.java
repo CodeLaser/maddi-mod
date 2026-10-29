@@ -523,6 +523,21 @@ public final class NullabilityPass {
     // written outside the field's class reaches it
     private final Map<FieldInfo, List<Arg>> pendingHolders = new LinkedHashMap<>();
     private final Map<Object, Set<Object>> successors = new LinkedHashMap<>();
+
+    /*
+     Culprits (Culprits.ENABLED, off by default): where each edge and seed was first built, the statement the walk was
+     at (narrowed to the call it was visiting), so the chain that made a node nullable can be told as statements.
+     */
+    private record Site(MethodInfo in, Element element) {
+    }
+
+    private final boolean recordSites = io.codelaser.maddi.modification.common.util.Culprits.ENABLED;
+    private final Map<Object, Map<Object, Site>> edgeSites = new HashMap<>();
+    private final Map<Object, Site> seedSites = new HashMap<>();
+    private Element currentSite;
+    private MethodInfo currentSiteMethod;
+    private static final int CULPRIT_STEPS = 12;
+    private static final int CULPRIT_TEXT = 60;
     private final Map<Object, String> seedOrigin = new LinkedHashMap<>();
     private final Set<MethodInfo> degraded = new LinkedHashSet<>();
     // the methods of this analysis: their own NULLABILITY_* may be this pass's output of an earlier run, so only the
@@ -699,6 +714,7 @@ public final class NullabilityPass {
             Set<Expression> nextPresent = pass.nextPresentLookups;
             if (next.equals(trusted) && nextPreconditions.equals(nonNullAtExit) && nextNarrowed.equals(narrowedReads)
                 && nextAtEntry.equals(atEntry) && nextPresent.equals(present) || round == MAX_ROUNDS) {
+                if (io.codelaser.maddi.modification.common.util.Culprits.ENABLED) pass.writeCulprits(report);
                 return report;
             }
             trusted = next;
@@ -1627,6 +1643,56 @@ public final class NullabilityPass {
      * not {@link Info}s; a printer asks the {@link Report}. A declaration that carries a null annotation keeps the
      * value that annotation gave it: a contract wins over inference (M2).
      */
+    /*
+     Culprits: each field, parameter and method return whose verdict is nullable, and which the closure reached, gets
+     NULLABLE_CULPRIT, its chain back to the seed told as the statements that built each edge, the seed's own
+     statement last with its origin ("null argument in ..."). An edge built outside the walk (an override, a type
+     argument slot) says nothing and is left out; the chain is cut at CULPRIT_STEPS.
+     */
+    private void writeCulprits(Report report) {
+        report.verdicts().forEach((info, pt) -> {
+            if (ValueImpl.NullabilityImpl.of(pt).state() != NullableState.NULLABLE) return;
+            if (!report.cause().containsKey(info) && !report.seedOrigin().containsKey(info)) return;
+            List<Value.Culprit.Step> steps = new ArrayList<>();
+            Object at = info;
+            Set<Object> seen = new HashSet<>();
+            while (report.cause().containsKey(at) && seen.add(at) && steps.size() < CULPRIT_STEPS) {
+                Object from = report.cause().get(at);
+                Site site = edgeSites.getOrDefault(from, Map.of()).get(at);
+                if (site != null) {
+                    io.codelaser.maddi.modification.common.util.Culprits.add(steps,
+                            io.codelaser.maddi.modification.common.util.Culprits.step(site.in(), site.element(),
+                                    culpritText(site.element())));
+                }
+                at = from;
+            }
+            String origin = report.seedOrigin().get(at);
+            Site seed = seedSites.get(at);
+            if (seed != null) {
+                io.codelaser.maddi.modification.common.util.Culprits.add(steps,
+                        io.codelaser.maddi.modification.common.util.Culprits.step(seed.in(), seed.element(),
+                                culpritText(seed.element()) + (origin == null ? "" : " (" + shorten(origin) + ")")));
+            } else if (origin != null) {
+                steps.add(new Value.Culprit.Step(null, 0, 0, shorten(origin)));
+            }
+            if (steps.isEmpty()) return;
+            ValueImpl.CulpritImpl culprit = new ValueImpl.CulpritImpl(steps);
+            if (info.analysis().haveAnalyzedValueFor(PropertyImpl.NULLABLE_CULPRIT)) {
+                info.analysis().overwrite(PropertyImpl.NULLABLE_CULPRIT, culprit);
+            } else {
+                info.analysis().set(PropertyImpl.NULLABLE_CULPRIT, culprit);
+            }
+        });
+    }
+
+    private static String culpritText(Element element) {
+        return shorten(element.toString().replaceAll("\\s+", " ").strip());
+    }
+
+    private static String shorten(String s) {
+        return s.length() <= CULPRIT_TEXT ? s : s.substring(0, CULPRIT_TEXT - 1) + "…";
+    }
+
     public static void write(Report report) {
         report.verdicts().forEach((info, pt) -> {
             Property property = switch (info) {
@@ -2549,6 +2615,9 @@ public final class NullabilityPass {
         // 2026-10-18). Gate NOPRIMITIVECUTS.
         if (policy.callResults() && !PRIMITIVE_CUTS_OFF.get() && !(from instanceof Content) && primitive(typeOf(from))) return;
         flows.add(List.of(from, to));
+        if (recordSites && currentSite != null) {
+            edgeSites.computeIfAbsent(from, _ -> new HashMap<>()).putIfAbsent(to, new Site(currentSiteMethod, currentSite));
+        }
         if (successors.computeIfAbsent(from, _ -> new LinkedHashSet<>()).add(to) && to instanceof Content c
             && why(c.of())) {
             whyLog(from instanceof Content ? "content edge" : "element write", c.of(),
@@ -2574,6 +2643,7 @@ public final class NullabilityPass {
         if (node != null) {
             if (why(node)) whyLog("seed", node, origin);
             seedOrigin.putIfAbsent(node, origin);
+            if (recordSites && currentSite != null) seedSites.putIfAbsent(node, new Site(currentSiteMethod, currentSite));
             strictSeeds.add(node);
             seedWriters.computeIfAbsent(node, _ -> new ArrayList<>()).add(writer);
         }
@@ -2588,6 +2658,7 @@ public final class NullabilityPass {
     private void seedIndirect(Object node, String origin, TypeInfo writer) {
         if (node != null) {
             seedOrigin.putIfAbsent(node, origin);
+            if (recordSites && currentSite != null) seedSites.putIfAbsent(node, new Site(currentSiteMethod, currentSite));
             seedWriters.computeIfAbsent(node, _ -> new ArrayList<>()).add(writer);
         }
     }
@@ -4754,6 +4825,8 @@ public final class NullabilityPass {
             });
             Set<ParameterInfo> shadowedBySubBlocks = new HashSet<>(shadowed);
             shadowed.retainAll(shadowedBefore);
+            currentSite = statement;
+            currentSiteMethod = mi;
             VariableData vd = VariableDataImpl.of(statement);
             if (vd != null) vd.variableInfoStream().forEach(vi -> linksOf(mi, own, vi, statement));
             if (statement instanceof TryStatement ts) {
@@ -4779,6 +4852,10 @@ public final class NullabilityPass {
                 }
                 if (e instanceof Block) return false; // nested statements are handled with their own vd
                 if (policy.nullTests() && e instanceof BinaryOperator bo) nullTest(mi, own, bo);
+                if (e instanceof MethodCall || e instanceof ConstructorCall) {
+                    currentSite = e;
+                    currentSiteMethod = mi;
+                }
                 if (e instanceof MethodCall mc && mc.methodInfo() != null) {
                     callSite(mi, own, statement, mc, mc.methodInfo(), mc.analysis(), mc.parameterExpressions());
                 } else if (e instanceof ConstructorCall cc && cc.constructor() != null) {
@@ -4790,6 +4867,8 @@ public final class NullabilityPass {
                 }
                 return true;
             });
+            currentSite = statement;
+            currentSiteMethod = mi;
             syntacticSeeds(mi, own, statement);
             if (statement instanceof ExplicitConstructorInvocation eci && eci.methodInfo() != null) {
                 callSite(mi, own, statement, null, eci.methodInfo(), eci.analysis(), eci.parameterExpressions());
@@ -4797,6 +4876,7 @@ public final class NullabilityPass {
             // from here on a read of a parameter the statement assigned is a read of the shadow
             shadowed.addAll(shadowedBySubBlocks);
             shadowed.addAll(parametersAssignedIn(statement, mi));
+            currentSite = null;
         }
         return scope;
     }
