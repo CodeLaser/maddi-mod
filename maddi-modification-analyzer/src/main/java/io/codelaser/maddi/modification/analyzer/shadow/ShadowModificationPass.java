@@ -1572,7 +1572,7 @@ public class ShadowModificationPass {
             // so the reason goes with the call this chain went through
             Value.Culprit.Step last = steps.getLast();
             steps.set(steps.size() - 1, new Value.Culprit.Step(last.uri(), last.line(), last.column(),
-                    last.text() + ", " + reason(seed.why())));
+                    last.text() + ", " + reason(seed.why()) + (assumed(at) ? " (no annotation: the default)" : "")));
         } else if (seed != null) {
             String text = seed.element() == null ? reason(seed.why())
                     : describe(seed.element()) + suffix(seed.why());
@@ -1612,6 +1612,17 @@ public class ShadowModificationPass {
                     + pi.name());
             default -> null;
         };
+    }
+
+    // a library callee whose verdict is the defaults analyzer's assumption, not an annotation's statement
+    private static boolean assumed(Object node) {
+        io.codelaser.maddi.cst.api.analysis.Property property = switch (node) {
+            case MethodInfo _ -> PropertyImpl.NON_MODIFYING_METHOD;
+            case ParameterInfo _ -> PropertyImpl.UNMODIFIED_PARAMETER;
+            default -> null;
+        };
+        return property != null && ((Info) node).analysis().getOrDefault(PropertyImpl.ASSUMED_DEFAULTS,
+                ValueImpl.SetOfStringsImpl.EMPTY_SET).set().contains(property.key());
     }
 
     private static boolean sharedCalleeSeed(String why) {

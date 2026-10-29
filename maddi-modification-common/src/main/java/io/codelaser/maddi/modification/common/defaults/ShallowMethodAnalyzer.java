@@ -40,6 +40,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.*;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static io.codelaser.maddi.modification.common.defaults.ShallowAnalyzer.AnnotationOrigin.*;
 import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.*;
@@ -94,6 +95,10 @@ public class ShallowMethodAnalyzer extends AnnotationToProperty {
                 }
                 parameterData.put(p, vo.origin());
             });
+            if (assumed(parameterVoMap.get(UNMODIFIED_PARAMETER)) && !stated(UNMODIFIED_PARAMETER,
+                    methodInfo.overrides().stream().map(mi -> mi.parameters().get(parameterInfo.index())))) {
+                markAssumed(parameterInfo, UNMODIFIED_PARAMETER);
+            }
         }
 
         methodPropertiesAfterParameters(methodInfo, voMap);
@@ -106,7 +111,33 @@ public class ShallowMethodAnalyzer extends AnnotationToProperty {
             }
             methodData.put(p, vo.origin());
         });
+        ValueOrigin fluent = voMap.get(FLUENT_METHOD);
+        // a static method has no receiver to modify: its default says nothing
+        if (!methodInfo.isConstructor() && !methodInfo.isStatic() && (fluent == null || !fluent.valueAsBool().isTrue())
+            && assumed(voMap.get(NON_MODIFYING_METHOD)) && !stated(NON_MODIFYING_METHOD, methodInfo.overrides().stream())) {
+            markAssumed(methodInfo, NON_MODIFYING_METHOD);
+        }
         return dataMap;
+    }
+
+    /*
+    A FALSE reached by default (no annotation; the constructor and fluent rules, and static methods, aside) is an assumption, unless an
+    overridden method states the property: then it is inherited. An override's FALSE that was itself assumed, as
+    read back from the compiled hints, states nothing.
+     */
+    private static boolean assumed(ValueOrigin vo) {
+        return vo != null && vo.origin() == DEFAULT && vo.valueAsBool().isFalse();
+    }
+
+    private static boolean stated(Property property, Stream<? extends Info> overridden) {
+        return overridden.anyMatch(i -> i.analysis().haveAnalyzedValueFor(property)
+                                        && !i.analysis().getOrDefault(ASSUMED_DEFAULTS,
+                ValueImpl.SetOfStringsImpl.EMPTY_SET).set().contains(property.key()));
+    }
+
+    private static void markAssumed(Info info, Property property) {
+        TolerantWrite.setAllowControlledOverwrite(info.analysis(), ASSUMED_DEFAULTS,
+                new ValueImpl.SetOfStringsImpl(Set.of(property.key())));
     }
 
     private ValueOrigin computeMethodContainer(MethodInfo methodInfo) {
