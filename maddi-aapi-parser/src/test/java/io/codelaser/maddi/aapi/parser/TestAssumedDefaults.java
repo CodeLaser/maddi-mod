@@ -33,6 +33,7 @@ import java.util.stream.Collectors;
 
 import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.*;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /*
 What the JDK hints leave open: the methods that are modifying, and the parameters that are modified, only because no
@@ -40,7 +41,9 @@ annotation says otherwise (ASSUMED_DEFAULTS). Each is either a gap (ThreadLocal.
 nobody wrote down; annotating it, either way, takes it off the list.
 
 The counts per package are a ratchet: a new unannotated method raises one, annotating lowers one; both fail until the
-table below is updated. The full list is written to build/assumed-defaults.txt, ready to work through.
+table below is updated. The full list is written to build/assumed-defaults.txt, ready to work through. The JDK's API
+differs per release (java.security on 26), so the table holds only on the release the jdk results were compiled on
+(CompileAnalysisHints.JDK_RELEASE_FILE); elsewhere the list is still written.
  */
 public class TestAssumedDefaults extends CommonTest {
 
@@ -114,6 +117,8 @@ public class TestAssumedDefaults extends CommonTest {
                 .filter(e -> e.getValue()[0] + e.getValue()[1] > 0)
                 .collect(Collectors.toMap(Map.Entry::getKey, e -> List.of(e.getValue()[0], e.getValue()[1]),
                         (a, _) -> a, TreeMap::new));
+        assumeTrue(CompileAnalysisHints.runningJdkRelease() == CompileAnalysisHints.committedJdkRelease(),
+                "the table holds on the JDK release of the jdk results only");
         assertEquals(table(EXPECTED), table(actual), "assumed modifying methods and modified parameters per package;"
                 + " see build/assumed-defaults.txt");
     }
