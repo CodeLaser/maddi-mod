@@ -144,18 +144,21 @@ public class AnalysisEngineImpl implements AnalysisEngine {
 
     @Override
     public ModificationOutcome modification(ModificationRequest request) throws IOException {
-        // The two feature switches are process-wide statics of the analyzer; a request that names one sets it for
+        // The feature switches are process-wide statics of the analyzer; a request that names one sets it for
         // this run only and puts the previous value back, as the tests that toggled them directly always did.
         ModificationOptions o = request.options();
         boolean sseBefore = StaticSideEffectAnalyzerImpl.ENABLED;
         boolean clusterBefore = EventualCluster.ENABLED;
+        boolean culpritsBefore = StaticSideEffectAnalyzerImpl.CULPRITS;
         if (o.staticSideEffects() != null) StaticSideEffectAnalyzerImpl.ENABLED = o.staticSideEffects();
         if (o.eventualCluster() != null) EventualCluster.ENABLED = o.eventualCluster();
+        if (o.culprits() != null) StaticSideEffectAnalyzerImpl.CULPRITS = o.culprits();
         try {
             return modificationWithSwitchesSet(request);
         } finally {
             StaticSideEffectAnalyzerImpl.ENABLED = sseBefore;
             EventualCluster.ENABLED = clusterBefore;
+            StaticSideEffectAnalyzerImpl.CULPRITS = culpritsBefore;
         }
     }
 

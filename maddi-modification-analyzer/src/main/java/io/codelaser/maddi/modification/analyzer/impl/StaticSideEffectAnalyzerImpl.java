@@ -67,6 +67,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class StaticSideEffectAnalyzerImpl {
     // non-final: a run's ModificationOptions can switch it off
     public static boolean ENABLED = true;
+    /*
+     Off by default: a run's ModificationOptions.culprits switches on STATIC_SIDE_EFFECTS_CULPRIT_METHOD, the first
+     statement responsible for a static side effect, followed into the callees (the IDE daemon asks for it).
+     */
+    public static boolean CULPRITS = false;
+    // how far a culprit is followed into the callees
+    private static final int CULPRIT_DEPTH = 6;
 
     private final AtomicInteger propertyChanges;
     private final TypeInfo global;
@@ -119,7 +126,99 @@ public class StaticSideEffectAnalyzerImpl {
                     ValueImpl.BoolImpl.from(sse), mi)) {
                 propertyChanges.incrementAndGet();
             }
+            if (sse && CULPRITS && !mi.analysis().haveAnalyzedValueFor(PropertyImpl.STATIC_SIDE_EFFECTS_CULPRIT_METHOD)) {
+                List<Value.Culprit.Step> steps = culprit(mi, owner -> escapes(mi, owner), sets, 0, new HashSet<>());
+                // display data: not a verdict, so not counted as a property change
+                if (!steps.isEmpty()) {
+                    mi.analysis().set(PropertyImpl.STATIC_SIDE_EFFECTS_CULPRIT_METHOD, new ValueImpl.CulpritImpl(steps));
+                }
+            }
         }
+    }
+
+    /*
+     The first statement of mi's body (in visiting order) that modifies the static state of a type 'wanted' accepts:
+     an assignment to, or a modifying call on, such a static field, or a call of a method or constructor whose set
+     holds one. A call is followed into the callee for the type it contributes, so the chain ends at the
+     assignment or modifying call itself, or at a callee without a body (a contract). Empty when nothing is found.
+     */
+    private List<Value.Culprit.Step> culprit(MethodInfo mi, java.util.function.Predicate<TypeInfo> wanted,
+                                            Map<MethodInfo, Set<TypeInfo>> group, int depth, Set<MethodInfo> visited) {
+        if (!visited.add(mi) || depth > CULPRIT_DEPTH) return List.of();
+        List<Value.Culprit.Step> found = new java.util.ArrayList<>();
+        java.util.function.Predicate<Element> visitor = e -> {
+            if (!found.isEmpty()) return false;
+            FieldReference direct = directStaticModification(e);
+            if (direct != null && wanted.test(direct.fieldInfo().owner())) {
+                String what = e instanceof Assignment ? "assigns " : "modifies ";
+                found.add(step(mi, e, what + name(direct)));
+                return false;
+            }
+            MethodInfo callee = callee(e);
+            if (callee != null) {
+                Set<TypeInfo> set = group.containsKey(callee) ? group.get(callee) : modified(callee);
+                TypeInfo owner = set.stream().filter(wanted).findFirst().orElse(null);
+                if (owner != null) {
+                    boolean contract = !computable(callee);
+                    found.add(step(mi, e, describeCall(e, callee) + (contract ? ", contracted @StaticSideEffects" : "")));
+                    if (!contract) found.addAll(culprit(callee, owner::equals, group, depth + 1, visited));
+                    return false;
+                }
+            }
+            return true;
+        };
+        mi.methodBody().visit(visitor);
+        if (found.isEmpty() && mi.isConstructor()) instanceInitializers(mi.typeInfo()).forEach(i -> i.visit(visitor));
+        return found;
+    }
+
+    private static Value.Culprit.Step step(MethodInfo in, Element e, String text) {
+        io.codelaser.maddi.cst.api.element.Source source = e.source();
+        java.net.URI uri = in.compilationUnit() == null ? null : in.compilationUnit().uri();
+        return new Value.Culprit.Step(uri == null ? null : uri.toString(),
+                source == null ? 0 : source.beginLine(), source == null ? 0 : source.beginPos(), text);
+    }
+
+    private static String name(FieldReference fr) {
+        return fr.fieldInfo().owner().simpleName() + "." + fr.fieldInfo().name();
+    }
+
+    private static String describeCall(Element e, MethodInfo callee) {
+        String type = callee.typeInfo().simpleName();
+        return switch (e) {
+            case ConstructorCall _ -> "new " + type + "(..)";
+            case ExplicitConstructorInvocation _ -> "calls " + type + "'s constructor";
+            case MethodReference _ -> "references " + type + "::" + callee.name();
+            default -> "calls " + type + "." + callee.name() + "(..)";
+        };
+    }
+
+    /*
+     The static field (or the static root of a field chain) that e assigns, or makes a modifying call on; null for
+     anything else, an @IgnoreModifications field or method included. A call whose NON_MODIFYING_METHOD is not in
+     counts, as it does in collect under cycle breaking, the only time one is still out at a decision.
+     */
+    private static FieldReference directStaticModification(Element e) {
+        if (e instanceof Assignment a && OwnStaticState.staticRoot(a.variableTarget()) instanceof FieldReference fr) {
+            return fr;
+        }
+        if (e instanceof MethodCall mc && mc.object() instanceof VariableExpression ve
+            && OwnStaticState.staticRoot(ve.variable()) instanceof FieldReference fr && !mc.methodInfo().isIgnoreModification()) {
+            Value.Bool nonModifying = mc.methodInfo().analysis()
+                    .getOrNull(PropertyImpl.NON_MODIFYING_METHOD, ValueImpl.BoolImpl.class);
+            if (nonModifying == null || nonModifying.isFalse()) return fr;
+        }
+        return null;
+    }
+
+    private static MethodInfo callee(Element e) {
+        return switch (e) {
+            case MethodCall mc -> mc.methodInfo();
+            case ConstructorCall cc -> cc.constructor();
+            case ExplicitConstructorInvocation eci -> eci.methodInfo();
+            case MethodReference mr -> mr.methodInfo();
+            default -> null;
+        };
     }
 
     /*
@@ -148,13 +247,7 @@ public class StaticSideEffectAnalyzerImpl {
             }
             // what the callee modifies, static or instance method, constructor, this(...) or super(...); a method
             // or constructor reference as a lambda calling it, whose body counts as if it ran here
-            MethodInfo callee = switch (e) {
-                case MethodCall mc -> mc.methodInfo();
-                case ConstructorCall cc -> cc.constructor();
-                case ExplicitConstructorInvocation eci -> eci.methodInfo();
-                case MethodReference mr -> mr.methodInfo();
-                default -> null;
-            };
+            MethodInfo callee = callee(e);
             if (callee != null) {
                 if (sets.containsKey(callee)) inGroup.add(callee);
                 else if (decided(callee)) set.addAll(modified(callee));

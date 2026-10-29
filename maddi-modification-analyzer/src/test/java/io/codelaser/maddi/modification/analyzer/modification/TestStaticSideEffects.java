@@ -281,6 +281,86 @@ public class TestStaticSideEffects extends CommonTest {
                 .getOrNull(PropertyImpl.UNMODIFIED_PARAMETER, ValueImpl.BoolImpl.class), "c.instanceNext() modifies c");
     }
 
+    /**
+     * The culprit: the first statement responsible for the static side effect, followed into the callee to the
+     * assignment itself, even where the callee has no static side effect of its own (Registry.register modifies
+     * Registry's own state). Computed only when a run asks for it.
+     */
+    @Language("java")
+    private static final String CULPRIT = """
+            package a.b;
+            public class Big {
+                void big(String s) {
+                    int x = 1;
+                    Registry.register(s);
+                    Registry.count = 3;
+                }
+            }
+            class Registry {
+                static int count;
+                static void register(String s) {
+                    String t = s.trim();
+                    count = count + t.length();
+                }
+            }
+            """;
+
+    private static String culprit(MethodInfo mi) {
+        var c = mi.analysis().getOrNull(PropertyImpl.STATIC_SIDE_EFFECTS_CULPRIT_METHOD, ValueImpl.CulpritImpl.class);
+        return c == null ? null : c.steps().stream().map(st -> st.line() + " " + st.text())
+                .collect(Collectors.joining(" <- "));
+    }
+
+    @DisplayName("culprits: the first responsible statement, followed into the callee to the assignment")
+    @Test
+    public void testCulprit() throws IOException {
+        boolean before = io.codelaser.maddi.modification.analyzer.impl.StaticSideEffectAnalyzerImpl.CULPRITS;
+        io.codelaser.maddi.modification.analyzer.impl.StaticSideEffectAnalyzerImpl.CULPRITS = true;
+        try {
+            TypeInfo X = javaInspector.parse("a.b.Big", CULPRIT);
+            List<Info> ao = prepWork(X);
+            analyzer.go(ao);
+
+            MethodInfo big = X.findUniqueMethod("big", 1);
+            assertTrue(sse(big));
+            assertEquals("5 calls Registry.register(..) <- 13 assigns Registry.count", culprit(big));
+            MethodInfo register = type(X, "Registry").findUniqueMethod("register", 1);
+            assertFalse(sse(register), "its own static state");
+            assertNull(culprit(register), "no static side effect, no culprit");
+        } finally {
+            io.codelaser.maddi.modification.analyzer.impl.StaticSideEffectAnalyzerImpl.CULPRITS = before;
+        }
+    }
+
+    @DisplayName("culprits: a call of a contracted @StaticSideEffects method ends the chain")
+    @Test
+    public void testCulpritContract() throws IOException {
+        boolean before = io.codelaser.maddi.modification.analyzer.impl.StaticSideEffectAnalyzerImpl.CULPRITS;
+        io.codelaser.maddi.modification.analyzer.impl.StaticSideEffectAnalyzerImpl.CULPRITS = true;
+        try {
+            TypeInfo X = javaInspector.parse("a.b.X", PROPAGATION);
+            List<Info> ao = prepWork(X);
+            analyzer.go(ao);
+
+            assertEquals("6 calls X.direct(..) <- 5 calls X.reconfigure(..), contracted @StaticSideEffects",
+                    culprit(X.findUniqueMethod("indirect", 0)));
+        } finally {
+            io.codelaser.maddi.modification.analyzer.impl.StaticSideEffectAnalyzerImpl.CULPRITS = before;
+        }
+    }
+
+    @DisplayName("culprits are off by default")
+    @Test
+    public void testNoCulpritByDefault() throws IOException {
+        TypeInfo X = javaInspector.parse("a.b.Big", CULPRIT);
+        List<Info> ao = prepWork(X);
+        analyzer.go(ao);
+
+        MethodInfo big = X.findUniqueMethod("big", 1);
+        assertTrue(sse(big));
+        assertNull(culprit(big));
+    }
+
     private static TypeInfo type(TypeInfo primary, String simpleName) {
         return primary.compilationUnit().types().stream()
                 .filter(t -> simpleName.equals(t.simpleName())).findFirst().orElseThrow();
