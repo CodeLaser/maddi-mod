@@ -59,6 +59,8 @@ public class TestModifiedCulprit extends CommonTest {
                 void bump() { count = count + 1; }
                 static void fill(Bag bag) { bag.add("x"); }
                 int size() { return items.size(); }
+                private final java.lang.ref.WeakReference<String> ref = new java.lang.ref.WeakReference<>("x");
+                String peek() { return ref.get(); }
             }
             """;
 
@@ -78,7 +80,7 @@ public class TestModifiedCulprit extends CommonTest {
         return bag;
     }
 
-    @DisplayName("@Modified: the receiver chain into a private helper, to the library call; a field assignment")
+    @DisplayName("@Modified: the receiver chain into a private helper, to the library call; a field assignment; an assumed default")
     @Test
     public void test() {
         boolean before = Culprits.ENABLED;
@@ -87,13 +89,16 @@ public class TestModifiedCulprit extends CommonTest {
             TypeInfo bag = analyze();
             MethodInfo add = bag.findUniqueMethod("add", 1);
             assertFalse(add.isNonModifying());
-            assertEquals("9 calls store(..) <- 12 calls items.add(..), a modifying method outside the analysis",
-                    culprit(add));
+            assertEquals("9 calls store(..) <- 12 calls items.add(..), a modifying method outside the analysis"
+                         + " (no annotation: the default)", culprit(add));
             assertEquals("14 assigns this.count", culprit(bag.findUniqueMethod("bump", 0)));
             MethodInfo fill = bag.findUniqueMethod("fill", 1);
             assertEquals("15 calls bag.add(..) <- 9 calls store(..) <- 12 calls items.add(..), a modifying method"
-                         + " outside the analysis", culprit(fill.parameters().getFirst()));
+                         + " outside the analysis (no annotation: the default)", culprit(fill.parameters().getFirst()));
             assertNull(culprit(bag.findUniqueMethod("size", 0)), "not modified, no culprit");
+            // neither Collection.add nor Reference.get has an annotation in the JDK hints: the why says so
+            assertEquals("18 calls ref.get(..), a modifying method outside the analysis (no annotation: the default)",
+                    culprit(bag.findUniqueMethod("peek", 0)));
         } finally {
             Culprits.ENABLED = before;
         }
