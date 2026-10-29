@@ -224,9 +224,40 @@ public class SharedVariable extends LocalVariableImpl implements LinkVariable {
         invalidate();
     }
 
+    /*
+     A reassigned member leaves the group, but the others still hold the one object: 'r = n; n = n.next' keeps r
+     and root together. Their relation was recorded through the leaving member ('r ← n', 'n ← root'), and summary
+     extraction reconstructs it by following the chain; cut out the middle and 'r ← root' is gone
+     (CodeLaser/maddi-mod#72, 4a). So bridge it: every 'x ← variable' and 'variable ← y' leave 'x ← y', at the
+     index where x was assigned. Gate NOBRIDGE: drop the assignments, as before.
+     */
+    private static final boolean NO_BRIDGE = io.codelaser.maddi.modification.link.impl.Gate.isSet("NOBRIDGE");
+
     public void remove(Variable variable) {
         data.variables.remove(variable);
+        List<Assignment> bridges = new ArrayList<>();
+        if (!NO_BRIDGE) {
+            for (Assignment into : data.assignments) {
+                if (!variable.equals(into.to()) || variable.equals(into.from())) continue;
+                for (Assignment outOf : data.assignments) {
+                    if (variable.equals(outOf.from()) && !variable.equals(outOf.to())
+                        && !outOf.to().equals(into.from())) {
+                        bridges.add(new Assignment(into.from(), outOf.to(), into.statementIndex()));
+                    }
+                }
+            }
+        }
         data.assignments.removeIf(a -> variable.equals(a.from()) || variable.equals(a.to()));
+        for (Assignment bridge : bridges) {
+            if (!data.assignments.contains(bridge)) data.assignments.add(bridge);
+        }
+        invalidate();
+    }
+
+    // see SharedVariables.evictSource: the records it received go, those it was the source of stay
+    public void removeMemberKeepSourceRecords(Variable variable) {
+        data.variables.remove(variable);
+        data.assignments.removeIf(a -> variable.equals(a.from()));
         invalidate();
     }
 }

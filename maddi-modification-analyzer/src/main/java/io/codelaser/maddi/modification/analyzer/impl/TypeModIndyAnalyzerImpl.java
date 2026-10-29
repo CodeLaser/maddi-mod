@@ -30,6 +30,7 @@ import io.codelaser.maddi.modification.prepwork.variable.Links;
 import io.codelaser.maddi.modification.prepwork.variable.MethodLinkedVariables;
 import io.codelaser.maddi.cst.api.analysis.Message;
 import io.codelaser.maddi.cst.api.analysis.Value;
+import io.codelaser.maddi.cst.api.info.FieldInfo;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
@@ -111,14 +112,30 @@ public class TypeModIndyAnalyzerImpl extends CommonAnalyzerImpl implements TypeM
         }
     }
 
+    // gate NOALLVALUESFLUENT: fluent when any return link reaches this (the old rule, A/B)
+    private static final boolean ALL_VALUES_FLUENT_OFF = System.getenv("NOALLVALUESFLUENT") != null;
+
+    private static boolean isThis(MethodInfo methodInfo, Variable v) {
+        return v instanceof This thisVar
+               && (thisVar.typeInfo() == methodInfo.typeInfo()
+                   || thisVar.typeInfo().typeHierarchyExcludingJLOStream().anyMatch(h -> h.equals(methodInfo.typeInfo())));
+    }
+
     private void doFluentAnalysis(MethodInfo methodInfo, MethodLinkedVariables mlv) {
         boolean identityFluent;
         if (methodInfo.hasReturnValue() && !mlv.ofReturnValue().isEmpty()) {
-            identityFluent = mlv.ofReturnValue().stream()
-                    .anyMatch(v -> v.to() instanceof This thisVar
-                                   && (thisVar.typeInfo() == methodInfo.typeInfo()
-                                       || thisVar.typeInfo().typeHierarchyExcludingJLOStream()
-                                               .anyMatch(h -> h.equals(methodInfo.typeInfo()))));
+            if (ALL_VALUES_FLUENT_OFF) {
+                identityFluent = mlv.ofReturnValue().stream().anyMatch(v -> isThis(methodInfo, v.to()));
+            } else {
+                // fluent: every value the method returns is 'this'. Not 'c ? this : next' ('←this.next,←this'),
+                // nor a field of this ('getWrapper ≺ this'), nor a face of the result ('either.next ← this.next')
+                Variable rv = mlv.ofReturnValue().primary();
+                List<Variable> values = mlv.ofReturnValue().stream()
+                        .filter(v -> v.from().equals(rv)
+                                     && (v.linkNature().isIdenticalTo() || v.linkNature().isAssignedFrom()))
+                        .map(Link::to).toList();
+                identityFluent = !values.isEmpty() && values.stream().allMatch(v -> isThis(methodInfo, v));
+            }
         } else {
             identityFluent = false;
         }
@@ -275,6 +292,11 @@ public class TypeModIndyAnalyzerImpl extends CommonAnalyzerImpl implements TypeM
                     if ((fr = relevantLinkForModification(link)) != null) {
                         Bool unmodifiedField = fr.fieldInfo().analysis().getOrNull(UNMODIFIED_FIELD,
                                 ValueImpl.BoolImpl.class);
+                        if (unmodifiedField == null && !RESPELLED_FIELD_OFF) {
+                            FieldInfo declared = declaredField(fr.fieldInfo());
+                            if (declared == null) continue;
+                            unmodifiedField = declared.analysis().getOrNull(UNMODIFIED_FIELD, ValueImpl.BoolImpl.class);
+                        }
                         if (unmodifiedField == null) {
                             unmodifiedInMethod = null;
                             break;
@@ -296,6 +318,27 @@ public class TypeModIndyAnalyzerImpl extends CommonAnalyzerImpl implements TypeM
         } else {
             UNDECIDED.debug("MI: Unmodified of parameter {} undecided", pi);
         }
+    }
+
+    // gate NORESPELLEDFIELD: a field declared nowhere keeps the parameter undecided (the old rule, A/B)
+    private static final boolean RESPELLED_FIELD_OFF = System.getenv("NORESPELLEDFIELD") != null;
+
+    /*
+    The link engine respells a real field onto the type of the scope it is read through: a Singleton's 'element' read
+    through 'EMPTY', an IList, becomes 'IList.element', a fresh field that IList does not declare, and whose
+    modification is therefore never decided. Use the field the owner's hierarchy declares under that name; when there
+    is none, the field belongs to a subtype, and its modification reaches the parameter through the call that stored
+    the parameter in it (guava's ImmutableList.construct, CodeLaser/maddi-mod#72 4a). Null: no such field.
+     */
+    private static FieldInfo declaredField(FieldInfo fieldInfo) {
+        if (Util.virtual(fieldInfo)) return fieldInfo;
+        for (TypeInfo t = fieldInfo.owner(); t != null; ) {
+            FieldInfo f = t.getFieldByName(fieldInfo.name(), false);
+            if (f != null) return f;
+            ParameterizedType parent = t.parentClass();
+            t = parent == null ? null : parent.typeInfo();
+        }
+        return null;
     }
 
     private FieldReference relevantLinkForModification(Link link) {

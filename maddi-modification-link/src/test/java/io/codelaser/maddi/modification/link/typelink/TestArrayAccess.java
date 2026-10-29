@@ -151,6 +151,7 @@ public class TestArrayAccess extends CommonTest {
         MethodCall mc2 = (MethodCall) callMc2.expression();
         Value.VariableBooleanMap tlvMc = mc2.analysis().getOrNull(LinkComputerImpl.VARIABLES_LINKED_TO_OBJECT,
                 ValueImpl.VariableBooleanMapImpl.class);
-        assertEquals("ii=true, ii[j]=false", tlvMc.toString()); // NOT: ii=false, ii[3]=true
+        // NOT: ii=false, ii[3]=true. No ii[j] either: j is out of scope after the loop, which may not run (#72 4a)
+        assertEquals("ii=true", tlvMc.toString());
     }
 }

@@ -7881,4 +7881,37 @@ public class TestNullabilityPass extends CommonTest {
         Map<String, String> v = byName(run("a.b.TH", TOLERANT_HIDDEN));
         assertEquals("String", v.get("a.b.TH.unused(String):0:s"));
     }
+
+    @DisplayName("a local assigned a value known non-null takes no null through the closure (jenkins CLIRegisterer.main)")
+    @Test
+    public void assignedNonNullLocal() {
+        NullabilityPass.Report report = run("a.b.CR", """
+                package a.b;
+                import java.util.*;
+                class CR {
+                    interface Binder { Object call(Object o); }
+                    static void consume(int x) { }
+                    static int main(List<Binder> binders) {
+                        Object instance = null;
+                        for (Binder binder : binders) instance = binder.call(instance);
+                        Integer exitCode = (instance instanceof Integer) ? (Integer) instance : 0;
+                        consume(exitCode);
+                        return exitCode;
+                    }
+                    static Object maybe(List<Binder> binders, boolean b) {
+                        Object instance = null;
+                        for (Binder binder : binders) instance = binder.call(instance);
+                        Object kept = b ? instance : "x";
+                        return kept;
+                    }
+                }
+                """);
+        String locals = locals(report);
+        // the loop may run zero times: 'instance' keeps its null (CodeLaser/maddi-mod#72 4a), and the closure links
+        // 'exitCode ← instance ← null'. Neither branch can be null. Gate NOASSIGNEDNONNULL.
+        assertTrue(locals.contains("main.instance: Object?"), locals);
+        assertTrue(locals.contains("main.exitCode: Integer\n"), locals);
+        // the control: an unguarded branch keeps the null
+        assertTrue(locals.contains("maybe.kept: Object?"), locals);
+    }
 }

@@ -105,6 +105,9 @@ public class SharedVariables {
      */
     private Map<Variable, java.util.Set<SharedVariable>> evictedFrom = new HashMap<>();
 
+    // CodeLaser/maddi-mod#77, see evictSource and Graph.mergeEdgeBi
+    private static final boolean NO_SRC_EVICT = Gate.isSet("NOSRCEVICT");
+
     public Collection<Variable> allShared(Variable variable) {
         SharedVariable sv = memberToGroup.get(variable);
         if(sv == null) return List.of(variable);
@@ -670,7 +673,15 @@ public class SharedVariables {
 
     // 'variable' is (re)assigned: the assignments it received in earlier alternatives no longer describe it
     public void dropDetached(Variable variable) {
-        if (!evictedFrom.isEmpty()) evictedFrom.remove(variable);
+        if (!evictedFrom.isEmpty()) {
+            java.util.Set<SharedVariable> reps = evictedFrom.get(variable);
+            // a group the variable is still the recorded source of holds its OLD object, which a further
+            // reassignment does not change (evictSource): only the others go
+            if (reps != null && (NO_SRC_EVICT || reps.removeIf(rep -> rep.assignments().stream()
+                    .noneMatch(a -> variable.equals(a.to()))) && reps.isEmpty())) {
+                evictedFrom.remove(variable);
+            }
+        }
         if (detachedIn.isEmpty()) return;
         java.util.Set<SharedVariable> detached = detachedIn.remove(variable);
         if (detached != null) {
@@ -678,6 +689,33 @@ public class SharedVariables {
                 if (sv.assignments().removeIf(a -> variable.equals(a.from()))) sv.invalidateMemos();
             }
         }
+    }
+
+    /*
+     A SOURCE of its group is assigned a new value ('x = p; p = y', 'x = h.next; h.next = y', 'x = a[i]; a[i] = y'):
+     it leaves the group, which keeps holding the OLD value. Unlike remove, the records in which it is the source
+     stay: they are how the others still read 'x ← 0:p' (assignmentEdgeStream walks records, not memberships). As a
+     non-member its own extraction no longer sees them, and its new value no longer reaches the group's rep.
+     */
+    public void evictSource(Variable variable) {
+        dropDetached(variable);
+        SharedVariable sv = memberToGroup.remove(variable);
+        if (sv != null) {
+            unindexMember(variable);
+            sv.removeMemberKeepSourceRecords(variable);
+            boolean removed = variableTranslationMap.remove(variable);
+            assert removed;
+            // the group still holds the object the variable held: 'x = p; p = y; x.next = null' modifies the
+            // caller's p (detachedAliases, WriteLinksAndModification.expand)
+            evictedFrom.computeIfAbsent(variable, _ -> new java.util.LinkedHashSet<>()).add(sv);
+        }
+    }
+
+    // whether 'variable''s group holds a return value: a return assigned on several paths keeps every value
+    public boolean groupHoldsReturnValue(Variable variable) {
+        SharedVariable sv = memberToGroup.get(variable);
+        return sv != null && sv.variables().stream().anyMatch(v ->
+                Util.primary(v) instanceof io.codelaser.maddi.modification.prepwork.variable.ReturnVariable);
     }
 
     public void remove(Variable variable) {

@@ -620,8 +620,10 @@ public class TypeIndependentAnalyzerImpl extends CommonAnalyzerImpl implements T
         });
     }
 
-    private static final java.util.Set<String> KOTLIN_COPIES = java.util.Set.of("toList", "toSet", "toMap",
-            "listOf", "setOf", "mapOf", "emptyList", "emptySet", "emptyMap");
+    // Kotlin's copies are copies, not immutable ones: toList/toSet/toMap return a fresh ArrayList, LinkedHashSet,
+    // LinkedHashMap; listOf(a, b) is Arrays.asList, setOf/mapOf a LinkedHashSet/Map. A getter hands out a mutable
+    // wrapper. Only the empty singletons cannot be mutated.
+    private static final java.util.Set<String> KOTLIN_COPIES = java.util.Set.of("emptyList", "emptySet", "emptyMap");
 
     private static boolean immutableCopyExpression(io.codelaser.maddi.cst.api.expression.Expression expr) {
         if (expr instanceof io.codelaser.maddi.cst.api.expression.NullConstant) {
@@ -644,8 +646,8 @@ public class TypeIndependentAnalyzerImpl extends CommonAnalyzerImpl implements T
                 return "java.util.List".equals(owner) || "java.util.Set".equals(owner)
                        || "java.util.Map".equals(owner);
             }
-            // the Kotlin spellings of the same copies (CodeLaser/maddi#87): `xs.toList()`, `toSet()`, `toMap()`, and the literal
-            // constructors `listOf`/`setOf`/`mapOf`, static members of the kotlin.collections facades
+            // the Kotlin spellings that are immutable (CodeLaser/maddi#87): the empty collections, static members of
+            // the kotlin.collections facades
             if (mi.isStatic() && KOTLIN_COPIES.contains(name)
                 && mi.typeInfo().fullyQualifiedName().startsWith("kotlin.collections.")) {
                 return true;

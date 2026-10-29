@@ -35,8 +35,10 @@ public class TestLambdaWritesCapturedHolder extends CommonTest {
         TypeInfo X = javaInspector.parse("a.b.X", INPUT);
         new PrepAnalyzer(runtime, new PrepAnalyzer.Options.Builder().build()).doPrimaryType(X);
         LinkComputer tlc = new LinkComputerImpl(javaInspector);
-        // the control: a loop
-        assertEquals("[-] --> loop∈0:xs.§$s", tlc.doMethod(X.findUniqueMethod("loop", 1)).toString());
+        // the control: a loop. It may not run, so r keeps its null (←$_ce0); the join composes the two values into
+        // the parameter's 0:xs.§$s∋$_ce0, as 'if (c) r = xs.get(0);' does (#72 4a)
+        assertEquals("[0:xs.§$s∋$_ce0] --> loop←$_ce0,loop∈0:xs.§$s",
+                tlc.doMethod(X.findUniqueMethod("loop", 1)).toString());
         // an array element, a field of a captured object
         assertEquals("[-] --> array[0]∈0:xs.§$s,array[0].§m~0:xs.§m", tlc.doMethod(X.findUniqueMethod("array", 1)).toString());
         assertEquals("[-] --> box∈0:xs.§$s,box.§m~0:xs.§m", tlc.doMethod(X.findUniqueMethod("box", 1)).toString());

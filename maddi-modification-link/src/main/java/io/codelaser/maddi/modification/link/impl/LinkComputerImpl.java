@@ -28,6 +28,7 @@ import io.codelaser.maddi.cst.api.expression.Assignment;
 import io.codelaser.maddi.cst.api.expression.Expression;
 import io.codelaser.maddi.cst.api.expression.MethodCall;
 import io.codelaser.maddi.cst.api.expression.NullConstant;
+import io.codelaser.maddi.cst.api.expression.VariableExpression;
 import io.codelaser.maddi.cst.api.info.InfoMap;
 import io.codelaser.maddi.cst.api.info.InfoMapView;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
@@ -552,7 +553,7 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
         private TranslationMap replaceConstants(VariableData vd, Stage stage) {
             TranslateConstants tc = new TranslateConstants(javaInspector.runtime());
             for (LocalVariable lv : variablesRepresentingConstants) {
-                if (!(lv.assignmentExpression() instanceof NullConstant)) {
+                if (!(lv.assignmentExpression() instanceof NullConstant) && !variesInLoop(lv)) {
                     assert lv.parameterizedType().arrays() == 0;
                     tc.put(lv, lv.assignmentExpression());
                 }
@@ -568,7 +569,8 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                                 // array-typed variables stay out of constant propagation (the assert that stood
                                 // here fails on real code: an array local linked ≡ to a constant-holding local)
                                 if (constant != null && !(constant instanceof NullConstant)
-                                    && vi.variable().parameterizedType().arrays() == 0) {
+                                    && vi.variable().parameterizedType().arrays() == 0
+                                    && !variesInLoop(vi.variable())) {
                                     Expression prev = tc.put(vi.variable(), constant);
                                     if (prev != null && !constant.equals(prev)) {
                                         // multiple values...
@@ -590,6 +592,8 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                                   || !vd.isKnown(returnVariable.fullyQualifiedName())
                     ? LinksImpl.EMPTY
                     : emptyIfOnlySomeValue(vd.variableInfo(returnVariable).linkedVariables());
+            if (ofReturnValue.primary() != null) ofReturnValue = liftLocallyIndexed(ofReturnValue, Set.of());
+            ofReturnValue = withLiftedIntoReturnValue(ofReturnValue, vd);
             if (Gate.isSet("BTRACE") && methodInfo.name().contains(Gate.get("BTRACE"))) {
                 System.out.println("BTRACE go() raw=" + (vd == null || returnVariable == null
                                                          || !vd.isKnown(returnVariable.fullyQualifiedName())
@@ -884,6 +888,7 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
             VariableInfo vi = vic.best();
             Links viLinks = vi.linkedVariables();
             if (viLinks == null || viLinks.primary() == null) return LinksImpl.EMPTY;
+            viLinks = liftLocallyIndexed(viLinks, inClosure);
             // a local of the ENCLOSING method (a lambda's, a local or anonymous class's closure) is not this method's
             // local: a parameter's link to it -- `x -> r.element = x`, the Ref holder of a Kotlin var the lambda
             // assigns -- is the lambda's effect on its creator, and applying the lambda must carry it there (CodeLaser/maddi#94)
@@ -902,6 +907,115 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                                              || isParameterOfStrictlyEnclosed(v));
             }
             return links.removeIfTo(this::isParameterOfStrictlyEnclosed);
+        }
+
+        /*
+         An element at a local index ('0:in.§$s ∩ postInc[index++]', 'a[i]' in a loop) is nothing a caller can resolve,
+         but its array is: the link is lifted through 'X[i] ∈ X' (and 'X[i].f ≺ X[i]' on the way up) instead of being
+         dropped with the local. Extraction prefers the element form and blocks the array form as redundant, so dropping
+         lost the link altogether ('Entry[] a = ..; for (..) a[i] = new Entry(s); return a;' exported nothing about
+         'in'). CodeLaser/maddi-mod#72 4a exposed it for 'a[index++]': once 'index' is no constant across the loop, the
+         element became a vertex of its own. Gate NOLIFTINDEX.
+         */
+        private static final boolean NO_LIFT_INDEX = Gate.isSet("NOLIFTINDEX");
+
+        private static Links liftLocallyIndexed(Links links, Set<Variable> inClosure) {
+            if (NO_LIFT_INDEX || links.stream().noneMatch(l -> locallyIndexed(l.from()) || locallyIndexed(l.to()))) {
+                return links;
+            }
+            Links.Builder builder = new LinksImpl.Builder(links.primary());
+            for (Link link : links) {
+                Link lifted = liftOne(link, links.primary(), inClosure);
+                if (lifted != null && !builder.contains(lifted.from(), lifted.linkNature(), lifted.to())) {
+                    builder.add(lifted.from(), lifted.linkNature(), lifted.to(), lifted.mediated(), lifted.derived());
+                }
+            }
+            return builder.build();
+        }
+
+        // the link itself when neither end is locally indexed; null when the lift composes to nothing
+        private static Link liftOne(Link link, Variable primary, Set<Variable> inClosure) {
+            Variable from = link.from();
+            Variable to = link.to();
+            LinkNature nature = link.linkNature();
+            while (nature.valid() && locallyIndexed(to) && !isInClosure(to, inClosure)) {
+                nature = nature.combine(upNature(to));
+                to = upVariable(to);
+            }
+            while (nature.valid() && locallyIndexed(from) && !isInClosure(from, inClosure) && !from.equals(primary)) {
+                nature = upNature(from).reverse().combine(nature);
+                from = upVariable(from);
+            }
+            if (from == link.from() && to == link.to()) return link;
+            // a §m face lifted past its field is no §m link any more: dropped, as before the lift
+            if (!nature.valid() || from.equals(to)
+                || Util.isVirtualModification(from) != Util.isVirtualModification(to)) {
+                return null;
+            }
+            return new LinksImpl.LinkImpl(from, nature, to, link.mediated(), true);
+        }
+
+        /*
+         The return value's own extraction never sees an element at a local index ('create.entries[index++]'); the
+         parameter does ('0:in.§$s ∩ create.entries[index++]'). Lifted, that link targets the return value, and
+         filteredPi drops a parameter's links into the return value once the parameter is in it (they are read there).
+         So the lifted link goes to the return value, reversed: 'create.entries ∩ 0:in.§$s'.
+         */
+        private Links withLiftedIntoReturnValue(Links ofReturnValue, VariableData vd) {
+            if (NO_LIFT_INDEX || vd == null || returnVariable == null) return ofReturnValue;
+            Links.Builder builder = null;
+            for (ParameterInfo pi : methodInfo.parameters()) {
+                VariableInfoContainer vic = vd.variableInfoContainerOrNull(pi.fullyQualifiedName());
+                if (vic == null) continue;
+                Links links = vic.best().linkedVariables();
+                if (links == null || links.primary() == null
+                    || links.stream().noneMatch(l -> locallyIndexed(l.to()) && rootedAtReturn(l.to()))) {
+                    continue;
+                }
+                for (Link original : links) {
+                    if (!locallyIndexed(original.to()) || !rootedAtReturn(original.to())) continue;
+                    Link link = liftOne(original, links.primary(), Set.of());
+                    if (link == null || !LinkVariable.acceptForLinkedVariables(link.to())
+                        || !LinkVariable.acceptForLinkedVariables(link.from())) {
+                        continue;
+                    }
+                    if (builder == null) {
+                        builder = ofReturnValue.primary() == null ? new LinksImpl.Builder(returnVariable)
+                                : new LinksImpl.Builder(ofReturnValue);
+                    }
+                    LinkNature reverse = link.linkNature().reverse();
+                    if (!builder.contains(link.to(), reverse, link.from())) {
+                        builder.add(link.to(), reverse, link.from(), link.mediated(), true);
+                    }
+                }
+            }
+            return builder == null ? ofReturnValue : builder.build();
+        }
+
+        private boolean rootedAtReturn(Variable v) {
+            return returnVariable.equals(Util.primary(v));
+        }
+
+        // not acceptable for the summary, but below an array element whose index is (part of) the reason
+        private static boolean locallyIndexed(Variable v) {
+            if (LinkVariable.acceptForLinkedVariables(v)) return false;
+            for (Variable x = v; x != null; x = upVariable(x)) {
+                if (x instanceof DependentVariable dv && dv.arrayVariable() != null
+                    && LinkVariable.acceptForLinkedVariables(dv.arrayVariable())) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static Variable upVariable(Variable v) {
+            if (v instanceof DependentVariable dv) return dv.arrayVariable();
+            if (v instanceof FieldReference fr) return fr.scopeVariable();
+            return null;
+        }
+
+        private static LinkNature upNature(Variable v) {
+            return v instanceof DependentVariable ? LinkNatureImpl.IS_ELEMENT_OF : LinkNatureImpl.IS_FIELD_OF;
         }
 
         /** Whether every local variable [v] is made of belongs to the closure: the enclosing method's. */
@@ -1026,25 +1140,57 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                     r = u.addExtra(Map.of(forEachLv, newLinks));
                 } // else: most often: a recursive method, which has an empty result
             }
+            Result updaters = null;
             if (statement instanceof ForStatement fs) {
                 for (Expression updater : fs.updaters()) {
                     Expression sorted = javaInspector.runtime().sortAndSimplify(true, updater);
                     Result u = expressionVisitor.visit(sorted, previousVd, stageOfPrevious);
-                    r = r == null ? u : r.merge(u);
+                    if (isLoopThatMayRunNone(fs)) {
+                        updaters = updaters == null ? u : updaters.merge(u);
+                    } else {
+                        r = r == null ? u : r.merge(u);
+                    }
                 }
+            }
+            // the statement's own variable data keeps the updaters' links, as when they were linked with the
+            // initializers: the nullability pass reads a for loop's updaters there (NullabilityPass.updaterLink)
+            Result withUpdaters = updaters == null ? null : r == null ? updaters : r.merge(updaters);
+            if (updaters != null) {
+                // the updaters run after the body, so their links go in after the snapshot of the state before the
+                // loop, inside the body's alternative (linkAlternatives): 'for (; ..; n = n.next)' keeps the value
+                // from before the loop for the zero-iteration path. Their modifications stay with the statement.
+                Result modificationsOnly = new Result(LinksImpl.EMPTY, LinkedVariablesImpl.EMPTY,
+                        updaters.modified(), updaters.deepOnlyModified(), new ArrayList<>(), new HashMap<>(),
+                        new HashSet<>(), new HashSet<>());
+                r = r == null ? modificationsOnly : r.merge(modificationsOnly);
             }
             TranslationMap replaceConstants;
             if (r != null) {
                 this.variablesRepresentingConstants.addAll(r.variablesRepresentingConstants());
+                if (updaters != null) {
+                    this.variablesRepresentingConstants.addAll(updaters.variablesRepresentingConstants());
+                }
                 replaceConstants = replaceConstants(previousVd, stageOfPrevious);
             } else {
                 replaceConstants = null;
+            }
+            if (updaters != null) {
+                Set<Variable> assigned = new HashSet<>();
+                for (Expression updater : ((ForStatement) statement).updaters()) {
+                    if (updater instanceof Assignment a) assigned.add(a.variableTarget());
+                }
+                assignedByOpenUpdaters.addAll(assigned);
+                pendingUpdaters.put(statement, new PendingUpdaters(updaters.copyLinksToExtra(), replaceConstants,
+                        assigned));
             }
             VariableData vd = VariableDataImpl.of(statement);
             assert vd != null;
             Variable destination;
             if (r != null) {
                 r = r.copyLinksToExtra();
+            }
+            if (withUpdaters != null) {
+                withUpdaters = withUpdaters.copyLinksToExtra();
             }
             // A Kotlin non-local return (CodeLaser/maddi-mod#11), `xs.forEach { if (p(it)) return it }`, returns from the
             // method exitLevels() lambdas up. Its value is assigned to THAT method's return variable, not to the
@@ -1080,10 +1226,13 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                 current.add(LinkNatureImpl.IS_ASSIGNED_FROM, r.links().primary());
             }
             String statementIndex = statement.source().index();
-            if (r != null) {
-                this.erase.addAll(r.erase());
-                linkGraph.compute(statementIndex, r.extra().map(), r.erase(), replaceConstants,
-                        r.modified());
+            // the graph links the updaters only for the variable data written below, then forgets them
+            Graph.State beforeUpdaters = withUpdaters == null ? null : linkGraph.graph().snapshot();
+            Result linked = withUpdaters == null ? r : withUpdaters;
+            if (linked != null) {
+                this.erase.addAll(linked.erase());
+                linkGraph.compute(statementIndex, linked.extra().map(), linked.erase(), replaceConstants,
+                        linked.modified());
             }
             Set<Variable> previouslyModified = computePreviouslyModified(vd, previousVd, stageOfPrevious, false);
             Set<Variable> previouslyStructurallyModified = computePreviouslyModified(vd, previousVd, stageOfPrevious, true);
@@ -1096,8 +1245,12 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                     .forEach(modificationsOutsideStructural::add);
 
             writeCasts(r == null ? new HashMap<>() : r.casts(), previousVd, stageOfPrevious, vd);
+            if (beforeUpdaters != null) {
+                linkGraph.graph().restore(beforeUpdaters);
+                linkGraph.compute(statementIndex, r.extra().map(), r.erase(), replaceConstants, r.modified());
+            }
 
-            if (statement.hasSubBlocks()) {
+            if (statement.hasSubBlocks() || pendingUpdaters.containsKey(statement)) {
                 handleSubBlocks(statement, vd);
             }
             if (r != null) {
@@ -1284,13 +1437,24 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
         private void handleSubBlocks(Statement statement, VariableData vd) {
             List<Block> blocks = subBlocksForLinking(statement).filter(block -> !block.isEmpty()).toList();
             List<VariableData> vds = new ArrayList<>();
-            if (!NO_FORK && isAlternatives(statement) && !blocks.isEmpty()) {
-                linkAlternatives(statement, blocks, vd, vds);
-            } else {
-                for (Block block : blocks) {
-                    VariableData subVd = doBlock(block, vd);
-                    if (subVd != null) vds.add(subVd);
+            Set<LocalVariable> varied = !NO_LOOP_VARIED && statement instanceof LoopStatement ? variedIn(blocks) : Set.of();
+            variedInOpenLoops.addAll(varied);
+            try {
+                List<Block> cases = NO_FORK || NO_SWITCH_FORK || !(statement instanceof SwitchStatementOldStyle ss)
+                        ? null : casesWithoutFallThrough(ss);
+                if (cases != null) {
+                    linkAlternatives(statement, cases, !hasDefault((SwitchStatementOldStyle) statement), vd, vds);
+                } else if (!NO_FORK && isAlternatives(statement)
+                           && (!blocks.isEmpty() || pendingUpdaters.containsKey(statement))) {
+                    linkAlternatives(statement, blocks, mayRunNone(statement, blocks), vd, vds);
+                } else {
+                    for (Block block : blocks) {
+                        VariableData subVd = doBlock(block, vd);
+                        if (subVd != null) vds.add(subVd);
+                    }
                 }
+            } finally {
+                varied.forEach(variedInOpenLoops::remove);
             }
             Set<Variable> toRemove = new HashSet<>();
             for (VariableData subVd : vds) {
@@ -1302,6 +1466,7 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
             }
             handleSubBlocks(vds, vd, toRemove);
             LOGGER.debug("Removing {}", toRemove);
+            linkGraph.graph().liftElementsLeavingScope(toRemove, statement.source().index());
             linkGraph.graph().remove(toRemove);
         }
 
@@ -1323,22 +1488,40 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
         private static final boolean NO_FORK = Gate.isSet("NOFORK");
 
         private static boolean isAlternatives(Statement statement) {
-            return statement instanceof IfElseStatement;
+            return statement instanceof IfElseStatement || isLoopThatMayRunNone(statement);
+        }
+
+        /*
+         A while, for or for-each body may run zero times: the state after the loop is the JOIN of the state in which
+         the body ends and the state before it, as for an if without an else. Linked one after the other, a
+         reassignment in the body ('n = n.next', 'n = other') erased the value from before the loop, so 'Node n =
+         root; while (..) n = n.next; return n;' lost 'return ← this.root' (CodeLaser/maddi-mod#72, 4a). A do-while
+         body runs at least once. Gate NOLOOPFORK: link loop bodies one after the other, as before.
+         */
+        private static final boolean NO_LOOP_FORK = Gate.isSet("NOLOOPFORK");
+
+        private static boolean isLoopThatMayRunNone(Statement statement) {
+            return !NO_FORK && !NO_LOOP_FORK && statement instanceof LoopStatement && !(statement instanceof DoStatement);
         }
 
         // true when control may pass the statement without running any of its non-empty sub-blocks
-        private static boolean mayRunNone(List<Block> blocks) {
-            return blocks.size() < 2;
+        private static boolean mayRunNone(Statement statement, List<Block> blocks) {
+            return blocks.size() < 2 || isLoopThatMayRunNone(statement);
         }
 
-        private void linkAlternatives(Statement statement, List<Block> blocks, VariableData vd,
+        private void linkAlternatives(Statement statement, List<Block> blocks, boolean none, VariableData vd,
                                       List<VariableData> vds) {
             Graph graph = linkGraph.graph();
-            boolean none = mayRunNone(blocks);
             Graph.State before = graph.snapshot();
             List<Graph.State> ends = new ArrayList<>(blocks.size() + 1);
+            PendingUpdaters updaters = pendingUpdaters.remove(statement);
             graph.enterAlternatives();
             try {
+                if (blocks.isEmpty()) {
+                    // an empty for body: the updaters are the whole alternative
+                    commitUpdaters(statement, updaters);
+                    ends.add(graph.detach());
+                }
                 for (int i = 0; i < blocks.size(); i++) {
                     if (i > 0) {
                         boolean lastUse = i == blocks.size() - 1 && !none;
@@ -1346,13 +1529,120 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                     }
                     VariableData subVd = doBlock(blocks.get(i), vd);
                     if (subVd != null) vds.add(subVd);
+                    commitUpdaters(statement, updaters);
                     ends.add(graph.detach());
                 }
             } finally {
                 graph.leaveAlternatives();
+                if (updaters != null) assignedByOpenUpdaters.removeAll(updaters.assigned());
             }
             if (none) ends.add(before);
             graph.join(ends, statement.source().index());
+        }
+
+        /*
+         The cases of an old-style switch are alternatives too. Linked one after the other, the paths of different
+         cases composed: 'switch (n) { case 1: return of(a[0]); default: return construct(b); }' joined the first
+         return's 'element ← a[0]' with the second's 'array[0] → element' into 'b ~ a' and 'return.element → a[0]'
+         (guava's ImmutableList.copyOf(E[]), whose element then flowed into Invokable.getParameters' annotations:
+         CodeLaser/maddi-mod#72 4a). The body is one block, the labels are positions in it: each run of statements
+         between labels is an alternative, when none falls through into the next (each non-empty run ends in a
+         return, throw, break or continue) and no run reads a local declared in an earlier one. Without a default,
+         no case may run. Anything else stays linked one after the other.
+
+         Opt-in (SWITCHFORK) until the two older defects its more complete flow exposes are fixed: two alternative
+         sources of one call result exchanging their links (guava TypeResolver.resolveParameterizedType), and #68's
+         tolerance walk failing at the return of a library override (guava Joiner); with the fork on, guava's oracle
+         gained 15 unsafe parameters and 167 reflection tests threw (worktree-maddi-all, 2026-10-29).
+         */
+        private static final boolean NO_SWITCH_FORK = !Gate.isSet("SWITCHFORK");
+
+        private static boolean hasDefault(SwitchStatementOldStyle ss) {
+            return ss.switchLabels().stream().anyMatch(l -> l.literal().isEmpty() && l.patternVariable() == null);
+        }
+
+        private List<Block> casesWithoutFallThrough(SwitchStatementOldStyle ss) {
+            List<Statement> statements = ss.block().statements();
+            java.util.TreeSet<Integer> starts = new java.util.TreeSet<>();
+            ss.switchLabels().forEach(l -> starts.add(l.startFromPosition()));
+            starts.add(statements.size());
+            List<Block> cases = new ArrayList<>();
+            Set<Variable> declaredEarlier = new HashSet<>();
+            Integer from = null;
+            for (int to : starts) {
+                if (from != null && from < to) {
+                    List<Statement> run = statements.subList(from, to);
+                    Statement last = run.getLast();
+                    if (!(last instanceof ReturnStatement || last instanceof ThrowStatement
+                          || last instanceof BreakOrContinueStatement)) {
+                        return null;
+                    }
+                    AtomicBoolean readsEarlier = new AtomicBoolean();
+                    if (!declaredEarlier.isEmpty()) {
+                        for (Statement st : run) {
+                            st.visit(e -> {
+                                if (e instanceof VariableExpression ve && declaredEarlier.contains(ve.variable())) {
+                                    readsEarlier.set(true);
+                                }
+                                return !readsEarlier.get();
+                            });
+                        }
+                    }
+                    if (readsEarlier.get()) return null;
+                    for (Statement st : run) {
+                        if (st instanceof LocalVariableCreation lvc) declaredEarlier.addAll(lvc.newLocalVariables());
+                    }
+                    Block.Builder bb = javaInspector.runtime().newBlockBuilder();
+                    bb.addStatements(run);
+                    cases.add(bb.build());
+                }
+                from = to;
+            }
+            return cases.size() < 2 ? null : cases;
+        }
+
+        // a for statement's updaters, linked after its body: see the statement's evaluation
+        private record PendingUpdaters(Result result, TranslationMap replaceConstants, Set<Variable> assigned) {
+        }
+
+        private final Map<Statement, PendingUpdaters> pendingUpdaters = new HashMap<>();
+        // the variables a for statement's updaters assign, while its body is linked: they vary in the body, so they
+        // are not replaced by the constant of their initializer ('for (int i = 0; ..; i++) .. array[i] ..')
+        private final Set<Variable> assignedByOpenUpdaters = new HashSet<>();
+
+        /*
+         The same holds for a local declared before a loop and assigned anywhere in its body ('int index = 0; for (..)
+         { a[index] = ..; index++; }'): from the second iteration on, it is no longer its initializer's constant, so
+         'a[index]' is not 'a[0]' (CodeLaser/maddi-mod#79). A local declared in the body starts afresh each iteration
+         and keeps its constant. A multiset: nested loops can both assign the same local. Gate NOLOOPVARIED.
+         */
+        private static final boolean NO_LOOP_VARIED = Gate.isSet("NOLOOPVARIED");
+        private final List<LocalVariable> variedInOpenLoops = new ArrayList<>();
+
+        private static Set<LocalVariable> variedIn(List<Block> blocks) {
+            Set<LocalVariable> assigned = new HashSet<>();
+            Set<LocalVariable> declared = new HashSet<>();
+            for (Block block : blocks) {
+                block.visit(e -> {
+                    if (e instanceof Assignment a && a.variableTarget() instanceof LocalVariable lv) assigned.add(lv);
+                    if (e instanceof LocalVariableCreation lvc) declared.addAll(lvc.newLocalVariables());
+                    return true;
+                });
+            }
+            assigned.removeAll(declared);
+            return assigned;
+        }
+
+        private boolean variesInLoop(Variable variable) {
+            return assignedByOpenUpdaters.contains(variable) || variedInOpenLoops.contains(variable);
+        }
+
+        private void commitUpdaters(Statement statement, PendingUpdaters updaters) {
+            if (updaters == null) return;
+            this.erase.addAll(updaters.result().erase());
+            // its own index: the updaters' assignments are not part of the initializers' (multi-valued) assignment
+            linkGraph.compute(statement.source().index() + ".u", updaters.result().extra().map(),
+                    updaters.result().erase(), updaters.replaceConstants(), updaters.result().modified());
         }
 
         // The CST's subBlockStream() does not include try-with-resources declarations. Those 'res = expr'

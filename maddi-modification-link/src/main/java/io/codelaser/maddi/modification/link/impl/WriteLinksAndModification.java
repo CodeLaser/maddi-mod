@@ -20,6 +20,7 @@ import io.codelaser.maddi.cst.api.runtime.Runtime;
 import io.codelaser.maddi.cst.api.statement.Statement;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.api.variable.DependentVariable;
+import io.codelaser.maddi.cst.api.expression.VariableExpression;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.cst.api.variable.This;
 import io.codelaser.maddi.cst.api.variable.Variable;
@@ -888,11 +889,32 @@ class WriteLinksAndModification {
         // place that can distinguish deconstruction components from accessor-copy expansions) is genuine
         // containment, including through the binding's cast aliases ('0:i ≻ set' for bound 'o', group {o, set}).
         if (linkNature == CONTAINS_AS_FIELD) return !Util.virtual(to) && !Util.isPartOf(from, to)
+                                                    && !expressionScoped(to)
                                                     && !followGraph.graph().isPatternBindingOrAlias(from, to);
         if (linkNature == IS_FIELD_OF) return !Util.virtual(from)
                                               && !(Util.primary(from) instanceof ReturnVariable)
                                               && !Util.isPartOf(to, from)
+                                              && !expressionScoped(from)
                                               && !followGraph.graph().isPatternBindingOrAlias(to, from);
+        return false;
+    }
+
+    /*
+     A field of an expression's result, at any depth ('parent.wrapperNode().map', 'parent.self().data.list'): its
+     scope chain stops at the call, so it is structurally part of nothing. Its containment comes through the result
+     ('parent.wrapperNode().map ≺ $rv ← parent' gives '≺ parent', ExpressionVisitor.variableExpression), and is real:
+     the variable holds a field of whatever the expression returned. Dropped, a modification through it in a later
+     statement no longer reached 'parent' (fernflower NestedClassProcessor.insertLocalVars, CodeLaser/maddi-mod#72).
+     Gate NOEXPRSCOPEFIELD.
+     */
+    private static boolean expressionScoped(Variable variable) {
+        if (ExpressionVisitor.NO_EXPRESSION_SCOPE_FIELD) return false;
+        Variable v = variable;
+        while (v instanceof FieldReference fr) {
+            Variable scope = fr.scopeVariable();
+            if (scope == null) return fr.scope() != null && !(fr.scope() instanceof VariableExpression);
+            v = scope;
+        }
         return false;
     }
 

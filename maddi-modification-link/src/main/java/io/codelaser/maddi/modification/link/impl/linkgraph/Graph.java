@@ -207,6 +207,60 @@ public class Graph {
         assigned.forEach(sharedVariables::dropDetached);
     }
 
+    /*
+     The variables a statement assigns that are a source of their group leave it BEFORE any of the statement's links
+     go in (CodeLaser/maddi-mod#77, see mergeEdgeBi). Done at the assignment link alone, the store
+     'hashTable[b] = newEntry' first added 'hashTable[b] ∈ hashTable' onto the OLD group (bucketHead's), and the new
+     entry never became an element: 'entries ~ table' was lost.
+     */
+    public void evictReassignedSources(Set<Variable> assigned, String statementIndex) {
+        if (NO_SRC_EVICT) return;
+        for (Variable v : assigned) {
+            if (sharedVariables.isKnown(v) && sharedVariables.isSourceAtOtherStatement(v, statementIndex)
+                && !sharedVariables.isReassignment(v, statementIndex)
+                && !(v instanceof io.codelaser.maddi.cst.api.info.ParameterInfo)
+                && !sharedVariables.groupHoldsReturnValue(v)) {
+                clearRepExpansionCache();
+                touchVariable(v);
+                Variable rep = sharedVariables.translateForward(v);
+                if (rep != v) touchVariable(rep);
+                touchAll(sharedVariables.allShared(v));
+                sharedVariables.evictSource(v);
+            }
+        }
+    }
+
+    /*
+     An assigned variable's faces (its fields and elements, 'r.element') that are members of a group describe its OLD
+     object. They are no graph vertices, so the removal of every vertex rooted at the variable (LinkGraph.compute)
+     missed them, and 'r = new Singleton<>(a[0]); r = new Regular<>(b); return r' read 'return.element ← 0:a[0]'.
+     guava's ImmutableList.copyOf(E[]) switches between of(elements[0]) and construct(..): its summary had the
+     list's element flow INTO the argument's, and Invokable.getParameters' annotations elements turned nullable
+     (CodeLaser/maddi-mod#72 4a). As for the variable itself (mergeEdgeBi): a face that is a source at another
+     statement is evicted, its records stay; any other face leaves its group. Gate NOFACEDROP.
+     */
+    private static final boolean NO_FACE_DROP = Gate.isSet("NOFACEDROP");
+
+    public void dropReassignedFaces(Set<Variable> assigned, String statementIndex) {
+        if (NO_FACE_DROP) return;
+        for (Variable v : assigned) {
+            for (Variable face : List.copyOf(sharedVariables.membersRootedAt(v))) {
+                if (face.equals(v)) continue;
+                clearRepExpansionCache();
+                touchVariable(face);
+                Variable rep = sharedVariables.translateForward(face);
+                if (rep != face) touchVariable(rep);
+                touchAll(sharedVariables.allShared(face));
+                if (sharedVariables.isSourceAtOtherStatement(face, statementIndex)
+                    && !sharedVariables.groupHoldsReturnValue(face)) {
+                    sharedVariables.evictSource(face);
+                } else {
+                    sharedVariables.remove(face);
+                }
+            }
+        }
+    }
+
     public void enterAlternatives() {
         sharedVariables.enterAlternatives();
     }
@@ -700,6 +754,14 @@ public class Graph {
         return result.stream();
     }
 
+    // another member of 'variable's shared group: it survives clearing 'variable' (a reassignment) and stands for
+    // the same object until then. Null when 'variable' is in no group, or alone in it.
+    public Variable survivingAlias(Variable variable) {
+        return sharedVariables.allShared(variable).stream()
+                .filter(v -> !v.equals(variable) && !(v instanceof IntermediateVariable))
+                .min(Variable::compareTo).orElse(null);
+    }
+
     public boolean isPureAssignmentSource(Variable variable) {
         return sharedVariables.isPureAssignmentSource(variable);
     }
@@ -762,6 +824,8 @@ public class Graph {
     // diagnostic: NOSV=1 in the environment disables the shared-variable collapse (assignments stay first-class
     // edges), so the O(N^2) part-of link explosion is not bounded. Used to demonstrate what sv prevents.
     private static final boolean NOSV = Gate.isSet("NOSV");
+    // CodeLaser/maddi-mod#77: gate NOSRCEVICT restores the rep edge for a reassigned source
+    private static final boolean NO_SRC_EVICT = Gate.isSet("NOSRCEVICT");
 
     boolean mergeEdgeBi(Variable from, LinkNature linkNature, Variable to, String statementIndex) {
         if (Gate.isSet("TRACEVAR")
@@ -813,6 +877,16 @@ public class Graph {
                 // reassignment — removing it abandons the group rep carrying the first path's knowledge.
                 sharedVariables.remove(from);
                 // TODO what with fromInGraph?
+            } else if (!NO_SRC_EVICT && fromInGroups && sharedVariables.isSourceAtOtherStatement(from, statementIndex)
+                       && !(from instanceof io.codelaser.maddi.cst.api.info.ParameterInfo)
+                       && !sharedVariables.groupHoldsReturnValue(from)) {
+                // a source is assigned a new value: the group keeps the old one. The rep edge below made every
+                // other member hold the new value as well ('x = h.next; h.next = y; return x' read '← 1:y', and
+                // guava's 'bucketHead = hashTable[b]; .. hashTable[b] = newEntry' made bucketHead the new entry,
+                // CodeLaser/maddi-mod#77). Only a return value accumulates: it is assigned on several paths. A
+                // parameter keeps the rep edge for now: evicted, its new value ('0:p ← 1:y') would read as the
+                // caller's.
+                sharedVariables.evictSource(from);
             } else if (!Gate.isSet("NORSRC")
                        && fromInGroups && sharedVariables.isSourceAtOtherStatement(from, statementIndex)) {
                 // 'from' was a pure SOURCE in its group ('method ← 1:num' at an earlier statement) and is now
@@ -1048,6 +1122,76 @@ public class Graph {
                           String statementIndex,
                           Predicate<Fact<Variable, LinkNature>> acceptRemoval) {
         engine.recompute(affected, statementIndex, acceptRemoval);
+    }
+
+    /*
+     An element at an index that goes out of scope ('for (int i = 0; ..; i++) a[i] = new Entry(in.get(i)); return a;')
+     is dropped with its index, and so are its links: the returned array exported nothing about 'in'. Before the
+     removal, each link of such an element to a variable that stays is lifted to the array through 'a[i] ∈ a', as the
+     summary does for an element at a local index (LinkComputerImpl.liftLocallyIndexed). CodeLaser/maddi-mod#79.
+     Gate NOSCOPELIFT.
+     */
+    private static final boolean NO_SCOPE_LIFT = Gate.isSet("NOSCOPELIFT");
+
+    public void liftElementsLeavingScope(Set<Variable> toRemove, String statementIndex) {
+        if (NO_SCOPE_LIFT || toRemove.isEmpty()) return;
+        List<Link> lifted = new ArrayList<>();
+        Set<Variable> vertices = variables();
+        for (Variable removed : toRemove) {
+            if (!(removed instanceof DependentVariable dv) || dv.arrayVariable() == null || dv.indexVariable() == null
+                || !toRemove.contains(dv.indexVariable()) || toRemove.contains(dv.arrayVariable())
+                || !vertices.contains(removed)) {
+                continue;
+            }
+            Variable array = dv.arrayVariable();
+            // the element and what holds the same object: its shared group's rep ('a[i] ← $__sv_a[i]')
+            Set<Variable> same = new HashSet<>();
+            same.add(removed);
+            closureStream(removed).filter(e -> e.getValue().isIdenticalToOrAssignedFromTo())
+                    .forEach(e -> same.add(e.getKey()));
+            for (Variable vertex : vertices) {
+                // up the vertex's field chain to the object ('$__sv_a[i].e ≺ $__sv_a[i]'), then into the array
+                LinkNature fieldUp = null;
+                Variable cur = vertex;
+                while (!same.contains(cur) && cur instanceof FieldReference fr && fr.scopeVariable() != null) {
+                    fieldUp = fieldUp == null ? LinkNatureImpl.IS_FIELD_OF.reverse()
+                            : LinkNatureImpl.IS_FIELD_OF.reverse().combine(fieldUp);
+                    cur = fr.scopeVariable();
+                }
+                if (!same.contains(cur)) continue;
+                LinkNature up = fieldUp == null ? LinkNatureImpl.IS_ELEMENT_OF.reverse()
+                        : LinkNatureImpl.IS_ELEMENT_OF.reverse().combine(fieldUp);
+                if (!engine.isValid(up)) continue;
+                closureStream(vertex).forEach(e -> {
+                    Variable to = e.getKey();
+                    if (same.contains(to) || to.equals(array) || Util.isPartOf(array, to)
+                        || expandRepToMembers(to).allMatch(m -> leavesScope(m, toRemove))) {
+                        return;
+                    }
+                    LinkNature nature = up.combine(e.getValue());
+                    if (engine.isValid(nature)) lifted.add(new LinksImpl.LinkImpl(array, nature, to, false, true));
+                });
+            }
+        }
+        // the graph has no ∩ between a real variable and hidden content ('a ∩ in.§$s', invalidEdge): of the rest, the
+        // finer link speaks for the coarser
+        lifted.removeIf(l -> invalidEdge(l.from(), l.linkNature(), l.to()));
+        lifted.removeIf(l -> lifted.stream().anyMatch(f -> f.from().equals(l.from()) && !f.to().equals(l.to())
+                                                          && Util.isPartOf(l.to(), f.to())));
+        lifted.forEach(l -> simpleAddToGraph(l.from(), l.linkNature(), l.to(), statementIndex, false));
+    }
+
+    // the variable, or a scope or index on its chain, is being removed
+    private static boolean leavesScope(Variable v, Set<Variable> toRemove) {
+        for (Variable cur = v; cur != null; ) {
+            if (toRemove.contains(cur)) return true;
+            if (cur instanceof FieldReference fr) cur = fr.scopeVariable();
+            else if (cur instanceof DependentVariable dv) {
+                if (dv.indexVariable() != null && toRemove.contains(dv.indexVariable())) return true;
+                cur = dv.arrayVariable();
+            } else cur = null;
+        }
+        return false;
     }
 
     public void remove(Set<Variable> toRemove) {

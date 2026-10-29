@@ -115,17 +115,19 @@ public class TestKotlinLinkFunctions extends CommonKotlinLinkTest {
      The lambda assigns the enclosing `var r`: a Ref holder, `r.element = it`, as kotlinc compiles it (CodeLaser/maddi#72). A lambda's
      write through a captured holder -- a Ref field, an array element -- now reaches its creator (CodeLaser/maddi#94): the lambda's
      summary keeps its parameter's link to the closure variable, and a Consumer applied to a collection's elements
-     stores one of them there. The Java holder forms link as the `for` loop does; they also keep the holder's earlier
-     value (`←1:a`), which the loop form drops, at the price of an over-approximate parameter link (`1:a∈0:xs.§$s`).
+     stores one of them there. The Java holder forms link as the `for` loop does. A loop may not run, so it keeps the
+     earlier value (`←$_ce0`, #72 4a), as the holder forms do (`←1:a`), at the price of an over-approximate parameter
+     link (`0:xs.§$s∋$_ce0`, `1:a∈0:xs.§$s`).
      */
     @Test
     public void varAssignedInLambda() {
-        assertEquals("[-] --> captured∈0:xs.§$s", p.javaLinks("captured"));
+        assertEquals("[0:xs.§$s∋$_ce0] --> captured←$_ce0,captured∈0:xs.§$s", p.javaLinks("captured"));
         assertEquals("[-] --> capturedRef1∈0:xs.§$s", p.javaLinks("capturedRef1"));
         assertEquals("[0:xs.§$s∋$_ce1] --> capturedRef←$_ce1,capturedRef∈0:xs.§$s,capturedRef.§m~0:xs.§m",
                 p.javaLinks("capturedRef"));
         assertEquals("[-] --> capturedArr[0]∈0:xs.§$s,capturedArr[0].§m~0:xs.§m", p.javaLinks("capturedArr"));
-        assertEquals("[-, -] --> capturedLoopInit∈0:xs.§$s", p.javaLinks("capturedLoopInit"));
+        assertEquals("[0:xs.§$s∋1:a, 1:a∈0:xs.§$s] --> capturedLoopInit←1:a,capturedLoopInit∈0:xs.§$s,"
+                     + "capturedLoopInit.§m≡1:a.§m", p.javaLinks("capturedLoopInit"));
         assertEquals("[0:xs.§$s∋1:a,0:xs.§m~1:a.§m, 1:a∈0:xs.§$s,1:a.§m~0:xs.§m] --> capturedRefInit←1:a,"
                      + "capturedRefInit∈0:xs.§$s,capturedRefInit.§m←1:a.§m,capturedRefInit.§m~0:xs.§m",
                 p.javaLinks("capturedRefInit"));

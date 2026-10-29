@@ -158,22 +158,23 @@ public class TestList extends CommonTest {
 
         VariableInfo prev1 = vd1.variableInfo("prev");
         Links tlvPrev1 = prev1.linkedVariablesOrEmpty();
-        assertEquals("prev←2:k,prev∈1:x.ts,prev←1:x.ts[0:i]", tlvPrev1.toString());
+        // x.set(i, k) stores k in the slot prev was read from: prev keeps the old element (CodeLaser/maddi-mod#77)
+        assertEquals("prev∈1:x.ts,prev←1:x.ts[0:i]", tlvPrev1.toString());
 
         ParameterInfo k = method.parameters().get(2);
         VariableInfo k1 = vd1.variableInfo(k);
         Links tlvK1 = k1.linkedVariablesOrEmpty();
-        assertEquals("2:k∈1:x.ts,2:k→prev", tlvK1.toString());
+        assertEquals("2:k∈1:x.ts,2:k→1:x.ts[0:i]", tlvK1.toString());
 
         ParameterInfo x = method.parameters().get(1);
         VariableInfo x1 = vd1.variableInfo(x);
-        assertEquals("1:x.ts∋2:k,1:x.ts∋prev,1:x.ts[0:i]∈1:x.ts,1:x.ts[0:i]→prev",
+        assertEquals("1:x.ts∋2:k,1:x.ts∋prev,1:x.ts[0:i]←2:k,1:x.ts[0:i]∈1:x.ts",
                 x1.linkedVariables().toString());
 
         MethodLinkedVariables tlvMethod = method.analysis().getOrNull(METHOD_LINKS, MethodLinkedVariablesImpl.class);
         assertEquals("""
-                [-, 1:x.ts*∋2:k*,1:x.ts*[0:i]∈1:x.ts*, 2:k*∈1:x.ts*] --> method←2:k*,method∈1:x.ts*,\
-                method←1:x.ts*[0:i]\
+                [-, 1:x.ts*∋2:k*,1:x.ts*[0:i]←2:k*,1:x.ts*[0:i]∈1:x.ts*, 2:k*∈1:x.ts*,2:k*→1:x.ts*[0:i]] --> \
+                method∈1:x.ts*,method←1:x.ts*[0:i]\
                 """, tlvMethod.toString());
     }
 
