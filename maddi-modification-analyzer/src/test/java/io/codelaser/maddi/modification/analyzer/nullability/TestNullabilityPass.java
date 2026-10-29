@@ -7999,4 +7999,84 @@ public class TestNullabilityPass extends CommonTest {
         assertTrue(locals.contains("viaIf.resolvedRawType: Type"), locals);
         assertFalse(locals.contains("viaIf.resolvedRawType: Type?"), locals);
     }
+
+    @DisplayName("#68: a parameter returned by an override of a library method is tolerant (guava Joiner)")
+    @Test
+    public void toleratedThroughLibraryReturn() {
+        NullabilityPass.Report report = run("a.b.LR", """
+                package a.b;
+                import java.util.AbstractList;
+                import java.util.Iterator;
+                import java.util.Objects;
+                public class LR {
+                    public static class Joiner {
+                        private final String separator;
+                        Joiner(String separator) { this.separator = separator; }
+                        public StringBuilder appendTo(StringBuilder builder, Iterator<?> parts) {
+                            if (parts.hasNext()) {
+                                builder.append(toString(parts.next()));
+                                while (parts.hasNext()) {
+                                    builder.append(separator);
+                                    builder.append(toString(parts.next()));
+                                }
+                            }
+                            return builder;
+                        }
+                        public final String join(Iterable<?> parts) {
+                            return appendTo(new StringBuilder(), parts.iterator()).toString();
+                        }
+                        public final String join(Object first, Object second, Object... rest) {
+                            return join(iterable(first, second, rest));
+                        }
+                        CharSequence toString(Object part) {
+                            Objects.requireNonNull(part);
+                            return (part instanceof CharSequence) ? (CharSequence) part : part.toString();
+                        }
+                        private static Iterable<Object> iterable(Object first, Object second, Object[] rest) {
+                            Objects.requireNonNull(rest);
+                            return new AbstractList<Object>() {
+                                @Override public int size() { return rest.length + 2; }
+                                @Override public Object get(int index) {
+                                    if (index == 0) return first;
+                                    if (index == 1) return second;
+                                    return rest[index - 2];
+                                }
+                            };
+                        }
+                        public Object passThrough(Object o) { return o; }
+                        public java.util.List<String> identity(java.util.List<String> in) {
+                            return in.stream().map(s -> s).toList();
+                        }
+                        public java.util.function.Function<String, Double> constant(Double minScore) {
+                            return query -> minScore;
+                        }
+                    }
+                }
+                """, NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY);
+        System.out.println(explain(report));
+        Map<String, String> v = byName(report);
+        // first and second reach the anonymous list's get(), an override of AbstractList.get: its return leaves for
+        // the library (the iterator appendTo reads), no sink. guava annotates them @Nullable (useForNull).
+        assertEquals("Object?", v.get("a.b.LR.Joiner.join(Object,Object,Object[]):0:first"));
+        assertEquals("Object?", v.get("a.b.LR.Joiner.join(Object,Object,Object[]):1:second"));
+        // the control: an own return that is not nullable otherwise ends the tolerance, as before
+        assertEquals("Object", v.get("a.b.LR.Joiner.passThrough(Object):0:o"));
+        // the lambda's own return is no stop: it hands the library back what the library gave it (guava's 's -> s')
+        List<String> lambda = v.entrySet().stream().filter(e -> e.getKey().contains(".apply(String):0:s"))
+                .map(e -> e.getKey() + "=" + e.getValue()).toList();
+        assertEquals(1, lambda.size(), v.toString());
+        assertTrue(lambda.getFirst().endsWith("=String"), lambda.toString());
+        // nor a lambda's return: Kotlin types it by the target, '(Query) -> Double' (langchain4j
+        // EmbeddingStoreContentRetriever 'query -> minScore', timefold SolverJobBuilder 'id -> problem')
+        assertEquals("Double", v.get("a.b.LR.Joiner.constant(Double):0:minScore"));
+
+        Switches.offForNextPasses(Set.of("NOLIBRARYRETURN"));
+        try {
+            Map<String, String> off = byName(new NullabilityPass(NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY)
+                    .go(analysisOrder));
+            assertEquals("Object", off.get("a.b.LR.Joiner.join(Object,Object,Object[]):0:first"));
+        } finally {
+            Switches.offForNextPasses(Set.of());
+        }
+    }
 }

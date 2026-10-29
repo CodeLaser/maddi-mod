@@ -2383,9 +2383,20 @@ public final class NullabilityPass {
                     if (demanded(local.methodInfo(), v -> (v instanceof LocalVariable || v instanceof ParameterInfo)
                                                           && v.simpleName().equals(local.name()))) return false;
                 }
-                case FieldInfo _, MethodInfo _ -> {
+                case FieldInfo _ -> {
                     if (!before.contains(n)) return false;
                     continue; // nullable anyway: what it flows into is decided without this parameter
+                }
+                case MethodInfo m -> {
+                    if (before.contains(m)) continue; // nullable anyway, as a field
+                    // the return of an override of a library method is no sink: the value travels through the
+                    // library to whoever reads it there, which this walk cannot follow. guava's Joiner.join(first,
+                    // second, rest) hands them to an AbstractList's get(), whose iterator the appendTo loop reads;
+                    // first and second are @Nullable (useForNull), and the walk failed at get's return. Not the
+                    // parameter's own method: 's -> s' hands the library back what the library gave it, which says
+                    // nothing about null (guava's identity lambdas). Gate NOLIBRARYRETURN.
+                    if (!LIBRARY_RETURN_OFF.get() && !m.equals(start.methodInfo()) && overridesLibraryOnly(m)) continue;
+                    return false;
                 }
                 default -> {
                 }
@@ -2395,6 +2406,20 @@ public final class NullabilityPass {
             }
         }
         return true;
+    }
+
+    // gate NOLIBRARYRETURN: the return of an override of a library method ends the tolerance, as any other (A/B)
+    private static final Switches.Gate LIBRARY_RETURN_OFF = Switches.gate("NOLIBRARYRETURN");
+
+    /*
+     overrides a library method, and no analysed one. A method of a class only: a lambda's return is typed by its
+     target, a function type declared elsewhere ('(Query) -> Double'), which a null does not fit (langchain4j
+     EmbeddingStoreContentRetriever 'query -> minScore', timefold SolverJobBuilder 'id -> problem'; worktree-maddi-all
+     2026-10-30). The model's overrides, not overrides(m), which adds a lambda's functional method.
+     */
+    private boolean overridesLibraryOnly(MethodInfo m) {
+        Set<MethodInfo> overrides = m.overrides();
+        return !overrides.isEmpty() && overrides.stream().noneMatch(analysed::contains);
     }
 
     // a demand in m's body, or in the body of the method that encloses m's lambda or local class
