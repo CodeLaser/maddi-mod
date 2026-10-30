@@ -869,7 +869,8 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                         EventualClusterContraction.retract(analysisOrder, sia.eventualCluster());
                     }
                     logVerdictFingerprint(analysisOrder);
-                    if (configuration.guardContracts() || configuration.warnNearMisses()) {
+                    if (configuration.guardContracts() || configuration.warnNearMisses()
+                        || io.codelaser.maddi.modification.common.util.Culprits.ENABLED) {
                         // values are final now: verify user-written contracts, and/or warn on near-misses
                         feed(f -> f.stage("contract checks"));
                         new GuardAnalyzerImpl(javaInspector.runtime(), configuration, guardMessages).go(analysisOrder);

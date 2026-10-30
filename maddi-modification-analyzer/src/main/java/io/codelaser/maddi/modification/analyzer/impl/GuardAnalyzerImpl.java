@@ -20,6 +20,7 @@ package io.codelaser.maddi.modification.analyzer.impl;
 import io.codelaser.maddi.modification.analyzer.GuardAnalyzer;
 import io.codelaser.maddi.modification.analyzer.IteratingAnalyzer;
 import io.codelaser.maddi.modification.common.AnalysisHelper;
+import io.codelaser.maddi.modification.common.util.Culprits;
 import io.codelaser.maddi.modification.common.defaults.ContractReader;
 import io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl;
 import io.codelaser.maddi.modification.prepwork.Util;
@@ -131,6 +132,13 @@ public class GuardAnalyzerImpl extends CommonAnalyzerImpl implements GuardAnalyz
         }
         if (configuration.warnNearMisses()) {
             nearMissPass(analysisOrder);
+        }
+        if (Culprits.ENABLED) {
+            // values are final now: why each type stops below @Immutable, from the evidence the guard blames with
+            TypeCulprit typeCulprit = new TypeCulprit(this, analysisHelper);
+            for (Info info : analysisOrder) {
+                if (info instanceof TypeInfo typeInfo) typeCulprit.write(typeInfo);
+            }
         }
     }
 
@@ -505,7 +513,7 @@ public class GuardAnalyzerImpl extends CommonAnalyzerImpl implements GuardAnalyz
      * so guarding such a type would report its own design as a violation. Once eventuality is computed, this is
      * where the guard starts checking those types instead of skipping them.
      */
-    private boolean isEventual(TypeInfo typeInfo) {
+    boolean isEventual(TypeInfo typeInfo) {
         return contractReader.contracts(typeInfo)
                 .get(EVENTUALLY_IMMUTABLE_TYPE) instanceof Value.EventuallyImmutable ev
                && ev.isEventual();
@@ -601,7 +609,7 @@ public class GuardAnalyzerImpl extends CommonAnalyzerImpl implements GuardAnalyz
     }
 
     /** Where a contract is broken: the method, the statement in it (or the method itself), and what it does. */
-    private record Culprit(MethodInfo method, Source source, String what) {
+    record Culprit(MethodInfo method, Source source, String what) {
     }
 
     /** One error per culprit, located at it; the field and the contract are its causes. */
@@ -625,7 +633,7 @@ public class GuardAnalyzerImpl extends CommonAnalyzerImpl implements GuardAnalyz
      *   <li>rule 3 — nothing dependent on the accessible part of the fields.</li>
      * </ul>
      */
-    private int immutableFieldFailingRule(FieldInfo fieldInfo) {
+    int immutableFieldFailingRule(FieldInfo fieldInfo) {
         if (!fieldInfo.isFinal()) {
             Value.Bool finalField = fieldInfo.analysis().getOrNull(FINAL_FIELD, ValueImpl.BoolImpl.class);
             if (finalField != null && finalField.isFalse()) return 0;
@@ -1058,7 +1066,7 @@ public class GuardAnalyzerImpl extends CommonAnalyzerImpl implements GuardAnalyz
      * parameter the caller keeps. One per method, the first link that explains it; read from the field's links as
      * {@link #blameFieldDependent} describes.
      */
-    private List<Culprit> culpritsExposing(FieldInfo fieldInfo) {
+    List<Culprit> culpritsExposing(FieldInfo fieldInfo) {
         Links links = fieldInfo.analysis().getOrNull(LinksImpl.LINKS, LinksImpl.class);
         if (links == null) return List.of();
         TypeInfo owner = fieldInfo.owner();
@@ -1098,7 +1106,7 @@ public class GuardAnalyzerImpl extends CommonAnalyzerImpl implements GuardAnalyz
      * modifying call on it, the field passed to a parameter the callee modifies, or an assignment into it
      * ({@code items[i] = x}, {@code this.box.value = x}). The evidence {@link #blameParameterModified} uses.
      */
-    private List<Culprit> culpritsModifying(TypeInfo owner, FieldInfo fieldInfo) {
+    List<Culprit> culpritsModifying(TypeInfo owner, FieldInfo fieldInfo) {
         List<Culprit> culprits = new ArrayList<>();
         String field = "field '" + fieldInfo.name() + "'";
         owner.methods().stream().filter(mi -> !mi.methodBody().isEmpty()).forEach(mi -> {
