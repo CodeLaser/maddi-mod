@@ -87,6 +87,8 @@ public final class NonNullFacts {
     private static final Switches.Gate ENTRY_FIELDS_OFF = Switches.gate("NOENTRYFIELDS");
     // gate NOLOOPBACKEDGES: a loop's start knows only what the loop does not change (A/B for #48 B8)
     private static final Switches.Gate LOOP_BACK_EDGES_OFF = Switches.gate("NOLOOPBACKEDGES");
+    // gate NOREFERENCEDEMANDS: a bound method reference's receiver is no demand, as before (A/B for #68)
+    private static final Switches.Gate REFERENCE_DEMANDS_OFF = Switches.gate("NOREFERENCEDEMANDS");
     // the loops refined at once (nested), and the rounds per loop (assumedAtLoopStart): each round walks the body again
     private static final int MAX_LOOP_DEPTH = 2;
     private static final int MAX_LOOP_ROUNDS = 2;
@@ -1480,6 +1482,13 @@ public final class NonNullFacts {
                 }
                 case MethodReference mr -> {
                     callOfPrivate(mr, mr.methodInfo(), null);
+                    // a bound receiver is evaluated here, and a null one throws: 'director::before' demands director
+                    // (timefold ChangedVariableNotifier.of, #68, test-manager 2026-10-30). The demand only, no fact:
+                    // Kotlin's smart casts stay as they were. Gate NOREFERENCEDEMANDS.
+                    if (!REFERENCE_DEMANDS_OFF.get() && unwrap(mr.scope()) instanceof VariableExpression ve
+                        && trackable(ve.variable())) {
+                        demand(ve.variable(), facts);
+                    }
                     return true;
                 }
                 case ConstructorCall cc -> {

@@ -2432,39 +2432,64 @@ public final class NullabilityPass {
      into must be nullable anyway; a non-null contract, or a method without a body, ends the tolerance.
      */
     private boolean tolerates(ParameterInfo start, Set<Object> before) {
+        // NULLWHY: the node the walk reached each node from, to print the paths of a traced parameter
+        Map<Object, Object> from = why(start) ? new HashMap<>() : null;
         Set<Object> seen = new HashSet<>();
         Deque<Object> queue = new ArrayDeque<>();
         seen.add(start);
         queue.add(start);
         while (!queue.isEmpty()) {
             Object n = queue.removeFirst();
-            if (seen.size() > MAX_TOLERANCE_SEARCH || nonNullContracts.contains(n)) return false;
+            if (seen.size() > MAX_TOLERANCE_SEARCH || nonNullContracts.contains(n)) {
+                return whyTolerance(from, n, seen.size() > MAX_TOLERANCE_SEARCH ? "search too large" : "contract");
+            }
             switch (n) {
                 case ParameterInfo pi -> {
                     MethodInfo m = pi.methodInfo();
-                    if (!hasBody(m) || demanded(m, v -> pi.equals(v))) return false;
+                    if (!hasBody(m) || demanded(m, v -> pi.equals(v))) return whyTolerance(from, n, "demanded");
                 }
                 case Local local -> {
                     // by name, as NonNullFacts compares locals; a reassigned parameter's shadow is the parameter
                     if (demanded(local.methodInfo(), v -> (v instanceof LocalVariable || v instanceof ParameterInfo)
-                                                          && v.simpleName().equals(local.name()))) return false;
+                                                          && v.simpleName().equals(local.name()))) {
+                        return whyTolerance(from, n, "demanded");
+                    }
                 }
                 case FieldInfo _, MethodInfo _ -> {
-                    if (!before.contains(n)) return false;
+                    if (!before.contains(n)) return whyTolerance(from, n, "non-null sink");
+                    whyTolerance(from, n, "nullable anyway");
                     continue; // nullable anyway: what it flows into is decided without this parameter
                 }
                 case Content _, Arg _ when declaredSlot(n) && !TOLERANT_SLOTS_OFF.get() -> {
-                    if (!before.contains(n)) return false;
+                    if (!before.contains(n)) return whyTolerance(from, n, "non-null slot");
+                    whyTolerance(from, n, "nullable anyway");
                     continue;
                 }
                 default -> {
                 }
             }
             for (Object s : successors.getOrDefault(n, Set.of())) {
-                if (seen.add(s)) queue.addLast(s);
+                if (seen.add(s)) {
+                    queue.addLast(s);
+                    if (from != null) from.put(s, n);
+                }
             }
         }
+        if (from != null) System.err.println("NULLWHY tolerates " + whyName(start) + " visited=" + seen.size());
         return true;
+    }
+
+    // NULLWHY: the path from the traced parameter to the node where its tolerance walk ended or passed; false
+    private static boolean whyTolerance(Map<Object, Object> from, Object node, String what) {
+        if (from == null) return false;
+        StringBuilder sb = new StringBuilder("NULLWHY tolerance " + what + " at " + Report.label(node));
+        Object n = node;
+        for (int i = 0; i < 40 && from.get(n) != null; i++) {
+            n = from.get(n);
+            sb.append(" <- ").append(Report.label(n));
+        }
+        System.err.println(sb);
+        return false;
     }
 
     /*
@@ -2486,12 +2511,40 @@ public final class NullabilityPass {
 
     private static final Switches.Gate TOLERANT_SLOTS_OFF = Switches.gate("NOTOLERANTSLOTS");
 
-    // a demand in m's body, or in the body of the method that encloses m's lambda or local class
+    /*
+     a demand in m's body, or in the body of the method that encloses m's lambda or local class; or in a method of an
+     anonymous or local class m encloses, which captures m's variables: langchain4j LambdaStreamingResponseHandler
+     hands 'onPartialResponse' to an anonymous handler whose onPartialResponse(s) calls 'onPartialResponse.accept(s)'
+     (#68: 5 C# warnings, test-manager 2026-10-30). A lambda's body is m's own (NonNullFacts.demands). Gate
+     NOENCLOSEDDEMANDS.
+     */
     private boolean demanded(MethodInfo m, java.util.function.Predicate<Variable> variable) {
         for (MethodInfo mi = m; mi != null; mi = mi.typeInfo().enclosingMethod()) {
             if (facts.demands(mi).stream().anyMatch(variable)) return true;
         }
+        if (!ENCLOSED_DEMANDS_OFF.get()) {
+            for (MethodInfo inner : enclosedMethods().getOrDefault(m, List.of())) {
+                if (facts.demands(inner).stream().anyMatch(variable)) return true;
+            }
+        }
         return false;
+    }
+
+    private static final Switches.Gate ENCLOSED_DEMANDS_OFF = Switches.gate("NOENCLOSEDDEMANDS");
+
+    // per analysed method, the analysed methods of the classes it encloses, at any depth
+    private Map<MethodInfo, List<MethodInfo>> enclosedMethods;
+
+    private Map<MethodInfo, List<MethodInfo>> enclosedMethods() {
+        if (enclosedMethods != null) return enclosedMethods;
+        enclosedMethods = new HashMap<>();
+        for (MethodInfo inner : analysed) {
+            for (MethodInfo outer = inner.typeInfo().enclosingMethod(); outer != null;
+                 outer = outer.typeInfo().enclosingMethod()) {
+                enclosedMethods.computeIfAbsent(outer, _ -> new ArrayList<>()).add(inner);
+            }
+        }
+        return enclosedMethods;
     }
 
     // ------------------------------------------------------------------ outside callers (World.OPEN*)
@@ -2661,6 +2714,7 @@ public final class NullabilityPass {
     // reading is a 'lateinit' field), a comparison with null (the nullTests heuristic). Not a null that is written.
     private void seedIndirect(Object node, String origin, TypeInfo writer) {
         if (node != null) {
+            if (why(node)) whyLog("indirect seed", node, origin);
             seedOrigin.putIfAbsent(node, origin);
             if (recordSites && currentSite != null) seedSites.putIfAbsent(node, new Site(currentSiteMethod, currentSite));
             seedWriters.computeIfAbsent(node, _ -> new ArrayList<>()).add(writer);
@@ -5664,7 +5718,7 @@ public final class NullabilityPass {
                 }
                 if (init != null && arrayCreatedWithNulls(init) == 1
                     && NonNullFacts.unwrap(init) instanceof ConstructorCall cc
-                    && (i + 1 < statements.size() && statements.get(i + 1) instanceof ForStatement loop
+                    && (fillingLoop(statements, i, array) instanceof ForStatement loop
                         && fills(loop, array, cc.parameterExpressions().getFirst())
                         || !COUNTED_FILLS_OFF.get() && countedFill(statements, i, array, cc.parameterExpressions().getFirst()))) {
                     filledCreations.add(init);
@@ -5681,6 +5735,28 @@ public final class NullabilityPass {
             });
         }
     }
+
+    /*
+     The statement after the creation, or after the sibling creations that follow it: 'var left = new Function[n];
+     var types = new JoinerType[n]; var right = new Function[n]; for (int i = 0; i < n; i++) { left[i] = ..; .. }'
+     fills all three (timefold DefaultBiJoiner.reorderedEqualsFirst, whose null elements let Joiners' mapping
+     parameters tolerate null, #68: 23 C# warnings, test-manager 2026-10-30). A sibling is a local of its own
+     initialised with an array creation, not mentioning the array. Gate NOSIBLINGFILLS: the next statement only.
+     */
+    private Statement fillingLoop(List<Statement> statements, int creation, Variable array) {
+        int j = creation + 1;
+        while (!SIBLING_FILLS_OFF.get() && j < statements.size()
+               && statements.get(j) instanceof LocalVariableCreation lvc && lvc.localVariableStream().count() == 1
+               && NonNullFacts.unwrap(lvc.localVariableStream().findFirst().orElseThrow().assignmentExpression())
+                       instanceof ConstructorCall sibling
+               && sibling.parameterizedType() != null && sibling.parameterizedType().arrays() > 0
+               && !mentionsInStatement(lvc, array)) {
+            j++;
+        }
+        return j < statements.size() ? statements.get(j) : null;
+    }
+
+    private static final Switches.Gate SIBLING_FILLS_OFF = Switches.gate("NOSIBLINGFILLS");
 
     private static boolean fills(ForStatement loop, Variable array,
                                  Expression size) {
@@ -7462,6 +7538,7 @@ public final class NullabilityPass {
                     seed(pi, "null argument in " + mi.fullyQualifiedName(), mi.typeInfo());
                 } else if (!(unwrappedAlternative instanceof MethodCall)) {
                     addEdge(argumentNode(mi, scope, alternative), pi);
+                    initializerElements(mi, scope, unwrappedAlternative, pi);
                 } else {
                     callResultArgument(unwrappedAlternative, pi);
                 }
@@ -7483,6 +7560,28 @@ public final class NullabilityPass {
         // an intermediate (or a local assigned in this very statement): its sources, in the argument's own links
         sourcesOf(mi, scope, primary, links, pi);
     }
+
+    /*
+     An array created in place as an argument without links ('this(new Function[] { rightMapping }, ..)'): its elements
+     flow into the parameter's. Without the edge, timefold AbstractJoiner's rightMapping led nowhere, and #68's walk
+     found it tolerant by absence (Joiners' rightMapping parameters, test-manager 2026-10-30). A null element is
+     seedCreated's. Gate NOINITIALIZERARGUMENTS.
+     */
+    private void initializerElements(MethodInfo mi, Scope scope, Expression argument, Object pi) {
+        if (INITIALIZER_ARGUMENTS_OFF.get()) return;
+        ArrayInitializer initializer = argument instanceof ArrayInitializer ai ? ai
+                : argument instanceof ConstructorCall cc ? cc.arrayInitializer() : null;
+        if (initializer == null) return;
+        for (Expression element : initializer.expressions()) {
+            for (Expression alternative : alternatives(element)) {
+                if (!(NonNullFacts.unwrap(alternative) instanceof NullConstant)) {
+                    addEdge(argumentNode(mi, scope, alternative), new Content(pi));
+                }
+            }
+        }
+    }
+
+    private static final Switches.Gate INITIALIZER_ARGUMENTS_OFF = Switches.gate("NOINITIALIZERARGUMENTS");
 
     /*
      An analysed method's result as the argument, where the links say nothing: the link engine links no value of an
