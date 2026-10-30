@@ -2486,12 +2486,40 @@ public final class NullabilityPass {
 
     private static final Switches.Gate TOLERANT_SLOTS_OFF = Switches.gate("NOTOLERANTSLOTS");
 
-    // a demand in m's body, or in the body of the method that encloses m's lambda or local class
+    /*
+     a demand in m's body, or in the body of the method that encloses m's lambda or local class; or in a method of an
+     anonymous or local class m encloses, which captures m's variables: langchain4j LambdaStreamingResponseHandler
+     hands 'onPartialResponse' to an anonymous handler whose onPartialResponse(s) calls 'onPartialResponse.accept(s)'
+     (#68: 5 C# warnings, test-manager 2026-10-30). A lambda's body is m's own (NonNullFacts.demands). Gate
+     NOENCLOSEDDEMANDS.
+     */
     private boolean demanded(MethodInfo m, java.util.function.Predicate<Variable> variable) {
         for (MethodInfo mi = m; mi != null; mi = mi.typeInfo().enclosingMethod()) {
             if (facts.demands(mi).stream().anyMatch(variable)) return true;
         }
+        if (!ENCLOSED_DEMANDS_OFF.get()) {
+            for (MethodInfo inner : enclosedMethods().getOrDefault(m, List.of())) {
+                if (facts.demands(inner).stream().anyMatch(variable)) return true;
+            }
+        }
         return false;
+    }
+
+    private static final Switches.Gate ENCLOSED_DEMANDS_OFF = Switches.gate("NOENCLOSEDDEMANDS");
+
+    // per analysed method, the analysed methods of the classes it encloses, at any depth
+    private Map<MethodInfo, List<MethodInfo>> enclosedMethods;
+
+    private Map<MethodInfo, List<MethodInfo>> enclosedMethods() {
+        if (enclosedMethods != null) return enclosedMethods;
+        enclosedMethods = new HashMap<>();
+        for (MethodInfo inner : analysed) {
+            for (MethodInfo outer = inner.typeInfo().enclosingMethod(); outer != null;
+                 outer = outer.typeInfo().enclosingMethod()) {
+                enclosedMethods.computeIfAbsent(outer, _ -> new ArrayList<>()).add(inner);
+            }
+        }
+        return enclosedMethods;
     }
 
     // ------------------------------------------------------------------ outside callers (World.OPEN*)
@@ -5664,7 +5692,7 @@ public final class NullabilityPass {
                 }
                 if (init != null && arrayCreatedWithNulls(init) == 1
                     && NonNullFacts.unwrap(init) instanceof ConstructorCall cc
-                    && (i + 1 < statements.size() && statements.get(i + 1) instanceof ForStatement loop
+                    && (fillingLoop(statements, i, array) instanceof ForStatement loop
                         && fills(loop, array, cc.parameterExpressions().getFirst())
                         || !COUNTED_FILLS_OFF.get() && countedFill(statements, i, array, cc.parameterExpressions().getFirst()))) {
                     filledCreations.add(init);
@@ -5681,6 +5709,28 @@ public final class NullabilityPass {
             });
         }
     }
+
+    /*
+     The statement after the creation, or after the sibling creations that follow it: 'var left = new Function[n];
+     var types = new JoinerType[n]; var right = new Function[n]; for (int i = 0; i < n; i++) { left[i] = ..; .. }'
+     fills all three (timefold DefaultBiJoiner.reorderedEqualsFirst, whose null elements let Joiners' mapping
+     parameters tolerate null, #68: 23 C# warnings, test-manager 2026-10-30). A sibling is a local of its own
+     initialised with an array creation, not mentioning the array. Gate NOSIBLINGFILLS: the next statement only.
+     */
+    private Statement fillingLoop(List<Statement> statements, int creation, Variable array) {
+        int j = creation + 1;
+        while (!SIBLING_FILLS_OFF.get() && j < statements.size()
+               && statements.get(j) instanceof LocalVariableCreation lvc && lvc.localVariableStream().count() == 1
+               && NonNullFacts.unwrap(lvc.localVariableStream().findFirst().orElseThrow().assignmentExpression())
+                       instanceof ConstructorCall sibling
+               && sibling.parameterizedType() != null && sibling.parameterizedType().arrays() > 0
+               && !mentionsInStatement(lvc, array)) {
+            j++;
+        }
+        return j < statements.size() ? statements.get(j) : null;
+    }
+
+    private static final Switches.Gate SIBLING_FILLS_OFF = Switches.gate("NOSIBLINGFILLS");
 
     private static boolean fills(ForStatement loop, Variable array,
                                  Expression size) {
@@ -7462,6 +7512,7 @@ public final class NullabilityPass {
                     seed(pi, "null argument in " + mi.fullyQualifiedName(), mi.typeInfo());
                 } else if (!(unwrappedAlternative instanceof MethodCall)) {
                     addEdge(argumentNode(mi, scope, alternative), pi);
+                    initializerElements(mi, scope, unwrappedAlternative, pi);
                 } else {
                     callResultArgument(unwrappedAlternative, pi);
                 }
@@ -7483,6 +7534,28 @@ public final class NullabilityPass {
         // an intermediate (or a local assigned in this very statement): its sources, in the argument's own links
         sourcesOf(mi, scope, primary, links, pi);
     }
+
+    /*
+     An array created in place as an argument without links ('this(new Function[] { rightMapping }, ..)'): its elements
+     flow into the parameter's. Without the edge, timefold AbstractJoiner's rightMapping led nowhere, and #68's walk
+     found it tolerant by absence (Joiners' rightMapping parameters, test-manager 2026-10-30). A null element is
+     seedCreated's. Gate NOINITIALIZERARGUMENTS.
+     */
+    private void initializerElements(MethodInfo mi, Scope scope, Expression argument, Object pi) {
+        if (INITIALIZER_ARGUMENTS_OFF.get()) return;
+        ArrayInitializer initializer = argument instanceof ArrayInitializer ai ? ai
+                : argument instanceof ConstructorCall cc ? cc.arrayInitializer() : null;
+        if (initializer == null) return;
+        for (Expression element : initializer.expressions()) {
+            for (Expression alternative : alternatives(element)) {
+                if (!(NonNullFacts.unwrap(alternative) instanceof NullConstant)) {
+                    addEdge(argumentNode(mi, scope, alternative), new Content(pi));
+                }
+            }
+        }
+    }
+
+    private static final Switches.Gate INITIALIZER_ARGUMENTS_OFF = Switches.gate("NOINITIALIZERARGUMENTS");
 
     /*
      An analysed method's result as the argument, where the links say nothing: the link engine links no value of an

@@ -7868,6 +7868,147 @@ public class TestNullabilityPass extends CommonTest {
     }
 
     @Language("java")
+    private static final String TOLERANT_DEMANDS = """
+            package a.b;
+            import java.util.function.Consumer;
+            import java.util.function.Function;
+            public class TD {
+                public interface Handler { void onPartial(String s); }
+                public interface Director { void before(Object o); }
+                // langchain4j LambdaStreamingResponseHandler: dereferenced in the anonymous class that captures it
+                public static Handler onPartial(Consumer<String> consumer) {
+                    return new Handler() {
+                        @Override public void onPartial(String s) { consumer.accept(s); }
+                    };
+                }
+                // the same in a lambda
+                public static Handler viaLambda(Consumer<String> consumer) {
+                    return s -> consumer.accept(s);
+                }
+                // timefold ChangedVariableNotifier.of: the receiver of a bound method reference
+                public static Consumer<Object> of(Director director) {
+                    return director::before;
+                }
+                // timefold Joiners/DefaultBiJoiner/AbstractJoiner: arrays whose elements are null only before they are filled
+                public abstract static class AbstractJoiner<R> {
+                    protected final Function<R, Object>[] rightMappings;
+                    protected final int[] types;
+                    @SuppressWarnings("unchecked")
+                    protected AbstractJoiner(Function<R, ?> rightMapping, int type) {
+                        this(new Function[] { rightMapping }, new int[] { type });
+                    }
+                    @SuppressWarnings("unchecked")
+                    protected AbstractJoiner(Function<R, ?>[] rightMappings, int[] types) {
+                        this.rightMappings = (Function<R, Object>[]) java.util.Objects.requireNonNull(rightMappings);
+                        this.types = java.util.Objects.requireNonNull(types);
+                    }
+                    public final Function<R, Object> getRightMapping(int index) { return rightMappings[index]; }
+                    public final int count() { return types.length; }
+                }
+                public static final class Joiner<A, B> extends AbstractJoiner<B> {
+                    private final Function<A, Object>[] leftMappings;
+                    @SuppressWarnings("unchecked")
+                    public Joiner(Function<A, ?> leftMapping, int type, Function<B, ?> rightMapping) {
+                        super(rightMapping, type);
+                        this.leftMappings = new Function[] { leftMapping };
+                    }
+                    @SuppressWarnings("unchecked")
+                    public Joiner(Function<A, ?>[] leftMappings, int[] types, Function<B, ?>[] rightMappings) {
+                        super(rightMappings, types);
+                        this.leftMappings = (Function<A, Object>[]) java.util.Objects.requireNonNull(leftMappings);
+                    }
+                    public Function<A, Object> getLeftMapping(int index) { return leftMappings[index]; }
+                    public Joiner<A, B> and(Joiner<A, B> other) {
+                        int n = count();
+                        int m = other.count();
+                        var newTypes = java.util.Arrays.copyOf(this.types, n + m);
+                        var newLeft = java.util.Arrays.copyOf(this.leftMappings, n + m);
+                        var newRight = java.util.Arrays.copyOf(this.rightMappings, n + m);
+                        for (int i = 0; i < m; i++) {
+                            newTypes[n + i] = other.types[i];
+                            newLeft[n + i] = other.getLeftMapping(i);
+                            newRight[n + i] = other.getRightMapping(i);
+                        }
+                        return new Joiner<>(newLeft, newTypes, newRight);
+                    }
+                    @SuppressWarnings("unchecked")
+                    public Joiner<A, B> reordered(int[] order) {
+                        var newLeft = new Function[order.length];
+                        var newTypes = new int[order.length];
+                        var newRight = new Function[order.length];
+                        for (int i = 0; i < order.length; i++) {
+                            newLeft[i] = leftMappings[order[i]];
+                            newTypes[i] = types[order[i]];
+                            newRight[i] = rightMappings[order[i]];
+                        }
+                        return new Joiner<>(newLeft, newTypes, newRight);
+                    }
+                    public boolean matches(A a, B b) {
+                        for (int i = 0; i < count(); i++) {
+                            if (!java.util.Objects.equals(getLeftMapping(i).apply(a), getRightMapping(i).apply(b))) return false;
+                        }
+                        return true;
+                    }
+                }
+                public static <A, P> Joiner<A, A> equal(Function<A, P> mapping) {
+                    return equal(mapping, mapping);
+                }
+                public static <A, B, P> Joiner<A, B> equal(Function<A, P> leftMapping, Function<B, P> rightMapping) {
+                    return new Joiner<>(leftMapping, 0, rightMapping);
+                }
+                // timefold ReflectionHelper.getDeclaredField: the body does handle null, the control
+                public static Class<?> top(Class<?> containingClass) {
+                    Class<?> base = containingClass;
+                    Class<?> last = null;
+                    while (base != null) {
+                        last = base;
+                        base = base.getSuperclass();
+                    }
+                    return last;
+                }
+            }
+            """;
+
+    @DisplayName("#68: a demand in an enclosed class or lambda, a bound method reference, a filled array (timefold, langchain4j C#)")
+    @Test
+    public void toleratedNullsMissedDemands() {
+        NullabilityPass.Report report = run("a.b.TD", TOLERANT_DEMANDS, NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY);
+        System.out.println(explain(report));
+        Map<String, String> v = byName(report);
+        // the consumer is called in the anonymous class that captures it, or in the lambda
+        assertEquals("Consumer<String>", v.get("a.b.TD.onPartial(java.util.function.Consumer):0:consumer"));
+        assertEquals("Consumer<String>", v.get("a.b.TD.viaLambda(java.util.function.Consumer):0:consumer"));
+        // 'director::before' throws on a null director
+        assertEquals("Director", v.get("a.b.TD.of(a.b.TD.Director):0:director"));
+        // the mappings go into arrays filled before anything reads them: left directly, right through this(..)
+        assertEquals("Function<A!, P!>", v.get("a.b.TD.equal(java.util.function.Function):0:mapping"));
+        assertEquals("Function<A!, P!>",
+                v.get("a.b.TD.equal(java.util.function.Function,java.util.function.Function):0:leftMapping"));
+        assertEquals("Function<B!, P!>",
+                v.get("a.b.TD.equal(java.util.function.Function,java.util.function.Function):1:rightMapping"));
+        assertEquals("Function<A!, Object>[]", v.get("a.b.TD.Joiner.leftMappings"));
+        // the control: the body does handle null
+        assertEquals("Class<?!>?", v.get("a.b.TD.top(Class):0:containingClass"));
+
+        // each gate brings back the tolerance it closes
+        Map<String, String> gates = Map.of(
+                "NOENCLOSEDDEMANDS", "a.b.TD.onPartial(java.util.function.Consumer):0:consumer",
+                "NOREFERENCEDEMANDS", "a.b.TD.of(a.b.TD.Director):0:director",
+                "NOSIBLINGFILLS", "a.b.TD.equal(java.util.function.Function,java.util.function.Function):0:leftMapping",
+                "NOINITIALIZERARGUMENTS", "a.b.TD.equal(java.util.function.Function,java.util.function.Function):1:rightMapping");
+        gates.forEach((gate, key) -> {
+            Switches.offForNextPasses(Set.of(gate));
+            try {
+                Map<String, String> off = byName(new NullabilityPass(NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY)
+                        .go(analysisOrder));
+                assertTrue(off.get(key).endsWith("?"), gate + ": " + off.get(key));
+            } finally {
+                Switches.offForNextPasses(Set.of());
+            }
+        });
+    }
+
+    @Language("java")
     private static final String TOLERANT_HIDDEN = """
             package a.b;
             class TH {
