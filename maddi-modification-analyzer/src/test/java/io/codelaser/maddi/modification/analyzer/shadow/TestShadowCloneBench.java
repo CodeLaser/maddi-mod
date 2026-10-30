@@ -321,7 +321,26 @@ public class TestShadowCloneBench extends CommonTest {
         // All 14 are nonModifyingMethod and one shape, a for-each over a field's collection that calls the
         // elements' methods: fireModifiedListeners, notifyObservers(Object), stopAll, pauseAll, close, flush,
         // cleanUp, triggerAction(String), isSizeEqualsOrLargerThan(int) (in two corpora), ...
-        org.junit.jupiter.api.Assertions.assertEquals(317, totalRev,
+        // ⭐ Re-baselined 2026-10-30 after the maddi slowTest gate 41058945355 (maddi 14cfe0495, maddi-mod 7e8805c8):
+        // reverse 317 -> 348 (42 opened, 11 closed), divergences 56 -> 48. Two fresh runs on the Mac at the gate's
+        // tuple are identical, and the old tuple (maddi e28e7f511, maddi-mod 607c00a8) still gives 317. Bisected
+        // over devel's first-parent states, each mover attributed to the step where it appears:
+        //   maddi-mod f2cf4e92 then 4a10ec58 (#65, own static state; 310 -> 392 -> 329): 19 opened, all
+        //     nonModifyingMethod on a method that writes its own class's static state (emitTab's `static FileWriter
+        //     out`, poissonRand's static seeds, sendHeader, createHttpResponse, ...). The engine's @Modified is
+        //     right; the pass does not model static state.
+        //   maddi 2d18e29b9 (merge of ws/maddi-bug, the java.lang query hints 16eeb29c2): 7 opened, Process and
+        //     ClassLoader parameters (getResultOfProcess, waitAndCapture, readArgFile, Service.load, ...).
+        //   maddi ee2c275e1 (JDK hints: the queries are @NotModified): 13 opened, ZipFile, JarFile, FileOutputStream,
+        //     NetworkInterface and Socket parameters; 2 closed (getInput/OutputFileDescriptor's stream). Divergences
+        //     7 opened (JarFile/Manifest/ClassLoader/InputStream readers) and 15 closed (createCookieHeader's
+        //     URLConnection in nine clones, ZipEntry, JarEntry, Attributes).
+        //   maddi 14cfe0495 (Iterator.hasNext @Modified): 1 divergence closed, AppendKeywords' Iterator.
+        //   Not pinned to a commit: between 10-24 12:25 and 10-25 08:15, 2 reverse opened (two main(String[])
+        //     args), 9 closed (for-each/while over a collection parameter: ArrayList_AddAt_Copy, Map_Foreach,
+        //     toNameClassMap, listToString, cutVectors, ...), 1 divergence opened (Function739845.listeners); by
+        //     10-27 one more closed; and one opened between maddi 2d18e29b9 and 35184db60 (getFileAsString's Charset).
+        org.junit.jupiter.api.Assertions.assertEquals(348, totalRev,
                 "reverse divergences are expected since design A (110695ece) retired the "
                 + "walkable-summary seed channel; re-baseline deliberately, and reclassify");
         // Re-baselined 2026-09-22 for the RECEIVER-DISCLAIMER rule (@IgnoreModifications on a parameter now
@@ -337,10 +356,12 @@ public class TestShadowCloneBench extends CommonTest {
         // Both fixes above apply together, measured on this corpus with both present.
         // 2026-10-20, maddi-mod b265dc8f (#55): unmodifiedParameter 49 -> 43, {propagated 44 -> 46, seed 18 -> 10};
         // classified with the reverse re-baseline above.
+        // 2026-10-30: unmodifiedField 12 -> 13, unmodifiedParameter 43 -> 34, {propagated 46 -> 38, seed 10};
+        // classified with the reverse re-baseline above.
         org.junit.jupiter.api.Assertions.assertEquals(
-                Map.of("nonModifyingMethod", 1, "unmodifiedField", 12, "unmodifiedParameter", 43),
+                Map.of("nonModifyingMethod", 1, "unmodifiedField", 13, "unmodifiedParameter", 34),
                 byProperty);
-        org.junit.jupiter.api.Assertions.assertEquals(Map.of("propagated", 46, "seed", 10), byClass);
+        org.junit.jupiter.api.Assertions.assertEquals(Map.of("propagated", 38, "seed", 10), byClass);
     }
 
     private volatile int totalMethods, totalSeeds, totalEdges, totalMissingArgLinks, totalUnprojectedReceivers;
