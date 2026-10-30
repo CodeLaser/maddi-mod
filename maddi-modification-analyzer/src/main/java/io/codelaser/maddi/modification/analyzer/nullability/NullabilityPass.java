@@ -2432,39 +2432,64 @@ public final class NullabilityPass {
      into must be nullable anyway; a non-null contract, or a method without a body, ends the tolerance.
      */
     private boolean tolerates(ParameterInfo start, Set<Object> before) {
+        // NULLWHY: the node the walk reached each node from, to print the paths of a traced parameter
+        Map<Object, Object> from = why(start) ? new HashMap<>() : null;
         Set<Object> seen = new HashSet<>();
         Deque<Object> queue = new ArrayDeque<>();
         seen.add(start);
         queue.add(start);
         while (!queue.isEmpty()) {
             Object n = queue.removeFirst();
-            if (seen.size() > MAX_TOLERANCE_SEARCH || nonNullContracts.contains(n)) return false;
+            if (seen.size() > MAX_TOLERANCE_SEARCH || nonNullContracts.contains(n)) {
+                return whyTolerance(from, n, seen.size() > MAX_TOLERANCE_SEARCH ? "search too large" : "contract");
+            }
             switch (n) {
                 case ParameterInfo pi -> {
                     MethodInfo m = pi.methodInfo();
-                    if (!hasBody(m) || demanded(m, v -> pi.equals(v))) return false;
+                    if (!hasBody(m) || demanded(m, v -> pi.equals(v))) return whyTolerance(from, n, "demanded");
                 }
                 case Local local -> {
                     // by name, as NonNullFacts compares locals; a reassigned parameter's shadow is the parameter
                     if (demanded(local.methodInfo(), v -> (v instanceof LocalVariable || v instanceof ParameterInfo)
-                                                          && v.simpleName().equals(local.name()))) return false;
+                                                          && v.simpleName().equals(local.name()))) {
+                        return whyTolerance(from, n, "demanded");
+                    }
                 }
                 case FieldInfo _, MethodInfo _ -> {
-                    if (!before.contains(n)) return false;
+                    if (!before.contains(n)) return whyTolerance(from, n, "non-null sink");
+                    whyTolerance(from, n, "nullable anyway");
                     continue; // nullable anyway: what it flows into is decided without this parameter
                 }
                 case Content _, Arg _ when declaredSlot(n) && !TOLERANT_SLOTS_OFF.get() -> {
-                    if (!before.contains(n)) return false;
+                    if (!before.contains(n)) return whyTolerance(from, n, "non-null slot");
+                    whyTolerance(from, n, "nullable anyway");
                     continue;
                 }
                 default -> {
                 }
             }
             for (Object s : successors.getOrDefault(n, Set.of())) {
-                if (seen.add(s)) queue.addLast(s);
+                if (seen.add(s)) {
+                    queue.addLast(s);
+                    if (from != null) from.put(s, n);
+                }
             }
         }
+        if (from != null) System.err.println("NULLWHY tolerates " + whyName(start) + " visited=" + seen.size());
         return true;
+    }
+
+    // NULLWHY: the path from the traced parameter to the node where its tolerance walk ended or passed; false
+    private static boolean whyTolerance(Map<Object, Object> from, Object node, String what) {
+        if (from == null) return false;
+        StringBuilder sb = new StringBuilder("NULLWHY tolerance " + what + " at " + Report.label(node));
+        Object n = node;
+        for (int i = 0; i < 40 && from.get(n) != null; i++) {
+            n = from.get(n);
+            sb.append(" <- ").append(Report.label(n));
+        }
+        System.err.println(sb);
+        return false;
     }
 
     /*
@@ -2689,6 +2714,7 @@ public final class NullabilityPass {
     // reading is a 'lateinit' field), a comparison with null (the nullTests heuristic). Not a null that is written.
     private void seedIndirect(Object node, String origin, TypeInfo writer) {
         if (node != null) {
+            if (why(node)) whyLog("indirect seed", node, origin);
             seedOrigin.putIfAbsent(node, origin);
             if (recordSites && currentSite != null) seedSites.putIfAbsent(node, new Site(currentSiteMethod, currentSite));
             seedWriters.computeIfAbsent(node, _ -> new ArrayList<>()).add(writer);
