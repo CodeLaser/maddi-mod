@@ -16,6 +16,7 @@ import io.codelaser.maddi.cst.api.statement.Block;
 import io.codelaser.maddi.cst.api.statement.ExplicitConstructorInvocation;
 import io.codelaser.maddi.cst.api.statement.LocalTypeDeclaration;
 import io.codelaser.maddi.cst.api.statement.LocalVariableCreation;
+import io.codelaser.maddi.cst.api.statement.Statement;
 import io.codelaser.maddi.cst.api.statement.TryStatement;
 import io.codelaser.maddi.cst.api.type.NamedType;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
@@ -311,6 +312,7 @@ abstract class IsolationCore {
             TypeInfo annotation = javaInspector.compiledTypesManager()
                     .type(java.lang.annotation.Annotation.class);
             stub.builder().addInterfaceImplemented(annotation.asSimpleParameterizedType());
+            copyMetaAnnotations(typeInfo, stub);
         } else {
             // reproduce implemented/extended interfaces, so the subtype edges they create hold in the stubs
             for (ParameterizedType itf : typeInfo.interfacesImplemented()) {
@@ -344,6 +346,23 @@ abstract class IsolationCore {
         return stub;
     }
 
+
+    /**
+     * An annotation type's own {@code @Target}, {@code @Retention}, {@code @Documented} and {@code @Inherited}, onto
+     * the type that stands in for it. Without its {@code @Target} an annotation applies in declaration contexts only,
+     * so a verbatim {@code @Nullable String[]} or {@code List<@NotNull X>} against a stub of JetBrains' type-use
+     * {@code @Nullable} is "not applicable in this type context" (CodeLaser/maddi#180). Their values name only
+     * {@code java.lang.annotation} types, which ship with the JDK, so the expressions are reused as they are.
+     * {@code @Repeatable} is left out: it names its container type, which the isolate does not otherwise reach.
+     */
+    void copyMetaAnnotations(TypeInfo original, TypeInfo standIn) {
+        for (AnnotationExpression ae : original.annotations()) {
+            TypeInfo type = ae.typeInfo();
+            if (type == null || !"java.lang.annotation".equals(type.packageName())) continue;
+            if ("Repeatable".equals(type.simpleName())) continue;
+            standIn.builder().addAnnotation(ae);
+        }
+    }
 
     /**
      * Does {@code isolated} inherit from {@code owner}, so that a member of it is in scope unqualified?
@@ -596,6 +615,10 @@ abstract class IsolationCore {
             newParam.builder().setVarArgs(pi.isVarArgs()).setIsFinal(pi.isFinal()).commit();
         });
         Block.Builder mb = runtime.newBlockBuilder();
+        if (methodInfo.isConstructor()) {
+            Statement superCall = superCallOwed(methodInfo.typeInfo());
+            if (superCall != null) mb.addStatement(superCall);
+        }
         ParameterizedType newReturnType = eraseOutOfScope(ensureTypes(methodInfo.returnType()), owner, newMethod);
         if (!methodInfo.isConstructor() && !methodInfo.returnType().isVoid()) {
             Expression fresh = freshReturnOrNull(methodInfo, newReturnType);
@@ -776,11 +799,65 @@ abstract class IsolationCore {
                 .build();
     }
 
+    /**
+     * The {@code super(...)} a stub constructor owes its parent when that parent has no accessible no-argument
+     * constructor (CodeLaser/maddi#180). Two parents can be in that position, because their constructors are what
+     * the original declares: a JDK type ({@code DataInputFullStream extends DataInputStream}, stubbed with an empty
+     * {@code DataInputFullStream(byte[] bytes) { }}, is "constructor DataInputStream cannot be applied to given
+     * types"), and a type isolated in the same group (fernflower's {@code StructClass} below an isolated
+     * {@code StructMember}, whose only constructor is {@code protected StructMember(int, Map)}). A stubbed parent
+     * needs none of this: it gets a no-argument constructor when it is extended. The call picks the accessible
+     * constructor with the fewest parameters, each argument a null or zero cast to the parameter's erasure, so that
+     * overloads of the same arity do not make it ambiguous.
+     * <p>
+     * Reads the ORIGINAL hierarchy: a stub's {@code parentClass()} is not readable before it is committed.
+     *
+     * @param original the type whose stub declares the constructor
+     */
+    private Statement superCallOwed(TypeInfo original) {
+        ParameterizedType parent = original == null ? null : original.parentClass();
+        TypeInfo parentType = parent == null ? null : parent.typeInfo();
+        if (parentType == null || parentType.isJavaLangObject()) return null;
+        boolean jdk = isJdkType(parentType);
+        if (!jdk && !originalTypes.contains(parentType)) return null;
+        List<MethodInfo> accessible = parentType.constructors().stream()
+                .filter(c -> !c.access().isPrivate() && !c.isSynthetic()).toList();
+        if (accessible.isEmpty() || accessible.stream().anyMatch(c -> c.parameters().isEmpty())) return null;
+        MethodInfo target = accessible.stream()
+                .min(Comparator.comparingInt((MethodInfo c) -> c.parameters().size())
+                        .thenComparing(MethodInfo::fullyQualifiedName))
+                .orElseThrow();
+        List<Expression> arguments = target.parameters().stream().map(pi -> {
+            ParameterizedType erased = pi.parameterizedType().erased();
+            ParameterizedType type = jdk ? erased : ensureTypes(erased);
+            Expression value = runtime.nullValue(type);
+            return type.isPrimitiveExcludingVoid() ? value : runtime.newCastBuilder().setSource(runtime.noSource())
+                    .setExpression(value).setParameterizedType(type).build();
+        }).toList();
+        return runtime.newExplicitConstructorInvocationBuilder()
+                // the first statement of the stub's body: an explicit invocation must have a statement index
+                .setSource(runtime.noSource().withIndex("0"))
+                .setIsSuper(true)
+                .setMethodInfo(target)
+                .setParameterExpressions(arguments)
+                .build();
+    }
+
+    /** The original a stub stands in for, or null for a type that is not a stub. */
+    private TypeInfo originalOfStub(TypeInfo stub) {
+        for (Map.Entry<TypeInfo, TypeInfo> e : typeMap.entrySet()) {
+            if (e.getValue() == stub) return e.getKey();
+        }
+        return null;
+    }
+
     private MethodInfo newNoArgConstructor(TypeInfo stub) {
         MethodInfo noArg = runtime.newConstructor(stub);
+        Statement superCall = superCallOwed(originalOfStub(stub));
         noArg.builder().setReturnType(runtime.parameterizedTypeReturnTypeOfConstructor())
                 .setSource(runtime.noSource())
-                .setMethodBody(runtime.emptyBlock())
+                .setMethodBody(superCall == null ? runtime.emptyBlock()
+                        : runtime.newBlockBuilder().addStatement(superCall).build())
                 .setAccess(stubsCrossPackageBoundaries() ? runtime.accessPublic() : runtime.accessPackage());
         if (stubsCrossPackageBoundaries()) noArg.builder().addMethodModifier(runtime.methodModifierPublic());
         noArg.builder().commit();
@@ -984,6 +1061,21 @@ abstract class IsolationCore {
             stub.builder().addMethod(noArg);
             LOGGER.info("Added a no-arg constructor to {}, which is extended or instantiated by another stub", stub);
         }
+        // a class stub with no constructor of its own has the implicit one, whose implicit 'super()' does not
+        // compile below a parent that has no no-argument constructor: it gets an explicit one that passes the
+        // parent what it needs (superCallOwed, CodeLaser/maddi#180)
+        for (Map.Entry<TypeInfo, TypeInfo> entry : new ArrayList<>(typeMap.entrySet())) {
+            TypeInfo original = entry.getKey();
+            TypeInfo stub = entry.getValue();
+            if (!original.typeNature().isClass() || interfaceStubs.contains(stub) || annotationStubs.contains(stub)
+                || enumStubs.contains(stub)) continue;
+            boolean declaresConstructor = Stream.concat(stub.builder().constructors().stream(),
+                    stub.builder().methods().stream()).anyMatch(MethodInfo::isConstructor);
+            if (declaresConstructor || superCallOwed(original) == null) continue;
+            stub.builder().addMethod(noArgConstructorPerInstantiatedStub.computeIfAbsent(stub,
+                    this::newNoArgConstructor));
+            LOGGER.info("Added a constructor to {}, whose parent has no no-arg constructor", stub);
+        }
     }
 
     void addDummyInterfaceMethods() {
@@ -1010,7 +1102,7 @@ abstract class IsolationCore {
                 for (ParameterizedType itf : original.interfacesImplemented()) {
                     collectAbstractMethods(itf, required);
                 }
-                collectAbstractMethodsOfJdkAncestors(original.parentClass(), required);
+                collectAbstractMethodsOfKeptAncestors(original.parentClass(), required);
                 if (required.isEmpty()) continue;
                 Set<String> present = new HashSet<>();
                 stub.methodStream().forEach(m -> present.add(erasureKey(m)));
@@ -1046,10 +1138,13 @@ abstract class IsolationCore {
      * The abstract methods a stub inherits from an <b>abstract class</b> — {@code class CustomOutputStream extends
      * java.io.OutputStream { }} does not compile without {@code write(int)}.
      * <p>
-     * Only JDK ancestors, and that is not a shortcut: a stubbed ancestor is a concrete class whose every method has
-     * a body ({@link #ensureMethodInfo}), so it leaves nothing abstract to implement. A JDK ancestor is kept as
-     * itself, with its real abstract methods intact, and is the only kind that can. Eight of the hundred class
-     * isolates: {@code OutputStream.write(int)}, {@code InputStream.read()}, {@code Transformer.getErrorListener()}.
+     * Only JDK ancestors and isolated ones, and that is not a shortcut: a stubbed ancestor's every method has a body
+     * ({@link #ensureMethodInfo}), so it leaves nothing abstract to implement. A JDK ancestor is kept as itself, with
+     * its real abstract methods intact, and so is an ancestor isolated in the same group: its members are verbatim,
+     * {@code protected abstract Type getType()} included, and fernflower's {@code StructClass}, stubbed below an
+     * isolated {@code StructMember}, was "not abstract and does not override abstract method getType()"
+     * (CodeLaser/maddi#180). Eight of the hundred class isolates: {@code OutputStream.write(int)},
+     * {@code InputStream.read()}, {@code Transformer.getErrorListener()}.
      * <p>
      * Each ancestor's OWN abstract methods only. An abstract class that leaves an interface method unimplemented
      * without redeclaring it is not covered; every case measured redeclares.
@@ -1061,10 +1156,11 @@ abstract class IsolationCore {
      * not abstract at all — "get(int) in ListStack cannot override get(int) in java.util.AbstractList", because the
      * type arguments do not survive that far either.
      */
-    private void collectAbstractMethodsOfJdkAncestors(ParameterizedType classType,
+    private void collectAbstractMethodsOfKeptAncestors(ParameterizedType classType,
                                                       Map<String, AbstractMethod> result) {
         TypeInfo ti = classType == null ? null : classType.typeInfo();
-        if (ti == null || ti.isJavaLangObject() || !isJdkType(ti) || !ti.isAbstract()) return;
+        if (ti == null || ti.isJavaLangObject() || !ti.isAbstract()) return;
+        if (!isJdkType(ti) && !originalTypes.contains(ti)) return;
         // A parent that is not REPRODUCED owes the stub nothing: a record stub extends Object, not
         // java.lang.Record, so the three abstract methods java.lang.Record declares (toString, hashCode, equals)
         // are not inherited and dummies for them are pure noise
@@ -1079,7 +1175,7 @@ abstract class IsolationCore {
         // declared several levels up, on a type parameter this level has already bound
         ParameterizedType parent = ti.parentClass();
         if (parent != null) {
-            collectAbstractMethodsOfJdkAncestors(parent.applyTranslation(runtime, typeArguments), result);
+            collectAbstractMethodsOfKeptAncestors(parent.applyTranslation(runtime, typeArguments), result);
         }
     }
 
