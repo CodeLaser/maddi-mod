@@ -80,8 +80,9 @@ import java.util.stream.Stream;
  * {@code TestIsolateClosedCoreClasses} for anything that changes what a stub declares.
  * {@code docs/design/isolate-class.md} §6 has the twelve causes and §7 the three that are left.
  * <p>
- * One gap is left deliberately: the <b>isolated type itself</b> is always emitted as a {@code class}, so isolating
- * an {@code enum} loses its nature and its constants. The stubs reproduce every nature; the isolated type does not.
+ * One gap is left deliberately: an isolated {@code enum} or {@code record} is emitted as a {@code class}, so it loses
+ * its nature and its constants or components. An isolated interface or annotation type keeps its nature
+ * (CodeLaser/maddi#180), and the stubs reproduce every nature.
  */
 public class IsolateClass {
     private static final Logger LOGGER = LoggerFactory.getLogger(IsolateClass.class);
@@ -320,8 +321,13 @@ public class IsolateClass {
                     .setURI(original.compilationUnit().uri())
                     .build();
             TypeInfo isolated = runtime.newTypeInfo(isolatedCu, original.simpleName());
+            // an interface stays an interface and an annotation type an annotation type: every 'implements X' and
+            // '@X' in the verbatim text depends on it (CodeLaser/maddi#180). Enums and records do not, yet: see
+            // the class javadoc
             isolated.builder().setSource(runtime.noSource())
-                    .setTypeNature(runtime.typeNatureClass())
+                    .setTypeNature(original.isAnnotation() ? runtime.typeNatureAnnotation()
+                            : original.isInterface() ? runtime.typeNatureInterface()
+                            : runtime.typeNatureClass())
                     .setParentClass(runtime.objectParameterizedType())
                     .addTypeModifier(runtime.typeModifierPublic())
                     .computeAccess();
@@ -478,14 +484,22 @@ public class IsolateClass {
         // verbatim, 'protected abstract V getValue(...)' included, and a plain 'class' declaring them is
         // "X is not abstract and does not override abstract method ... in X" -- javac naming the type twice,
         // which reads as a puzzle until you notice the declaration lost the keyword
-        if (typeInfo.isAbstract()) {
+        // (an interface is abstract by nature, and the keyword on it is redundant at best)
+        if (typeInfo.isAbstract() && !typeInfo.isInterface()) {
             isolated.builder().addTypeModifier(runtime.typeModifierAbstract());
+        }
+        if (typeInfo.isAnnotation()) {
+            // as for an annotation stub: the interface every annotation type implements, and its own @Target
+            TypeInfo annotation = javaInspector.compiledTypesManager().type(java.lang.annotation.Annotation.class);
+            isolated.builder().addInterfaceImplemented(annotation.asSimpleParameterizedType());
+            data.copyMetaAnnotations(typeInfo, isolated);
         }
 
         // the isolated type keeps its place in the hierarchy: an 'implements Outer.Sink<Entry>' in the verbatim
         // text has to still be there, or the @Override on its implementation does not resolve
         isolated.builder().setParentClass(data.reproducedParentClass(typeInfo));
-        for (ParameterizedType itf : typeInfo.interfacesImplemented()) {
+        for (ParameterizedType itf : typeInfo.isAnnotation() ? List.<ParameterizedType>of()
+                : typeInfo.interfacesImplemented()) {
             isolated.builder().addInterfaceImplemented(data.ensureTypes(itf,
                     IsolationCore.detailedSources(typeInfo.source())));
         }
@@ -504,12 +518,15 @@ public class IsolateClass {
             FieldInfo newField = runtime.newFieldInfo(fieldInfo.name(), fieldInfo.isStatic(), newType, isolated);
             boolean constantVariable = fieldInfo.isStatic() && fieldInfo.isFinal()
                                        && fieldInfo.initializer() != null && fieldInfo.initializer().isConstant();
+            // an interface field is implicitly 'static final', so it must be initialized, as in an interface stub
+            boolean interfaceField = typeInfo.isInterface();
             newField.builder()
-                    .setInitializer(constantVariable ? fieldInfo.initializer() : runtime.newEmptyExpression())
+                    .setInitializer(constantVariable ? fieldInfo.initializer()
+                            : interfaceField ? runtime.nullValue(newType) : runtime.newEmptyExpression())
                     .setAccess(fieldInfo.access())
                     .setSource(runtime.noSource());
             if (fieldInfo.isStatic()) newField.builder().addFieldModifier(runtime.fieldModifierStatic());
-            if (constantVariable) newField.builder().addFieldModifier(runtime.fieldModifierFinal());
+            if (constantVariable && !interfaceField) newField.builder().addFieldModifier(runtime.fieldModifierFinal());
             newField.builder().commit();
             isolated.builder().addField(newField);
             ownFields.add(newField);

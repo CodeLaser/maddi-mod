@@ -43,12 +43,15 @@
 # method's overloads (maddi 74039b947, Streams' four Splitr) and writes this.x for a member field a captured local
 # would hide (maddi fed0a5ba2, Splitr's fromSpliterator): all 610 files compiling (0 type errors), 495 to class
 # files, no test lost.
+# 2026-10-30, Bart's decision: bytecodeFiles 495 -> 494 while the switch fork stays off for 0.9.6. #72's step 4a
+# loses Parameter.kt's class file; only the switch fork brings it back. Measured on laser1 at maddi 14cfe0495 with
+# maddi-mod 7e8805c8 and 9b9f1c10 alike: 610 files compiling, 494 to class files, 861,616 tests pass.
 types	610
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	610
 compilingFiles	610
-bytecodeFiles	495
+bytecodeFiles	494
 testsPassing	861616
 testBytecodeFiles	341
 translatedTestsPassing	861589

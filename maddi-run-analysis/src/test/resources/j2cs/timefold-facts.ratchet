@@ -175,10 +175,15 @@
 # 209 -> 207 (211 before c23c8a94d).
 # 2026-10-20, maddi 07026fe78, a93dae4bf: IJavaIterator covariant, a Func of other type arguments wrapped
 # (JavaDelegates.Cast): 1317 -> 1319 compiling files, 644 -> 633 errors, nullableWarnings 207 -> 206.
+# 2026-10-30, Bart's decision, with maddi-mod 9b9f1c10 (ws/maddi-null-68narrow) at maddi 14cfe0495, on the Mac:
+# nullableWarnings 206 -> 229 (231 without 9b9f1c10). #68's tolerance makes the Joiners parameters nullable: timefold's
+# DummyMemberAccessor.getGetterFunction() returns null, which reaches Joiners.lessThan's mapping and the joiners'
+# mapping arrays, and every parameter flowing into those arrays tolerates null. The rule works as designed; a
+# sharper one (a nullable slot dereferenced on read is no tolerance) is post-release work.
 types	1583
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	1565
 compilingFiles	1319
 unmappedJdkUses	106
-nullableWarnings	206
+nullableWarnings	229

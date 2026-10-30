@@ -79,10 +79,12 @@
 # an overflow split: 184 -> 185 compiling files.
 # 2026-10-20, maddi 07026fe78: IJavaIterator covariant, so an iterator of string? is one of string: nullableWarnings
 # 24 -> 17, errors (32) and compiling files unchanged.
+# 2026-10-30, the maddi slowTest gate 41058945355 (maddi 14cfe0495, maddi-mod 7e8805c8), then two fresh runs on the
+# Mac, identical: nullableWarnings 17 -> 16, one fewer in ClassesProcessor.cs (2 -> 1). Not bisected.
 types	199
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	199
 compilingFiles	185
 unmappedJdkUses	15
-nullableWarnings	17
+nullableWarnings	16
