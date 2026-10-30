@@ -24,6 +24,7 @@ import io.codelaser.maddi.cst.api.expression.Assignment;
 import io.codelaser.maddi.cst.api.info.FieldInfo;
 import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
@@ -50,6 +51,9 @@ import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.ImmutableImpl.*;
  * non-private field of a mutable type, a dependent field or method, or a modifying abstract method; IMMUTABLE_HC from
  * extensibility, hidden content shared, or a field whose type is not deeply immutable. A reason given is a reason
  * that holds; when none of them can be pinned to a member, nothing is written rather than something vague.
+ * <p>
+ * And why a type is not {@code @Container}: {@code CONTAINER_CULPRIT}, each modified parameter of a non-private
+ * constructor or method.
  */
 final class TypeCulprit {
     private static final int TEXT = 60;
@@ -80,6 +84,52 @@ final class TypeCulprit {
             }
             set(typeInfo, DEPENDENT_CULPRIT, steps);
         }
+        Value.Bool container = typeInfo.analysis().getOrNull(CONTAINER_TYPE, ValueImpl.BoolImpl.class);
+        if (container != null && container.isFalse()) {
+            List<Value.Culprit.Step> steps = new ArrayList<>();
+            notContainer(typeInfo, steps);
+            set(typeInfo, CONTAINER_CULPRIT, steps);
+        }
+    }
+
+    // ---- not a container: the modified parameters, as TypeContainerAnalyzerImpl enumerates them ----
+
+    /*
+     One step per blocking parameter, so that the number of steps is the number of parameters standing between the
+     type and @Container: at the statement that modifies it (its own culprit's first step), else at the parameter.
+     */
+    private void notContainer(TypeInfo typeInfo, List<Value.Culprit.Step> steps) {
+        for (MethodInfo method : typeInfo.constructorAndMethodStream().toList()) {
+            if (method.access().isPrivate()) continue;
+            for (ParameterInfo parameter : method.parameters()) {
+                if (parameter.isUnmodified()) continue;
+                String what = "parameter " + parameter.name() + " of "
+                              + (method.isConstructor() ? "the constructor" : method.name() + "(..)") + " is modified";
+                if (method.isAbstract()) {
+                    MethodInfo implementation = modifyingImplementation(method, parameter.index());
+                    steps.add(Culprits.step(parameter, parameter, implementation == null ? what : what + ": "
+                            + implementation.typeInfo().simpleName() + "." + implementation.name()
+                            + "(..), which implements it, modifies it"));
+                    continue;
+                }
+                List<Value.Culprit.Step> own = culpritOf(parameter, MODIFIED_CULPRIT);
+                Value.Culprit.Step first = own.stream().filter(st -> st.line() > 0).findFirst().orElse(null);
+                steps.add(first == null ? Culprits.step(parameter, parameter, what)
+                        : new Value.Culprit.Step(first.uri(), first.line(), first.column(), what + ": "
+                                                                                            + first.text()));
+            }
+        }
+    }
+
+    private static MethodInfo modifyingImplementation(MethodInfo method, int index) {
+        Value.SetOfMethodInfo implementations = method.analysis().getOrDefault(IMPLEMENTATIONS,
+                ValueImpl.SetOfMethodInfoImpl.EMPTY);
+        for (MethodInfo implementation : implementations.methodInfoSet()) {
+            if (index < implementation.parameters().size() && !implementation.parameters().get(index).isUnmodified()) {
+                return implementation;
+            }
+        }
+        return null;
     }
 
     // ---- MUTABLE: rule 0, setters, a mutable supertype ----

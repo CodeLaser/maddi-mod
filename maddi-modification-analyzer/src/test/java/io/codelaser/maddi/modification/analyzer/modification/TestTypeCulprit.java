@@ -109,6 +109,10 @@ public class TestTypeCulprit extends CommonTest {
         return culprit(nested(x, name), PropertyImpl.IMMUTABLE_CULPRIT);
     }
 
+    private static String container(TypeInfo y, String name) {
+        return culprit(nested(y, name), PropertyImpl.CONTAINER_CULPRIT);
+    }
+
     private static TypeInfo nested(TypeInfo x, String name) {
         return x.subTypes().stream().filter(t -> name.equals(t.simpleName())).findFirst().orElseThrow();
     }
@@ -146,6 +150,64 @@ public class TestTypeCulprit extends CommonTest {
             assertNull(why(x, "Square"));
             assertNull(why(x, "Point"));
             assertNull(culprit(nested(x, "Bag"), PropertyImpl.DEPENDENT_CULPRIT), "independent");
+        } finally {
+            Culprits.ENABLED = before;
+        }
+    }
+
+    @Language("java")
+    private static final String CONTAINERS = """
+            package a.b;
+            import java.util.List;
+            public class Y {
+                static final class Sink {
+                    void fill(List<String> list) { list.add("x"); }
+                    int size(List<String> list) { return list.size(); }
+                }
+                static final class Two {
+                    Two(List<String> a) { a.clear(); }
+                    void both(List<String> b, List<String> c) { b.add("b"); helper(c); }
+                    private static void helper(List<String> d) { d.add("d"); }
+                }
+                interface Filler {
+                    void fill(List<String> list);
+                }
+                static final class Adding implements Filler {
+                    public void fill(List<String> list) { list.add("a"); }
+                }
+                static final class Reading implements Filler {
+                    public void fill(List<String> list) { System.out.println(list.size()); }
+                }
+                static final class Fine {
+                    int size(List<String> list) { return list.size(); }
+                }
+            }
+            """;
+
+    @DisplayName("why a type is not @Container: each modified parameter, where it is modified")
+    @Test
+    public void container() {
+        boolean before = Culprits.ENABLED;
+        Culprits.ENABLED = true;
+        try {
+            TypeInfo y = javaInspector.parse("a.b.Y", CONTAINERS);
+            List<Info> ao = prepAnalyzer.doPrimaryTypes(Set.of(y));
+            new IteratingAnalyzerImpl(javaInspector, new IteratingAnalyzerImpl.ConfigurationBuilder()
+                    .setMaxIterations(10)
+                    .setModificationViaReachability(true)
+                    .build()).analyze(ao);
+            assertEquals("5 parameter list of fill(..) is modified: calls list.add(..), a modifying method outside"
+                         + " the analysis", container(y, "Sink"));
+            // one step per modified parameter, the constructor's included; a private method's parameters do not count
+            assertEquals("9 parameter a of the constructor is modified: calls a.clear(..), a modifying method outside"
+                         + " the analysis <- 10 parameter b of both(..) is modified: calls b.add(..), a modifying"
+                         + " method outside the analysis <- 10 parameter c of both(..) is modified: calls helper(..)",
+                    container(y, "Two"));
+            // an abstract method's parameter: the implementation that modifies it
+            assertEquals("14 parameter list of fill(..) is modified: Adding.fill(..), which implements it, modifies it",
+                    container(y, "Filler"));
+            assertNull(container(y, "Reading"));
+            assertNull(container(y, "Fine"));
         } finally {
             Culprits.ENABLED = before;
         }
