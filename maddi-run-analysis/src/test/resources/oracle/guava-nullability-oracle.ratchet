@@ -29,6 +29,8 @@
 # reachability pass runs on guava again: it had failed silently in every round since at least 2026-10-27 (a
 # StackOverflowError in the view-local projection, CodeLaser/maddi-mod#75, fixed in 3dfb9820), so the numbers above
 # were the fixpoint's. Ordering.allEqual()'s return now agrees; five Funnels factory returns leave noise.
+# 2026-10-30, maddi 14cfe0495 / maddi-mod 024e618c (devel with the JDK hints written out, the culprits and #72 4a), on
+# laser1: 229 unsafe, 1,806 noise, 281 undecided. Unchanged with CodeLaser/maddi-mod#84 on top.
 unsafe	229
-noise	1829
+noise	1806
 noiseSlack	20
