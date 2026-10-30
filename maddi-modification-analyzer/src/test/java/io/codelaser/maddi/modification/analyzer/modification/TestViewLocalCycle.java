@@ -64,8 +64,8 @@ public class TestViewLocalCycle extends CommonTest {
                     .append(' ');
         }
         // swapped: the view local's modification reaches the argument through the cycle (U with NOVIEWLOCAL).
-        // reassigned: should be M, a list or a view of it is modified; the fixpoint gives U as well, and so does the
-        // pass with NOVIEWLOCAL, so that is the loop's linking, not this cycle
-        assertEquals("reassigned=U swapped=M read=U ", sb.toString());
+        // reassigned: a list or a view of it is modified, so M. This was pinned at U, a known miss of the loop's
+        // linking, until the analysis started to give M (the change that did it was not traced)
+        assertEquals("reassigned=M swapped=M read=U ", sb.toString());
     }
 }
