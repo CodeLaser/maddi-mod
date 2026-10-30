@@ -228,18 +228,10 @@ public class TypeModIndyAnalyzerImpl extends CommonAnalyzerImpl implements TypeM
         }
         if (value instanceof io.codelaser.maddi.cst.api.expression.MethodCall mc && mc.methodInfo() != null) {
             MethodInfo callee = mc.methodInfo();
-            Value.Bool view = callee.analysis().getOrNull(UNMODIFIABLE_VIEW_METHOD, ValueImpl.BoolImpl.class);
-            if (view != null) return view.isTrue();
-            Value.Bool identity = callee.analysis().getOrNull(IDENTITY_METHOD, ValueImpl.BoolImpl.class);
-            boolean isIdentity = identity != null && identity.isTrue();
-            Value.Immutable ofMethod = callee.analysis().getOrNull(IMMUTABLE_METHOD, ValueImpl.ImmutableImpl.class);
-            if (!isIdentity && ofMethod != null && ofMethod.isAtLeastImmutableHC()) return true;
-            // a source method with a body gets the property from this very pass: wait for it
-            boolean sourceWithBody = callee.methodBody() != null && !callee.methodBody().isEmpty()
-                                     && callee.typeInfo().compilationUnit() != null
-                                     && callee.typeInfo().compilationUnit().sourceSet() != null
-                                     && !callee.typeInfo().compilationUnit().sourceSet().externalLibrary();
-            return sourceWithBody ? null : Boolean.FALSE;
+            Boolean ofOverrides = unmodifiableOverrides(callee);
+            if (Boolean.FALSE.equals(ofOverrides)) return false;
+            Boolean ofCallee = unmodifiableCallee(callee);
+            return ofCallee == null || !ofCallee ? ofCallee : ofOverrides;
         }
         if (value instanceof io.codelaser.maddi.cst.api.expression.VariableExpression ve
             && ve.variable() instanceof FieldReference fr) {
@@ -247,6 +239,40 @@ public class TypeModIndyAnalyzerImpl extends CommonAnalyzerImpl implements TypeM
             return ofField != null && ofField.isAtLeastImmutableHC();
         }
         return false;
+    }
+
+    /** The callee's own verdict, as a call result: TRUE, FALSE, or null while a source callee is undecided. */
+    private static Boolean unmodifiableCallee(MethodInfo callee) {
+        Value.Bool view = callee.analysis().getOrNull(UNMODIFIABLE_VIEW_METHOD, ValueImpl.BoolImpl.class);
+        if (view != null) return view.isTrue();
+        Value.Bool identity = callee.analysis().getOrNull(IDENTITY_METHOD, ValueImpl.BoolImpl.class);
+        boolean isIdentity = identity != null && identity.isTrue();
+        Value.Immutable ofMethod = callee.analysis().getOrNull(IMMUTABLE_METHOD, ValueImpl.ImmutableImpl.class);
+        if (!isIdentity && ofMethod != null && ofMethod.isAtLeastImmutableHC()) return true;
+        // a source method with a body gets the property from this very pass: wait for it
+        boolean sourceWithBody = callee.methodBody() != null && !callee.methodBody().isEmpty()
+                                 && callee.typeInfo().compilationUnit() != null
+                                 && callee.typeInfo().compilationUnit().sourceSet() != null
+                                 && !callee.typeInfo().compilationUnit().sourceSet().externalLibrary();
+        return sourceWithBody ? null : Boolean.FALSE;
+    }
+
+    /**
+     * The overrides a call through a concrete method may dispatch to (CodeLaser/maddi-mod#84): the callee's verdict
+     * is its own body's, so the result is a view only when each source override's is one too. TRUE when none
+     * says otherwise, FALSE when one does not, null while one is undecided. An abstract method or a placeholder
+     * already holds the fold over its implementations (AbstractMethodAnalyzerImpl.methodUnmodifiableView).
+     */
+    private static Boolean unmodifiableOverrides(MethodInfo callee) {
+        if (Util.unionOverImplementations(callee)) return Boolean.TRUE;
+        Boolean result = Boolean.TRUE;
+        for (MethodInfo override : callee.analysis().getOrDefault(IMPLEMENTATIONS,
+                ValueImpl.SetOfMethodInfoImpl.EMPTY).methodInfoSet()) {
+            Value.Bool view = override.analysis().getOrNull(UNMODIFIABLE_VIEW_METHOD, ValueImpl.BoolImpl.class);
+            if (view == null) result = null;
+            else if (view.isFalse()) return Boolean.FALSE;
+        }
+        return result;
     }
 
     private void doIdentityAnalysis(MethodInfo methodInfo, MethodLinkedVariables mlv) {

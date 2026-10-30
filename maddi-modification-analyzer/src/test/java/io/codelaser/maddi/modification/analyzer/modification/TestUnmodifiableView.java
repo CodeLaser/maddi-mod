@@ -166,4 +166,65 @@ public class TestUnmodifiableView extends CommonTest {
         String plainLine = printed.lines().filter(l -> l.contains("plain()")).findFirst().orElseThrow();
         assertFalse(plainLine.contains("@UnmodifiableView"), plainLine);
     }
+
+    @Language("java")
+    private static final String DISPATCH = """
+            package a.b;
+            import java.util.ArrayList;
+            import java.util.Collections;
+            import java.util.List;
+            class Dispatch {
+                static class Base {
+                    final List<String> list = new ArrayList<>();
+                    List<String> items() { return Collections.unmodifiableList(list); }
+                }
+                static class Sub extends Base {
+                    @Override List<String> items() { return new ArrayList<>(list); }
+                }
+                // two levels down: the copy is in a grandchild
+                static class Top {
+                    final List<String> list = new ArrayList<>();
+                    List<String> items() { return Collections.unmodifiableList(list); }
+                }
+                static class Mid extends Top {
+                    @Override List<String> items() { return Collections.unmodifiableList(list); }
+                }
+                static class Leaf extends Mid {
+                    @Override List<String> items() { return new ArrayList<>(list); }
+                }
+                // every override a view: the call stays one
+                static class Same {
+                    final List<String> list = new ArrayList<>();
+                    List<String> items() { return Collections.unmodifiableList(list); }
+                }
+                static class SameSub extends Same {
+                    @Override List<String> items() { return Collections.unmodifiableList(list); }
+                }
+                static class User {
+                    List<String> viaBase(Base b) { return b.items(); }
+                    List<String> viaTop(Top t) { return t.items(); }
+                    List<String> viaMid(Mid m) { return m.items(); }
+                    List<String> viaSame(Same s) { return s.items(); }
+                    List<String> viaSub(Sub s) { return s.items(); }
+                }
+            }
+            """;
+
+    @DisplayName("a call through an overridable method is a view only when each override's result is one (#84)")
+    @Test
+    public void dispatch() {
+        TypeInfo dispatch = javaInspector.parse("a.b.Dispatch", DISPATCH);
+        List<Info> ao = prepWork(dispatch);
+        new IteratingAnalyzerImpl(javaInspector, new IteratingAnalyzerImpl.ConfigurationBuilder()
+                .setMaxIterations(10).build()).analyze(ao);
+
+        // a declaration keeps its own body's verdict; an override may return a mutable list
+        assertEquals("true/false", unmodifiableView(method(dispatch.findSubType("Base"), "items")) + "/"
+                                   + unmodifiableView(method(dispatch.findSubType("Sub"), "items")));
+        TypeInfo user = dispatch.findSubType("User");
+        assertEquals("false/false/false/true/false", String.join("/",
+                unmodifiableView(method(user, "viaBase")), unmodifiableView(method(user, "viaTop")),
+                unmodifiableView(method(user, "viaMid")), unmodifiableView(method(user, "viaSame")),
+                unmodifiableView(method(user, "viaSub"))));
+    }
 }

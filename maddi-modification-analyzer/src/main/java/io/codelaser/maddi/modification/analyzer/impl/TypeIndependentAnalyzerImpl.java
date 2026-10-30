@@ -493,6 +493,7 @@ public class TypeIndependentAnalyzerImpl extends CommonAnalyzerImpl implements T
      */
     private boolean ignoreModificationsAccessor(MethodInfo methodInfo) {
         if (isIgnoreModAccessor(methodInfo)) return true;
+        if (!io.codelaser.maddi.modification.prepwork.Util.unionOverImplementations(methodInfo)) return false;
         for (MethodInfo im : methodInfo.analysis()
                 .getOrDefault(IMPLEMENTATIONS, ValueImpl.SetOfMethodInfoImpl.EMPTY).methodInfoSet()) {
             if (isIgnoreModAccessor(im)) return true;
@@ -542,6 +543,7 @@ public class TypeIndependentAnalyzerImpl extends CommonAnalyzerImpl implements T
     /** @param parameterIndex -1 for the return value */
     private boolean sharedContentCommits(TypeInfo member, MethodInfo abstractMethod, int parameterIndex,
                                          String what) {
+        if (!io.codelaser.maddi.modification.prepwork.Util.unionOverImplementations(abstractMethod)) return false;
         Value.SetOfMethodInfo implementations = abstractMethod.analysis()
                 .getOrDefault(IMPLEMENTATIONS, ValueImpl.SetOfMethodInfoImpl.EMPTY);
         if (implementations.isEmpty()) return false;

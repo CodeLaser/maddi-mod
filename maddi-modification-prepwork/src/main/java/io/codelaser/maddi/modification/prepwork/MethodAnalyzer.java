@@ -372,8 +372,12 @@ public class MethodAnalyzer {
             throw t;
         }
         if (!methodInfo.isAbstract()) {
+            // a concrete method of the sources collects its overrides too, the bodies a call through it may
+            // dispatch to (CodeLaser/maddi-mod#84); only an abstract method or a placeholder takes their union
+            // (Util.unionOverImplementations), so a reader that folds checks that first
             methodInfo.overrides().stream()
-                    .filter(override -> override.isAbstract() || Util.isThrowOnlyPlaceholder(override))
+                    .filter(override -> override.isAbstract() || Util.isThrowOnlyPlaceholder(override)
+                                        || !override.typeInfo().compilationUnit().externalLibrary())
                     .forEach(override -> addImplementation(override, methodInfo));
         }
     }

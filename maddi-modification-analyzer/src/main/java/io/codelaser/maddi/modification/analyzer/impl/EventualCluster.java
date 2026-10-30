@@ -246,6 +246,7 @@ public class EventualCluster {
 
     private static boolean setterOrImplementedBySetter(MethodInfo methodInfo) {
         if (isSetter(methodInfo)) return true;
+        if (!io.codelaser.maddi.modification.prepwork.Util.unionOverImplementations(methodInfo)) return false;
         for (MethodInfo implementation : methodInfo.analysis()
                 .getOrDefault(PropertyImpl.IMPLEMENTATIONS, ValueImpl.SetOfMethodInfoImpl.EMPTY)
                 .methodInfoSet()) {
