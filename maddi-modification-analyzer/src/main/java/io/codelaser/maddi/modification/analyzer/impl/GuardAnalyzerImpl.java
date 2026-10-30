@@ -534,12 +534,41 @@ public class GuardAnalyzerImpl extends CommonAnalyzerImpl implements GuardAnalyz
                 Value.Bool nonModifying = methodInfo.analysis().getOrNull(NON_MODIFYING_METHOD,
                         ValueImpl.BoolImpl.class);
                 if (nonModifying != null && nonModifying.isFalse()) {
-                    reportViolation(methodInfo, null, contractLocation,
-                            "abstract method " + methodInfo.fullyQualifiedName() + " is modifying, violating rule 1"
-                            + " (all fields @NotModified) of the @Immutable contract on "
-                            + contractHolder.fullyQualifiedName());
+                    guardAbstractMethodModifying(contractHolder, methodInfo, contractLocation);
                 }
             }
+        }
+    }
+
+    /**
+     * An abstract method of an {@code @Immutable} type is modifying. ⛔ This used to be reported at the abstract
+     * method itself, citing "rule 1 (all fields @NotModified)": a finding on a line without a body, naming a rule about
+     * fields the interface does not have, while the cause sat in an implementation ({@code ++cntCalls} on a static
+     * counter in {@code Circle.area()}) that the message never mentioned. An abstract method is modifying because an
+     * implementation is, so the error goes to each modifying implementation, at its first self-modification, as rule 1's
+     * field culprits do; the abstract method becomes a cause. Only when no implementation modifies (the abstract method
+     * is modifying by default, or through one outside the analysed sources) does it carry the error itself.
+     */
+    private void guardAbstractMethodModifying(TypeInfo contractHolder, MethodInfo abstractMethod,
+                                              Message contractLocation) {
+        String suffix = ", violating rule 1 for abstract methods (they must be @NotModified) of the @Immutable"
+                        + " contract on " + contractHolder.fullyQualifiedName();
+        Message abstractCause = MessageImpl.cause(abstractMethod, "abstract method "
+                + abstractMethod.fullyQualifiedName() + " is modifying, because an implementation of it is");
+        boolean reported = false;
+        for (MethodInfo impl : implementationsOf(abstractMethod)) {
+            Value.Bool implNonModifying = impl.analysis().getOrNull(NON_MODIFYING_METHOD, ValueImpl.BoolImpl.class);
+            if (implNonModifying == null || !implNonModifying.isFalse()) continue;
+            Message blame = blameMethodModifying(impl);
+            String what = impl.fullyQualifiedName() + (blame == null ? " is modifying" : " " + blame.message())
+                          + ", which makes " + abstractMethod.fullyQualifiedName() + ", which it implements, modifying";
+            analyzerMessages.add(new MessageImpl(blame == null ? impl.source() : blame.source(), impl,
+                    Message.Severity.ERROR, what + suffix, CONTRACT_VIOLATION, List.of(abstractCause, contractLocation)));
+            reported = true;
+        }
+        if (!reported) {
+            reportViolation(abstractMethod, null, contractLocation,
+                    "abstract method " + abstractMethod.fullyQualifiedName() + " is modifying" + suffix);
         }
     }
 
@@ -1215,17 +1244,31 @@ public class GuardAnalyzerImpl extends CommonAnalyzerImpl implements GuardAnalyz
 
     /**
      * Blame walk for a modifying method: the first self-modification in {@code impl}'s body — a write to a field
-     * of the instance ({@code count++}), or a modifying call on {@code this} or one of its fields. Located cause;
-     * {@code null} when nothing direct is found.
+     * of the instance ({@code count++}) or to a static field (§050 does not exempt those), or a modifying call on
+     * {@code this}, one of its fields, or a static field. Located cause; {@code null} when nothing direct is found.
      */
     private Message blameMethodModifying(MethodInfo impl) {
         if (impl.methodBody().isEmpty()) return null;
         AtomicReference<Message> found = new AtomicReference<>();
         impl.methodBody().visit(e -> {
             if (found.get() != null) return false;
-            if (e instanceof Assignment asg && asg.variableTarget() instanceof FieldReference fr
-                && fr.scopeIsRecursivelyThis()) {
-                found.set(MessageImpl.cause(e.source(), impl, "assigns field '" + fr.fieldInfo().name() + "'"));
+            if (e instanceof Assignment asg && asg.variableTarget() instanceof FieldReference fr) {
+                if (fr.fieldInfo().isStatic()) {
+                    found.set(MessageImpl.cause(e.source(), impl, "assigns static field '"
+                            + fr.fieldInfo().owner().simpleName() + "." + fr.fieldInfo().name() + "'"));
+                    return false;
+                }
+                if (fr.scopeIsRecursivelyThis()) {
+                    found.set(MessageImpl.cause(e.source(), impl, "assigns field '" + fr.fieldInfo().name() + "'"));
+                    return false;
+                }
+            }
+            if (e instanceof MethodCall mc && isModifyingMethod(mc.methodInfo())
+                && mc.object() instanceof VariableExpression ve && ve.variable() instanceof FieldReference frv
+                && frv.fieldInfo().isStatic()) {
+                found.set(MessageImpl.cause(e.source(), impl, "calls modifying method '" + mc.methodInfo().name()
+                        + "' on static field '" + frv.fieldInfo().owner().simpleName() + "." + frv.fieldInfo().name()
+                        + "'"));
                 return false;
             }
             if (e instanceof MethodCall mc && isModifyingMethod(mc.methodInfo())

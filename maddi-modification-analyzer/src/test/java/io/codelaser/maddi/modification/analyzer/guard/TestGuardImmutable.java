@@ -33,6 +33,18 @@ public class TestGuardImmutable extends CommonTest {
         return analyzer.messages();
     }
 
+    // as the engine runs it: an abstract method is modifying through its implementations only after the reachability pass
+    private List<Message> analyzeWithGuardAndReachability(String fqn, String source) throws IOException {
+        AnalyzerBundle bundle = buildAnalyzerBundle();
+        TypeInfo typeInfo = bundle.javaInspector().parse(fqn, source);
+        List<Info> analysisOrder = bundle.prepAnalyzer().doPrimaryType(typeInfo);
+        IteratingAnalyzer analyzer = new IteratingAnalyzerImpl(bundle.javaInspector(),
+                new IteratingAnalyzerImpl.ConfigurationBuilder().setMaxIterations(10).setGuardContracts(true)
+                        .setModificationViaReachability(true).build());
+        analyzer.analyze(analysisOrder);
+        return analyzer.messages();
+    }
+
     private List<Message> violations(List<Message> messages) {
         return messages.stream().filter(m -> GuardAnalyzerImpl.CONTRACT_VIOLATION.equals(m.category())).toList();
     }
@@ -308,6 +320,49 @@ public class TestGuardImmutable extends CommonTest {
         List<Message> violations = violations(analyzeWithGuard("a.b.X", EVENTUAL));
         assertTrue(violations.isEmpty(), "eventually immutable types must not be guarded, have: "
                                          + violations.stream().map(Message::message).toList());
+    }
+
+    @Language("java")
+    private static final String ABSTRACT_MODIFYING = """
+            package a.b;
+            import io.codelaser.maddi.annotation.Immutable;
+
+            public class X {
+                @Immutable
+                interface Shape {
+                    double area();
+                }
+
+                static final class Circle implements Shape {
+                    private static int cntCalls;
+                    private final double r;
+
+                    Circle(double r) { this.r = r; }
+
+                    @Override
+                    public double area() {
+                        ++cntCalls;
+                        return Math.PI * r * r;
+                    }
+                }
+            }
+            """;
+
+    @DisplayName("rule 1, abstract method: reported at the implementation's culprit, not at the abstract method")
+    @Test
+    public void testAbstractMethodModifyingThroughImplementation() throws IOException {
+        List<Message> violations = violations(analyzeWithGuardAndReachability("a.b.X", ABSTRACT_MODIFYING));
+        assertEquals(1, violations.size(), violations.stream().map(Message::message).toList().toString());
+        Message v = violations.getFirst();
+        assertEquals("a.b.X.Circle.area()", v.info().fullyQualifiedName());
+        assertTrue(v.message().contains("assigns static field 'Circle.cntCalls'"), v.message());
+        assertTrue(v.message().contains("a.b.X.Shape.area()"), v.message());
+        assertTrue(v.message().contains("rule 1 for abstract methods"), v.message());
+        assertFalse(v.message().contains("all fields"), v.message());
+        assertNotNull(v.source());
+        assertEquals(2, v.causes().size());
+        assertEquals("a.b.X.Shape.area()", v.causes().getFirst().info().fullyQualifiedName());
+        assertTrue(v.causes().get(1).message().contains("@Immutable contracted on Shape"));
     }
 
     @DisplayName("guard disabled: no findings")
