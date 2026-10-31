@@ -2092,15 +2092,15 @@ public class TestNullabilityPass extends CommonTest {
         ParameterizedType f = parsed.getFieldByName("f", true).type();
         ParameterizedType nullableDeque = deque.withNullable(NullableState.NULLABLE);
         // a parameter: exactly main's
-        assertEquals("Deque<String>", k(NullabilityPass.clamped(nullableDeque,
+        assertEquals("Deque<String>", k(Contracts.clamped(nullableDeque,
                 f.withNullable(NullableState.UNSPECIFIED))));
-        assertEquals("Deque<String>?", k(NullabilityPass.clamped(deque.withNullable(NullableState.NONNULL),
+        assertEquals("Deque<String>?", k(Contracts.clamped(deque.withNullable(NullableState.NONNULL),
                 f.withNullable(NullableState.NULLABLE))));
         ParameterizedType nullableElements = list.withNullable(NullableState.NONNULL)
                 .withParameters(List.of(list.parameters().getFirst().withNullable(NullableState.NULLABLE)));
         ParameterizedType plainElements = list.withNullable(NullableState.NONNULL)
                 .withParameters(List.of(list.parameters().getFirst().withNullable(NullableState.NONNULL)));
-        assertEquals("List<String>", k(NullabilityPass.clamped(nullableElements, plainElements)));
+        assertEquals("List<String>", k(Contracts.clamped(nullableElements, plainElements)));
     }
 
     /*

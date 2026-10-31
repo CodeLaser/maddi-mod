@@ -455,28 +455,10 @@ public final class NullabilityPass {
     private final Policy policy;
     // NULLWHY: every print of the pass goes through it
     private final Trace trace;
-    // analysed implementations per overridden method (any overridden method, also a library one)
-    private final Map<MethodInfo, List<MethodInfo>> implementations = new HashMap<>();
-    // each null literal of an analysed body, by identity: a NullConstant equals every other, a Source only compares
-    // line and column; a marker whose literal is not found here (a decoded summary) is seeded where it arrives
-    private final Map<Expression, MethodInfo> nullOwners = new java.util.IdentityHashMap<>();
-    // array creations ('new T[n]') the next statement fills completely before anything reads them (indexFills)
-    private final Set<Expression> filledCreations = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
-    // gate NOFIELDFILL: only a local's declaration counts as the creation the next loop fills (A/B for CodeLaser/maddi-mod#22 gap 4)
-    private static final Switches.Gate FIELD_FILLS_OFF = Switches.gate("NOFIELDFILL");
     // analysed methods whose return an earlier round found unreached by null (see go)
     private final Set<MethodInfo> trustedReturns;
     // analysed parameters an earlier round found non-null on every normal exit of their method: passing null throws
     private final Set<ParameterInfo> preconditions;
-    // CodeLaser/maddi-mod#41: the lambdas in analysed bodies (members of their functional method's family); the analysed
-    // methods a method reference implements (their family has a member the pass does not see); the methods a method
-    // reference hands to whoever calls the function; the parameters a call passes the literal null to; per
-    // precondition parameter, the calls and the node of what each passes
-    private final Set<MethodInfo> lambdaMethods = new HashSet<>();
-    // Kotlin: the bodies of 'assertThrows(NullPointerException.class, () -> ...)' (rejectsNull)
-    private final Set<String> nullRejectingBodies = new HashSet<>();
-    private final Set<MethodInfo> referencedSams = new HashSet<>();
-    private final Set<MethodInfo> referencedMethods = new HashSet<>();
     private final Set<ParameterInfo> nullLiteralParameters = new HashSet<>();
     private final List<Object[]> preconditionArguments = new ArrayList<>();
     // what an earlier round found about final fields per runtime class: a read narrowed by 'instanceof' (gap 3)
@@ -489,17 +471,10 @@ public final class NullabilityPass {
     // graph's walk cannot know itself: its put's value is non-null by a library call only the closure clears
     private final Set<Expression> presentLookups;
     private Set<Expression> nextPresentLookups = Set.of();
-    private final Set<MethodCall> lookups = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
     // gate NOROUNDKEYS: no key presence from an earlier round (A/B for #48 B6)
     private static final Switches.Gate ROUND_KEYS_OFF = Switches.gate("NOROUNDKEYS");
     // gate NOENTRYFIELDS: no field of this is non-null at a private method's entry by its calls (A/B for #48 A5)
     private static final Switches.Gate ENTRY_FIELDS_OFF = Switches.gate("NOENTRYFIELDS");
-    private List<FieldInfo> analysedFields = List.of();
-    // keyed map fields (CodeLaser/maddi-mod#22 gap 2): the value slot per field, the accessors that take the key as a
-    // parameter, and the keys written per slot
-    private final Map<FieldInfo, Arg> keyedSlots = new HashMap<>();
-    private final Map<MethodInfo, KeyedAccessor> keyedPutters = new HashMap<>();
-    private final Map<MethodInfo, KeyedAccessor> keyedGetters = new HashMap<>();
     private final Map<Arg, Set<Object>> keysUsed = new LinkedHashMap<>();
     private Set<Object> reached = Set.of();
     // what a written null reaches (the strict closure, from strictSeeds), as of the last closure: Report.writtenReach
@@ -511,33 +486,16 @@ public final class NullabilityPass {
     private final Set<Local> unobservedCandidates = new HashSet<>();
     // not reached by null, but by a value of an outside caller (World.OPEN*): UNSPECIFIED
     private Set<Object> external = Set.of();
-    // nodes seeded by a null that is written (a literal, an argument, an initializer, an annotation), not by indirect
-    // evidence only (seedLibrary): Policy.assertContentWrites. Insertion-ordered: it seeds a closure whose cause
-    // chains are reported, and a Local hashes by identity, so a hash order differs between runs (maddi-mod#33)
-    private final Set<Object> strictSeeds = new LinkedHashSet<>();
-    // per seed, the types whose code writes its null (a literal, a default value, a comparison); a null element: a
-    // seed without a writer in the code (an annotation, a library contract). Read by holderFields.
-    private final Map<Object, List<TypeInfo>> seedWriters = new HashMap<>();
-    private final Map<Object, Site> seedSites = new HashMap<>();
     // Culprits: the statement the walk is at (WalkSite)
     private final WalkSite site = new WalkSite();
+    // the parts of this round, in the order they are built (see once)
+    private final Index index;
+    private final TypeUses typeUses;
+    private final Seeds seeds;
+    private final Contracts contracts;
     // the nodes and edges of this round
     private final NullGraph graph;
     private static final int CULPRIT_STEPS = 12;
-    private final Map<Object, String> seedOrigin = new LinkedHashMap<>();
-    private final Set<MethodInfo> degraded = new LinkedHashSet<>();
-    // the methods of this analysis: their own NULLABILITY_* may be this pass's output of an earlier run, so only the
-    // others' (the library's, from the hints) are read as contracts
-    private final Set<MethodInfo> analysed = new HashSet<>();
-    // source declarations annotated non-null (Policy.contracts): null stops there
-    private final Set<Object> nonNullContracts = new HashSet<>() {
-        @Override
-        public boolean add(Object o) {
-            boolean added = super.add(o);
-            if (added && trace.why(o)) trace.log("contract", o, null);
-            return added;
-        }
-    };
 
     // (method, null marker): a return statement guarded the marker's link into the method's return (linksOf)
     private final Set<List<Object>> guardedReturnMarkers = new HashSet<>();
@@ -573,6 +531,10 @@ public final class NullabilityPass {
                             Map<MethodInfo, Set<Variable>> fieldsAtEntry, Set<Expression> presentLookups) {
         this.policy = policy;
         this.trace = trace;
+        this.index = new Index(policy);
+        this.typeUses = new TypeUses(policy, index);
+        this.seeds = new Seeds(trace, index, site);
+        this.contracts = new Contracts(policy, trace, index, seeds, trustedReturns, preconditions, presentLookups);
         this.graph = new NullGraph(policy, trace, site);
         this.trustedReturns = trustedReturns;
         this.preconditions = preconditions;
@@ -742,10 +704,10 @@ public final class NullabilityPass {
         boolean open = policy.world() != World.CLOSED;
         if (NARROWING_OFF.get() || open && OPEN_NARROWING_OFF.get()) return NarrowedReads.NONE;
         Set<TypeInfo> classes = new LinkedHashSet<>();
-        for (MethodInfo mi : analysed) classes.add(mi.typeInfo());
-        for (FieldInfo fi : analysedFields) classes.add(fi.owner());
+        for (MethodInfo mi : index.analysed) classes.add(mi.typeInfo());
+        for (FieldInfo fi : index.analysedFields) classes.add(fi.owner());
         Map<FieldInfo, Set<TypeInfo>> nullClasses = new HashMap<>();
-        for (FieldInfo fi : analysedFields) {
+        for (FieldInfo fi : index.analysedFields) {
             if (!fi.isFinal() || fi.isStatic() || fi.type().isPrimitiveExcludingVoid() && fi.type().arrays() == 0) continue;
             TypeInfo owner = fi.owner();
             if (owner.typeNature().isRecord() || owner.isInterface()) continue;
@@ -769,10 +731,10 @@ public final class NullabilityPass {
         }
         if (nullClasses.isEmpty()) return NarrowedReads.NONE;
         Map<MethodInfo, FieldInfo> getters = new HashMap<>();
-        for (MethodInfo mi : analysed) {
+        for (MethodInfo mi : index.analysed) {
             io.codelaser.maddi.cst.api.analysis.Value.FieldValue fv = mi.getSetField();
             if (fv == null || fv.field() == null || fv.setter() || fv.hasIndex() || mi.isStatic()
-                || !mi.parameters().isEmpty() || implementations.containsKey(mi)
+                || !mi.parameters().isEmpty() || index.implementations.containsKey(mi)
                 || !nullClasses.containsKey(fv.field())) continue;
             getters.put(mi, fv.field());
         }
@@ -795,7 +757,7 @@ public final class NullabilityPass {
     }
 
     private boolean mayRunOn(MethodInfo m, TypeInfo s) {
-        CallIndex index = callIndex();
+        Index.CallIndex index = this.index.callIndex();
         if (!index.superCalled().contains(m) && overriddenBetween(m, s)) return false;
         // a public method may be called where the pass does not look: by reflection, a serializer reading getters
         // (timefold SolverWorkerEvent.getModel() on a FailedSolutionEvent, which no analysed call reaches). An
@@ -821,42 +783,6 @@ public final class NullabilityPass {
             if (t.methodStream().anyMatch(x -> x.overrides().contains(m))) return true;
         }
         return false;
-    }
-
-    /*
-     Per method called in the analysed code, the static types of the receivers of its calls; null for a receiver
-     without a type, and for a method reference (any instance may be its receiver). The methods called through
-     'super', which run on the caller's instance whatever overrides them.
-     */
-    private record CallIndex(Map<MethodInfo, List<TypeInfo>> receivers, Set<MethodInfo> superCalled) {
-    }
-
-    private CallIndex callIndex;
-
-    private CallIndex callIndex() {
-        if (callIndex != null) return callIndex;
-        Map<MethodInfo, List<TypeInfo>> receivers = new HashMap<>();
-        Set<MethodInfo> superCalled = new HashSet<>();
-        for (MethodInfo mi : analysed) {
-            Block body = mi.methodBody();
-            if (body == null) continue;
-            body.visit(e -> {
-                if (e instanceof MethodCall mc && mc.methodInfo() != null && !mc.methodInfo().isStatic()) {
-                    Expression object = mc.object();
-                    if (object instanceof VariableExpression ve
-                        && ve.variable() instanceof io.codelaser.maddi.cst.api.variable.This t && t.writeSuper()) {
-                        superCalled.add(mc.methodInfo());
-                    }
-                    ParameterizedType type = object == null ? null : object.parameterizedType();
-                    receivers.computeIfAbsent(mc.methodInfo(), _ -> new ArrayList<>())
-                            .add(type == null ? null : type.typeInfo());
-                } else if (e instanceof MethodReference mr && mr.methodInfo() != null) {
-                    receivers.computeIfAbsent(mr.methodInfo(), _ -> new ArrayList<>()).add(null);
-                }
-                return true;
-            });
-        }
-        return callIndex = new CallIndex(receivers, superCalled);
     }
 
     // may an instance whose runtime class is x hold null in the final field fi, through any of x's constructors?
@@ -978,10 +904,10 @@ public final class NullabilityPass {
             case MethodCall mc -> {
                 MethodInfo callee = mc.methodInfo();
                 if (callee == null) yield true;
-                if (analysed.contains(callee)) {
-                    yield reached.contains(callee) || external.contains(callee) || degraded.contains(callee);
+                if (index.analysed.contains(callee)) {
+                    yield reached.contains(callee) || external.contains(callee) || contracts.degraded.contains(callee);
                 }
-                yield libraryNullableCall(mc) != null;
+                yield contracts.libraryNullableCall(mc) != null;
             }
             default -> true;
         };
@@ -993,13 +919,13 @@ public final class NullabilityPass {
     private Set<ParameterInfo> preconditions() {
         Set<ParameterInfo> set = new HashSet<>();
         Map<MethodInfo, Set<MethodInfo>> families = policy.world() == World.CLOSED && !FAMILY_PRECONDITIONS_OFF.get()
-                ? families() : Map.of();
-        for (MethodInfo mi : analysed) {
+                ? index.families() : Map.of();
+        for (MethodInfo mi : index.analysed) {
             if (families.containsKey(mi)) continue;
             // a call runs this body only when no override replaces it: an analysed one; in an open world any
             boolean overridable = !mi.isConstructor() && !mi.isStatic() && !mi.access().isPrivate()
                                   && !mi.isFinal() && !mi.typeInfo().isFinal();
-            if (overridable && (policy.world() != World.CLOSED || implementations.containsKey(mi))) continue;
+            if (overridable && (policy.world() != World.CLOSED || index.implementations.containsKey(mi))) continue;
             for (ParameterInfo pi : mi.parameters()) {
                 if (facts.nonNullAtExit(mi, pi)) set.add(pi);
             }
@@ -1027,7 +953,7 @@ public final class NullabilityPass {
         MethodInfo first = family.iterator().next();
         int n = first.parameters().size();
         for (MethodInfo m : family) {
-            if (m.parameters().size() != n || referencedSams.contains(m)) {
+            if (m.parameters().size() != n || this.index.referencedSams.contains(m)) {
                 return;
             }
         }
@@ -1048,50 +974,6 @@ public final class NullabilityPass {
             }
             if (throwing.isEmpty() || family.stream().anyMatch(m -> hasBody(m) && !throwing.contains(m))) continue;
             family.forEach(m -> set.add(m.parameters().get(index)));
-        }
-    }
-
-    /*
-     Kotlin: 'assertThrows(NullPointerException.class, () -> map.putInstance(null, 1))' tests that the callee rejects
-     null: its null argument is no evidence that the parameter takes one. guava (2026-10-17): 1371 cause lines began
-     at a null in such a body (MutableTypeToInstanceMapTest's made the backing map's key 'TypeToken<out B>?', against
-     ForwardingMap<TypeToken<out B>, B>.delegate(); PredicatesTest's made subtypeOf's 'Predicate<Class<*>?>'). The
-     printer asserts such a test null at its call, and the NullPointerException still comes.
-     */
-    private void rejectsNull(MethodCall mc) {
-        if (mc.methodInfo() == null || mc.parameterExpressions().size() < 2) return;
-        String name = mc.methodInfo().name();
-        if (!"assertThrows".equals(name) && !"expectThrows".equals(name)) return;
-        if (!(NonNullFacts.unwrap(mc.parameterExpressions().get(0)) instanceof ClassExpression ce)
-            || ce.type() == null || ce.type().typeInfo() == null
-            || !"java.lang.NullPointerException".equals(ce.type().typeInfo().fullyQualifiedName())) {
-            return;
-        }
-        if (NonNullFacts.unwrap(mc.parameterExpressions().get(1)) instanceof Lambda lambda && lambda.methodInfo() != null) {
-            nullRejectingBodies.add(lambda.methodInfo().fullyQualifiedName());
-        }
-    }
-
-    private static final String NULL_ARGUMENT = "null argument in ";
-    // gate NOREJECTEDNULLS: a null passed inside assertThrows(NullPointerException.class, ...) seeds as any (A/B)
-    private static final Switches.Gate REJECTED_NULLS_OFF = Switches.gate("NOREJECTEDNULLS");
-
-    private void indexFunctionals(List<MethodInfo> methods) {
-        for (MethodInfo mi : methods) {
-            if (mi.methodBody() == null) continue;
-            mi.methodBody().visit(e -> {
-                if (e instanceof MethodCall mc && policy.callResults() && !REJECTED_NULLS_OFF.get()) rejectsNull(mc);
-                if (e instanceof Lambda lambda && lambda.methodInfo() != null) {
-                    lambdaMethods.add(lambda.methodInfo());
-                } else if (e instanceof MethodReference mr && mr.methodInfo() != null) {
-                    referencedMethods.add(mr.methodInfo());
-                    ParameterizedType functional = mr.parameterizedType();
-                    MethodInfo sam = functional == null || functional.typeInfo() == null ? null
-                            : functional.typeInfo().singleAbstractMethod();
-                    if (sam != null) referencedSams.add(sam);
-                }
-                return true;
-            });
         }
     }
 
@@ -1143,15 +1025,15 @@ public final class NullabilityPass {
      */
     private Set<ParameterInfo> declaredPreconditions() {
         Map<MethodInfo, Set<MethodInfo>> families = policy.world() == World.CLOSED && !FAMILY_PRECONDITIONS_OFF.get()
-                ? families() : Map.of();
+                ? index.families() : Map.of();
         Set<ParameterInfo> declared = new HashSet<>();
         for (ParameterInfo pi : preconditions) {
             Set<MethodInfo> family = families.getOrDefault(pi.methodInfo(), Set.of(pi.methodInfo()));
             boolean excluded = family.stream().anyMatch(m -> m.parameters().size() <= pi.index()
                     || nullLiteralParameters.contains(m.parameters().get(pi.index()))
-                    || referencedMethods.contains(m) || junitNullSource(m)
+                    || index.referencedMethods.contains(m) || junitNullSource(m)
                     || hasBody(m) && comparedWithNull(m, m.parameters().get(pi.index()), new HashSet<>())
-                    || overrides(m).stream().anyMatch(o -> !analysed.contains(o)));
+                    || overrides(m).stream().anyMatch(o -> !index.analysed.contains(o)));
             if (!excluded) declared.add(pi);
         }
         return declared;
@@ -1205,7 +1087,7 @@ public final class NullabilityPass {
                     callee = eci.methodInfo();
                     arguments = eci.parameterExpressions();
                 }
-                if (callee != null && analysed.contains(callee) && hasBody(callee)
+                if (callee != null && index.analysed.contains(callee) && hasBody(callee)
                     && passedOnAndTested(pi, callee, arguments, seen)) {
                     found[0] = true;
                 }
@@ -1226,34 +1108,6 @@ public final class NullabilityPass {
             }
         }
         return false;
-    }
-
-    // the analysed methods, and the lambdas in their bodies, connected by overriding; only methods in a family of two
-    // or more. A method reference implementing an analysed method marks that method's family (referencedSams)
-    private Map<MethodInfo, Set<MethodInfo>> families() {
-        Map<MethodInfo, Set<MethodInfo>> family = new HashMap<>();
-        for (MethodInfo mi : analysed) {
-            if (mi.isConstructor() || mi.isStatic()) continue;
-            for (MethodInfo overridden : overrides(mi)) {
-                if (analysed.contains(overridden)) merge(family, mi, overridden);
-            }
-        }
-        for (MethodInfo mi : lambdaMethods) {
-            for (MethodInfo overridden : overrides(mi)) {
-                if (analysed.contains(overridden)) merge(family, mi, overridden);
-            }
-        }
-        return family;
-    }
-
-    private static void merge(Map<MethodInfo, Set<MethodInfo>> family, MethodInfo a, MethodInfo b) {
-        Set<MethodInfo> fa = family.computeIfAbsent(a, k -> new HashSet<>(Set.of(k)));
-        Set<MethodInfo> fb = family.computeIfAbsent(b, k -> new HashSet<>(Set.of(k)));
-        if (fa == fb) return;
-        Set<MethodInfo> big = fa.size() >= fb.size() ? fa : fb;
-        Set<MethodInfo> small = big == fa ? fb : fa;
-        big.addAll(small);
-        for (MethodInfo m : small) family.put(m, big);
     }
 
     /*
@@ -1287,10 +1141,10 @@ public final class NullabilityPass {
     // (guava's own 'checkNotNull(T)')
     private Set<MethodInfo> unreachedReturns() {
         Set<MethodInfo> set = new HashSet<>();
-        for (MethodInfo mi : analysed) {
+        for (MethodInfo mi : index.analysed) {
             ParameterizedType rt = mi.returnType();
             if (mi.isConstructor() || rt.isVoid() || rt.isPrimitiveExcludingVoid() && rt.arrays() == 0
-                || degraded.contains(mi) || reached.contains(mi) || external.contains(mi)) continue;
+                || contracts.degraded.contains(mi) || reached.contains(mi) || external.contains(mi)) continue;
             set.add(mi);
         }
         return Set.copyOf(set);
@@ -1301,44 +1155,45 @@ public final class NullabilityPass {
                 .filter(i -> i instanceof MethodInfo).map(i -> (MethodInfo) i).toList();
         List<FieldInfo> fields = analysisOrder.stream()
                 .filter(i -> i instanceof FieldInfo).map(i -> (FieldInfo) i).toList();
-        analysed.addAll(methods);
-        analysedFields = fields;
-        nonNullBounds(analysisOrder, methods, fields);
-        methods.forEach(this::indexNullLiterals);
-        for (MethodInfo mi : methods) if (mi.methodBody() != null) indexFills(mi.methodBody());
+        index.analysed.addAll(methods);
+        index.analysedFields = fields;
+        typeUses.nonNullBounds(analysisOrder, methods, fields);
+        methods.forEach(seeds::indexNullLiterals);
+        for (MethodInfo mi : methods) if (mi.methodBody() != null) seeds.indexFills(mi.methodBody());
         for (MethodInfo mi : methods) {
             for (MethodInfo overridden : overrides(mi)) {
-                implementations.computeIfAbsent(overridden, _ -> new java.util.ArrayList<>()).add(mi);
+                index.implementations.computeIfAbsent(overridden, _ -> new java.util.ArrayList<>()).add(mi);
             }
         }
-        indexFunctionals(methods);
-        indexKeyedMaps(methods, fields);
+        index.indexFunctionals(methods);
+        index.indexKeyedMaps(methods, fields);
         predicates = NullPredicates.infer(methods);
         narrowedReads = narrowed.isEmpty() ? null : narrowed::nonNull;
-        facts = new NonNullFacts(this::parameterContract, this::returnContract)
+        facts = new NonNullFacts(contracts::parameterContract, contracts::returnContract)
                 .withPredicates(predicates)
                 .withNarrowedReads(narrowedReads)
                 .withNarrowedInMethod(narrowedReads == null ? null : this::narrowedInMethod)
                 .withFieldsAtEntry(fieldsAtEntry)
-                .withSuperCalls(policy.callResults() && !SUPER_CALLS_OFF.get() ? this::ownReturnsNonNull : null);
+                .withSuperCalls(policy.callResults() && !Contracts.SUPER_CALLS_OFF.get() ? contracts::ownReturnsNonNull : null);
+        contracts.facts = facts;
         if (policy.contracts()) {
-            for (FieldInfo fi : fields) contract(fi, fi);
+            for (FieldInfo fi : fields) contracts.contract(fi, fi);
             for (MethodInfo mi : methods) {
-                for (ParameterInfo pi : mi.parameters()) contract(pi, pi);
-                if (!mi.isConstructor() && !mi.returnType().isVoid()) contract(mi, mi);
+                for (ParameterInfo pi : mi.parameters()) contracts.contract(pi, pi);
+                if (!mi.isConstructor() && !mi.returnType().isVoid()) contracts.contract(mi, mi);
             }
-            for (FieldInfo fi : fields) elementContract(fi.type(), fi);
+            for (FieldInfo fi : fields) contracts.elementContract(fi.type(), fi);
             for (MethodInfo mi : methods) {
-                for (ParameterInfo pi : mi.parameters()) elementContract(pi.parameterizedType(), pi);
-                if (!mi.isConstructor() && !mi.returnType().isVoid()) elementContract(mi.returnType(), mi);
+                for (ParameterInfo pi : mi.parameters()) contracts.elementContract(pi.parameterizedType(), pi);
+                if (!mi.isConstructor() && !mi.returnType().isVoid()) contracts.elementContract(mi.returnType(), mi);
             }
         }
         if (policy.callResults()) {
             for (MethodInfo mi : methods) {
-                if (boundedTypeVariableOverride(mi) || overridesKotlinNonNullReturn(mi)
-                    || overridesLibraryNonNullReturn(mi) || testOverrideOfInstantiatedReturn(mi)) nonNullContracts.add(mi);
+                if (Contracts.boundedTypeVariableOverride(mi) || contracts.overridesKotlinNonNullReturn(mi)
+                    || contracts.overridesLibraryNonNullReturn(mi) || contracts.testOverrideOfInstantiatedReturn(mi)) contracts.add(mi);
             }
-            nonNullOverrides(methods);
+            contracts.nonNullOverrides(methods);
         }
         if (policy.callResults() && !DEAD_NULLS_OFF.get()) {
             for (MethodInfo mi : methods) if (mi.methodBody() != null) deadNullAssignments(mi.methodBody());
@@ -1387,7 +1242,7 @@ public final class NullabilityPass {
             if (added) coupleContent(); // the nested slots of the new flows
         }
 
-        libraryParameterContracts();
+        contracts.libraryParameterContracts(graph.successors);
         if (!TOLERANT_OFF.get()) tolerantParameters(methods);
         Map<Object, Object> cause = new LinkedHashMap<>();
         reached = closure(cause);
@@ -1400,7 +1255,7 @@ public final class NullabilityPass {
             preconditionsNonNull = declared.stream().filter(reachedBefore::contains)
                     .collect(java.util.stream.Collectors.toUnmodifiableSet());
             if (!declared.isEmpty()) {
-                nonNullContracts.addAll(declared);
+                contracts.addAll(declared);
                 cause.clear();
                 reached = closure(cause);
             }
@@ -1411,7 +1266,7 @@ public final class NullabilityPass {
                 if (reached.contains(local)) asserted.add(local);
             });
             if (!asserted.isEmpty()) {
-                nonNullContracts.addAll(asserted);
+                contracts.addAll(asserted);
                 cause.clear();
                 reached = closure(cause);
             }
@@ -1423,37 +1278,37 @@ public final class NullabilityPass {
         Map<Local, ParameterizedType> locals = new LinkedHashMap<>();
         // an unreached local of a degraded method: its links are missing, so "no null reaches it" is not known
         graph.declaredLocals.forEach((local, lv) -> {
-            ParameterizedType v = verdict(lv.parameterizedType(), local, degraded.contains(graph.localOwner.get(local)));
+            ParameterizedType v = verdict(lv.parameterizedType(), local, contracts.degraded.contains(graph.localOwner.get(local)));
             locals.put(local, guardedLocals.contains(local) && !(v.isPrimitiveExcludingVoid() && v.arrays() == 0)
                     ? v.withNullable(NullableState.NULLABLE) : v);
         });
         graph.shadows.forEach((local, pi) -> locals.put(local, verdict(pi.parameterizedType(), local,
-                degraded.contains(pi.methodInfo()))));
+                contracts.degraded.contains(pi.methodInfo()))));
         for (FieldInfo fi : fields) {
-            verdicts.put(fi, contracted(fi, verdict(fi.type(), fi, false)));
+            verdicts.put(fi, contracts.contracted(fi, verdict(fi.type(), fi, false)));
             if (trace.why(fi)) {
                 trace.print("NULLWHY final " + fi.fullyQualifiedName() + " reached=" + reached.contains(fi)
-                                   + trace.chain(cause, seedOrigin, fi) + " elements reached=" + reached.contains(new Content(fi))
-                                   + trace.chain(cause, seedOrigin, new Content(fi)) + " verdict=" + verdicts.get(fi));
+                                   + trace.chain(cause, seeds.seedOrigin, fi) + " elements reached=" + reached.contains(new Content(fi))
+                                   + trace.chain(cause, seeds.seedOrigin, new Content(fi)) + " verdict=" + verdicts.get(fi));
             }
         }
         for (MethodInfo mi : methods) {
-            boolean deg = degraded.contains(mi);
+            boolean deg = contracts.degraded.contains(mi);
             for (ParameterInfo pi : mi.parameters()) {
-                verdicts.put(pi, contracted(pi, verdict(pi.parameterizedType(), pi, false)));
+                verdicts.put(pi, contracts.contracted(pi, verdict(pi.parameterizedType(), pi, false)));
             }
             if (!mi.isConstructor() && !mi.returnType().isVoid()) {
-                verdicts.put(mi, contracted(mi, verdict(mi.returnType(), mi, deg)));
+                verdicts.put(mi, contracts.contracted(mi, verdict(mi.returnType(), mi, deg)));
             }
             if (trace.why(mi)) {
                 trace.print("NULLWHY final " + mi.fullyQualifiedName() + " reached=" + reached.contains(mi)
-                                   + " seed=" + seedOrigin.get(mi) + " contract=" + nonNullContracts.contains(mi)
-                                   + " degraded=" + deg + " verdict=" + verdicts.get(mi) + trace.chain(cause, seedOrigin, mi));
+                                   + " seed=" + seeds.seedOrigin.get(mi) + " contract=" + contracts.nonNullContracts.contains(mi)
+                                   + " degraded=" + deg + " verdict=" + verdicts.get(mi) + trace.chain(cause, seeds.seedOrigin, mi));
             }
         }
         if (policy.callResults()) {
-            clampTestOverrides(methods, verdicts);
-            clampTypeVariableOverrides(methods, verdicts);
+            contracts.clampTestOverrides(methods, verdicts);
+            contracts.clampTypeVariableOverrides(methods, verdicts);
         }
         NonNullFacts smartCasts = facts.kotlinSmartCasts();
         methods.forEach(smartCasts::walk);
@@ -1468,7 +1323,7 @@ public final class NullabilityPass {
             }
         });
         // gap 7: the facts handed out know what the closure decided; the walk that built the graph could not
-        NonNullFacts useSites = new NonNullFacts(this::parameterContract, this::returnContract)
+        NonNullFacts useSites = new NonNullFacts(contracts::parameterContract, contracts::returnContract)
                 .withPredicates(predicates)
                 .withNarrowedReads(narrowedReads)
                 .withNarrowedInMethod(narrowedReads == null ? null : this::narrowedInMethod)
@@ -1478,12 +1333,12 @@ public final class NullabilityPass {
         nextFieldsAtEntry = fieldsAtEntry(useSites, methods, fields);
         if (!ROUND_KEYS_OFF.get()) {
             Set<Expression> present = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
-            for (MethodCall lookup : lookups) if (useSites.keyPresentWhenCalled(lookup)) present.add(lookup);
+            for (MethodCall lookup : contracts.lookups) if (useSites.keyPresentWhenCalled(lookup)) present.add(lookup);
             nextPresentLookups = present;
         }
-        return new Report(verdicts, locals, cause, seedOrigin, useSites, smartCasts, Set.copyOf(asserted),
+        return new Report(verdicts, locals, cause, seeds.seedOrigin, useSites, smartCasts, Set.copyOf(asserted),
                 Set.copyOf(unobservedCandidates), nonNullCallResults, preconditions, nullArguments, preconditionsNonNull,
-                rejectsNull(), writtenReach, Set.copyOf(nonNullTypeParameters), parentClassVerdicts(methods));
+                rejectsNull(), writtenReach, Set.copyOf(typeUses.nonNullTypeParameters), parentClassVerdicts(methods));
     }
 
     /*
@@ -1542,7 +1397,7 @@ public final class NullabilityPass {
             if (mi.isConstructor() || mi.isStatic() || mi.methodBody() == null || mi.methodBody().isEmpty()) continue;
             // after the closure, so nothing carries the change through a hierarchy: an override's parameter must
             // keep its overridden one's state (fernflower SwitchStatement.replaceExprent overrode nothing)
-            if (!mi.overrides().isEmpty() || implementations.containsKey(mi)) continue;
+            if (!mi.overrides().isEmpty() || index.implementations.containsKey(mi)) continue;
             for (ParameterInfo pi : mi.parameters()) {
                 if (reached.contains(pi) || pi.parameterizedType().isPrimitiveExcludingVoid()
                     || pi.isVarArgs()) continue;
@@ -1604,7 +1459,7 @@ public final class NullabilityPass {
                 at = from;
             }
             String origin = report.seedOrigin().get(at);
-            Site seed = seedSites.get(at);
+            Site seed = seeds.seedSites.get(at);
             if (seed != null) {
                 io.codelaser.maddi.modification.common.util.Culprits.add(steps,
                         io.codelaser.maddi.modification.common.util.Culprits.step(seed.in(), seed.element(),
@@ -1637,50 +1492,6 @@ public final class NullabilityPass {
     }
 
     /*
-     Kotlin: an override of a method returning a class type variable with an explicit bound ('R execute(P)' in
-     'GuardrailExecutor<..., R extends GuardrailResult<R>, ...>') returns the type argument its class passes for R,
-     which the bound keeps non-null: Kotlin refuses 'execute(...): OutputGuardrailResult?' as an override of 'R'
-     (langchain4j OutputGuardrailExecutor, whose 'return result' after the retry loop is reached only by the
-     'result = null' declaration, the loop running at least once). Its return is non-null; a null value is asserted.
-     */
-    /*
-     Kotlin: a member of its own collection interfaces (Iterable, Iterator, Collection, List, Set, Map, Map.Entry, ...)
-     that returns its type variable returns it non-null ('Iterator<E>.next(): E'), unless Kotlin declares it nullable
-     (Map.get, put, remove: the hints say so). An override may not widen it: guava's LocalCache.HashIterator<T>.next(),
-     and EntryIterator.next() below it.
-     */
-    private boolean overridesKotlinNonNullReturn(MethodInfo mi) {
-        if (mi.isConstructor() || mi.returnType().isVoid()) return false;
-        for (MethodInfo overridden : overrides(mi)) {
-            if (!analysed.contains(overridden) && isTypeVariable(overridden.returnType())
-                && KOTLIN_COLLECTIONS.contains(overridden.typeInfo().fullyQualifiedName())
-                && stateOf(overridden, PropertyImpl.NULLABILITY_METHOD) != NullableState.NULLABLE) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static final Set<String> KOTLIN_COLLECTIONS = Set.of("java.lang.Iterable", "java.util.Iterator",
-            "java.util.ListIterator", "java.util.Collection", "java.util.List", "java.util.Set", "java.util.Map",
-            "java.util.Map.Entry");
-
-    /*
-     Kotlin: the analysed overrides of a return the pass holds non-null (nonNullContracts: an annotation, the rules
-     above) are non-null too, a null value asserted: an override may not widen its overridden member's return.
-     */
-    private void nonNullOverrides(List<MethodInfo> methods) {
-        java.util.ArrayDeque<MethodInfo> work = new java.util.ArrayDeque<>();
-        for (MethodInfo mi : methods) if (nonNullContracts.contains(mi)) work.add(mi);
-        while (!work.isEmpty()) {
-            MethodInfo m = work.poll();
-            for (MethodInfo implementation : implementations.getOrDefault(m, List.of())) {
-                if (!implementation.returnType().isVoid() && nonNullContracts.add(implementation)) work.add(implementation);
-            }
-        }
-    }
-
-    /*
      Kotlin: type arguments are invariant, so the type-argument slots of an override's return or parameter equal the
      analysed overridden member's, where both declare the same class ('List<String>' over 'List<E>'): edges both ways
      (guava: AbstractMapBasedMultimap's remove, MutableCollection<V?>? over MutableCollection<V>?).
@@ -1693,521 +1504,6 @@ public final class NullabilityPass {
             if (upward) graph.addEdge(new Arg(node, j), new Arg(theirNode, j));
             graph.addEdge(new Arg(theirNode, j), new Arg(node, j));
         }
-    }
-
-    /*
-     Kotlin, a test's override of a main member (guava's tests, worktree-maddi-all 2026-10-16: ForwardingDequeTest's
-     anonymous Function, DiscreteDomainTest.MyIntegerDomain.next): its parameters, type arguments included, take
-     main's states exactly, as an override of a library member does; what the tests pass is asserted at their calls.
-     Its return is not clamped: a null it returns widens main's return through the upward edge (buildForMethod).
-     */
-    private void clampTestOverrides(List<MethodInfo> methods, Map<Info, ParameterizedType> verdicts) {
-        for (MethodInfo mi : methods) {
-            if (mi.isConstructor() || !testCode(mi)) continue;
-            for (MethodInfo overridden : overrides(mi)) {
-                if (!analysed.contains(overridden) || testCode(overridden)) continue;
-                int n = Math.min(mi.parameters().size(), overridden.parameters().size());
-                for (int i = 0; i < n; i++) {
-                    ParameterInfo ours = mi.parameters().get(i);
-                    ParameterizedType theirs = verdicts.get(overridden.parameters().get(i));
-                    if (verdicts.containsKey(ours) && theirs != null) {
-                        verdicts.put(ours, clamped(verdicts.get(ours), theirs));
-                    }
-                }
-            }
-        }
-    }
-
-    /*
-     Kotlin: an override's parameter has the overridden parameter's type, which for a type variable is the
-     instantiation's: 'apply(input: F)' over java.util.function.Function's 'apply(p0: F)', 'compareTo(that: Cut<C>)'
-     over Comparable's 'compareTo(other: T)'. A null passed to the override belongs to that instantiation, not to the
-     override's own parameter, or kotlinc finds it overrides nothing (guava, worktree-maddi-all 2026-10-17: 14
-     errors). Not where the override says @Nullable itself ('Equivalence.test(@Nullable T t, ...)' over
-     BiPredicate<@Nullable T, @Nullable T>): the supertype's argument carries that. Overridden analysed parameters
-     first, so a chain settles (a few passes).
-     */
-    private void clampTypeVariableOverrides(List<MethodInfo> methods, Map<Info, ParameterizedType> verdicts) {
-        if (TYPE_VARIABLE_OVERRIDES_OFF.get()) return;
-        for (int pass = 0; pass < 3; pass++) {
-            boolean changed = false;
-            for (MethodInfo mi : methods) {
-                if (mi.isConstructor()) continue;
-                for (MethodInfo overridden : mi.overrides()) {
-                    int n = Math.min(mi.parameters().size(), overridden.parameters().size());
-                    for (int i = 0; i < n; i++) {
-                        ParameterInfo ours = mi.parameters().get(i);
-                        ParameterInfo their = overridden.parameters().get(i);
-                        if (!isTypeVariable(their.parameterizedType()) || !verdicts.containsKey(ours)
-                            || explicitState(ours) == NullableState.NULLABLE) {
-                            continue;
-                        }
-                        ParameterizedType theirs;
-                        if (analysed.contains(overridden)) {
-                            theirs = verdicts.get(their);
-                        } else {
-                            NullableState state = libraryParameterState(their);
-                            if (state == NullableState.NULLABLE) continue;
-                            theirs = their.parameterizedType().withNullable(state);
-                        }
-                        if (theirs == null) continue;
-                        ParameterizedType before = verdicts.get(ours);
-                        ParameterizedType after = clamped(before, theirs);
-                        if (!after.equals(before)) {
-                            verdicts.put(ours, after);
-                            changed = true;
-                        }
-                    }
-                }
-            }
-            if (!changed) return;
-        }
-    }
-
-    // gate NOTYPEVAROVERRIDES: an override keeps its own parameter state over a type-variable parameter (A/B)
-    private static final Switches.Gate TYPE_VARIABLE_OVERRIDES_OFF = Switches.gate("NOTYPEVAROVERRIDES");
-
-    // 'ours' with the overridden type's states, type arguments included
-    static ParameterizedType clamped(ParameterizedType ours, ParameterizedType theirs) {
-        if (ours.isPrimitiveExcludingVoid() && ours.arrays() == 0) return ours;
-        NullableState top = theirs.nullable();
-        // a type variable's own state stands for the instantiation's type, non-null as written ('F' as 'Deque<*>')
-        if (top == NullableState.UNSPECIFIED && !isTypeVariable(ours)) top = NullableState.NONNULL;
-        ParameterizedType result = ours.withNullable(top);
-        if (ours.arrays() == 0 && theirs.arrays() == 0 && ours.typeInfo() != null && ours.typeInfo() == theirs.typeInfo()
-            && ours.parameters().size() == theirs.parameters().size() && !ours.parameters().isEmpty()) {
-            List<ParameterizedType> arguments = new ArrayList<>();
-            for (int j = 0; j < ours.parameters().size(); j++) {
-                arguments.add(clamped(ours.parameters().get(j), theirs.parameters().get(j)));
-            }
-            result = result.withParameters(arguments);
-        }
-        return result;
-    }
-
-    /*
-     Not where the override declares its return @Nullable (guava MapMakerInternalMap's Helper.copy and
-     Segment.castForTesting over 'E copy(...)', 'abstract E castForTesting(...)', E bounded by InternalEntry<K, V, E>):
-     'E?' is a valid return for a bounded E, so the overridden member takes the null through the upward edge, as for
-     any analysed type-variable return (MapMakerInternalMap.kt, 7 "not a subtype of the overridden member").
-     Gate NOEXPLICITBOUNDED.
-     */
-    private static final Switches.Gate RETURNS_NULL_BOUNDED_OFF = Switches.gate("NORETURNSNULLBOUNDED");
-
-    private static boolean returnsNullLiteral(MethodInfo mi) {
-        if (mi.methodBody() == null) return false;
-        boolean[] found = {false};
-        mi.methodBody().visit(e -> {
-            if (e instanceof Lambda || e instanceof ConstructorCall cc && cc.anonymousClass() != null) return false;
-            if (e instanceof ReturnStatement rs && rs.expression() != null
-                && NonNullFacts.unwrap(rs.expression()) instanceof NullConstant) found[0] = true;
-            return !found[0];
-        });
-        return found[0];
-    }
-
-    private static boolean boundedTypeVariableOverride(MethodInfo mi) {
-        if (mi.isConstructor() || mi.returnType().isVoid() || mi.returnType().typeParameter() != null) return false;
-        if (!EXPLICIT_BOUNDED_OFF.get() && NullAnnotations.explicitState(mi) == NullableState.NULLABLE) return false;
-        // nor where the override returns a null literal itself ('else { return null; }' in nacos
-        // NacosDelayTaskExecuteEngine.removeTask over 'T removeTask(Object)', T bounded by NacosTask: Kotlin had
-        // 'return null' in a non-null function, NacosDelayTaskExecuteEngine.java:90, 2026-10-19). Gate NORETURNSNULLBOUNDED.
-        if (!RETURNS_NULL_BOUNDED_OFF.get() && returnsNullLiteral(mi)) return false;
-        for (MethodInfo overridden : mi.overrides()) {
-            ParameterizedType rt = overridden.returnType();
-            if (isClassTypeVariable(rt) && !rt.typeParameter().typeBounds().isEmpty()
-                && rt.typeParameter().typeBounds().stream().noneMatch(b -> b.typeInfo() != null
-                        && "java.lang.Object".equals(b.typeInfo().fullyQualifiedName()))) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /*
-     Kotlin: what a declaration's null annotations say about the declared value itself. The front end puts a type-use
-     annotation written in declaration position on an array's ELEMENT type (JLS 9.7.4: '@Nullable Entry<K, V>[]
-     entries' has nullable elements, a non-null array), but NullAnnotations also reads it from the declaration's own
-     list, as about the array. guava's ImmutableMap.Builder.entries then made the array nullable too, and with it
-     RegularImmutableMap's and RegularImmutableBiMap's entries parameters, 'Array<Entry<K, V>?>?' (RegularImmutableMap.kt:63,
-     RegularImmutableBiMap.kt:113, 2026-10-17). On an array, an annotation the element carries does not count for the
-     array; one written on the array type ('X @Nullable []') and a declaration-only one (JSR-305) still do.
-     Gate NOELEMENTANNOTATIONS.
-     */
-    private NullableState explicitState(Info info) {
-        NullableState state = NullAnnotations.explicitState(info);
-        if (state == null || !policy.callResults() || ELEMENT_ANNOTATIONS_OFF.get()) return state;
-        ParameterizedType type = switch (info) {
-            case FieldInfo fi -> fi.type();
-            case ParameterInfo pi -> pi.parameterizedType();
-            case MethodInfo mi -> mi.returnType();
-            default -> null;
-        };
-        if (type == null || type.arrays() == 0) return state;
-        ParameterizedType element = type;
-        while (element.arrays() > 0 && element.componentType() != null) element = element.componentType();
-        Set<String> onElement = new HashSet<>();
-        for (var ae : element.annotations()) if (ae.typeInfo() != null) onElement.add(ae.typeInfo().fullyQualifiedName());
-        boolean nonNull = false;
-        // the array type's own annotations ('X @Nullable []', guava's RegularImmutableMap.table) are about the array;
-        // the declaration's list holds a parameter's type-use annotation, which the front end also moved to the
-        // element, and a field's, which it did not: there the annotation type's @Target decides
-        List<io.codelaser.maddi.cst.api.expression.AnnotationExpression> own = new ArrayList<>(type.annotations());
-        for (var ae : info.annotations()) {
-            if (ae.typeInfo() != null && !onElement.contains(ae.typeInfo().fullyQualifiedName())
-                && !typeUseOnly(ae.typeInfo())) {
-                own.add(ae);
-            }
-        }
-        for (var ae : own) {
-            if (ae.typeInfo() == null) continue;
-            if ("io.codelaser.maddi.annotation".equals(ae.typeInfo().packageName()) && ae.extractBoolean("absent")) continue;
-            String name = ae.typeInfo().simpleName();
-            if (NullAnnotations.NULLABLE.contains(name)) return NullableState.NULLABLE;
-            if (NullAnnotations.NON_NULL.contains(name)) nonNull = true;
-        }
-        return nonNull ? NullableState.NONNULL : null;
-    }
-
-    // Kotlin: a type-use @Nullable in a field's declaration position, which the front end leaves off the element
-    // type: it is about the elements (explicitState)
-    private boolean nullableElementsByDeclaration(Info info) {
-        if (!policy.callResults() || ELEMENT_ANNOTATIONS_OFF.get() || !(info instanceof FieldInfo fi)) return false;
-        ParameterizedType type = fi.type();
-        // one dimension only: in '@Nullable V[][] values' (guava DenseImmutableTable, ArrayTable) the innermost V is
-        // nullable, not the rows, and the pass has no node for an element's element
-        if (type.arrays() != 1 || type.componentType() == null) return false;
-        if (type.componentType().annotations().stream().anyMatch(NullAnnotations::isNullnessAnnotation)) return false;
-        return info.annotations().stream().anyMatch(ae -> ae.typeInfo() != null && typeUseOnly(ae.typeInfo())
-                && NullAnnotations.NULLABLE.contains(ae.typeInfo().simpleName()));
-    }
-
-    // an annotation type whose @Target is TYPE_USE (or TYPE_PARAMETER) only: JSpecify's, Checker's; not JSR-305's
-    private static boolean typeUseOnly(TypeInfo annotationType) {
-        for (var target : annotationType.annotations()) {
-            if (target.typeInfo() == null
-                || !"java.lang.annotation.Target".equals(target.typeInfo().fullyQualifiedName())) continue;
-            String targets = target.keyValuePairs().stream().map(kv -> String.valueOf(kv.value()))
-                    .collect(java.util.stream.Collectors.joining(","));
-            return targets.contains("TYPE_USE") && !targets.contains("FIELD") && !targets.contains("PARAMETER")
-                   && !targets.contains("METHOD");
-        }
-        return false;
-    }
-
-    // gate NOELEMENTANNOTATIONS: an array's element annotation in declaration position counts for the array (A/B)
-    private static final Switches.Gate ELEMENT_ANNOTATIONS_OFF = Switches.gate("NOELEMENTANNOTATIONS");
-
-    // a source declaration's null annotation, under Policy.contracts: nullable seeds, non-null stops null
-    private void contract(Info info, Object node) {
-        NullableState state = explicitState(info);
-        if (state == NullableState.NULLABLE) seed(node, "annotated nullable");
-        else if (state == NullableState.NONNULL) nonNullContracts.add(node);
-        if (nullableElementsByDeclaration(info)) seed(new Content(node), "annotated nullable elements");
-    }
-
-    private ParameterizedType contracted(Info info, ParameterizedType verdict) {
-        if (!policy.contracts() || verdict.isPrimitiveExcludingVoid() && verdict.arrays() == 0) return verdict;
-        ParameterizedType declared = switch (info) {
-            case FieldInfo fi -> fi.type();
-            case ParameterInfo pi -> pi.parameterizedType();
-            case MethodInfo mi -> mi.returnType();
-            default -> verdict;
-        };
-        ParameterizedType v = nestedContracted(declared, verdict);
-        if (nullableElementsByDeclaration(info) && v.arrays() == 1 && v.componentType() != null) {
-            v = v.withComponentType(v.componentType().withNullable(NullableState.NULLABLE));
-        }
-        NullableState state = explicitState(info);
-        return state == null ? v : v.withNullable(state);
-    }
-
-    // the annotations written on an array's elements and on type arguments, over the inferred states
-    private static ParameterizedType nestedContracted(ParameterizedType declared, ParameterizedType verdict) {
-        if (declared.arrays() > 0 && verdict.arrays() == declared.arrays()) {
-            ParameterizedType component = nestedContracted(declared.componentType(), verdict.componentType());
-            NullableState element = explicitElementState(declared);
-            if (element != null && !(component.isPrimitiveExcludingVoid() && component.arrays() == 0)) {
-                component = component.withNullable(element);
-            }
-            return verdict.withComponentType(component);
-        }
-        if (declared.parameters().isEmpty() || declared.parameters().size() != verdict.parameters().size()) {
-            return verdict;
-        }
-        List<ParameterizedType> args = new ArrayList<>();
-        for (int i = 0; i < declared.parameters().size(); i++) {
-            ParameterizedType d = declared.parameters().get(i);
-            ParameterizedType a = nestedContracted(d, verdict.parameters().get(i));
-            NullableState state = explicit(d.annotations());
-            args.add(state == null ? a : a.withNullable(state));
-        }
-        ParameterizedType withArgs = verdict.withParameters(args);
-        return withArgs;
-    }
-
-    // the null annotation on an array's elements, as the front end placed it (ParameterizedType.componentType)
-    private static NullableState explicitElementState(ParameterizedType declared) {
-        return explicit(declared.componentType().annotations());
-    }
-
-    // Policy.contracts, for an array's elements and the type arguments ('List<@Nullable String>'), recursively: a
-    // nullable one is a seed, a non-null one stops null
-    private void elementContract(ParameterizedType declared, Object node) {
-        if (declared.arrays() > 0) {
-            Content content = new Content(node);
-            nestedContract(explicitElementState(declared), content);
-            elementContract(declared.componentType(), content);
-            return;
-        }
-        for (int i = 0; i < declared.parameters().size(); i++) {
-            ParameterizedType argument = declared.parameters().get(i);
-            Arg arg = new Arg(node, i);
-            nestedContract(explicit(argument.annotations()), arg);
-            elementContract(argument, arg);
-        }
-    }
-
-    private void nestedContract(NullableState state, Object slot) {
-        if (state == NullableState.NULLABLE) seed(slot, "annotated nullable");
-        else if (state == NullableState.NONNULL) nonNullContracts.add(slot);
-    }
-
-    // what a callee promises, for the use-site facts: a library method's hints; an analysed one's annotation
-    private NullableState parameterContract(ParameterInfo pi) {
-        if (!analysed.contains(pi.methodInfo())) return stateOf(pi, PropertyImpl.NULLABILITY_PARAMETER);
-        if (preconditions.contains(pi)) return NullableState.NONNULL;
-        return policy.contracts() ? explicitState(pi) : null;
-    }
-
-    /*
-     Kotlin: a call through 'super' runs the method's own body, whatever its overrides return. Non-null when every
-     return of that body is non-null by itself ('return new NullsFirstOrdering<S>(this)'), with no facts. guava's
-     NaturalOrdering caches 'result = nullsFirst = super.<Comparable<?>>nullsFirst()' in an @Nullable field: the
-     override family tied Ordering.nullsFirst()'s return to NaturalOrdering's, so the super call was nullable, the
-     cached 'result' too, and so were nullsFirst(), nullsLast() and reverse() across Ordering's whole family
-     (NaturalOrdering.kt:21, NullsFirstOrdering.kt:14, Ordering.kt:23; 2026-10-17).
-     */
-    private boolean ownReturnsNonNull(MethodInfo mi) {
-        if (!analysed.contains(mi) || mi.methodBody() == null || mi.isAbstract()) return false;
-        Boolean known = ownReturnsNonNull.get(mi);
-        if (known != null) return known;
-        ownReturnsNonNull.put(mi, false); // a cycle (not through super) is not proof
-        boolean[] any = {false};
-        boolean[] all = {true};
-        mi.methodBody().visit(e -> {
-            if (e instanceof Lambda || e instanceof ConstructorCall cc && cc.anonymousClass() != null) return false;
-            if (e instanceof ReturnStatement rs) {
-                any[0] = true;
-                if (rs.expression() == null || !facts.nonNull(rs.expression(), Set.of())) all[0] = false;
-            }
-            return all[0];
-        });
-        boolean result = any[0] && all[0];
-        ownReturnsNonNull.put(mi, result);
-        return result;
-    }
-
-    private final Map<MethodInfo, Boolean> ownReturnsNonNull = new HashMap<>();
-    // gate NOSUPERCALLS: a call through super returns what the method's override family does (A/B)
-    private static final Switches.Gate SUPER_CALLS_OFF = Switches.gate("NOSUPERCALLS");
-
-    private NullableState returnContract(MethodInfo mi) {
-        if (!analysed.contains(mi)) {
-            NullableState hint = stateOf(mi, PropertyImpl.NULLABILITY_METHOD);
-            if (hint == NullableState.UNSPECIFIED && policy.callResults() && collectionsFactory(mi)) {
-                return NullableState.NONNULL;
-            }
-            return hint;
-        }
-        if (trustedReturns.contains(mi)) return NullableState.NONNULL;
-        return policy.contracts() ? explicitState(mi) : null;
-    }
-
-    /*
-     Kotlin: java.util.Collections' static methods return a new or wrapping object ('unmodifiableMap', 'emptyList',
-     'synchronizedSet'), never null, unless they return an element ('max(Collection<T>)'). Without it guava's lazy
-     caches, 'result = map; if (result == null) { result = map = Collections.unmodifiableMap(...); } return result',
-     made Multimap.asMap() and values() nullable across their override families (2026-10-17).
-     */
-    private static boolean collectionsFactory(MethodInfo mi) {
-        return !COLLECTIONS_FACTORIES_OFF.get() && mi.isStatic() && !isTypeVariable(mi.returnType())
-               && !mi.returnType().isPrimitiveExcludingVoid() && !mi.returnType().isVoid()
-               && "java.util.Collections".equals(mi.typeInfo().fullyQualifiedName());
-    }
-
-    // gate NOCOLLECTIONSFACTORIES: a Collections factory's return is unknown, as any unhinted library return (A/B)
-    private static final Switches.Gate COLLECTIONS_FACTORIES_OFF = Switches.gate("NOCOLLECTIONSFACTORIES");
-
-    /** A library method, {@code mi} or one it overrides, whose return may be null; null when there is none. */
-    private String libraryNullableReturn(MethodInfo mi) {
-        List<MethodInfo> nearest = nearestLibraryDeclarations(mi);
-        if (nearest.stream().anyMatch(m -> libraryReturnState(m) == NullableState.NONNULL)) return null;
-        return nearest.stream().filter(m -> libraryReturnState(m) == NullableState.NULLABLE)
-                .map(MethodInfo::fullyQualifiedName).findFirst().orElse(null);
-    }
-
-    /*
-     The library declarations of mi's return that say something, the nearest ones: Spring Security 7's
-     UsernamePasswordAuthenticationFilter.attemptAuthentication (@NullMarked, non-null) over
-     AbstractAuthenticationProcessingFilter's '@Nullable Authentication attemptAuthentication' (jenkins
-     AuthenticationProcessingFilter2.kt:36, 2026-10-20). Gate NONEARESTLIBRARYRETURN: any one that says nullable.
-     */
-    private List<MethodInfo> nearestLibraryDeclarations(MethodInfo mi) {
-        List<MethodInfo> declared = java.util.stream.Stream.concat(java.util.stream.Stream.of(mi), overrides(mi).stream())
-                .filter(m -> !analysed.contains(m))
-                .filter(m -> libraryReturnState(m) != NullableState.UNSPECIFIED)
-                .toList();
-        if (NEAREST_LIBRARY_RETURN_OFF.get() || declared.size() < 2) return declared;
-        return declared.stream()
-                .filter(m -> declared.stream().noneMatch(o -> o != m && o.typeInfo() != m.typeInfo()
-                        && o.typeInfo().superTypesExcludingJavaLangObject().contains(m.typeInfo())))
-                .toList();
-    }
-
-    private static final Switches.Gate NEAREST_LIBRARY_RETURN_OFF = Switches.gate("NONEARESTLIBRARYRETURN");
-
-    /*
-     Kotlin: an override of a library method whose return is declared non-null may not widen it ('override fun
-     attemptAuthentication(...): Authentication?' over Spring 7's non-null one): its return is non-null, a null value
-     asserted. Gate NONEARESTLIBRARYRETURN.
-     */
-    private boolean overridesLibraryNonNullReturn(MethodInfo mi) {
-        if (NEAREST_LIBRARY_RETURN_OFF.get() || mi.isConstructor() || mi.returnType().isVoid()
-            || mi.returnType().isPrimitiveExcludingVoid() && mi.returnType().arrays() == 0
-            || NullAnnotations.explicitState(mi) == NullableState.NULLABLE) return false;
-        return overrides(mi).stream().anyMatch(m -> !analysed.contains(m)
-                                                    && libraryReturnState(m) == NullableState.NONNULL);
-    }
-
-    /*
-     What a library method's return declares: the hints first, then the class file's own annotations, as for a
-     library parameter (libraryParameterState). Without the second, only the JDK hints seeded: io.kubernetes.client's
-     model getters, '@jakarta.annotation.Nullable V1EndpointSubset getSubsets()', never did (nacos K8sSyncServer,
-     21 SpotBugs results we missed, 2026-10-10). A @NullMarked scope makes an unannotated return non-null: it seeds
-     nothing, but it is the nearest declaration (nearestLibraryDeclarations), and an override may not widen it.
-     */
-    private static NullableState libraryReturnState(MethodInfo mi) {
-        NullableState hint = stateOf(mi, PropertyImpl.NULLABILITY_METHOD);
-        if (hint != NullableState.UNSPECIFIED) return hint;
-        NullableState explicit = NullAnnotations.explicitState(mi);
-        if (explicit != null) return explicit;
-        // a @NullMarked scope's unannotated return that is not a type variable (Spring Security 7)
-        if (!NEAREST_LIBRARY_RETURN_OFF.get() && !mi.isConstructor() && !mi.returnType().isVoid()
-            && !isTypeVariable(mi.returnType()) && NullAnnotations.inNullMarkedScope(mi)) {
-            return NullableState.NONNULL;
-        }
-        return NullableState.UNSPECIFIED;
-    }
-
-    /*
-     The content an overridden library method declares nullable, one level down (the hints' nullableArguments, from
-     JSpecify): the elements of 'Object[] toArray()' (guava's overrides of Collection.toArray()), the elements of
-     InvocationHandler.invoke's 'args'. Seeded on the override's own node, the return or the parameter, where the
-     override declares the same shape (the same class or array of it), so that the positions correspond.
-     */
-    private void libraryNullableContent(Object node, ParameterizedType declared,
-                                        java.util.function.Function<MethodInfo, Value.Nullability> nullabilityOf,
-                                        java.util.function.Function<MethodInfo, ParameterizedType> typeOf) {
-        MethodInfo mi = node instanceof ParameterInfo pi ? pi.methodInfo() : (MethodInfo) node;
-        if (declared == null || declared.isVoid() || declared.isPrimitiveExcludingVoid() && declared.arrays() == 0) return;
-        for (MethodInfo m : overrides(mi)) {
-            if (analysed.contains(m)) continue;
-            ParameterizedType theirs = typeOf.apply(m);
-            if (theirs == null || theirs.arrays() != declared.arrays() || theirs.typeInfo() != declared.typeInfo()
-                || theirs.parameters().size() != declared.parameters().size()) continue;
-            List<? extends Value.Nullability> arguments = nullabilityOf.apply(m).arguments();
-            for (int j = 0; j < arguments.size(); j++) {
-                if (arguments.get(j).state() != NullableState.NULLABLE) continue;
-                Object content = declared.arrays() > 0 ? new Content(node) : new Arg(node, j);
-                seed(content, "overrides " + m.fullyQualifiedName() + ", whose "
-                              + (declared.arrays() > 0 ? "elements" : "type argument " + j) + " may be null");
-            }
-        }
-    }
-
-    /** A library method, {@code mi} or one it overrides, whose parameter {@code index} accepts null. */
-    private String libraryNullableParameter(MethodInfo mi, int index) {
-        return java.util.stream.Stream.concat(java.util.stream.Stream.of(mi), overrides(mi).stream())
-                .filter(m -> !analysed.contains(m) && index < m.parameters().size())
-                .filter(m -> libraryParameterState(m.parameters().get(index)) == NullableState.NULLABLE)
-                .map(MethodInfo::fullyQualifiedName).findFirst().orElse(null);
-    }
-
-    /*
-     What a library parameter declares: the hints first, then the class file's own annotations (JSpecify's
-     @Nullable on a type use), then its @NullMarked scope -- method, types, package-info, module -- where an
-     unannotated parameter that is not a type variable is non-null (JUnit 6's ArgumentsProvider.provideArguments:
-     a nullable override parameter does not override it in Kotlin). UNSPECIFIED when nothing says.
-     */
-    private static NullableState libraryParameterState(ParameterInfo pi) {
-        NullableState hint = stateOf(pi, PropertyImpl.NULLABILITY_PARAMETER);
-        if (hint != NullableState.UNSPECIFIED) return hint;
-        if (containerCallback(pi.methodInfo())) return NullableState.NONNULL;
-        NullableState explicit = NullAnnotations.explicitState(pi);
-        if (explicit != null) return explicit;
-        if (!isTypeVariable(pi.parameterizedType()) && NullAnnotations.inNullMarkedScope(pi.methodInfo())) {
-            return NullableState.NONNULL;
-        }
-        return NullableState.UNSPECIFIED;
-    }
-
-    /*
-     The servlet container's callbacks: it never passes a null request, response, chain or configuration, though the
-     servlet API declares nothing (jenkins: a 'Filter.doFilter' override's 'response' had reached Spring Security's
-     @NullMarked RememberMeServices.loginFail, BasicHeaderProcessor.kt:94, HttpSessionContextIntegrationFilter2.kt:34,
-     2026-10-20). Gate NOCONTAINERCALLBACKS.
-     */
-    private static final List<String> CONTAINER_CALLBACKS = List.of("jakarta.servlet.Filter.", "javax.servlet.Filter.",
-            "jakarta.servlet.Servlet.", "javax.servlet.Servlet.", "jakarta.servlet.FilterChain.doFilter(",
-            "javax.servlet.FilterChain.doFilter(", "jakarta.servlet.http.HttpServlet.", "javax.servlet.http.HttpServlet.",
-            "jakarta.servlet.GenericServlet.", "javax.servlet.GenericServlet.");
-
-    private static final Switches.Gate CONTAINER_CALLBACKS_OFF = Switches.gate("NOCONTAINERCALLBACKS");
-
-    private static boolean containerCallback(MethodInfo mi) {
-        if (CONTAINER_CALLBACKS_OFF.get() || mi.isConstructor() || mi.isStatic()) return false;
-        String fqn = mi.fullyQualifiedName();
-        return CONTAINER_CALLBACKS.stream().anyMatch(fqn::startsWith);
-    }
-
-    /*
-     Kotlin: a library parameter declared non-null (@NullMarked, a hint) is a contract: a caller's null is asserted
-     at the call, and does not flow on through it into the analysed implementations (Spring Security 7's
-     RememberMeServices.loginFail(request, response) had carried a null into RememberMeServicesProxy's override,
-     jenkins RememberMeServicesProxy.kt:20, 2026-10-20). Gate NOLIBRARYCONTRACTS.
-     */
-    private void libraryParameterContracts() {
-        if (LIBRARY_CONTRACTS_OFF.get() || !policy.callResults()) return;
-        Set<ParameterInfo> seen = new HashSet<>();
-        for (Set<Object> targets : graph.successors.values()) {
-            for (Object t : targets) {
-                if (t instanceof ParameterInfo pi && !analysed.contains(pi.methodInfo()) && seen.add(pi)
-                    && libraryParameterState(pi) == NullableState.NONNULL) {
-                    nonNullContracts.add(pi);
-                }
-            }
-        }
-    }
-
-    private static final Switches.Gate LIBRARY_CONTRACTS_OFF = Switches.gate("NOLIBRARYCONTRACTS");
-
-    /*
-     A library method mi overrides (a real override, not a lambda's functional method) whose parameter 'index'
-     nothing declares (libraryParameterState): the library may call the override back with null (fernflower's
-     SimpleFileVisitor.postVisitDirectory before its hint). Not a type-variable parameter (the instantiation decides),
-     a primitive, or one any overridden library method declares non-null.
-     */
-    private String libraryUnhintedParameter(MethodInfo mi, int index) {
-        if (libraryNonNullParameter(mi, index)) return null;
-        return mi.overrides().stream()
-                .filter(m -> !analysed.contains(m) && index < m.parameters().size())
-                .filter(m -> {
-                    ParameterizedType type = m.parameters().get(index).parameterizedType();
-                    return !isTypeVariable(type) && !(type.isPrimitiveExcludingVoid() && type.arrays() == 0)
-                           && libraryParameterState(m.parameters().get(index)) == NullableState.UNSPECIFIED;
-                })
-                .map(MethodInfo::fullyQualifiedName).findFirst().orElse(null);
     }
 
     // ------------------------------------------------------------------ tolerated nulls (CodeLaser/maddi-mod#68)
@@ -2237,11 +1533,11 @@ public final class NullabilityPass {
             if (!hasBody(mi) || !externallyCallable(mi)) continue;
             for (ParameterInfo pi : mi.parameters()) {
                 ParameterizedType type = pi.parameterizedType();
-                if (primitive(type) || isTypeVariable(type) || before.contains(pi) || nonNullContracts.contains(pi)
-                    || explicitState(pi) == NullableState.NONNULL || libraryNonNullParameter(mi, pi.index())
+                if (primitive(type) || isTypeVariable(type) || before.contains(pi) || contracts.nonNullContracts.contains(pi)
+                    || contracts.explicitState(pi) == NullableState.NONNULL || contracts.libraryNonNullParameter(mi, pi.index())
                     || hook(mi, pi) || overloadedAt(mi, pi) || overridesAnalysed(mi)) continue;
                 if (tolerates(pi, before)) {
-                    seedIndirect(pi, mi.fullyQualifiedName() + " tolerates null in " + pi.name()
+                    seeds.seedIndirect(pi, mi.fullyQualifiedName() + " tolerates null in " + pi.name()
                                      + ", callable from outside");
                 }
             }
@@ -2255,7 +1551,7 @@ public final class NullabilityPass {
      it: an overridable one too (guava's StringCatcher.methodWithoutAnnotation(string)).
      */
     private boolean hook(MethodInfo mi, ParameterInfo pi) {
-        return implementations.containsKey(mi) && !read(mi, pi);
+        return index.implementations.containsKey(mi) && !read(mi, pi);
     }
 
     /*
@@ -2265,7 +1561,7 @@ public final class NullabilityPass {
      body decides. An override of a library method only (a Comparator's compare) is #68's case.
      */
     private boolean overridesAnalysed(MethodInfo mi) {
-        return mi.overrides().stream().anyMatch(analysed::contains);
+        return mi.overrides().stream().anyMatch(index.analysed::contains);
     }
 
     /*
@@ -2332,7 +1628,7 @@ public final class NullabilityPass {
         queue.add(start);
         while (!queue.isEmpty()) {
             Object n = queue.removeFirst();
-            if (seen.size() > MAX_TOLERANCE_SEARCH || nonNullContracts.contains(n)) {
+            if (seen.size() > MAX_TOLERANCE_SEARCH || contracts.nonNullContracts.contains(n)) {
                 return trace.tolerance(from, n, seen.size() > MAX_TOLERANCE_SEARCH ? "search too large" : "contract");
             }
             switch (n) {
@@ -2402,7 +1698,7 @@ public final class NullabilityPass {
             if (facts.demands(mi).stream().anyMatch(variable)) return true;
         }
         if (!ENCLOSED_DEMANDS_OFF.get()) {
-            for (MethodInfo inner : enclosedMethods().getOrDefault(m, List.of())) {
+            for (MethodInfo inner : index.enclosedMethods().getOrDefault(m, List.of())) {
                 if (facts.demands(inner).stream().anyMatch(variable)) return true;
             }
         }
@@ -2410,21 +1706,6 @@ public final class NullabilityPass {
     }
 
     private static final Switches.Gate ENCLOSED_DEMANDS_OFF = Switches.gate("NOENCLOSEDDEMANDS");
-
-    // per analysed method, the analysed methods of the classes it encloses, at any depth
-    private Map<MethodInfo, List<MethodInfo>> enclosedMethods;
-
-    private Map<MethodInfo, List<MethodInfo>> enclosedMethods() {
-        if (enclosedMethods != null) return enclosedMethods;
-        enclosedMethods = new HashMap<>();
-        for (MethodInfo inner : analysed) {
-            for (MethodInfo outer = inner.typeInfo().enclosingMethod(); outer != null;
-                 outer = outer.typeInfo().enclosingMethod()) {
-                enclosedMethods.computeIfAbsent(outer, _ -> new ArrayList<>()).add(inner);
-            }
-        }
-        return enclosedMethods;
-    }
 
     // ------------------------------------------------------------------ outside callers (World.OPEN*)
 
@@ -2437,9 +1718,9 @@ public final class NullabilityPass {
         for (MethodInfo mi : methods) {
             if (!externallyCallable(mi)) continue;
             for (ParameterInfo pi : mi.parameters()) {
-                if (reached.contains(pi) || nonNullContracts.contains(pi)
+                if (reached.contains(pi) || contracts.nonNullContracts.contains(pi)
                     || policy.world() == World.OPEN && facts.nonNullAtExit(mi, pi)
-                    || libraryNonNullParameter(mi, pi.index())) {
+                    || contracts.libraryNonNullParameter(mi, pi.index())) {
                     addContent(set, pi, pi.parameterizedType());
                     continue;
                 }
@@ -2451,7 +1732,7 @@ public final class NullabilityPass {
         while (!queue.isEmpty()) {
             Object n = queue.removeFirst();
             for (Object s : graph.successors.getOrDefault(n, Set.of())) {
-                if (!nonNullContracts.contains(s) && !reached.contains(s) && set.add(s)) queue.add(s);
+                if (!contracts.nonNullContracts.contains(s) && !reached.contains(s) && set.add(s)) queue.add(s);
             }
         }
         return set;
@@ -2461,13 +1742,13 @@ public final class NullabilityPass {
     private void addContent(Set<Object> set, Object node, ParameterizedType type) {
         if (type.arrays() > 0) {
             Content content = new Content(node);
-            if (!reached.contains(content) && !nonNullContracts.contains(content)) set.add(content);
+            if (!reached.contains(content) && !contracts.nonNullContracts.contains(content)) set.add(content);
             addContent(set, content, type.componentType());
             return;
         }
         for (int i = 0; i < type.parameters().size(); i++) {
             Arg arg = new Arg(node, i);
-            if (!reached.contains(arg) && !nonNullContracts.contains(arg)) set.add(arg);
+            if (!reached.contains(arg) && !contracts.nonNullContracts.contains(arg)) set.add(arg);
             addContent(set, arg, type.parameters().get(i));
         }
     }
@@ -2475,14 +1756,7 @@ public final class NullabilityPass {
     private boolean externallyCallable(MethodInfo mi) {
         if (visibleOutside(mi)) return true;
         // an override is called through what it overrides: from outside, or by the library itself
-        return overrides(mi).stream().anyMatch(o -> !analysed.contains(o) || visibleOutside(o));
-    }
-
-    /** A library method {@code mi} overrides declares parameter {@code index} non-null: its callers honour that. */
-    private boolean libraryNonNullParameter(MethodInfo mi, int index) {
-        return overrides(mi).stream()
-                .filter(m -> !analysed.contains(m) && index < m.parameters().size())
-                .anyMatch(m -> libraryParameterState(m.parameters().get(index)) == NullableState.NONNULL);
+        return overrides(mi).stream().anyMatch(o -> !index.analysed.contains(o) || visibleOutside(o));
     }
 
     /*
@@ -2522,58 +1796,25 @@ public final class NullabilityPass {
         return arguments.withNullable(NullableState.UNSPECIFIED);
     }
 
-    private void seed(Object node, String origin) {
-        seed(node, origin, null);
-    }
-
-    // writer: the type whose code writes the null; null when the seed has none (an annotation, a contract)
-    private void seed(Object node, String origin, TypeInfo writer) {
-        if (origin.startsWith(NULL_ARGUMENT) && nullRejectingBodies.contains(origin.substring(NULL_ARGUMENT.length()))) {
-            return;
-        }
-        if (node != null) {
-            if (trace.why(node)) trace.log("seed", node, origin);
-            seedOrigin.putIfAbsent(node, origin);
-            if (graph.recordSites && site.element != null) seedSites.putIfAbsent(node, new Site(site.method, site.element));
-            strictSeeds.add(node);
-            seedWriters.computeIfAbsent(node, _ -> new ArrayList<>()).add(writer);
-        }
-    }
-
-    private void seedIndirect(Object node, String origin) {
-        seedIndirect(node, origin, null);
-    }
-
-    // indirect evidence (Policy.assertContentWrites): a library contract, a field's default value (the Kotlin
-    // reading is a 'lateinit' field), a comparison with null (the nullTests heuristic). Not a null that is written.
-    private void seedIndirect(Object node, String origin, TypeInfo writer) {
-        if (node != null) {
-            if (trace.why(node)) trace.log("indirect seed", node, origin);
-            seedOrigin.putIfAbsent(node, origin);
-            if (graph.recordSites && site.element != null) seedSites.putIfAbsent(node, new Site(site.method, site.element));
-            seedWriters.computeIfAbsent(node, _ -> new ArrayList<>()).add(writer);
-        }
-    }
-
     private Set<Object> closure(Map<Object, Object> cause) {
         if (!policy.assertContentWrites()) {
             // the strict closure only for the Report (CodeLaser/maddi-mod#49): the verdicts are the full closure's
-            writtenReach = Set.copyOf(closure(new HashMap<>(), strictSeeds, null));
-            return closure(cause, seedOrigin.keySet(), null);
+            writtenReach = Set.copyOf(closure(new HashMap<>(), this.seeds.strictSeeds, null));
+            return closure(cause, this.seeds.seedOrigin.keySet(), null);
         }
         // Policy.assertContentWrites: first what null reaches without the library contracts; a value outside it
         // enters a slot only as an asserted write, so that edge is not followed, and a library seed on a slot itself
         // is an asserted write too
         Map<Object, Object> strictCause = new HashMap<>();
-        Set<Object> strict = closure(strictCause, strictSeeds, null);
+        Set<Object> strict = closure(strictCause, this.seeds.strictSeeds, null);
         writtenReach = Set.copyOf(strict);
-        Set<Object> seeds = new LinkedHashSet<>(seedOrigin.keySet());
-        seeds.removeIf(n -> isSlot(n) && !strictSeeds.contains(n));
+        Set<Object> seeds = new LinkedHashSet<>(this.seeds.seedOrigin.keySet());
+        seeds.removeIf(n -> isSlot(n) && !this.seeds.strictSeeds.contains(n));
         Set<Object> reached = closure(cause, seeds, strict);
         // explain a node null reaches by a written null with that chain: it is the one that lets the node's value
         // into a slot, where the first chain found may begin at a library contract or a default value
         strict.forEach(n -> {
-            if (strictSeeds.contains(n)) cause.remove(n);
+            if (this.seeds.strictSeeds.contains(n)) cause.remove(n);
             else if (strictCause.containsKey(n)) cause.put(n, strictCause.get(n));
         });
         return reached;
@@ -2633,16 +1874,16 @@ public final class NullabilityPass {
 
     // the slot of a null-marked type parameter, or one holding a type variable the null-marked bounds hold non-null
     private boolean nonNullSlot(Arg a) {
-        if (nonNullTypeParameters.isEmpty()) return false;
+        if (typeUses.nonNullTypeParameters.isEmpty()) return false;
         ParameterizedType outer = graph.typeOf(a.of());
         if (outer == null || outer.arrays() > 0) return false;
         TypeInfo ti = outer.typeInfo();
         if (ti != null && a.index() < ti.typeParameters().size()
-            && nonNullTypeParameters.contains(ti.typeParameters().get(a.index()))) return true;
+            && typeUses.nonNullTypeParameters.contains(ti.typeParameters().get(a.index()))) return true;
         if (a.index() >= outer.parameters().size()) return false;
         ParameterizedType p = outer.parameters().get(a.index());
         return p.typeParameter() != null && (p.wildcard() == null || !p.wildcard().isSuper())
-               && nonNullTypeParameters.contains(p.typeParameter());
+               && typeUses.nonNullTypeParameters.contains(p.typeParameter());
     }
 
     /*
@@ -2655,8 +1896,8 @@ public final class NullabilityPass {
     private Set<Arg> tiedToNonNullSlots() {
         if (tiedToNonNull != null) return tiedToNonNull;
         tiedToNonNull = new HashSet<>();
-        if (TIED_BOUNDS_OFF.get() || nonNullTypeParameters.isEmpty()) return tiedToNonNull;
-        List<String> why = NULL_MARKED_DEBUG == null ? null : new ArrayList<>();
+        if (TIED_BOUNDS_OFF.get() || typeUses.nonNullTypeParameters.isEmpty()) return tiedToNonNull;
+        List<String> why = TypeUses.NULL_MARKED_DEBUG == null ? null : new ArrayList<>();
         // the container itself given to a null-marked slot that the graph does not tie, a method type variable's:
         // 'copyOf(multiset)'. Not along the slot edges: those carry values ('accessQueue.add(table.get(i))'), which
         // Kotlin asserts at the write, and had made Segment.table's elements non-null through
@@ -2675,7 +1916,7 @@ public final class NullabilityPass {
         }
         if (why != null) {
             try {
-                java.nio.file.Files.write(java.nio.file.Path.of(NULL_MARKED_DEBUG + ".tied"), why);
+                java.nio.file.Files.write(java.nio.file.Path.of(TypeUses.NULL_MARKED_DEBUG + ".tied"), why);
             } catch (java.io.IOException ignored) {
             }
         }
@@ -2723,337 +1964,7 @@ public final class NullabilityPass {
     private static final Switches.Gate ERASED_SINGLETONS_OFF = Switches.gate("NOERASEDSINGLETONS");
 
     private final Map<Object, Boolean> boundedSlots = new HashMap<>();
-
-    /*
-     Kotlin: a class type parameter of a @NullMarked class without a @Nullable bound ('class LocalCache<K, V>' in
-     guava) is non-null: the printer bounds it by Any (NullabilityFacts.nonNullTypeParameter), and null stops at its
-     slots as at a bounded one, so no verdict instantiates it as 'X?'. Carried over to a subclass's type parameter
-     passed into such a position ('X<E> extends ImmutableList<E>' in a test outside the null-marked scope), which Kotlin
-     would otherwise reject, and to any type variable used in such a position. guava LocalCache.kt:1102/1020,
-     CollectCollectors.kt:24 (2026-10-18). Gate NONULLMARKEDBOUNDS.
-     */
-    private final Set<io.codelaser.maddi.cst.api.info.TypeParameter> nonNullTypeParameters = new HashSet<>();
-
-    private static final Switches.Gate NULL_MARKED_BOUNDS_OFF = Switches.gate("NONULLMARKEDBOUNDS");
-    private static final Switches.Gate MEMBERLESS_BOUNDS_OFF = Switches.gate("NOMEMBERLESSBOUNDS");
-    private static final Switches.Gate BOUND_USES_OFF = Switches.gate("NOBOUNDUSES");
     private static final Switches.Gate REJECTED_FLOWS_OFF = Switches.gate("NOREJECTEDFLOWS");
-
-    private void nonNullBounds(List<Info> analysisOrder, List<MethodInfo> methods, List<FieldInfo> fields) {
-        if (!policy.callResults() || NULL_MARKED_BOUNDS_OFF.get()) return;
-        // a source package's annotations sit on its package-info type, not on the compilation units of its classes
-        // (guava's com.google.common.cache, 2026-10-18)
-        for (Info info : analysisOrder) {
-            if (info instanceof TypeInfo t && t.typeNature().isPackageInfo()) {
-                packageInfoAnnotations.put(t.packageName(), t.annotations());
-            }
-        }
-        Set<TypeInfo> types = new java.util.LinkedHashSet<>();
-        for (MethodInfo mi : methods) types.add(mi.typeInfo());
-        for (FieldInfo fi : fields) types.add(fi.owner());
-        // a type without members of its own too: 'interface NullComparatorFactory<Solution_, T> extends
-        // ComparatorFactory<Solution_, T>' passes its parameters into null-marked positions, a member-less
-        // '@NullMarked interface UniConstraintStream<A>' has non-null ones (timefold PlanningEntity.kt:15,
-        // 2026-10-22). Gate NOMEMBERLESSBOUNDS.
-        if (!MEMBERLESS_BOUNDS_OFF.get()) {
-            for (Info info : analysisOrder) {
-                if (info instanceof TypeInfo t && !t.typeNature().isPackageInfo()) types.add(t);
-            }
-        }
-        // every type use: supertypes, fields, parameters and results, and in the bodies the types of locals, casts,
-        // calls and constructor calls ('new ReverseImmutableList<>(this)' in ImmutableList.reverse())
-        List<TypeUse> uses = new ArrayList<>();
-        List<Instantiation> instantiations = new ArrayList<>();
-        for (TypeInfo t : types) {
-            if (t.parentClass() != null) uses.add(new TypeUse(t.parentClass(), t, true));
-            for (ParameterizedType i : t.interfacesImplemented()) uses.add(new TypeUse(i, t, true));
-            // a type parameter's bound: 'class AbstractOriginalSwapIterator<Solution_, Move_ extends
-            // Move<Solution_>, …>' passes Solution_ into Move's (timefold AbstractOriginalSwapIterator.kt:5,
-            // 2026-10-22). Strict, as a supertype: Kotlin writes no 'Solution_ & Any' in a bound. Gate NOBOUNDUSES.
-            if (!BOUND_USES_OFF.get()) {
-                for (var tp : t.typeParameters()) for (ParameterizedType b : tp.typeBounds()) uses.add(new TypeUse(b, t, true));
-            }
-        }
-        for (FieldInfo fi : fields) {
-            uses.add(new TypeUse(fi.type(), fi, false));
-            if (fi.initializer() != null) fi.initializer().visit(e -> bodyTypeUse(e, fi, uses, instantiations));
-        }
-        for (MethodInfo mi : methods) {
-            if (!mi.isConstructor()) uses.add(new TypeUse(mi.returnType(), mi, false));
-            // an override repeats its parameters exactly: the printer keeps them as declared, without '& Any'
-            boolean repeated = !mi.isConstructor() && (!mi.overrides().isEmpty() || !mi.isStatic()
-                    && !mi.access().isPrivate() && !mi.isFinal() && !mi.typeInfo().isFinal());
-            for (ParameterInfo pi : mi.parameters()) uses.add(new TypeUse(pi.parameterizedType(), mi, repeated));
-            if (!BOUND_USES_OFF.get()) {
-                for (var tp : mi.typeParameters()) for (ParameterizedType b : tp.typeBounds()) uses.add(new TypeUse(b, mi, true));
-            }
-            if (mi.methodBody() != null) mi.methodBody().visit(e -> bodyTypeUse(e, mi, uses, instantiations));
-        }
-        /*
-         A type variable used in a non-null position ('Response<T>' in 'interface StreamingResponseHandler<T>', or
-         in '<T> Response<T> from(T content)') must be non-null too, or Kotlin rejects the use ("type argument is
-         not within its bounds", langchain4j, 2026-10-18): carried over to it, class or method type variable alike.
-         Where it cannot be (a @Nullable use, a library's type variable), the position is left unbounded,
-         and everything is worked out again without it.
-         */
-        Set<io.codelaser.maddi.cst.api.info.TypeParameter> blocked = new HashSet<>();
-        while (true) {
-            nonNullTypeParameters.clear();
-            for (TypeInfo t : types) {
-                if (!nullMarked(t)) continue;
-                for (var tp : t.typeParameters()) {
-                    if (!nullableBound(tp) && !blocked.contains(tp)) nonNullTypeParameters.add(tp);
-                }
-            }
-            Set<io.codelaser.maddi.cst.api.info.TypeParameter> conflicts = new HashSet<>();
-            boolean changed = true;
-            while (changed) {
-                changed = false;
-                for (TypeUse use : uses) {
-                    changed |= carryNonNull(use.type(), use.where(), use.strict(), types, blocked, conflicts);
-                }
-                for (Instantiation in : instantiations) {
-                    changed |= carryInstantiation(in.declared(), in.concrete(), in.callee(), in.where(), types,
-                            blocked, conflicts);
-                }
-                if (!OVERRIDE_BOUNDS_OFF.get()) changed |= overrideFamilyBounds(methods, blocked, conflicts);
-            }
-            if (conflicts.isEmpty() || !blocked.addAll(conflicts)) {
-                if (NULL_MARKED_DEBUG != null) debugNullMarked(types, blocked);
-                return;
-            }
-        }
-    }
-
-    /*
-     Kotlin: an override repeats its method type parameters' bounds exactly. 'override fun <B> ifExists(otherClass:
-     Class<B>, …)' whose B goes into ConstraintFactory.forEach's '<A : Any>' must be '<B : Any>', and so must the
-     method it overrides and that method's other overrides (timefold InnerUniConstraintStream.kt:32, 2026-10-22). A
-     family member that cannot be bounded (not ours, blocked) leaves the position unbounded for all. Gate
-     NOOVERRIDEBOUNDS.
-     */
-    private boolean overrideFamilyBounds(List<MethodInfo> methods,
-                                         Set<io.codelaser.maddi.cst.api.info.TypeParameter> blocked,
-                                         Set<io.codelaser.maddi.cst.api.info.TypeParameter> conflicts) {
-        boolean changed = false;
-        for (MethodInfo mi : methods) {
-            int n = mi.typeParameters().size();
-            if (n == 0) continue;
-            for (MethodInfo om : mi.overrides()) {
-                // a library method keeps its own bounds: Kotlin matches an override of a Java method against its
-                // platform bounds, and a conflict there would unbound the variable for all its uses (guava
-                // Parameter.getDeclaredAnnotation's A, and through it Optional's T)
-                if (om.typeParameters().size() != n || !analysed.contains(om)) continue;
-                for (int i = 0; i < n; i++) {
-                    var mine = mi.typeParameters().get(i);
-                    var theirs = om.typeParameters().get(i);
-                    boolean a = nonNullTypeParameters.contains(mine);
-                    boolean b = nonNullTypeParameters.contains(theirs);
-                    if (a == b) continue;
-                    var other = a ? theirs : mine;
-                    var source = a ? mine : theirs;
-                    if (!blocked.contains(other) && !nullableBound(other)) {
-                        nonNullTypeParameters.add(other);
-                        changed = true;
-                    } else {
-                        conflicts.add(source);
-                    }
-                }
-            }
-        }
-        return changed;
-    }
-
-    private static final Switches.Gate OVERRIDE_BOUNDS_OFF = Switches.gate("NOOVERRIDEBOUNDS");
-
-    private final Map<String, List<io.codelaser.maddi.cst.api.expression.AnnotationExpression>> packageInfoAnnotations
-            = new HashMap<>();
-
-    // strict: a supertype, or a parameter an override repeats, where the printer cannot write 'B & Any'
-    private record TypeUse(ParameterizedType type, Info where, boolean strict) {
-    }
-
-    /*
-     what a call instantiates its method's own type variables with, read off its declared parameter and result types
-     against its arguments and result: 'CartesianList.create(lists)' instantiates E with cartesianProduct's B
-     (Lists.kt:309, Sets.kt:707), 'explicit(Lists.asList(leastValue, rest))' explicit(List)'s T with the varargs
-     overload's T (Ordering.kt:212, 2026-10-19)
-     */
-    private record Instantiation(ParameterizedType declared, ParameterizedType concrete, MethodInfo callee,
-                                 Info where) {
-    }
-
-    private static boolean bodyTypeUse(Element e, Info where, List<TypeUse> uses, List<Instantiation> instantiations) {
-        switch (e) {
-            case ConstructorCall cc -> uses.add(new TypeUse(cc.parameterizedType(), where, false));
-            // a constructor reference ('transform(entries, UnmodifiableEntry::new)' as a Function<Entry<K, V>, ...>)
-            // instantiates the class with what its functional type passes: matched against each type argument
-            // (MutableTypeToInstanceMap.kt:58, 2026-10-19)
-            case MethodReference mr when mr.methodInfo() != null && mr.methodInfo().isConstructor()
-                                         && !mr.methodInfo().typeInfo().typeParameters().isEmpty()
-                                         && mr.parameterizedType() != null -> {
-                for (ParameterInfo pi : mr.methodInfo().parameters()) {
-                    for (ParameterizedType fa : mr.parameterizedType().parameters()) {
-                        instantiations.add(new Instantiation(pi.parameterizedType(), fa, mr.methodInfo(), where));
-                    }
-                }
-            }
-            case MethodCall mc -> {
-                uses.add(new TypeUse(mc.concreteReturnType(), where, false));
-                MethodInfo callee = mc.methodInfo();
-                if (callee != null && !callee.typeParameters().isEmpty()) {
-                    instantiations.add(new Instantiation(callee.returnType(), mc.concreteReturnType(), callee, where));
-                    List<Expression> args = mc.parameterExpressions();
-                    for (int i = 0; i < args.size() && i < callee.parameters().size(); i++) {
-                        instantiations.add(new Instantiation(callee.parameters().get(i).parameterizedType(),
-                                args.get(i).parameterizedType(), callee, where));
-                    }
-                }
-            }
-            case Cast c -> uses.add(new TypeUse(c.parameterizedType(), where, false));
-            case LocalVariableCreation lvc -> lvc.localVariableStream()
-                    .forEach(lv -> uses.add(new TypeUse(lv.parameterizedType(), where, false)));
-            default -> {
-            }
-        }
-        return true;
-    }
-
-    private boolean carryNonNull(ParameterizedType use, Info where, boolean strict, Set<TypeInfo> types,
-                                 Set<io.codelaser.maddi.cst.api.info.TypeParameter> blocked,
-                                 Set<io.codelaser.maddi.cst.api.info.TypeParameter> conflicts) {
-        if (use == null) return false;
-        boolean changed = false;
-        TypeInfo sup = use.typeInfo();
-        for (int i = 0; i < use.parameters().size(); i++) {
-            ParameterizedType a = use.parameters().get(i);
-            changed |= carryNonNull(a, where, strict, types, blocked, conflicts);
-            // a wildcard's bound too: 'List<? extends List<? extends B>>' into CartesianList.create's E (Lists.kt:309)
-            var tp = a.typeParameter();
-            if (tp == null || sup == null || i >= sup.typeParameters().size()) continue;
-            var position = sup.typeParameters().get(i);
-            /*
-             'ImmutableList<@NonNull E>' (FluentIterable.toList()): Kotlin's 'E & Any'. A @Nullable-bounded variable
-             is neither carried nor a conflict: the null-marked code that passes one on has made it non-null there
-             (JSpecify-checked), though an inferred call type in its body ('ImmutableList.copyOf(...)') no longer
-             says so; as a conflict, FluentIterable's E dropped ImmutableList's, and with it, through every class
-             ImmutableList's E is passed to, the bounds of 57 more guava classes (2026-10-19).
-             */
-            boolean nullable = nullableBound(tp);
-            if (!nonNullTypeParameters.contains(position) || nonNullTypeParameters.contains(tp)
-                || !strict && (nullable || explicit(a.annotations()) == NullableState.NONNULL)) continue;
-            /*
-             in a strict use a @Nullable-bounded variable, '@NonNull' or not, leaves the position unbounded:
-             'MutableTypeToInstanceMap<B extends @Nullable Object> extends ForwardingMap<TypeToken<? extends
-             @NonNull B>, B>' (TypeToInstanceMap.kt:6, 2026-10-19)
-             */
-            if (nullable) {
-                conflicts.add(position);
-                continue;
-            }
-            boolean ours = tp.getOwner().isLeft() ? types.contains(tp.getOwner().getLeft())
-                    : analysed.contains(tp.getOwner().getRight());
-            if (ours && !blocked.contains(tp) && explicit(a.annotations()) != NullableState.NULLABLE) {
-                nonNullTypeParameters.add(tp);
-                changed = true;
-            } else if (conflicts.add(position) && NULL_MARKED_DEBUG != null) {
-                debugConflicts.add(position + " of " + sup.fullyQualifiedName() + " <- " + tp + " ("
-                                   + (tp.getOwner().isLeft() ? tp.getOwner().getLeft().fullyQualifiedName()
-                        : tp.getOwner().getRight().fullyQualifiedName()) + ", ours " + ours + ", bound "
-                                   + nullableBound(tp) + ") in " + where.fullyQualifiedName());
-            }
-        }
-        return changed;
-    }
-
-    private boolean carryInstantiation(ParameterizedType declared, ParameterizedType concrete, MethodInfo callee,
-                                       Info where, Set<TypeInfo> types,
-                                       Set<io.codelaser.maddi.cst.api.info.TypeParameter> blocked,
-                                       Set<io.codelaser.maddi.cst.api.info.TypeParameter> conflicts) {
-        if (declared == null || concrete == null || declared.arrays() != concrete.arrays()) return false;
-        var position = declared.typeParameter();
-        if (position != null) {
-            var tp = concrete.typeParameter();
-            boolean callees = position.isMethodTypeParameter()
-                    ? position.getOwner().isRight() && position.getOwner().getRight() == callee
-                    : callee.isConstructor() && position.getOwner().isLeft()
-                      && position.getOwner().getLeft() == callee.typeInfo();
-            if (tp == null || !callees || !nonNullTypeParameters.contains(position)
-                || nonNullTypeParameters.contains(tp) || nullableBound(tp)
-                || explicit(concrete.annotations()) == NullableState.NONNULL) return false;
-            boolean ours = tp.getOwner().isLeft() ? types.contains(tp.getOwner().getLeft())
-                    : analysed.contains(tp.getOwner().getRight());
-            if (ours && !blocked.contains(tp) && explicit(concrete.annotations()) != NullableState.NULLABLE) {
-                nonNullTypeParameters.add(tp);
-                return true;
-            }
-            if (conflicts.add(position) && NULL_MARKED_DEBUG != null) {
-                debugConflicts.add(position + " of " + callee.fullyQualifiedName() + " <- " + tp + " in "
-                                   + where.fullyQualifiedName());
-            }
-            return false;
-        }
-        // within one generic type only: a 'Collection<? extends E>' given an 'ArrayList<X>' is not matched
-        if (declared.typeInfo() == null || declared.typeInfo() != concrete.typeInfo()
-            || declared.parameters().size() != concrete.parameters().size()) return false;
-        boolean changed = false;
-        for (int i = 0; i < declared.parameters().size(); i++) {
-            changed |= carryInstantiation(declared.parameters().get(i), concrete.parameters().get(i), callee, where,
-                    types, blocked, conflicts);
-        }
-        return changed;
-    }
-
-    // NULLMARKEDDEBUG=<file>: why each null-marked position was left unbounded, and the bounds kept (diagnostics)
-    private static final String NULL_MARKED_DEBUG = System.getenv("NULLMARKEDDEBUG");
-    private final List<String> debugConflicts = new ArrayList<>();
-
-    private void debugNullMarked(Set<TypeInfo> types, Set<io.codelaser.maddi.cst.api.info.TypeParameter> blocked) {
-        List<String> lines = new ArrayList<>(debugConflicts);
-        lines.add("blocked " + blocked.size() + ", non-null " + nonNullTypeParameters.size() + ", package-infos "
-                  + packageInfoAnnotations.size());
-        for (TypeInfo t : types) {
-            for (var tp : t.typeParameters()) {
-                lines.add((nonNullTypeParameters.contains(tp) ? "NONNULL " : "free ") + t.fullyQualifiedName() + "."
-                          + tp.simpleName());
-            }
-        }
-        try {
-            java.nio.file.Files.write(java.nio.file.Path.of(NULL_MARKED_DEBUG), lines);
-        } catch (java.io.IOException ignored) {
-        }
-    }
-
-    // '<T extends @Nullable Object>' (or any @Nullable bound)
-    private static boolean nullableBound(io.codelaser.maddi.cst.api.info.TypeParameter tp) {
-        return tp.typeBounds().stream().anyMatch(b -> explicit(b.annotations()) == NullableState.NULLABLE);
-    }
-
-    // the type, an enclosing type, its package or its module is @NullMarked, the nearest @NullUnmarked winning
-    private boolean nullMarked(TypeInfo type) {
-        TypeInfo t = type;
-        while (t != null) {
-            Boolean marked = markedBy(t.annotations());
-            if (marked != null) return marked;
-            t = t.compilationUnitOrEnclosingType().isRight() ? t.compilationUnitOrEnclosingType().getRight() : null;
-        }
-        Boolean marked = markedBy(packageInfoAnnotations.getOrDefault(type.packageName(), List.of()));
-        var cu = type.primaryType().compilationUnit();
-        if (cu == null) return Boolean.TRUE.equals(marked);
-        if (marked == null) marked = markedBy(cu.packageAnnotations());
-        if (marked == null) marked = markedBy(cu.moduleAnnotations());
-        return Boolean.TRUE.equals(marked);
-    }
-
-    private static Boolean markedBy(List<io.codelaser.maddi.cst.api.expression.AnnotationExpression> annotations) {
-        if (annotations.stream().anyMatch(a -> a.typeInfo() != null && "NullUnmarked".equals(a.typeInfo().simpleName()))) {
-            return false;
-        }
-        if (annotations.stream().anyMatch(a -> a.typeInfo() != null && "NullMarked".equals(a.typeInfo().simpleName()))) {
-            return true;
-        }
-        return null;
-    }
     // slots holding a type variable that a 'T[]' of the same method fills (arrayElementsPassedThrough): 'List<T?>'
     // where the array is an 'Array<T?>'
     private final Set<Arg> typeVariableElementSlots = new HashSet<>();
@@ -3070,7 +1981,7 @@ public final class NullabilityPass {
     private Set<Object> closure(Map<Object, Object> cause, Set<Object> seeds, Set<Object> strict) {
         // a seed on a non-null contract is the caller's error (an M5 finding), not a source of null
         Set<Object> reached = new LinkedHashSet<>(seeds);
-        reached.removeAll(nonNullContracts);
+        reached.removeAll(contracts.nonNullContracts);
         reached.removeIf(this::optionalValue);
         reached.removeIf(this::boundedSlot);
         Deque<Object> queue = new ArrayDeque<>(reached);
@@ -3080,7 +1991,7 @@ public final class NullabilityPass {
                 for (Object s : graph.successors.getOrDefault(n, Set.of())) {
                     if (strict != null && isSlot(s) && !isSlot(n) && !strict.contains(n) && !isVarargElements(s)) continue;
                     if (optionalValue(s) || boundedSlot(s)) continue;
-                    if (!nonNullContracts.contains(s) && reached.add(s)) {
+                    if (!contracts.nonNullContracts.contains(s) && reached.add(s)) {
                         cause.put(s, n);
                         queue.addLast(s);
                     }
@@ -3090,7 +2001,7 @@ public final class NullabilityPass {
             Map<MethodInfo, Boolean> intrinsic = new HashMap<>();
             for (GatedSite site : graph.gatedSites) {
                 if (!reached.contains(site.callee()) || reached.contains(site.target())
-                    || nonNullContracts.contains(site.target())
+                    || contracts.nonNullContracts.contains(site.target())
                     || !callResultNullable(site.callee(), site.call(), reached, reached::contains, intrinsic)) continue;
                 reached.add(site.target());
                 cause.put(site.target(), site.callee());
@@ -3129,8 +2040,8 @@ public final class NullabilityPass {
         Expression x = NonNullFacts.unwrap(e);
         if (x instanceof MethodCall mc && mc.methodInfo() != null) {
             MethodInfo callee = mc.methodInfo();
-            if (analysed.contains(callee)) return !reached.contains(callee) || nonNullCallResults.contains(mc);
-            return libraryNullableCall(mc) == null;
+            if (index.analysed.contains(callee)) return !reached.contains(callee) || nonNullCallResults.contains(mc);
+            return contracts.libraryNullableCall(mc) == null;
         }
         if (x instanceof VariableExpression ve) {
             return switch (ve.variable()) {
@@ -3150,7 +2061,7 @@ public final class NullabilityPass {
         while (!todo.isEmpty()) {
             Object n = todo.removeFirst();
             if (!seen.add(n) || through.contains(n) || !reached.contains(n)) continue;
-            if (seedOrigin.containsKey(n)) return true;
+            if (seeds.seedOrigin.containsKey(n)) return true;
             todo.addAll(pred.getOrDefault(n, Set.of()));
         }
         return false;
@@ -3174,12 +2085,12 @@ public final class NullabilityPass {
                 if (anonymous && ANONYMOUS_FIELD_INIT_OFF.get()) return false;
                 MethodInfo callee = switch (e) {
                     case MethodCall mc -> mc.methodInfo();
-                    case ConstructorCall cc when anonymous -> anonymousSuperConstructor(cc);
+                    case ConstructorCall cc when anonymous -> index.anonymousSuperConstructor(cc);
                     case ConstructorCall cc -> cc.constructor();
                     default -> null;
                 };
                 if (anonymous && callee == null) return false;
-                if (callee == null || !analysed.contains(callee)) return true;
+                if (callee == null || !index.analysed.contains(callee)) return true;
                 List<Expression> args = e instanceof MethodCall mc ? mc.parameterExpressions()
                         : ((ConstructorCall) e).parameterExpressions();
                 for (int i = 0; i < args.size() && i < callee.parameters().size(); i++) {
@@ -3188,7 +2099,7 @@ public final class NullabilityPass {
                     // site ('static final ImmediateFuture<?> NULL = new ImmediateFuture<>(null)', guava)
                     if (!pi.isVarArgs() && !isTypeVariable(pi.parameterizedType())
                         && NonNullFacts.unwrap(args.get(i)) instanceof NullConstant) {
-                        seed(pi, NULL_ARGUMENT + fi.fullyQualifiedName(), fi.owner());
+                        seeds.seed(pi, Seeds.NULL_ARGUMENT + fi.fullyQualifiedName(), fi.owner());
                     }
                 }
                 return !anonymous;
@@ -3237,7 +2148,7 @@ public final class NullabilityPass {
         for (MethodInfo mi : methods) {
             if (mi.isStatic() && "valueOf".equals(mi.name()) && mi.typeInfo().typeNature().isEnum()
                 && mi.parameters().size() == 1 && mi.parameters().getFirst().parameterizedType().isJavaLangString()) {
-                nonNullContracts.add(mi.parameters().getFirst());
+                contracts.add(mi.parameters().getFirst());
             }
         }
     }
@@ -3292,8 +2203,8 @@ public final class NullabilityPass {
         graph.pendingHolders.keySet().forEach(fi -> byOwner.computeIfAbsent(fi.owner(), _ -> new ArrayList<>()).add(fi));
         byOwner.forEach((holder, holders) -> {
             Set<Object> outside = new LinkedHashSet<>();
-            seedOrigin.keySet().forEach(seed -> {
-                List<TypeInfo> writers = seedWriters.getOrDefault(seed, List.of());
+            seeds.seedOrigin.keySet().forEach(seed -> {
+                List<TypeInfo> writers = seeds.seedWriters.getOrDefault(seed, List.of());
                 if (writers.isEmpty() || writers.stream().anyMatch(w -> !within(w, holder))) outside.add(seed);
             });
             Set<Object> reachedFromOutside = closure(new HashMap<>(), outside, null);
@@ -3350,7 +2261,7 @@ public final class NullabilityPass {
             List<Object> flow = queue.removeFirst();
             if (!seen.add(flow)) continue;
             // not through a library method: its parameter would tie together the arrays of all its callers
-            if (library(flow.get(0)) || library(flow.get(1))) continue;
+            if (index.library(flow.get(0)) || index.library(flow.get(1))) continue;
             ParameterizedType t0 = graph.typeOf(flow.get(0));
             ParameterizedType t1 = graph.typeOf(flow.get(1));
             if (t0 == null || t1 == null) continue;
@@ -3440,8 +2351,8 @@ public final class NullabilityPass {
         for (List<Object> flow : graph.flows) {
             if (flow.get(0) instanceof ParameterInfo pi) out.computeIfAbsent(pi, _ -> new HashSet<>()).add(flow.get(1));
         }
-        for (MethodInfo mi : analysed) {
-            if (!overrides(mi).isEmpty() || implementations.containsKey(mi)) continue;
+        for (MethodInfo mi : index.analysed) {
+            if (!overrides(mi).isEmpty() || index.implementations.containsKey(mi)) continue;
             for (ParameterInfo pi : mi.parameters()) {
                 ParameterizedType t = pi.parameterizedType();
                 if (t.arrays() == 1 && !pi.isVarArgs() && !t.copyWithoutArrays().isPrimitiveExcludingVoid()
@@ -3456,7 +2367,7 @@ public final class NullabilityPass {
             for (java.util.Iterator<ParameterInfo> it = candidates.iterator(); it.hasNext(); ) {
                 ParameterInfo pi = it.next();
                 for (Object to : out.getOrDefault(pi, Set.of())) {
-                    if (to instanceof ParameterInfo target && (candidates.contains(target) || library(target))) continue;
+                    if (to instanceof ParameterInfo target && (candidates.contains(target) || index.library(target))) continue;
                     it.remove();
                     changed = true;
                     break;
@@ -3533,7 +2444,7 @@ public final class NullabilityPass {
                 }
             }
         });
-        seedOrigin.forEach((node, origin) -> {
+        seeds.seedOrigin.forEach((node, origin) -> {
             if (node instanceof Content c && !origin.startsWith("array created") && !origin.startsWith("null in an array initializer")
                 && (annotations || !origin.startsWith("annotated"))) {
                 if (written.add(c.of()) && because != null) because.put(c.of(), "seed " + origin);
@@ -3544,7 +2455,7 @@ public final class NullabilityPass {
         Deque<Object> queue = new ArrayDeque<>(written);
         while (!queue.isEmpty()) {
             Object down = queue.removeFirst();
-            if (!annotations && (liftedField(down) || library(down))) {
+            if (!annotations && (liftedField(down) || index.library(down))) {
                 if (because != null && trace.why(down)) trace.print("NULLWHY written(false) stops at " + Trace.name(down));
                 continue;
             }
@@ -3630,7 +2541,7 @@ public final class NullabilityPass {
             if (a.wildcard() != null && (a.wildcard().isUnbound() || a.wildcard().isExtends()
                                           && a.typeParameter() == null && a.typeInfo() != null
                                           && a.typeInfo().isJavaLangObject())) {
-                seed(new Arg(pi, i), "read from '*' in " + pi.methodInfo().fullyQualifiedName());
+                seeds.seed(new Arg(pi, i), "read from '*' in " + pi.methodInfo().fullyQualifiedName());
             }
         }
     }
@@ -3709,32 +2620,6 @@ public final class NullabilityPass {
                && p0.arrays() == p1.arrays() && p0.typeInfo() != p1.typeInfo();
     }
 
-    private boolean library(Object node) {
-        return switch (node) {
-            case Content c -> library(c.of());
-            case Arg a -> library(a.of());
-            case Keyed k -> library(k.slot());
-            case ParameterInfo pi -> !analysed.contains(pi.methodInfo());
-            case MethodInfo mi -> !analysed.contains(mi);
-            default -> false;
-        };
-    }
-
-    // the locals in scope: a block, or a statement's own (for initializers, for-each variable, try resources)
-    private record Scope(Scope parent, Map<String, Local> names) {
-        Scope(Scope parent) {
-            this(parent, new HashMap<>());
-        }
-
-        Local resolve(String name) {
-            for (Scope s = this; s != null; s = s.parent) {
-                Local local = s.names.get(name);
-                if (local != null) return local;
-            }
-            return null;
-        }
-    }
-
     // the shadow local of a reassigned parameter; created once, the caller's value flows into it
     private Local shadow(ParameterInfo pi) {
         Local local = new Local(pi.methodInfo(), null, pi.name());
@@ -3768,7 +2653,7 @@ public final class NullabilityPass {
 
     private void declare(Scope scope, MethodInfo mi, Element declaration, LocalVariable lv) {
         Local local = new Local(mi, declaration, lv.simpleName());
-        scope.names.put(lv.simpleName(), local);
+        scope.names().put(lv.simpleName(), local);
         graph.declaredLocals.put(local, lv);
         graph.localOwner.put(local, owner);
         declaredByName.computeIfAbsent(mi, _ -> new HashMap<>())
@@ -3849,11 +2734,11 @@ public final class NullabilityPass {
     private void nullMarker(MethodInfo mi, Variable marker, Object target, String origin) {
         // Policy.withoutTestNulls: a test's null literal written into a production node ('new Decider(null)')
         if (!policy.testNulls() && testCode(mi.typeInfo()) && !testCode(target)) return;
-        MethodInfo owner = nullOwner(((LocalVariable) marker).assignmentExpression());
-        if (owner != null && !owner.equals(mi) && analysed.contains(owner) && !owner.returnType().isVoid()) {
+        MethodInfo owner = seeds.nullOwner(((LocalVariable) marker).assignmentExpression());
+        if (owner != null && !owner.equals(mi) && index.analysed.contains(owner) && !owner.returnType().isVoid()) {
             graph.addEdge(owner, target);
         } else {
-            seed(target, origin, writer(mi));
+            seeds.seed(target, origin, writer(mi));
         }
     }
 
@@ -3880,89 +2765,8 @@ public final class NullabilityPass {
                 && a.typeInfo().simpleName().equals("ParametricNullness"));
     }
 
-    /*
-     Kotlin: an implementation whose class passes a nullable type argument for the overridden return's type variable
-     ('new Tables.AbstractCell<R, C, @Nullable V>()' in guava's ArrayTable.getCell, over Table.Cell's
-     '@ParametricNullness V getValue()'): its null belongs to that instantiation, which the printer writes as
-     'AbstractCell<R, C, V?>', so 'getValue(): V?' overrides 'getValue(): V' as it is. Without this, the upward edge
-     made Cell.getValue V? and AbstractTable's callers failed (worktree-maddi-all, 2026-10-27). A direct supertype
-     only. Gate NONULLABLEINSTANTIATION.
-     */
-    private static boolean nullableInstantiation(MethodInfo mi, MethodInfo overridden) {
-        if (NULLABLE_INSTANTIATION_OFF.get()) return false;
-        ParameterizedType argument = instantiation(mi, overridden);
-        return argument != null && (argument.nullable() == NullableState.NULLABLE || argument.annotations().stream()
-                .anyMatch(ae -> ae.typeInfo() != null && NullAnnotations.NULLABLE.contains(ae.typeInfo().simpleName())));
-    }
-
-    // the type argument a direct supertype of mi's class passes for the overridden return's class type variable
-    private static ParameterizedType instantiation(MethodInfo mi, MethodInfo overridden) {
-        ParameterizedType rt = overridden.returnType();
-        if (!isClassTypeVariable(rt) || rt.typeParameter().getOwner().getLeft() != overridden.typeInfo()) return null;
-        int index = rt.typeParameter().getIndex();
-        List<ParameterizedType> supertypes = new ArrayList<>();
-        if (mi.typeInfo().parentClass() != null) supertypes.add(mi.typeInfo().parentClass());
-        supertypes.addAll(mi.typeInfo().interfacesImplemented());
-        for (ParameterizedType st : supertypes) {
-            if (st.typeInfo() == null) continue;
-            ParameterizedType formal = st.typeInfo().asParameterizedType();
-            ParameterizedType view = st.typeInfo() == overridden.typeInfo() ? formal
-                    : formal.concreteSuperType(overridden.typeInfo().asParameterizedType());
-            if (view == null || index >= view.parameters().size()) continue;
-            ParameterizedType a = view.parameters().get(index);
-            if (a.arrays() > 0 || a.typeParameter() == null || a.typeParameter().isMethodTypeParameter()
-                || a.typeParameter().getOwner().getLeft() != st.typeInfo()) continue;
-            int j = a.typeParameter().getIndex();
-            if (j < st.parameters().size()) return st.parameters().get(j);
-        }
-        return null;
-    }
-
-    /*
-     Kotlin: a test's override of a main member's type-variable return, in a class that instantiates the variable with
-     a concrete type ('new Tables.AbstractCell<Character, Integer, String>() { String getValue() { return
-     holder.string; } }' in guava's ImmutableTableTest, the field @Nullable): its result is that instantiation's
-     String, non-null, its null value asserted. Without this, the test's null made main's Table.Cell.getValue V? and
-     AbstractTable failed (worktree-maddi-all, 2026-10-27). Not where the test returns a null literal, which the printer
-     cannot assert (the upward edge of buildForMethod keeps that one). Gate NOTESTINSTANTIATION.
-     */
-    private boolean testOverrideOfInstantiatedReturn(MethodInfo mi) {
-        if (TEST_INSTANTIATION_OFF.get() || mi.isConstructor() || mi.returnType().isVoid() || !testCode(mi)
-            || returnsNullLiteral(mi)) return false;
-        for (MethodInfo overridden : overrides(mi)) {
-            if (!analysed.contains(overridden) || testCode(overridden)) continue;
-            ParameterizedType argument = instantiation(mi, overridden);
-            if (argument != null && argument.typeParameter() == null && argument.wildcard() == null
-                && argument.nullable() != NullableState.NULLABLE && argument.annotations().stream().noneMatch(ae ->
-                    ae.typeInfo() != null && NullAnnotations.NULLABLE.contains(ae.typeInfo().simpleName()))) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    // gate NOTESTINSTANTIATION: a test override's null reaches main's type-variable return (A/B)
-    private static final Switches.Gate TEST_INSTANTIATION_OFF = Switches.gate("NOTESTINSTANTIATION");
-
-    // gate NONULLABLEINSTANTIATION: an implementation's null reaches the overridden type-variable return (A/B)
-    private static final Switches.Gate NULLABLE_INSTANTIATION_OFF = Switches.gate("NONULLABLEINSTANTIATION");
-
     // gate NOPARAMETRIC: a '@ParametricNullness' type-variable return's own null reaches every call (A/B)
     private static final Switches.Gate PARAMETRIC_OFF = Switches.gate("NOPARAMETRIC");
-
-    // the analysed method whose body holds this null literal (a lambda's body is the lambda's method)
-    private MethodInfo nullOwner(Expression nullConstant) {
-        return nullOwners.get(nullConstant);
-    }
-
-    private void indexNullLiterals(MethodInfo mi) {
-        if (mi.methodBody() == null) return;
-        mi.methodBody().visit(e -> {
-            if (e instanceof Lambda) return false;
-            if (e instanceof NullConstant nc) nullOwners.put(nc, mi);
-            return true;
-        });
-    }
 
     // a constant marker ('$_ceN', the link module's MarkerVariable, seen through the API) holding the null constant
     private static boolean isNullMarker(Variable v) {
@@ -3987,10 +2791,10 @@ public final class NullabilityPass {
                 // Kotlin: an override's return may not be wider than its overridden member's, so a null returned
                 // by an implementation makes an analysed type-variable return nullable too ('Holder<T>.get(): T?')
                 if (!isTypeVariable(overridden.returnType())
-                    || policy.callResults() && analysed.contains(overridden) && !nullableInstantiation(mi, overridden)) {
+                    || policy.callResults() && this.index.analysed.contains(overridden) && !Contracts.nullableInstantiation(mi, overridden)) {
                     graph.addEdge(mi, overridden);
                 }
-                if (policy.callResults() && analysed.contains(overridden)) {
+                if (policy.callResults() && this.index.analysed.contains(overridden)) {
                     invariantSlots(mi.returnType(), mi, overridden.returnType(), overridden, true);
                     int m = Math.min(mi.parameters().size(), overridden.parameters().size());
                     for (int i = 0; i < m; i++) {
@@ -4023,23 +2827,23 @@ public final class NullabilityPass {
             }
         }
         if (!mi.isConstructor()) {
-            String lib = libraryNullableReturn(mi);
-            if (lib != null && !mi.returnType().isVoid()) seed(mi, "overrides " + lib);
-            libraryNullableContent(mi, mi.returnType(), m -> m.analysis().getOrDefault(PropertyImpl.NULLABILITY_METHOD,
+            String lib = contracts.libraryNullableReturn(mi);
+            if (lib != null && !mi.returnType().isVoid()) seeds.seed(mi, "overrides " + lib);
+            contracts.libraryNullableContent(mi, mi.returnType(), m -> m.analysis().getOrDefault(PropertyImpl.NULLABILITY_METHOD,
                     ValueImpl.NullabilityImpl.UNSPECIFIED), MethodInfo::returnType);
             for (ParameterInfo pi : mi.parameters()) {
                 int index = pi.index();
                 starSlots(pi);
-                libraryNullableContent(pi, pi.parameterizedType(), m -> index < m.parameters().size()
+                contracts.libraryNullableContent(pi, pi.parameterizedType(), m -> index < m.parameters().size()
                         ? m.parameters().get(index).analysis().getOrDefault(PropertyImpl.NULLABILITY_PARAMETER,
                         ValueImpl.NullabilityImpl.UNSPECIFIED) : ValueImpl.NullabilityImpl.UNSPECIFIED,
                         m -> index < m.parameters().size() ? m.parameters().get(index).parameterizedType() : null);
-                String libParam = libraryNullableParameter(mi, pi.index());
+                String libParam = contracts.libraryNullableParameter(mi, pi.index());
                 if (libParam != null) {
-                    seed(pi, "overrides " + libParam);
+                    seeds.seed(pi, "overrides " + libParam);
                 } else if (policy.libraryCallbacks()) {
-                    String unhinted = libraryUnhintedParameter(mi, pi.index());
-                    if (unhinted != null) seed(pi, "overrides " + unhinted + ", which does not declare it non-null");
+                    String unhinted = contracts.libraryUnhintedParameter(mi, pi.index());
+                    if (unhinted != null) seeds.seed(pi, "overrides " + unhinted + ", which does not declare it non-null");
                 }
             }
             // JUnit injects null into every parameter of a parameterized test with a null source, a caller the
@@ -4050,19 +2854,19 @@ public final class NullabilityPass {
                 for (ParameterInfo pi : mi.parameters()) {
                     ParameterizedType type = pi.parameterizedType();
                     if (type.isPrimitiveExcludingVoid() && type.arrays() == 0) continue;
-                    seed(pi, "JUnit null source of " + mi.fullyQualifiedName());
+                    seeds.seed(pi, "JUnit null source of " + mi.fullyQualifiedName());
                 }
             }
         }
         // Policy.rejectionsNullable (#28): a Java caller's null should reach the method's own check; constructors too
         if (policy.rejectionsNullable()) {
             for (ParameterInfo pi : mi.parameters()) {
-                if (rejects(pi)) seed(pi, mi.fullyQualifiedName() + " rejects null with its own exception");
+                if (rejects(pi)) seeds.seed(pi, mi.fullyQualifiedName() + " rejects null with its own exception");
             }
         }
         if (mi.analysis().getOrDefault(PropertyImpl.DEGRADED_ANALYSIS_METHOD,
                 ValueImpl.BoolImpl.FALSE).isTrue()) {
-            degraded.add(mi);
+            contracts.degraded.add(mi);
         }
         // the body first: it declares the locals; the method's own variable data is the state at the end of the
         // body, in the body's scope
@@ -4196,7 +3000,7 @@ public final class NullabilityPass {
                     // links' transitive closure through calls, in a method that never writes that list (timefold
                     // DefaultConstructionHeuristicPhaseFactory.getBuilder, CodeLaser/maddi-mod#27 a). A null this
                     // method writes is kept, and so are the call-site writes ('list.add(x)', receiverSlots).
-                    if (slot && deepFace(link.from()) && !mi.equals(nullOwner(((LocalVariable) link.to()).assignmentExpression()))) {
+                    if (slot && deepFace(link.from()) && !mi.equals(seeds.nullOwner(((LocalVariable) link.to()).assignmentExpression()))) {
                         continue;
                     }
                     // a local assigned a value known non-null takes no null, whatever the closure links it to: in
@@ -4793,29 +3597,29 @@ public final class NullabilityPass {
         nestedAssignments(mi, scope, statement);
         if (statement instanceof ReturnStatement rs && !mi.isConstructor() && !mi.returnType().isVoid()) {
             callResult(mi, rs.expression());
-            seedCreated(mi, rs.expression(), mi);
+            seeds.seedCreated(mi, rs.expression(), mi);
             constructorCopies(mi, scope, mi, rs.expression());
         } else if (statement instanceof LocalVariableCreation lvc) {
             lvc.localVariableStream().forEach(lv -> {
                 Object local = local(mi, scope, lv.simpleName());
                 if (lv.assignmentExpression() instanceof NullConstant) {
-                    seed(local, "initialized null in " + mi.fullyQualifiedName(), mi.typeInfo());
+                    seeds.seed(local, "initialized null in " + mi.fullyQualifiedName(), mi.typeInfo());
                 }
                 callResult(local, lv.assignmentExpression());
-                seedCreated(local, lv.assignmentExpression(), mi);
+                seeds.seedCreated(local, lv.assignmentExpression(), mi);
                 constructorCopies(mi, scope, local, lv.assignmentExpression());
             });
         } else if (statement.expression() instanceof Assignment a && a.variableTarget() != null) {
             Object target = assignmentTarget(mi, scope, a.variableTarget());
-            if (a.value() instanceof NullConstant) seed(target, "assigned null in " + mi.fullyQualifiedName(), mi.typeInfo());
+            if (a.value() instanceof NullConstant) seeds.seed(target, "assigned null in " + mi.fullyQualifiedName(), mi.typeInfo());
             callResult(target, a.value());
-            seedCreated(target, a.value(), mi);
+            seeds.seedCreated(target, a.value(), mi);
             constructorCopies(mi, scope, target, a.value());
         } else if (statement instanceof ForEachStatement fe && fe.initializer() != null) {
             // for (T x : array): the elements flow into x
             Expression iterated = NonNullFacts.unwrap(fe.expression());
             Object array = iterated instanceof VariableExpression ve ? node(mi, scope, ve.variable())
-                    : iterated instanceof MethodCall mc && mc.methodInfo() != null && analysed.contains(mc.methodInfo())
+                    : iterated instanceof MethodCall mc && mc.methodInfo() != null && index.analysed.contains(mc.methodInfo())
                     ? mc.methodInfo() : null;
             // Kotlin: a library view ('for (Map.Entry<K, V> e : data.entrySet())') holds the receiver's data: the loop
             // variable's slots are the map's, so 'e.setValue(null)' writes it (jenkins DiskSpaceMonitorDescriptor.kt:38,
@@ -4844,9 +3648,9 @@ public final class NullabilityPass {
             if (e instanceof Lambda) return false;
             if (e instanceof Assignment a && a != top && a.variableTarget() != null && a.assignmentOperator() == null) {
                 Object target = assignmentTarget(mi, scope, a.variableTarget());
-                if (a.value() instanceof NullConstant) seed(target, "assigned null in " + mi.fullyQualifiedName(), mi.typeInfo());
+                if (a.value() instanceof NullConstant) seeds.seed(target, "assigned null in " + mi.fullyQualifiedName(), mi.typeInfo());
                 callResult(target, a.value());
-                seedCreated(target, a.value(), mi);
+                seeds.seedCreated(target, a.value(), mi);
                 nestedCopy(mi, scope, statement, target, a.value());
             }
             return true;
@@ -4880,7 +3684,7 @@ public final class NullabilityPass {
         // slots (instantiatedSlots)
         MethodInfo constructor = cc.constructor();
         ParameterizedType targetType = graph.typeOf(target);
-        if (!analysed.contains(constructor) || targetType == null || constructor.typeInfo().typeParameters().isEmpty()) {
+        if (!index.analysed.contains(constructor) || targetType == null || constructor.typeInfo().typeParameters().isEmpty()) {
             return;
         }
         List<ParameterInfo> parameters = constructor.parameters();
@@ -4904,7 +3708,7 @@ public final class NullabilityPass {
      */
     private Object viewArgument(MethodInfo mi, Scope scope, Expression argument) {
         if (VIEW_ARGUMENTS_OFF.get() || !(NonNullFacts.unwrap(argument) instanceof MethodCall mc) || mc.methodInfo() == null
-            || analysed.contains(mc.methodInfo()) || mc.methodInfo().isStatic() || mc.concreteReturnType() == null) {
+            || index.analysed.contains(mc.methodInfo()) || mc.methodInfo().isStatic() || mc.concreteReturnType() == null) {
             return null;
         }
         CallResult result = new CallResult(mc);
@@ -4957,7 +3761,7 @@ public final class NullabilityPass {
         Object node = argumentNode(mi, scope, expression);
         if (node != null) return new Arg(node, j);
         if (!(NonNullFacts.unwrap(expression) instanceof MethodCall mc) || mc.methodInfo() == null
-            || mc.methodInfo().isStatic() || mc.object() == null || analysed.contains(mc.methodInfo())) return null;
+            || mc.methodInfo().isStatic() || mc.object() == null || this.index.analysed.contains(mc.methodInfo())) return null;
         ParameterizedType rt = mc.methodInfo().returnType();
         if (rt.arrays() > 0 || j >= rt.parameters().size()) return null;
         ParameterizedType a = rt.parameters().get(j);
@@ -4988,7 +3792,7 @@ public final class NullabilityPass {
             int index = type == null ? -1 : slotIndex(type, callee.typeInfo(), rt.typeParameter().getIndex());
             return index < 0 ? null : new Arg(receiver, index);
         }
-        if (analysed.contains(callee) && !rt.isVoid()) return callee;
+        if (this.index.analysed.contains(callee) && !rt.isVoid()) return callee;
         return null;
     }
 
@@ -5003,7 +3807,7 @@ public final class NullabilityPass {
         }
         if (object instanceof VariableExpression ve) return node(mi, scope, ve.variable());
         if (object instanceof MethodCall getter && getter.methodInfo() != null
-            && analysed.contains(getter.methodInfo()) && !getter.methodInfo().isConstructor()
+            && index.analysed.contains(getter.methodInfo()) && !getter.methodInfo().isConstructor()
             && concreteArguments(getter.methodInfo().returnType())) {
             return getter.methodInfo();
         }
@@ -5188,7 +3992,7 @@ public final class NullabilityPass {
         Expression f = NonNullFacts.unwrap(function);
         if (f instanceof MethodReference mr && mr.methodInfo() != null) {
             MethodInfo m = mr.methodInfo();
-            return !m.isConstructor() && !m.returnType().isVoid() && analysed.contains(m) ? List.of(m) : List.of();
+            return !m.isConstructor() && !m.returnType().isVoid() && index.analysed.contains(m) ? List.of(m) : List.of();
         }
         if (!(f instanceof Lambda lambda) || lambda.methodInfo() == null) return List.of();
         Expression body = lambda.singleExpression();
@@ -5255,270 +4059,6 @@ public final class NullabilityPass {
         return streamTerminal(mi, scope, expression).getOrDefault(j, List.of());
     }
 
-    /*
-     'new T[n]' (no initializer) holds nulls until filled: Kotlin's arrayOfNulls. With fewer dimension expressions
-     than dimensions ('new T[n][]') the inner arrays are null; else the innermost reference elements are. Returns the
-     depth of the Content that is null, 0 when the expression is not such a creation.
-     */
-    private static int arrayCreatedWithNulls(Expression value) {
-        // the front end's array creation is a ConstructorCall of a synthetic constructor, with the array's type
-        if (!(NonNullFacts.unwrap(value) instanceof ConstructorCall cc) || cc.arrayInitializer() != null) return 0;
-        ParameterizedType type = cc.parameterizedType();
-        if (type == null || type.arrays() == 0) return 0;
-        List<Expression> sizes = cc.parameterExpressions().stream().filter(e -> !e.isEmpty()).toList();
-        // 'new T[0]': no elements (guava's EMPTY_ARRAY)
-        if (!sizes.isEmpty() && sizes.getFirst() instanceof io.codelaser.maddi.cst.api.expression.IntConstant ic
-            && ic.constant() == 0) return 0;
-        int dimensions = sizes.size();
-        if (dimensions > 0 && dimensions < type.arrays()) return dimensions;
-        boolean primitive = type.copyWithoutArrays().isPrimitiveExcludingVoid();
-        return primitive ? 0 : type.arrays();
-    }
-
-    /*
-     'T[] a = new T[n]; for (int i = 0; i < n; i++) { ... a[i] = v; ... }': every element is written before anything
-     reads the array, so the creation leaves no null; each 'v' flows into the elements through the links. Only a
-     one-dimensional creation, followed directly by the loop: from 0, while i < n (the same size expression) or
-     i < a.length, one step at a time, with 'a[i] = ...' as a statement of the body itself, and no break, continue
-     or return in the body, and no other assignment to i. Guava 2026-10-07: 'TypeResolver.resolveTypes' and the like.
-     */
-    private void indexFills(Block block) {
-        List<Statement> statements = block.statements();
-        for (int i = 0; i < statements.size(); i++) {
-            Statement statement = statements.get(i);
-            {
-                Variable array = null;
-                Expression init = null;
-                if (statement instanceof LocalVariableCreation lvc) {
-                    List<LocalVariable> locals = lvc.localVariableStream().toList();
-                    if (locals.size() == 1) {
-                        array = locals.getFirst();
-                        init = locals.getFirst().assignmentExpression();
-                    }
-                } else if (!FIELD_FILLS_OFF.get() && statement instanceof ExpressionAsStatement eas
-                           && eas.expression() instanceof Assignment a && a.assignmentOperator() == null
-                           && (a.variableTarget() instanceof FieldReference || a.variableTarget() instanceof LocalVariable)) {
-                    // `this.workers = new Worker[n]; for (...) workers[i] = new Worker();` in a constructor (nacos's
-                    // NacosExecuteTaskExecuteEngine, CodeLaser/maddi-mod#22 gap 4), or a local assigned after its declaration
-                    array = a.variableTarget();
-                    init = a.value();
-                }
-                if (init != null && arrayCreatedWithNulls(init) == 1
-                    && NonNullFacts.unwrap(init) instanceof ConstructorCall cc
-                    && (fillingLoop(statements, i, array) instanceof ForStatement loop
-                        && fills(loop, array, cc.parameterExpressions().getFirst())
-                        || !COUNTED_FILLS_OFF.get() && countedFill(statements, i, array, cc.parameterExpressions().getFirst()))) {
-                    filledCreations.add(init);
-                }
-            }
-            statement.subBlockStream().forEach(this::indexFills);
-            statement.visit(e -> {
-                if (e instanceof SwitchExpression se) {
-                    se.entries().forEach(entry -> {
-                        if (entry.statement() instanceof Block arm) indexFills(arm);
-                    });
-                }
-                return !(e instanceof Block) && !(e instanceof Lambda);
-            });
-        }
-    }
-
-    /*
-     The statement after the creation, or after the sibling creations that follow it: 'var left = new Function[n];
-     var types = new JoinerType[n]; var right = new Function[n]; for (int i = 0; i < n; i++) { left[i] = ..; .. }'
-     fills all three (timefold DefaultBiJoiner.reorderedEqualsFirst, whose null elements let Joiners' mapping
-     parameters tolerate null, #68: 23 C# warnings, test-manager 2026-10-30). A sibling is a local of its own
-     initialised with an array creation, not mentioning the array. Gate NOSIBLINGFILLS: the next statement only.
-     */
-    private Statement fillingLoop(List<Statement> statements, int creation, Variable array) {
-        int j = creation + 1;
-        while (!SIBLING_FILLS_OFF.get() && j < statements.size()
-               && statements.get(j) instanceof LocalVariableCreation lvc && lvc.localVariableStream().count() == 1
-               && NonNullFacts.unwrap(lvc.localVariableStream().findFirst().orElseThrow().assignmentExpression())
-                       instanceof ConstructorCall sibling
-               && sibling.parameterizedType() != null && sibling.parameterizedType().arrays() > 0
-               && !mentionsInStatement(lvc, array)) {
-            j++;
-        }
-        return j < statements.size() ? statements.get(j) : null;
-    }
-
-    private static final Switches.Gate SIBLING_FILLS_OFF = Switches.gate("NOSIBLINGFILLS");
-
-    private static boolean fills(ForStatement loop, Variable array,
-                                 Expression size) {
-        if (loop.initializers().size() != 1 || !(loop.initializers().getFirst() instanceof LocalVariableCreation init)
-            || init.localVariableStream().count() != 1) return false;
-        LocalVariable index = init.localVariableStream().findFirst().orElseThrow();
-        if (!(index.assignmentExpression() instanceof io.codelaser.maddi.cst.api.expression.IntConstant zero)
-            || zero.constant() != 0) return false;
-        if (!(NonNullFacts.unwrap(loop.expression()) instanceof BinaryOperator bo) || bo.operator() == null
-            || !"<".equals(bo.operator().name()) || !isVariable(bo.lhs(), index)) return false;
-        Expression bound = NonNullFacts.unwrap(bo.rhs());
-        boolean sameBound = bound.equals(NonNullFacts.unwrap(size))
-                            || bound instanceof io.codelaser.maddi.cst.api.expression.ArrayLength length
-                               && isVariable(length.scope(), array);
-        if (!sameBound || loop.updaters().size() != 1 || !(loop.updaters().getFirst() instanceof Assignment step)
-            || !index.equals(step.variableTarget()) || !step.assignmentOperatorIsPlus()
-            || step.prefixPrimitiveOperator() == null
-               && !(step.value() instanceof io.codelaser.maddi.cst.api.expression.IntConstant one && one.constant() == 1)) {
-            return false;
-        }
-        boolean[] escapes = {false};
-        loop.block().visit(e -> {
-            if (e instanceof Lambda) return false;
-            // a return leaves a local array unread unless it hands the array out: 'if (x == null) return null;'
-            // (timefold SolverMetricUtil.extractScore, CodeLaser/maddi-mod#27 1); a field keeps what was filled
-            boolean returnsArray = e instanceof ReturnStatement rs
-                                   && (!(array instanceof LocalVariable) || rs.expression() != null
-                                                                            && mentions(rs.expression(), array));
-            if (e instanceof BreakOrContinueStatement || returnsArray
-                || e instanceof Assignment a && index.equals(a.variableTarget())) escapes[0] = true;
-            return !escapes[0];
-        });
-        if (escapes[0]) return false;
-        return loop.block().statements().stream().anyMatch(st -> st instanceof ExpressionAsStatement eas
-                && eas.expression() instanceof Assignment a && a.assignmentOperator() == null
-                && a.variableTarget() instanceof DependentVariable dv
-                && isVariable(dv.arrayExpression(), array) && isVariable(dv.indexExpression(), index));
-    }
-
-    /*
-     'T[] a = new T[c.size()]; ... int k = 0; ... for (X x : c) { ... a[k++] = v; ... }': one element per element of
-     the collection, so the creation leaves no null (guava's RegularImmutableMultiset.create, whose entryArray became
-     Array<ImmutableEntry<E>?> and with it IndexedImmutableSet.get's E?, worktree-maddi-all 2026-10-27). The size is
-     'c.size()' or a local holding it; the statements between do not mention the array, except an
-     'if (size == 0) return ...;' (no element to fill); the counter is a local declared there from 0, written only by
-     the one 'a[k++] = v', a statement of the loop's own body; no break, continue, or return handing out the array.
-     Gate NOCOUNTEDFILLS.
-     */
-    private static boolean countedFill(List<Statement> statements, int creation, Variable array, Expression size) {
-        Expression sizeExpression = NonNullFacts.unwrap(size);
-        Variable sizeLocal = null;
-        if (sizeExpression instanceof VariableExpression sv && sv.variable() instanceof LocalVariable lv
-            && lv.assignmentExpression() != null) {
-            sizeLocal = lv;
-            sizeExpression = NonNullFacts.unwrap(lv.assignmentExpression());
-        }
-        if (!(sizeExpression instanceof MethodCall mc) || !"size".equals(mc.methodInfo().name())
-            || !mc.parameterExpressions().isEmpty()
-            || !(NonNullFacts.unwrap(mc.object()) instanceof VariableExpression cv)) return false;
-        Variable collection = cv.variable();
-        Set<Variable> counters = new HashSet<>();
-        for (int j = creation + 1; j < statements.size(); j++) {
-            Statement st = statements.get(j);
-            if (st instanceof ForEachStatement fe && isVariable(fe.expression(), collection)) {
-                return countedLoop(fe, array, counters);
-            }
-            if (writes(st, collection) || sizeLocal != null && writes(st, sizeLocal)) return false;
-            for (Variable counter : counters) if (writes(st, counter)) return false;
-            if (st instanceof LocalVariableCreation lvc) {
-                for (LocalVariable lv : lvc.localVariableStream().toList()) {
-                    if (lv.parameterizedType().isInt() && lv.assignmentExpression() instanceof
-                            io.codelaser.maddi.cst.api.expression.IntConstant zero && zero.constant() == 0) {
-                        counters.add(lv);
-                    }
-                }
-            }
-            if (mentionsInStatement(st, array) && !emptyReturn(st, sizeLocal, sizeExpression)) return false;
-        }
-        return false;
-    }
-
-    // 'if (n == 0) return ...;' without else: the array has no element yet to fill
-    private static boolean emptyReturn(Statement st, Variable sizeLocal, Expression sizeCall) {
-        if (!(st instanceof io.codelaser.maddi.cst.api.statement.IfElseStatement ifs)
-            || ifs.elseBlock() != null && !ifs.elseBlock().isEmpty()
-            || ifs.block().statements().size() != 1 || !(ifs.block().statements().getFirst() instanceof ReturnStatement)
-            || !(NonNullFacts.unwrap(ifs.expression()) instanceof BinaryOperator bo) || bo.operator() == null
-            || !"==".equals(bo.operator().name())
-            || !(NonNullFacts.unwrap(bo.rhs()) instanceof io.codelaser.maddi.cst.api.expression.IntConstant zero)
-            || zero.constant() != 0) return false;
-        Expression lhs = NonNullFacts.unwrap(bo.lhs());
-        return sizeLocal != null ? isVariable(lhs, sizeLocal) : lhs.equals(sizeCall);
-    }
-
-    private static boolean countedLoop(ForEachStatement loop, Variable array, Set<Variable> counters) {
-        Variable[] counter = {null};
-        for (Statement st : loop.block().statements()) {
-            if (st instanceof ExpressionAsStatement eas && eas.expression() instanceof Assignment a
-                && a.assignmentOperator() == null && a.variableTarget() instanceof DependentVariable dv
-                && isVariable(dv.arrayExpression(), array)
-                && NonNullFacts.unwrap(dv.indexExpression()) instanceof Assignment step
-                && Boolean.FALSE.equals(step.prefixPrimitiveOperator()) && step.assignmentOperatorIsPlus()
-                && counters.contains(step.variableTarget())) {
-                if (counter[0] != null) return false;
-                counter[0] = step.variableTarget();
-            }
-        }
-        if (counter[0] == null) return false;
-        boolean[] escapes = {false};
-        int[] steps = {0};
-        loop.block().visit(e -> {
-            if (e instanceof Lambda) return false;
-            if (e instanceof BreakOrContinueStatement
-                || e instanceof ReturnStatement rs && rs.expression() != null && mentions(rs.expression(), array)) {
-                escapes[0] = true;
-            }
-            if (e instanceof Assignment a && counter[0].equals(a.variableTarget()) && ++steps[0] > 1) escapes[0] = true;
-            return !escapes[0];
-        });
-        return !escapes[0];
-    }
-
-    private static boolean writes(Statement st, Variable v) {
-        boolean[] found = {false};
-        st.visit(e -> {
-            if (e instanceof Assignment a && v.equals(a.variableTarget())) found[0] = true;
-            return !found[0];
-        });
-        return found[0];
-    }
-
-    private static boolean mentionsInStatement(Statement st, Variable v) {
-        boolean[] found = {false};
-        st.visit(e -> {
-            if (e instanceof VariableExpression ve && sameVariable(ve.variable(), v)) found[0] = true;
-            return !found[0];
-        });
-        return found[0];
-    }
-
-    // gate NOCOUNTEDFILLS: a creation filled by a counted for-each keeps its null elements (A/B)
-    private static final Switches.Gate COUNTED_FILLS_OFF = Switches.gate("NOCOUNTEDFILLS");
-
-    private void seedCreated(Object target, Expression value, MethodInfo mi) {
-        if (target == null || value == null) return;
-        int depth = filledCreations.contains(value) ? 0 : arrayCreatedWithNulls(value);
-        if (depth > 0) {
-            Object content = target;
-            for (int d = 0; d < depth; d++) content = new Content(content);
-            seed(content, "array created with null elements in " + where(mi), writer(mi));
-        }
-        Expression unwrapped = NonNullFacts.unwrap(value);
-        ArrayInitializer initializer = unwrapped instanceof ArrayInitializer ai ? ai
-                : unwrapped instanceof ConstructorCall cc ? cc.arrayInitializer() : null;
-        if (initializer != null) seedInitializer(new Content(target), initializer, mi);
-    }
-
-    /*
-     An array initializer, at any depth: a null element seeds the elements, a nested initializer or creation is
-     walked one level down. The links have this index-precisely for a method's own arrays, but not for a field
-     initializer ('int[][][] t = {{null, null}, null}'), which no method's variable data holds.
-     */
-    private void seedInitializer(Content elements, ArrayInitializer initializer, MethodInfo mi) {
-        for (Expression element : initializer.expressions()) {
-            // also an alternative of the element: '{…, monitor ? "1" : null}' (fernflower FlattenStatementsHelper)
-            for (Expression e : alternatives(element)) {
-                if (NonNullFacts.unwrap(e) instanceof NullConstant) {
-                    seed(elements, "null in an array initializer in " + where(mi), writer(mi));
-                } else {
-                    seedCreated(elements, e, mi);
-                }
-            }
-        }
-    }
-
     // a call's result used directly: a library method that may return null, or (Policy.contracts) an analysed one
     // annotated nullable, seeds. Neither leaves a null marker in the link summary. NOT a general edge from every
     // analysed callee's return: on guava that carried the flow-insensitivity of 'v = get(k); if (v == null) ...'
@@ -5573,7 +4113,7 @@ public final class NullabilityPass {
                     // a library method only: an analysed one's parameter elements are tied to every caller's
                     // array, and its body decides its result ('ImmutableList.copyOf(E[])' had carried the tests'
                     // nulls into Types.TypeVariableImpl.bounds, Files.FileByteSink.modes; guava 2026-10-17)
-                    if (analysed.contains(arrayCall.methodInfo())) continue;
+                    if (index.analysed.contains(arrayCall.methodInfo())) continue;
                     arrayElementsPassedThrough(arrayCall).forEach((source, k) -> {
                         Object node = argumentNode(readScope.mi(), readScope.scope(), source);
                         if (node == null) return;
@@ -5592,7 +4132,7 @@ public final class NullabilityPass {
                 }
             }
         }
-        if (analysed.contains(callee) && !callee.isConstructor() && !callee.returnType().isVoid()) {
+        if (index.analysed.contains(callee) && !callee.isConstructor() && !callee.returnType().isVoid()) {
             ParameterizedType rt = callee.returnType();
             // the same object: its content slots are one (coupleContent); not where the callee's type arguments are
             // type variables, which each call instantiates anew. An array's elements are the callee's whatever its
@@ -5654,7 +4194,7 @@ public final class NullabilityPass {
             graph.flows.add(List.of(accumulator.methodInfo().parameters().getFirst(), target));
         }
         if (readScope != null && argumentNode(readScope.mi(), readScope.scope(), unwrapped) instanceof Arg slot) {
-            if (!analysed.contains(callee)) {
+            if (!index.analysed.contains(callee)) {
                 graph.flows.add(List.of(slot, target)); // 'x = map.get(k)': x is the map's value, its slots are the value's
             }
             // Kotlin: the value read is the receiver's slot ('block = blocks.getWithKey(j)', 'st = stats.get(0)' on a
@@ -5663,19 +4203,19 @@ public final class NullabilityPass {
         }
         // 'x = map.get(k)' with k known present (NonNullFacts, CodeLaser/maddi-mod#22 gap 1): not the absent key's null; what
         // the map holds for k still flows through its value slot above
-        String lib = libraryNullableCall(mc);
+        String lib = contracts.libraryNullableCall(mc);
         if (lib != null) {
             // not a member Kotlin itself types nullable ('Map.get(k): V?'): the local must then be declared so
             if (!(target instanceof Local && seedStatement != null && deadNullAssignments.contains(seedStatement)
                   && java.util.stream.Stream.concat(java.util.stream.Stream.of(callee), overrides(callee).stream())
-                          .noneMatch(m -> KOTLIN_COLLECTIONS.contains(m.typeInfo().fullyQualifiedName())))) {
-                seedIndirect(target, "assigned " + lib);
+                          .noneMatch(m -> Contracts.KOTLIN_COLLECTIONS.contains(m.typeInfo().fullyQualifiedName())))) {
+                seeds.seedIndirect(target, "assigned " + lib);
             } else if (!GUARDED_LOCALS_OFF.get()) {
                 guardedLocals.add(target);
             }
-        } else if (policy.contracts() && analysed.contains(callee)
-                   && explicitState(callee) == NullableState.NULLABLE) {
-            seed(target, "assigned " + callee.fullyQualifiedName() + ", annotated nullable");
+        } else if (policy.contracts() && index.analysed.contains(callee)
+                   && contracts.explicitState(callee) == NullableState.NULLABLE) {
+            seeds.seed(target, "assigned " + callee.fullyQualifiedName() + ", annotated nullable");
         }
     }
 
@@ -5761,7 +4301,7 @@ public final class NullabilityPass {
     private void inferredNull(Object target, CallTarget ct, MethodCall mc, int i) {
         Expression argument = NonNullFacts.unwrap(mc.parameterExpressions().get(i));
         if (argument instanceof NullConstant) {
-            seed(target, NULL_ARGUMENT + ct.mi().fullyQualifiedName(), ct.mi().typeInfo());
+            seeds.seed(target, Seeds.NULL_ARGUMENT + ct.mi().fullyQualifiedName(), ct.mi().typeInfo());
         } else if (argument instanceof VariableExpression ve) {
             if (facts.nonNullWhenCalled(mc, ve.variable())) return;
             Object node = node(ct.mi(), ct.scope(), ve.variable());
@@ -5769,8 +4309,8 @@ public final class NullabilityPass {
         } else if (argument instanceof MethodCall inner && inner.methodInfo() != null) {
             Object node = argumentNode(ct.mi(), ct.scope(), inner);
             if (node != null) graph.addEdge(node, target);
-            String lib = libraryNullableCall(inner);
-            if (lib != null) seedIndirect(target, "assigned " + lib);
+            String lib = contracts.libraryNullableCall(inner);
+            if (lib != null) seeds.seedIndirect(target, "assigned " + lib);
         }
     }
 
@@ -5875,7 +4415,7 @@ public final class NullabilityPass {
         // List<T?>, where 'T[] castBuffer = buffer' is guava's own @SuppressWarnings("nullness") assertion. Nor in a
         // test: OrderingTest's 'newArray(strictlyOrderedElements, 0)' reached Ordering.max's 'E... rest', shared by
         // every caller, and made the min/max family's results nullable (guava 2026-10-17)
-        if (!analysed.contains(callee) || testCode(readScope.mi())) return;
+        if (!index.analysed.contains(callee) || testCode(readScope.mi())) return;
         ParameterizedType rt = callee.returnType();
         if (rt.arrays() != 1 || !isMethodTypeVariable(rt)) return;
         List<ParameterInfo> parameters = callee.parameters();
@@ -5929,7 +4469,7 @@ public final class NullabilityPass {
             return;
         }
         MethodInfo callee = mc.methodInfo();
-        if (analysed.contains(callee)) return;
+        if (index.analysed.contains(callee)) return;
         ParameterizedType returnType = callee.returnType();
         ParameterizedType targetType = graph.typeOf(target);
         if (returnType.arrays() > 0 || returnType.parameters().isEmpty() || targetType == null
@@ -5951,16 +4491,16 @@ public final class NullabilityPass {
                 if (stateOf(p, PropertyImpl.NULLABILITY_PARAMETER) == NullableState.NULLABLE) continue;
                 Expression argument = arguments.get(a);
                 if (rejectsNull(callee)) {
-                    seedCreated(slot, argument, mi); // the elements of an array stored as one ('new Integer[]{null}')
+                    seeds.seedCreated(slot, argument, mi); // the elements of an array stored as one ('new Integer[]{null}')
                     Object source = readScope == null ? null : argumentNode(readScope.mi(), readScope.scope(), argument);
                     if (source != null) graph.flows.add(List.of(source, slot)); // its content slots still are the slot's
                     continue;
                 }
                 if (NonNullFacts.unwrap(argument) instanceof NullConstant) {
-                    seed(slot, "null passed to " + callee.fullyQualifiedName() + " in " + where(mi), writer(mi));
+                    seeds.seed(slot, "null passed to " + callee.fullyQualifiedName() + " in " + where(mi), writer(mi));
                     continue;
                 }
-                seedCreated(slot, argument, mi);
+                seeds.seedCreated(slot, argument, mi);
                 Object source = readScope == null ? null : argumentNode(readScope.mi(), readScope.scope(), argument);
                 if (source != null) {
                     // M4: a variable known non-null at the call carries no null into the slot ('textSegment == null
@@ -5990,67 +4530,6 @@ public final class NullabilityPass {
                    || type.startsWith("com.google.common.collect.Immutable"));
     }
 
-    private String nullableLibraryCall(Expression e) {
-        Expression unwrapped = e instanceof Cast c ? c.expression() : e;
-        if (unwrapped instanceof MethodCall mc && mc.methodInfo() != null) return libraryNullableCall(mc);
-        return null;
-    }
-
-    /*
-     A library call that may return null, at this call: not 'map.get(k)' with k known present (NonNullFacts,
-     CodeLaser/maddi-mod#22 gap 1), not 'x.m()' after its own null test (gap 8: 'if (ioe.getMessage() != null) {
-     String errMsg = ioe.getMessage(); ...'), not 'computeIfAbsent(k, X::new)', not 'TL.get()' on a
-     'ThreadLocal.withInitial(X::new)' (gap 1's residue), not 'getClassLoader()' on the class of a type of this analysis, which the
-     bootstrap loader never loads ('getClass().getClassLoader()', 'X.class.getClassLoader()'; nacos 2026-10-10).
-     */
-    private String libraryNullableCall(MethodCall mc) {
-        if (mc.methodInfo() != null && !analysed.contains(mc.methodInfo())) lookups.add(mc);
-        if (mc.methodInfo() == null || facts.keyPresentWhenCalled(mc) || presentLookups.contains(mc)
-            || facts.pureCallNonNullWhenCalled(mc)
-            || NonNullFacts.computedNonNull(mc) || NonNullFacts.initialThreadLocal(mc)
-            || applicationClassLoader(mc) || standardSystemProperty(mc)) return null;
-        return libraryNullableReturn(mc.methodInfo());
-    }
-
-    /*
-     The keys System.getProperties() guarantees (its javadoc's table): 'System.getProperty("os.name")' is never null
-     (nacos, CodeLaser/maddi-mod#22, after gap 9). A key known only at run time stays the library's null.
-     */
-    private static final Set<String> STANDARD_PROPERTIES = Set.of("java.version", "java.version.date", "java.vendor",
-            "java.vendor.url", "java.home", "java.vm.specification.version", "java.vm.specification.vendor",
-            "java.vm.specification.name", "java.vm.version", "java.vm.vendor", "java.vm.name",
-            "java.specification.version", "java.specification.vendor", "java.specification.name",
-            "java.class.version", "java.class.path", "java.library.path", "java.io.tmpdir", "os.name", "os.arch",
-            "os.version", "file.separator", "path.separator", "line.separator", "user.name", "user.home", "user.dir",
-            "native.encoding", "file.encoding");
-
-    private static boolean standardSystemProperty(MethodCall mc) {
-        return "java.lang.System.getProperty(String)".equals(mc.methodInfo().fullyQualifiedName())
-               && NonNullFacts.unwrap(mc.parameterExpressions().getFirst()) instanceof StringConstant sc
-               && STANDARD_PROPERTIES.contains(sc.constant());
-    }
-
-    private boolean applicationClassLoader(MethodCall mc) {
-        if (!"java.lang.Class.getClassLoader()".equals(mc.methodInfo().fullyQualifiedName())) return false;
-        Expression receiver = mc.object() == null ? null : NonNullFacts.unwrap(mc.object());
-        ParameterizedType classOf = null;
-        if (receiver instanceof ClassExpression ce) {
-            classOf = ce.type();
-            if (classOf != null && classOf.typeInfo() != null && "java.lang.Class".equals(classOf.typeInfo()
-                    .fullyQualifiedName()) && !classOf.parameters().isEmpty()) {
-                classOf = classOf.parameters().getFirst();
-            }
-        } else if (receiver instanceof MethodCall getClass && getClass.methodInfo() != null
-                   && "getClass".equals(getClass.methodInfo().name()) && getClass.parameterExpressions().isEmpty()) {
-            Expression of = getClass.object() == null ? null : NonNullFacts.unwrap(getClass.object());
-            if (of == null || of instanceof VariableExpression ve && ve.variable() instanceof This) return true;
-            classOf = of.parameterizedType();
-        }
-        if (classOf == null || classOf.arrays() > 0 || classOf.typeInfo() == null) return false;
-        TypeInfo primary = classOf.typeInfo().primaryType();
-        return analysed.stream().anyMatch(m -> m.typeInfo().primaryType().equals(primary));
-    }
-
     // in Java only == and != take a null operand
     private void nullTest(MethodInfo mi, Scope scope, BinaryOperator bo) {
         // NOT excluded: 'if (p == null) throw ...'. Guava annotates such checking parameters @Nullable (the method's
@@ -6060,176 +4539,9 @@ public final class NullabilityPass {
         if (other instanceof VariableExpression ve) {
             Object node = node(mi, scope, ve.variable());
             if (node instanceof ParameterInfo || node instanceof FieldInfo) {
-                seedIndirect(node, "compared with null in " + mi.fullyQualifiedName(), mi.typeInfo());
+                seeds.seedIndirect(node, "compared with null in " + mi.fullyQualifiedName(), mi.typeInfo());
             }
         }
-    }
-
-    // ------------------------------------------------------------------ keyed maps (CodeLaser/maddi-mod#22 gap 2)
-
-    // gate NOKEYEDMAPS: a map field's values stay one slot for all keys (A/B)
-    private static final Switches.Gate KEYED_MAPS_OFF = Switches.gate("NOKEYEDMAPS");
-
-    /** An accessor of a keyed map: {@code get(key)} returning the value, or {@code put(key, value)}. */
-    record KeyedAccessor(FieldInfo field, int keyIndex, int valueIndex) {
-    }
-
-    private static final Set<String> KEYED_MAP_READS = Set.of("get", "containsKey", "containsValue", "size", "isEmpty",
-            "toString", "hashCode", "equals", "keySet", "values", "forEach", "remove", "clear");
-
-    /*
-     A final map field qualifies when every use the analysed code makes of it is seen: the receiver of a read, of a
-     removal, of 'get(k)' or 'put(k, v)', the target of its initialisation with an empty new map, an operand of a
-     string concatenation. Anything else (passed on, returned, assigned elsewhere, 'putAll', 'compute', 'entrySet'
-     whose entries can be set) may put a value under any key: the field's values stay one slot. An accessor is a
-     method whose single statement is 'return field.get(k)' or 'field.put(k, v)' with its own parameters; its callers
-     write or read the key they pass.
-     */
-    private void indexKeyedMaps(List<MethodInfo> methods, List<FieldInfo> fields) {
-        if (KEYED_MAPS_OFF.get()) return;
-        Map<FieldInfo, Boolean> candidates = new HashMap<>();
-        for (FieldInfo fi : fields) {
-            ParameterizedType type = fi.type();
-            if (!fi.isFinal() || type.arrays() > 0 || type.parameters().size() != 2 || !isMap(type)
-                || isTypeVariable(type.parameters().get(1))) continue;
-            Expression initializer = fi.initializer();
-            if (initializer != null && !initializer.isEmpty() && !emptyNewMap(initializer)) continue;
-            candidates.put(fi, true);
-        }
-        if (candidates.isEmpty()) return;
-        java.util.Set<Element> accounted = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
-        Map<MethodInfo, KeyedAccessor> putters = new HashMap<>();
-        Map<MethodInfo, KeyedAccessor> getters = new HashMap<>();
-        for (MethodInfo mi : methods) {
-            if (mi.methodBody() == null) continue;
-            mi.methodBody().visit(e -> {
-                switch (e) {
-                    case MethodCall mc when mc.object() != null && candidateField(mc.object(), candidates) != null -> {
-                        FieldInfo fi = candidateField(mc.object(), candidates);
-                        accounted.add(NonNullFacts.unwrap(mc.object()));
-                        String name = mc.methodInfo() == null ? "" : mc.methodInfo().name();
-                        int n = mc.parameterExpressions().size();
-                        if ("put".equals(name) && n == 2) {
-                            KeyedAccessor a = accessor(mi, mc, fi, true);
-                            if (a != null) putters.put(mi, a);
-                        } else if ("get".equals(name) && n == 1) {
-                            KeyedAccessor a = accessor(mi, mc, fi, false);
-                            if (a != null) getters.put(mi, a);
-                        } else if (!KEYED_MAP_READS.contains(name)) {
-                            candidates.put(fi, false);
-                        }
-                    }
-                    case Assignment a when a.variableTarget() instanceof FieldReference fr
-                                           && candidates.containsKey(fr.fieldInfo()) -> {
-                        accounted.add(a.target());
-                        if (!emptyNewMap(a.value())) candidates.put(fr.fieldInfo(), false);
-                    }
-                    // a string concatenation reads the map's toString(); also when the parser gives a plain '+'
-                    case io.codelaser.maddi.cst.api.expression.BinaryOperator bo when bo instanceof StringConcat
-                            || bo.parameterizedType() != null && bo.parameterizedType().arrays() == 0
-                               && bo.parameterizedType().typeInfo() != null
-                               && "java.lang.String".equals(bo.parameterizedType().typeInfo().fullyQualifiedName()) -> {
-                        if (candidateField(bo.lhs(), candidates) != null) accounted.add(NonNullFacts.unwrap(bo.lhs()));
-                        if (candidateField(bo.rhs(), candidates) != null) accounted.add(NonNullFacts.unwrap(bo.rhs()));
-                    }
-                    default -> {
-                    }
-                }
-                return true;
-            });
-        }
-        for (MethodInfo mi : methods) {
-            if (mi.methodBody() == null) continue;
-            mi.methodBody().visit(e -> {
-                if (e instanceof VariableExpression ve && ve.variable() instanceof FieldReference fr
-                    && candidates.containsKey(fr.fieldInfo()) && !accounted.contains(ve)) {
-                    candidates.put(fr.fieldInfo(), false); // a use not seen through: the map escapes
-                }
-                return true;
-            });
-        }
-        candidates.forEach((fi, ok) -> {
-            if (ok) keyedSlots.put(fi, new Arg(fi, 1));
-        });
-        putters.forEach((mi, a) -> {
-            if (keyedSlots.containsKey(a.field())) keyedPutters.put(mi, a);
-        });
-        // a getter some override replaces does not return the key's value
-        getters.forEach((mi, a) -> {
-            if (keyedSlots.containsKey(a.field()) && !implementations.containsKey(mi)
-                && (policy.world() == World.CLOSED || !overridable(mi))) {
-                keyedGetters.put(mi, a);
-            }
-        });
-    }
-
-    private static boolean overridable(MethodInfo mi) {
-        return !mi.isStatic() && !mi.access().isPrivate() && !mi.isFinal() && !mi.typeInfo().isFinal();
-    }
-
-    private static FieldInfo candidateField(Expression e, Map<FieldInfo, Boolean> candidates) {
-        return NonNullFacts.unwrap(e) instanceof VariableExpression ve && ve.variable() instanceof FieldReference fr
-               && candidates.containsKey(fr.fieldInfo()) ? fr.fieldInfo() : null;
-    }
-
-    private static boolean emptyNewMap(Expression e) {
-        return NonNullFacts.unwrap(e) instanceof ConstructorCall cc && cc.parameterExpressions().isEmpty()
-               && cc.anonymousClass() == null;
-    }
-
-    private static boolean isMap(ParameterizedType pt) {
-        TypeInfo ti = pt.typeInfo();
-        if (ti == null) return false;
-        return "java.util.Map".equals(ti.fullyQualifiedName())
-               || ti.superTypesExcludingJavaLangObject().stream()
-                       .anyMatch(t -> "java.util.Map".equals(t.fullyQualifiedName()));
-    }
-
-    // 'return field.get(k)' / 'field.put(k, v)' as the method's only statement, k (and v) its own parameters
-    private static KeyedAccessor accessor(MethodInfo mi, MethodCall mc, FieldInfo fi, boolean put) {
-        Block body = mi.methodBody();
-        if (body == null || body.statements().size() != 1) return null;
-        Statement only = body.statements().getFirst();
-        Expression whole = only instanceof ReturnStatement rs ? rs.expression()
-                : only instanceof ExpressionAsStatement eas ? eas.expression() : null;
-        if (whole == null || NonNullFacts.unwrap(whole) != mc) return null;
-        if (!put && !(only instanceof ReturnStatement)) return null;
-        int key = ownParameter(mi, mc.parameterExpressions().getFirst());
-        int value = put ? ownParameter(mi, mc.parameterExpressions().get(1)) : -1;
-        if (key < 0 || put && value < 0) return null;
-        return new KeyedAccessor(fi, key, value);
-    }
-
-    private static int ownParameter(MethodInfo mi, Expression e) {
-        return NonNullFacts.unwrap(e) instanceof VariableExpression ve && ve.variable() instanceof ParameterInfo pi
-               && pi.methodInfo() == mi ? pi.index() : -1;
-    }
-
-    /*
-     The key a constant expression stands for, by value: a literal, or a static final field whose initializer is one
-     (FieldConstant.DATA_ID and "dataId" are the same key), or an enum constant (equal only to itself). Null when not
-     a constant: a key computed at run time can be any key.
-     */
-    static Object keyOf(Expression e) {
-        return keyOf(e, 0);
-    }
-
-    private static Object keyOf(Expression e, int depth) {
-        Expression x = NonNullFacts.unwrap(e);
-        if (x == null || x instanceof NullConstant || depth > 8) return null;
-        if (x instanceof ConstantExpression<?> ce && ce.constant() != null) {
-            return ce.constant().getClass().getSimpleName() + ":" + ce.constant();
-        }
-        if (x instanceof VariableExpression ve && ve.variable() instanceof FieldReference fr) {
-            FieldInfo fi = fr.fieldInfo();
-            if (!fi.isStatic() || !fi.isFinal()) return null;
-            if (fi.owner().typeNature().isEnum() && fi.type().typeInfo() == fi.owner()) {
-                return "enum:" + fi.fullyQualifiedName();
-            }
-            Expression initializer = fi.initializer();
-            return initializer == null || initializer.isEmpty() ? null : keyOf(initializer, depth + 1);
-        }
-        return null;
     }
 
     private Keyed keyed(Arg slot, Object key) {
@@ -6246,41 +4558,41 @@ public final class NullabilityPass {
      */
     private void keyedWrite(MethodInfo mi, Scope scope, Statement statement, Expression call, MethodInfo callee,
                             LinkComputer.ListOfLinks list, List<Expression> arguments) {
-        if (keyedSlots.isEmpty()) return;
-        KeyedAccessor putter = keyedPutters.get(callee);
+        if (index.keyedSlots.isEmpty()) return;
+        KeyedAccessor putter = index.keyedPutters.get(callee);
         if (putter != null && arguments.size() > Math.max(putter.keyIndex(), putter.valueIndex())) {
-            Arg slot = keyedSlots.get(putter.field());
+            Arg slot = index.keyedSlots.get(putter.field());
             argument(mi, scope, statement, call, list, arguments, putter.valueIndex(),
-                    keyed(slot, keyOf(arguments.get(putter.keyIndex()))));
+                    keyed(slot, Index.keyOf(arguments.get(putter.keyIndex()))));
             return;
         }
         if (!(call instanceof MethodCall mc) || !"put".equals(callee.name()) || arguments.size() != 2
             || mc.object() == null || !(NonNullFacts.unwrap(mc.object()) instanceof VariableExpression ve)
             || !(ve.variable() instanceof FieldReference fr)) return;
-        Arg slot = keyedSlots.get(fr.fieldInfo());
+        Arg slot = index.keyedSlots.get(fr.fieldInfo());
         if (slot == null) return;
-        KeyedAccessor own = keyedPutters.get(mi);
-        if (own != null && own.field() == fr.fieldInfo() && ownParameter(mi, arguments.getFirst()) == own.keyIndex()) {
+        KeyedAccessor own = index.keyedPutters.get(mi);
+        if (own != null && own.field() == fr.fieldInfo() && Index.ownParameter(mi, arguments.getFirst()) == own.keyIndex()) {
             return;
         }
-        argument(mi, scope, statement, call, list, arguments, 1, keyed(slot, keyOf(arguments.getFirst())));
+        argument(mi, scope, statement, call, list, arguments, 1, keyed(slot, Index.keyOf(arguments.getFirst())));
     }
 
     // the keyed node a statement reads: 'x = ctx.get(KEY)' through a keyed getter, or 'x = field.get(KEY)'
     private Keyed keyedRead(Statement statement, Variable recipient) {
-        if (keyedSlots.isEmpty()) return null;
+        if (index.keyedSlots.isEmpty()) return null;
         Expression value = assignedValue(statement, recipient);
         if (!(NonNullFacts.unwrap(value) instanceof MethodCall mc) || mc.methodInfo() == null) return null;
-        KeyedAccessor getter = keyedGetters.get(mc.methodInfo());
+        KeyedAccessor getter = index.keyedGetters.get(mc.methodInfo());
         if (getter != null && getter.keyIndex() < mc.parameterExpressions().size()) {
-            Object key = keyOf(mc.parameterExpressions().get(getter.keyIndex()));
-            return key == null ? null : keyed(keyedSlots.get(getter.field()), key);
+            Object key = Index.keyOf(mc.parameterExpressions().get(getter.keyIndex()));
+            return key == null ? null : keyed(index.keyedSlots.get(getter.field()), key);
         }
         if ("get".equals(mc.methodInfo().name()) && mc.parameterExpressions().size() == 1 && mc.object() != null
             && NonNullFacts.unwrap(mc.object()) instanceof VariableExpression ve
-            && ve.variable() instanceof FieldReference fr && keyedSlots.containsKey(fr.fieldInfo())) {
-            Object key = keyOf(mc.parameterExpressions().getFirst());
-            return key == null ? null : keyed(keyedSlots.get(fr.fieldInfo()), key);
+            && ve.variable() instanceof FieldReference fr && index.keyedSlots.containsKey(fr.fieldInfo())) {
+            Object key = Index.keyOf(mc.parameterExpressions().getFirst());
+            return key == null ? null : keyed(index.keyedSlots.get(fr.fieldInfo()), key);
         }
         return null;
     }
@@ -6306,12 +4618,12 @@ public final class NullabilityPass {
             }
         });
         if (policy.world() == World.CLOSED) return;
-        keyedPutters.forEach((mi, putter) -> {
+        index.keyedPutters.forEach((mi, putter) -> {
             if (externallyCallable(mi)) {
-                graph.addEdge(mi.parameters().get(putter.valueIndex()), new Keyed(keyedSlots.get(putter.field()), null));
-                for (Object key : keysUsed.getOrDefault(keyedSlots.get(putter.field()), Set.of())) {
-                    if (key != NO_KEY) graph.addEdge(new Keyed(keyedSlots.get(putter.field()), null),
-                            new Keyed(keyedSlots.get(putter.field()), key));
+                graph.addEdge(mi.parameters().get(putter.valueIndex()), new Keyed(index.keyedSlots.get(putter.field()), null));
+                for (Object key : keysUsed.getOrDefault(index.keyedSlots.get(putter.field()), Set.of())) {
+                    if (key != NO_KEY) graph.addEdge(new Keyed(index.keyedSlots.get(putter.field()), null),
+                            new Keyed(index.keyedSlots.get(putter.field()), key));
                 }
             }
         });
@@ -6331,13 +4643,13 @@ public final class NullabilityPass {
         }
         List<Expression> arguments = cc.parameterExpressions();
         int n = arguments.size();
-        MethodInfo constructor = anonymousSuperConstructor(cc);
+        MethodInfo constructor = index.anonymousSuperConstructor(cc);
         if (constructor == null) return;
         for (int i = 0; i < n; i++) {
             ParameterInfo pi = constructor.parameters().get(i);
             Expression argument = NonNullFacts.unwrap(arguments.get(i));
             if (argument instanceof NullConstant) {
-                seed(pi, NULL_ARGUMENT + mi.fullyQualifiedName(), mi.typeInfo());
+                seeds.seed(pi, Seeds.NULL_ARGUMENT + mi.fullyQualifiedName(), mi.typeInfo());
             } else if (argument instanceof VariableExpression ve) {
                 Object source = node(mi, scope, ve.variable());
                 if (source == null) continue;
@@ -6348,17 +4660,6 @@ public final class NullabilityPass {
                 }
             }
         }
-    }
-
-    // the superclass constructor an anonymous class's creation calls: the one of that arity, when there is exactly one
-    private MethodInfo anonymousSuperConstructor(ConstructorCall cc) {
-        TypeInfo anonymous = cc.anonymousClass();
-        if (anonymous == null || anonymous.parentClass() == null || anonymous.parentClass().typeInfo() == null) return null;
-        int n = cc.parameterExpressions().size();
-        List<MethodInfo> candidates = anonymous.parentClass().typeInfo().constructors().stream()
-                .filter(c -> c.parameters().size() == n && c.parameters().stream().noneMatch(ParameterInfo::isVarArgs))
-                .toList();
-        return candidates.size() == 1 && analysed.contains(candidates.getFirst()) ? candidates.getFirst() : null;
     }
 
     /*
@@ -6410,7 +4711,7 @@ public final class NullabilityPass {
         if (LIBRARY_VIEWS_OFF.get() || readScope == null || depth > 3) return;
         MethodInfo callee = mc.methodInfo();
         ParameterizedType tt = graph.typeOf(target);
-        if (callee == null || analysed.contains(callee) || callee.isStatic() || mc.object() == null || tt == null
+        if (callee == null || index.analysed.contains(callee) || callee.isStatic() || mc.object() == null || tt == null
             || tt.arrays() > 0 || tt.parameters().isEmpty() || tt.typeInfo() == null) return;
         ParameterizedType rt = callee.returnType();
         if (rt.arrays() > 0 || rt.parameters().isEmpty() || rt.typeInfo() == null) return;
@@ -6419,7 +4720,7 @@ public final class NullabilityPass {
         if (lifted == null || lifted.parameters().size() != tt.parameters().size()) return;
         Expression object = NonNullFacts.unwrap(mc.object());
         Object receiver;
-        if (object instanceof MethodCall inner && inner.methodInfo() != null && !analysed.contains(inner.methodInfo())
+        if (object instanceof MethodCall inner && inner.methodInfo() != null && !index.analysed.contains(inner.methodInfo())
             && !inner.methodInfo().isStatic() && inner.concreteReturnType() != null) {
             receiver = new CallResult(inner);
             libraryView(receiver, inner, depth + 1);
@@ -6454,7 +4755,6 @@ public final class NullabilityPass {
     // gate NOCONSUMERSLOTS: a caller's null into an abstract type-variable parameter reaches the implementations (A/B)
     private static final Switches.Gate CONSUMER_SLOTS_OFF = Switches.gate("NOCONSUMERSLOTS");
     private static final Switches.Gate METHOD_TYPE_VARIABLE_ARGUMENTS_OFF = Switches.gate("NOMETHODTYPEVARARGS");
-    private static final Switches.Gate EXPLICIT_BOUNDED_OFF = Switches.gate("NOEXPLICITBOUNDED");
     // gate NOANONYMOUSSUPER: an anonymous class's arguments do not reach its superclass's constructor (A/B)
     private static final Switches.Gate ANONYMOUS_SUPER_OFF = Switches.gate("NOANONYMOUSSUPER");
 
@@ -6466,7 +4766,7 @@ public final class NullabilityPass {
                 LinkComputerImpl.ListOfLinksImpl.class);
         receiverSlots(mi, scope, statement, call, callee, list, arguments);
         instantiatedArguments(mi, scope, call, callee, arguments);
-        if (call instanceof MethodCall && analysed.contains(callee) && !callee.returnType().isVoid()) {
+        if (call instanceof MethodCall && this.index.analysed.contains(callee) && !callee.returnType().isVoid()) {
             int id = graph.callId(call, callee);
             graph.argumentsSeen.add(id);
             for (int i = 0; i < arguments.size() && i < parameters.size(); i++) {
@@ -6506,9 +4806,9 @@ public final class NullabilityPass {
             if (parameter.parameterizedType().typeParameter() != null
                 && !parameter.parameterizedType().typeParameter().isMethodTypeParameter()
                 && parameter.parameterizedType().arrays() == 0
-                && (!analysed.contains(callee)
+                && (!this.index.analysed.contains(callee)
                     || (policy.callResults() && !CONSUMER_SLOTS_OFF.get()
-                        || !callee.isAbstract() && !implementations.containsKey(callee))
+                        || !callee.isAbstract() && !this.index.implementations.containsKey(callee))
                        && slotReceiver(mi, scope, call, callee) != null)) {
                 continue;
             }
@@ -6516,8 +4816,8 @@ public final class NullabilityPass {
             // Kotlin: an argument to the callee's own type variable is decided once the graph is built
             // (resolveTypeVariableArguments)
             if (policy.callResults() && !METHOD_TYPE_VARIABLE_ARGUMENTS_OFF.get() && call instanceof MethodCall
-                && analysed.contains(callee) && isMethodTypeVariable(parameter.parameterizedType())
-                && !parameter.isVarArgs() && explicitState(parameter) != NullableState.NULLABLE) {
+                && this.index.analysed.contains(callee) && isMethodTypeVariable(parameter.parameterizedType())
+                && !parameter.isVarArgs() && contracts.explicitState(parameter) != NullableState.NULLABLE) {
                 int index = i;
                 typeVariableArguments.add(new TypeVariableArgument(parameter, call, index, mi, scope, () -> {
                     for (ParameterInfo pi : typedDispatch(call, callee, parameter)) {
@@ -6553,7 +4853,7 @@ public final class NullabilityPass {
             // IntConverter.INSTANCE a Converter<String?, Int>, which an IntConverter (a Converter<String, Int>) is
             // not; likewise 'Equivalence.equals().equivalentTo(null)' (Ints.kt:101, Equivalence.kt:98, 2026-10-18)
             if (policy.callResults() && !NULLABLE_PARAMETER_SLOTS_OFF.get()
-                && explicitState(parameters.get(i)) == NullableState.NULLABLE) continue;
+                && contracts.explicitState(parameters.get(i)) == NullableState.NULLABLE) continue;
             int index = slotIndex(type, callee.typeInfo(), pt.typeParameter().getIndex());
             if (index >= 0) argument(mi, scope, statement, call, list, arguments, i, new Arg(receiver, index));
         }
@@ -6600,8 +4900,8 @@ public final class NullabilityPass {
      nullable parameter. Gate NOFAMILYCONSUMERS.
      */
     private boolean familyConsumer(MethodInfo callee) {
-        return policy.callResults() && !FAMILY_CONSUMERS_OFF.get() && analysed.contains(callee)
-               && (callee.isAbstract() || implementations.containsKey(callee));
+        return policy.callResults() && !FAMILY_CONSUMERS_OFF.get() && index.analysed.contains(callee)
+               && (callee.isAbstract() || index.implementations.containsKey(callee));
     }
 
     private static final Switches.Gate FAMILY_CONSUMERS_OFF = Switches.gate("NOFAMILYCONSUMERS");
@@ -6615,10 +4915,10 @@ public final class NullabilityPass {
         } else if (object instanceof VariableExpression ve) {
             receiver = node(mi, scope, ve.variable());
         } else if (object instanceof MethodCall getter && getter.methodInfo() != null
-                   && analysed.contains(getter.methodInfo()) && !getter.methodInfo().isConstructor()
+                   && index.analysed.contains(getter.methodInfo()) && !getter.methodInfo().isConstructor()
                    && concreteArguments(getter.methodInfo().returnType())) {
             receiver = getter.methodInfo();
-        } else if (object instanceof MethodCall lookup && !analysed.contains(callee)
+        } else if (object instanceof MethodCall lookup && !index.analysed.contains(callee)
                    && argumentNode(mi, scope, lookup) instanceof Arg slot) {
             // a library write into a generic receiver's content read ('ranges.computeIfAbsent(id, k -> new
             // ArrayList<>()).add(new String[]{…, c ? "1" : null})' writes the map's value: fernflower
@@ -6661,7 +4961,7 @@ public final class NullabilityPass {
         ParameterizedType argumentType = receiver.parameters().get(index);
         if (argumentType.typeInfo() == null || argumentType.typeInfo().isJavaLangObject()) return List.of(pi);
         List<ParameterInfo> targets = new java.util.ArrayList<>(List.of(pi));
-        for (MethodInfo implementation : implementations.getOrDefault(callee, List.of())) {
+        for (MethodInfo implementation : this.index.implementations.getOrDefault(callee, List.of())) {
             ParameterizedType type = implementation.parameters().get(pi.index()).parameterizedType();
             if (type.typeInfo() == argumentType.typeInfo() && type.arrays() == argumentType.arrays()) {
                 targets.add(implementation.parameters().get(pi.index()));
@@ -6679,19 +4979,19 @@ public final class NullabilityPass {
         Expression argument = arguments.get(i);
         Expression unwrapped = NonNullFacts.unwrap(argument);
         if (unwrapped instanceof NullConstant) {
-            seed(site, "null argument in " + mi.fullyQualifiedName());
+            seeds.seed(site, "null argument in " + mi.fullyQualifiedName());
             return;
         }
         if (unwrapped instanceof VariableExpression ve
             && (facts.nonNullWhenCalled(call, ve.variable()) || facts.nonNullAt(statement, ve.variable()))) {
             return;
         }
-        String lib = nullableLibraryCall(argument);
+        String lib = contracts.nullableLibraryCall(argument);
         if (lib != null) {
-            seedIndirect(site, "argument " + lib + " in " + mi.fullyQualifiedName());
+            seeds.seedIndirect(site, "argument " + lib + " in " + mi.fullyQualifiedName());
             return;
         }
-        if (unwrapped instanceof MethodCall amc && amc.methodInfo() != null && analysed.contains(amc.methodInfo())
+        if (unwrapped instanceof MethodCall amc && amc.methodInfo() != null && index.analysed.contains(amc.methodInfo())
             && !amc.methodInfo().isConstructor() && !amc.methodInfo().returnType().isVoid()) {
             graph.addEdge(amc.methodInfo(), site); // conservative: the nested call's result, ungated
         }
@@ -6721,7 +5021,7 @@ public final class NullabilityPass {
         MethodInfo body = lambda.methodInfo();
         if (body == null) return;
         ParameterizedType formal;
-        if (pi instanceof ParameterInfo parameter && analysed.contains(parameter.methodInfo())) {
+        if (pi instanceof ParameterInfo parameter && index.analysed.contains(parameter.methodInfo())) {
             formal = parameter.parameterizedType();
         } else if (!LAMBDA_SLOTS_OFF.get() && policy.callResults() && pi instanceof Arg slot) {
             // a receiver's slot: 'chain.add(input -> states.get(current))' on a List<Function<Provider<S>, S>> makes
@@ -6752,9 +5052,9 @@ public final class NullabilityPass {
     private void methodReferenceResult(MethodReference mr, Object pi) {
         MethodInfo method = mr.methodInfo();
         if (METHOD_REF_RESULTS_OFF.get() || method == null || method.isConstructor() || method.returnType().isVoid()
-            || !analysed.contains(method)) return;
+            || !index.analysed.contains(method)) return;
         ParameterizedType formal;
-        if (pi instanceof ParameterInfo parameter && analysed.contains(parameter.methodInfo())) {
+        if (pi instanceof ParameterInfo parameter && index.analysed.contains(parameter.methodInfo())) {
             formal = parameter.parameterizedType();
         } else if (pi instanceof Arg slot) {
             formal = graph.typeOf(slot);
@@ -6780,7 +5080,7 @@ public final class NullabilityPass {
      */
     private void receiverLambdaResult(MethodInfo mi, Scope scope, Expression call, Lambda lambda, Object pi) {
         if (RECEIVER_LAMBDAS_OFF.get() || lambda.methodInfo() == null || !(pi instanceof ParameterInfo parameter)
-            || analysed.contains(parameter.methodInfo()) || !(call instanceof MethodCall mc)) return;
+            || this.index.analysed.contains(parameter.methodInfo()) || !(call instanceof MethodCall mc)) return;
         MethodInfo callee = parameter.methodInfo();
         ParameterizedType formal = parameter.parameterizedType();
         // only ConcurrentHashMap's own 'computeIfAbsent', whose function Kotlin types '(K) -> V': Map's (and
@@ -6836,7 +5136,7 @@ public final class NullabilityPass {
                 && ("java.util.Iterator".equals(container) || "java.lang.Iterable".equals(container))) {
                 Arg slot = new Arg(pi, 0);
                 typeVariableElementSlots.add(slot); // a T? slot, not held at T (boundedSlot)
-                seed(slot, "filtered of nulls in " + mi.fullyQualifiedName(), mi.typeInfo());
+                seeds.seed(slot, "filtered of nulls in " + mi.fullyQualifiedName(), mi.typeInfo());
             }
         }
     }
@@ -6866,7 +5166,7 @@ public final class NullabilityPass {
         MethodInfo body = lambda.methodInfo();
         if (LAMBDA_PARAMETERS_OFF.get() || body == null) return;
         ParameterizedType formal;
-        if (pi instanceof ParameterInfo parameter && analysed.contains(parameter.methodInfo())) {
+        if (pi instanceof ParameterInfo parameter && index.analysed.contains(parameter.methodInfo())) {
             formal = parameter.parameterizedType();
         } else if (!LAMBDA_PARAMETER_SLOTS_OFF.get() && pi instanceof Arg slot) {
             // a receiver's slot, as in lambdaResult: 'chain.add(next -> filter.getNextInstallState(current, next))'
@@ -6909,7 +5209,7 @@ public final class NullabilityPass {
      that its type variables are the ones the positions name.
      */
     private void libraryCallback(Lambda lambda, Object pi) {
-        if (!(pi instanceof ParameterInfo parameter) || analysed.contains(parameter.methodInfo())
+        if (!(pi instanceof ParameterInfo parameter) || index.analysed.contains(parameter.methodInfo())
             || lambda.methodInfo() == null) return;
         List<? extends Value.Nullability> arguments = parameter.analysis()
                 .getOrDefault(PropertyImpl.NULLABILITY_PARAMETER, ValueImpl.NullabilityImpl.UNSPECIFIED).arguments();
@@ -6925,7 +5225,7 @@ public final class NullabilityPass {
             for (ParameterInfo samParameter : sam.parameters()) {
                 ParameterizedType t = samParameter.parameterizedType();
                 if (t.arrays() == 0 && t.typeParameter() == typeParameter) {
-                    seed(lambdaParameters.get(samParameter.index()), "called back with null by "
+                    seeds.seed(lambdaParameters.get(samParameter.index()), "called back with null by "
                                                                      + parameter.methodInfo().fullyQualifiedName());
                 }
             }
@@ -6939,12 +5239,12 @@ public final class NullabilityPass {
         // rejected input, whether a literal null (seed) or a variable holding one: they carry nothing into the
         // callee. guava's ImmutableClassToInstanceMapTest had made Primitives.wrap(type), which starts with
         // checkNotNull(type), take a Class<T>? (worktree-maddi-all 2026-10-22). Gate NOREJECTEDFLOWS.
-        if (policy.callResults() && !REJECTED_FLOWS_OFF.get() && nullRejectingBodies.contains(mi.fullyQualifiedName())) {
+        if (policy.callResults() && !REJECTED_FLOWS_OFF.get() && index.nullRejectingBodies.contains(mi.fullyQualifiedName())) {
             return;
         }
         // also a cast null: '(AiMessage) null' choosing between overloads (langchain4j OutputGuardrailResult)
         if (NonNullFacts.unwrap(arguments.get(i)) instanceof NullConstant) {
-            seed(pi, "null argument in " + mi.fullyQualifiedName(), mi.typeInfo());
+            seeds.seed(pi, "null argument in " + mi.fullyQualifiedName(), mi.typeInfo());
             return;
         }
         // M4: a variable argument known non-null at the call (or when its statement starts) carries no null
@@ -6955,7 +5255,7 @@ public final class NullabilityPass {
             if (node != null) graph.flows.add(List.of(node, pi)); // an array known non-null: its elements still flow
             return;
         }
-        seedCreated(pi, arguments.get(i), mi);
+        seeds.seedCreated(pi, arguments.get(i), mi);
         Expression unwrappedArgument = NonNullFacts.unwrap(arguments.get(i));
         if (policy.callResults() && unwrappedArgument instanceof Lambda lambda) {
             lambdaResult(lambda, pi);
@@ -6967,7 +5267,7 @@ public final class NullabilityPass {
         // 'getUniqueNext(graph, new HashSet<>(mapNext.values()))': a library copy constructor as the argument copies
         // its argument's content into the parameter's slots (fernflower FinallyProcessor)
         if (unwrappedArgument instanceof ConstructorCall copy && copy.constructor() != null
-            && !analysed.contains(copy.constructor()) && copy.parameterizedType() != null
+            && !index.analysed.contains(copy.constructor()) && copy.parameterizedType() != null
             && copy.parameterizedType().arrays() == 0) {
             contentCopies(mi, scope, pi, copy.constructor(), copy.parameterExpressions());
         }
@@ -6989,9 +5289,9 @@ public final class NullabilityPass {
             streamTerminal(mi, scope, unwrappedArgument)
                     .forEach((j, nodes) -> nodes.forEach(n -> graph.addEdge(n, new Arg(pi, j))));
         }
-        String lib = nullableLibraryCall(arguments.get(i));
+        String lib = contracts.nullableLibraryCall(arguments.get(i));
         if (lib != null) {
-            seedIndirect(pi, "argument " + lib + " in " + mi.fullyQualifiedName(), mi.typeInfo());
+            seeds.seedIndirect(pi, "argument " + lib + " in " + mi.fullyQualifiedName(), mi.typeInfo());
             return;
         }
         if (list == null || i >= list.list().size()) {
@@ -7001,7 +5301,7 @@ public final class NullabilityPass {
             for (Expression alternative : alternatives(arguments.get(i))) {
                 Expression unwrappedAlternative = NonNullFacts.unwrap(alternative);
                 if (unwrappedAlternative instanceof NullConstant) {
-                    seed(pi, "null argument in " + mi.fullyQualifiedName(), mi.typeInfo());
+                    seeds.seed(pi, "null argument in " + mi.fullyQualifiedName(), mi.typeInfo());
                 } else if (!(unwrappedAlternative instanceof MethodCall)) {
                     graph.addEdge(argumentNode(mi, scope, alternative), pi);
                     initializerElements(mi, scope, unwrappedAlternative, pi);
@@ -7060,7 +5360,7 @@ public final class NullabilityPass {
     private void callResultArgument(Expression argument, Object pi) {
         if (!policy.callResults() || !(argument instanceof MethodCall mc) || mc.methodInfo() == null) return;
         MethodInfo callee = mc.methodInfo();
-        if (!analysed.contains(callee) || callee.isConstructor() || callee.returnType().isVoid()) return;
+        if (!index.analysed.contains(callee) || callee.isConstructor() || callee.returnType().isVoid()) return;
         ParameterizedType rt = callee.returnType();
         boolean ownNull = rt.arrays() == 0 && rt.typeParameter() != null
                           && (!rt.typeParameter().isMethodTypeParameter()
@@ -7087,23 +5387,23 @@ public final class NullabilityPass {
         if (fi.type().isPrimitiveExcludingVoid() && fi.type().arrays() == 0) return;
         Expression initializer = fi.initializer();
         if (initializer != null) {
-            seedCreated(fi, initializer, null);
+            seeds.seedCreated(fi, initializer, null);
             factorySlots(fi, initializer, null);
             initializerContent(fi, initializer);
         }
         if (initializer instanceof NullConstant) {
-            seed(fi, "initializer null", fi.owner());
+            seeds.seed(fi, "initializer null", fi.owner());
             return;
         }
         if (fi.isFinal() || initializer != null && !initializer.isEmpty()) return;
         List<MethodInfo> constructors = fi.owner().constructors();
         if (constructors.isEmpty()) {
-            seedIndirect(fi, "default value: no constructor assigns it", fi.owner());
+            seeds.seedIndirect(fi, "default value: no constructor assigns it", fi.owner());
             return;
         }
         for (MethodInfo constructor : constructors) {
             if (!assigns(constructor, fi)) {
-                seedIndirect(fi, "default value: not assigned in " + constructor.fullyQualifiedName(), fi.owner());
+                seeds.seedIndirect(fi, "default value: not assigned in " + constructor.fullyQualifiedName(), fi.owner());
                 return;
             }
         }
@@ -7123,7 +5423,7 @@ public final class NullabilityPass {
         Object source = null;
         if (e instanceof VariableExpression ve && ve.variable() instanceof FieldReference fr) {
             source = fr.fieldInfo();
-        } else if (e instanceof MethodCall mc && mc.methodInfo() != null && analysed.contains(mc.methodInfo())
+        } else if (e instanceof MethodCall mc && mc.methodInfo() != null && index.analysed.contains(mc.methodInfo())
                    && !mc.methodInfo().returnType().isVoid()) {
             source = mc.methodInfo();
         }
