@@ -66,7 +66,7 @@ final class Trace {
         Set<Object> seen = new HashSet<>();
         while (cause.containsKey(n) && seen.add(n)) {
             n = cause.get(n);
-            sb.append(" <- ").append(NullabilityPass.Report.label(n));
+            sb.append(" <- ").append(Report.label(n));
         }
         String origin = seedOrigin.get(n);
         return origin == null ? sb.toString() : sb.append(" <- ").append(origin).toString();
@@ -85,11 +85,11 @@ final class Trace {
     // NULLWHY: the path from the traced parameter to the node where its tolerance walk ended or passed; false
     boolean tolerance(Map<Object, Object> from, Object node, String what) {
         if (from == null) return false;
-        StringBuilder sb = new StringBuilder("NULLWHY tolerance " + what + " at " + NullabilityPass.Report.label(node));
+        StringBuilder sb = new StringBuilder("NULLWHY tolerance " + what + " at " + Report.label(node));
         Object n = node;
         for (int i = 0; i < 40 && from.get(n) != null; i++) {
             n = from.get(n);
-            sb.append(" <- ").append(NullabilityPass.Report.label(n));
+            sb.append(" <- ").append(Report.label(n));
         }
         print(sb.toString());
         return false;

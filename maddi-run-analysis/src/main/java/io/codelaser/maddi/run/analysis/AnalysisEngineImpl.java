@@ -48,6 +48,7 @@ import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
 import io.codelaser.maddi.modification.analyzer.impl.EventualCluster;
 import io.codelaser.maddi.modification.analyzer.impl.StaticSideEffectAnalyzerImpl;
 import io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass;
+import io.codelaser.maddi.modification.analyzer.nullability.Policy;
 import io.codelaser.maddi.modification.analyzer.shadow.ShadowModificationPass;
 import io.codelaser.maddi.modification.common.AnalyzerException;
 import io.codelaser.maddi.modification.common.defaults.ShallowMethodAnalyzer;
@@ -123,8 +124,8 @@ public class AnalysisEngineImpl implements AnalysisEngine {
         // also takes the parameter preconditions as non-null, which changes nothing at run time (its ! does not
         // throw); Kotlin does not, where the NPE would move from the method's body to the call (CodeLaser/maddi#125)
         return switch (target) {
-            case KOTLIN -> new NullabilityPass(NullabilityPass.Policy.KOTLIN).go(order);
-            case CSHARP -> new NullabilityPass(NullabilityPass.Policy.KOTLIN.withPreconditionsNonNull()).go(order)
+            case KOTLIN -> new NullabilityPass(Policy.KOTLIN).go(order);
+            case CSHARP -> new NullabilityPass(Policy.KOTLIN.withPreconditionsNonNull()).go(order)
                     .orElse(NullabilityFacts.STORED);
         };
     }

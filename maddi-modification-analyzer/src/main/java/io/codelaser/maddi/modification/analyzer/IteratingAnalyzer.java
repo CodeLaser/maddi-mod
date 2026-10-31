@@ -17,6 +17,7 @@
 
 package io.codelaser.maddi.modification.analyzer;
 
+import io.codelaser.maddi.modification.analyzer.nullability.World;
 import io.codelaser.maddi.analysis.api.AnalysisValueFeed;
 
 import io.codelaser.maddi.modification.link.LinkComputer;
@@ -114,7 +115,7 @@ public interface IteratingAnalyzer {
         /**
          * With {@link #nullability()}: the analysed code has callers the analysis does not see (a library), so a
          * parameter callable from outside is not non-null merely because no analysed call passes null to it
-         * ({@code NullabilityPass.World.OPEN}). Off: the analysed calls are all the calls (an application).
+         * ({@code World.OPEN}). Off: the analysed calls are all the calls (an application).
          */
         default boolean nullabilityOpenWorld() {
             return false;

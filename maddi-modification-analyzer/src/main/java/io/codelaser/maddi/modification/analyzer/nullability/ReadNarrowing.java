@@ -38,8 +38,6 @@ import io.codelaser.maddi.cst.api.statement.ExplicitConstructorInvocation;
 import io.codelaser.maddi.cst.api.statement.Statement;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
-import io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass.Policy;
-import io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass.World;
 import io.codelaser.maddi.modification.prepwork.Util;
 
 import java.util.ArrayList;

@@ -1,7 +1,8 @@
 package io.codelaser.maddi.run.openjdkmain;
 
 import io.codelaser.maddi.cst.print.kotlin.KotlinPrintOptions;
-import io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass;
+import io.codelaser.maddi.modification.analyzer.nullability.Policy;
+import io.codelaser.maddi.modification.analyzer.nullability.Report;
 import io.codelaser.maddi.run.j2k.JavaToKotlinRatchet;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
@@ -34,9 +35,9 @@ public class TestJavaToKotlinPreconditions {
     public void test() throws Exception {
         String corpusName = Objects.requireNonNullElse(System.getenv("PRECONDITIONS_CORPUS"), "fernflower");
         JavaToKotlinRatchet.Corpus corpus = JavaToKotlinRatchet.parse(corpusName);
-        List<NullabilityPass.Report> reports = CorpusNullability.reports(corpus,
+        List<Report> reports = CorpusNullability.reports(corpus,
                 corpus.summary().parseResult().primaryTypes(),
-                List.of(NullabilityPass.Policy.KOTLIN, NullabilityPass.Policy.KOTLIN.withPreconditionsNonNull()));
+                List.of(Policy.KOTLIN, Policy.KOTLIN.withPreconditionsNonNull()));
         System.out.println("preconditions " + reports.get(1).preconditions().size() + ", declared non-null where null"
                            + " reached " + reports.get(1).preconditionsNonNull().size() + ", null arguments "
                            + reports.get(1).nullArguments().size());

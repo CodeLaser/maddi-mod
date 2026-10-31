@@ -17,6 +17,8 @@
 
 package io.codelaser.maddi.modification.analyzer.impl;
 
+import io.codelaser.maddi.modification.analyzer.nullability.Policy;
+import io.codelaser.maddi.modification.analyzer.nullability.World;
 import io.codelaser.maddi.modification.common.util.TolerantWrite;
 import io.codelaser.maddi.modification.analyzer.CycleBreakingStrategy;
 import io.codelaser.maddi.modification.analyzer.IteratingAnalyzer;
@@ -446,10 +448,10 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
             // docs/design/nullability.md M3/B2: one-shot, over the converged link facts. The stored verdicts are the
             // Java annotations' (NullabilityDecorator): a parameter its method needs non-null is @NonNull, which
             // changes nothing at run time (CodeLaser/maddi#125)
-            var policy = io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass.Policy.NULL_MARKED
+            var policy = io.codelaser.maddi.modification.analyzer.nullability.Policy.NULL_MARKED
                     .withPreconditionsNonNull();
             if (configuration.nullabilityOpenWorld()) {
-                policy = policy.withWorld(io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass.World.OPEN);
+                policy = policy.withWorld(io.codelaser.maddi.modification.analyzer.nullability.World.OPEN);
             }
             feed(f -> f.stage("nullability"));
             var pass = new io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass(policy);

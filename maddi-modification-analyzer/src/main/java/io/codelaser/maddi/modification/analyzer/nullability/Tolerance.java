@@ -93,7 +93,7 @@ final class Tolerance {
                     || hook(mi, pi) || overloadedAt(mi, pi) || overridesAnalysed(mi)) continue;
                 if (tolerates(pi, before)) {
                     seeds.seedIndirect(pi, mi.fullyQualifiedName() + " tolerates null in " + pi.name()
-                                     + ", callable from outside");
+                                           + ", callable from outside");
                 }
             }
         }

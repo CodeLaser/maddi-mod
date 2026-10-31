@@ -22,13 +22,13 @@ import io.codelaser.maddi.cst.api.expression.Expression;
 import io.codelaser.maddi.cst.api.expression.MethodCall;
 import io.codelaser.maddi.cst.api.expression.VariableExpression;
 import io.codelaser.maddi.cst.api.info.FieldInfo;
+import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.type.NullableState;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
-import io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass.Policy;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -46,17 +46,72 @@ import static io.codelaser.maddi.modification.analyzer.nullability.Types.*;
  */
 final class Verdicts {
     private final Policy policy;
+    private final Trace trace;
     private final Index index;
+    private final Seeds seeds;
     private final Contracts contracts;
+    private final NullGraph graph;
+    // what null reaches, after the last closure; what an outside caller's values reach (World.OPEN*)
     private final Set<Object> reached;
     private final Set<Object> external;
 
-    Verdicts(Policy policy, Index index, Contracts contracts, Set<Object> reached, Set<Object> external) {
+    Verdicts(Policy policy, Trace trace, Index index, Seeds seeds, Contracts contracts, NullGraph graph,
+             Set<Object> reached, Set<Object> external) {
         this.policy = policy;
+        this.trace = trace;
         this.index = index;
+        this.seeds = seeds;
         this.contracts = contracts;
+        this.graph = graph;
         this.reached = reached;
         this.external = external;
+    }
+
+    // the verdicts of the locals and of the reassigned parameters' shadows
+    Map<Local, ParameterizedType> locals(Set<Object> guardedLocals) {
+        Map<Local, ParameterizedType> locals = new LinkedHashMap<>();
+        // an unreached local of a degraded method: its links are missing, so "no null reaches it" is not known
+        graph.declaredLocals.forEach((local, lv) -> {
+            ParameterizedType v = verdict(lv.parameterizedType(), local, contracts.degraded.contains(graph.localOwner.get(local)));
+            locals.put(local, guardedLocals.contains(local) && !(v.isPrimitiveExcludingVoid() && v.arrays() == 0)
+                    ? v.withNullable(NullableState.NULLABLE) : v);
+        });
+        graph.shadows.forEach((local, pi) -> locals.put(local, verdict(pi.parameterizedType(), local,
+                contracts.degraded.contains(pi.methodInfo()))));
+        return locals;
+    }
+
+    // the verdicts of the declarations, with the annotations' contracts over them; Kotlin's clamps last
+    Map<Info, ParameterizedType> declarations(List<MethodInfo> methods, List<FieldInfo> fields,
+                                              Map<Object, Object> cause) {
+        Map<Info, ParameterizedType> verdicts = new LinkedHashMap<>();
+        for (FieldInfo fi : fields) {
+            verdicts.put(fi, contracts.contracted(fi, verdict(fi.type(), fi, false)));
+            if (trace.why(fi)) {
+                trace.print("NULLWHY final " + fi.fullyQualifiedName() + " reached=" + reached.contains(fi)
+                                   + trace.chain(cause, seeds.seedOrigin, fi) + " elements reached=" + reached.contains(new Content(fi))
+                                   + trace.chain(cause, seeds.seedOrigin, new Content(fi)) + " verdict=" + verdicts.get(fi));
+            }
+        }
+        for (MethodInfo mi : methods) {
+            boolean deg = contracts.degraded.contains(mi);
+            for (ParameterInfo pi : mi.parameters()) {
+                verdicts.put(pi, contracts.contracted(pi, verdict(pi.parameterizedType(), pi, false)));
+            }
+            if (!mi.isConstructor() && !mi.returnType().isVoid()) {
+                verdicts.put(mi, contracts.contracted(mi, verdict(mi.returnType(), mi, deg)));
+            }
+            if (trace.why(mi)) {
+                trace.print("NULLWHY final " + mi.fullyQualifiedName() + " reached=" + reached.contains(mi)
+                                   + " seed=" + seeds.seedOrigin.get(mi) + " contract=" + contracts.nonNullContracts.contains(mi)
+                                   + " degraded=" + deg + " verdict=" + verdicts.get(mi) + trace.chain(cause, seeds.seedOrigin, mi));
+            }
+        }
+        if (policy.callResults()) {
+            contracts.clampTestOverrides(methods, verdicts);
+            contracts.clampTypeVariableOverrides(methods, verdicts);
+        }
+        return verdicts;
     }
 
     /*

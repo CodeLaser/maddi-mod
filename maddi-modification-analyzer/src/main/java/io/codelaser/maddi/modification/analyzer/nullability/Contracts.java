@@ -18,6 +18,8 @@
 package io.codelaser.maddi.modification.analyzer.nullability;
 
 import io.codelaser.maddi.cst.api.analysis.Value;
+import io.codelaser.maddi.cst.api.expression.Assignment;
+import io.codelaser.maddi.cst.api.expression.BinaryOperator;
 import io.codelaser.maddi.cst.api.expression.Cast;
 import io.codelaser.maddi.cst.api.expression.ClassExpression;
 import io.codelaser.maddi.cst.api.expression.ConstructorCall;
@@ -35,10 +37,10 @@ import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.statement.ReturnStatement;
 import io.codelaser.maddi.cst.api.type.NullableState;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
+import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.cst.api.variable.This;
 import io.codelaser.maddi.cst.impl.analysis.NullAnnotations;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
-import io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass.Policy;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -556,8 +558,8 @@ final class Contracts {
      override declares the same shape (the same class or array of it), so that the positions correspond.
      */
     void libraryNullableContent(Object node, ParameterizedType declared,
-                                        java.util.function.Function<MethodInfo, Value.Nullability> nullabilityOf,
-                                        java.util.function.Function<MethodInfo, ParameterizedType> typeOf) {
+                                java.util.function.Function<MethodInfo, Value.Nullability> nullabilityOf,
+                                java.util.function.Function<MethodInfo, ParameterizedType> typeOf) {
         MethodInfo mi = node instanceof ParameterInfo pi ? pi.methodInfo() : (MethodInfo) node;
         if (declared == null || declared.isVoid() || declared.isPrimitiveExcludingVoid() && declared.arrays() == 0) return;
         for (MethodInfo m : overrides(mi)) {
@@ -570,7 +572,7 @@ final class Contracts {
                 if (arguments.get(j).state() != NullableState.NULLABLE) continue;
                 Object content = declared.arrays() > 0 ? new Content(node) : new Arg(node, j);
                 seeds.seed(content, "overrides " + m.fullyQualifiedName() + ", whose "
-                              + (declared.arrays() > 0 ? "elements" : "type argument " + j) + " may be null");
+                                    + (declared.arrays() > 0 ? "elements" : "type argument " + j) + " may be null");
             }
         }
     }
@@ -794,4 +796,78 @@ final class Contracts {
         return index.analysed.stream().anyMatch(m -> m.typeInfo().primaryType().equals(primary));
     }
     private static final Switches.Gate EXPLICIT_BOUNDED_OFF = Switches.gate("NOEXPLICITBOUNDED");
+
+    // phase 3, Policy.contracts: the source declarations' null annotations, on the declarations and their slots
+    void annotations(List<MethodInfo> methods, List<FieldInfo> fields) {
+        if (policy.contracts()) {
+            for (FieldInfo fi : fields) contract(fi, fi);
+            for (MethodInfo mi : methods) {
+                for (ParameterInfo pi : mi.parameters()) contract(pi, pi);
+                if (!mi.isConstructor() && !mi.returnType().isVoid()) contract(mi, mi);
+            }
+            for (FieldInfo fi : fields) elementContract(fi.type(), fi);
+            for (MethodInfo mi : methods) {
+                for (ParameterInfo pi : mi.parameters()) elementContract(pi.parameterizedType(), pi);
+                if (!mi.isConstructor() && !mi.returnType().isVoid()) elementContract(mi.returnType(), mi);
+            }
+        }
+    }
+
+    // phase 3, Kotlin: the analysed returns its override rules hold non-null, and their overrides
+    void overrideContracts(List<MethodInfo> methods) {
+        if (policy.callResults()) {
+            for (MethodInfo mi : methods) {
+                if (boundedTypeVariableOverride(mi) || overridesKotlinNonNullReturn(mi)
+                    || overridesLibraryNonNullReturn(mi) || testOverrideOfInstantiatedReturn(mi)) add(mi);
+            }
+            nonNullOverrides(methods);
+        }
+    }
+
+    /*
+     Kotlin: the calls that fill a lazily cached field of this ('return (result == null) ? keySet = createKeySet() :
+     result'), trusted in round 1. Each later round keeps only what that round found unreached, so a null that really
+     reaches one still wins; what goes is the cycle that justifies itself. guava's keySet() was nullable because
+     createKeySet() might be, and createKeySet() because some members return another map's keySet()
+     ('ImmutableMap.this.keySet()', 'fromMultimap.keySet()'): the whole family printed 'createKeySet(): ImmutableSet<K>?'
+     (ImmutableMap.kt:105/107, AbstractMultimap.kt:76, 2026-10-17). Gate NOLAZYCACHES.
+     */
+    static Set<MethodInfo> lazyCacheCalls(Policy policy, List<Info> analysisOrder) {
+        if (!policy.callResults() || LAZY_CACHES_OFF.get()) return Set.of();
+        Set<MethodInfo> out = new HashSet<>();
+        for (Info info : analysisOrder) {
+            if (!(info instanceof MethodInfo mi) || mi.methodBody() == null) continue;
+            boolean[] nullTest = {false};
+            List<MethodInfo> calls = new ArrayList<>();
+            mi.methodBody().visit(e -> {
+                if (e instanceof Lambda || e instanceof ConstructorCall cc && cc.anonymousClass() != null) return false;
+                if (e instanceof BinaryOperator bo && (NonNullFacts.unwrap(bo.lhs()) instanceof NullConstant
+                                                       || NonNullFacts.unwrap(bo.rhs()) instanceof NullConstant)) {
+                    nullTest[0] = true;
+                }
+                if (e instanceof Assignment a && a.assignmentOperator() == null
+                    && a.variableTarget() instanceof FieldReference fr && fr.scopeIsRecursivelyThis()
+                    && NonNullFacts.unwrap(a.value()) instanceof MethodCall mc && mc.methodInfo() != null
+                    && !mc.methodInfo().isStatic() && !mc.methodInfo().returnType().isPrimitiveExcludingVoid()
+                    && (mc.object() == null || mc.object().isEmpty()
+                        || NonNullFacts.unwrap(mc.object()) instanceof VariableExpression ve
+                           && ve.variable() instanceof io.codelaser.maddi.cst.api.variable.This)) {
+                    calls.add(mc.methodInfo());
+                }
+                return true;
+            });
+            if (nullTest[0] && !calls.isEmpty()) {
+                out.addAll(calls);
+                // and the cache's getter itself: 'return from.keySet()' in another member is a call the guard does
+                // not see through, unless keySet() is trusted too
+                if (!mi.isConstructor() && !mi.returnType().isVoid() && !mi.returnType().isPrimitiveExcludingVoid()) {
+                    out.add(mi);
+                }
+            }
+        }
+        return Set.copyOf(out);
+    }
+
+    // gate NOLAZYCACHES: round 1 trusts no analysed method's return (A/B)
+    private static final Switches.Gate LAZY_CACHES_OFF = Switches.gate("NOLAZYCACHES");
 }

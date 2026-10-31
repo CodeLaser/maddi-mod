@@ -31,7 +31,6 @@ import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.statement.LocalVariableCreation;
 import io.codelaser.maddi.cst.api.type.NullableState;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
-import io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass.Policy;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -43,7 +42,7 @@ import java.util.Set;
 import static io.codelaser.maddi.modification.analyzer.nullability.Types.*;
 
 /**
- * Kotlin: the type parameters the null-marked code holds non-null ({@link NullabilityPass.Report#nonNullTypeParameter}),
+ * Kotlin: the type parameters the null-marked code holds non-null ({@link Report#nonNullTypeParameter}),
  * from every type use of the analysed code: supertypes, declarations, bounds, and the types in the bodies, carried
  * over to the type variables used in such positions until nothing changes. Phase 1 of {@link NullabilityPass}.
  */

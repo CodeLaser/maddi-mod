@@ -43,7 +43,7 @@ public class TestTolerantSlots extends CommonTest {
         List<Info> ao = prepWork(bag);
         new IteratingAnalyzerImpl(javaInspector, new IteratingAnalyzerImpl.ConfigurationBuilder()
                 .setNullability(true).build()).analyze(ao);
-        NullabilityPass.Report report = new NullabilityPass(NullabilityPass.Policy.NULL_MARKED
+        Report report = new NullabilityPass(Policy.NULL_MARKED
                 .withPreconditionsNonNull()).go(ao);
 
         // into the elements of a field no null is written into: not tolerated
@@ -56,7 +56,7 @@ public class TestTolerantSlots extends CommonTest {
         assertEquals(NullableState.NULLABLE, state(report, bag, "count", 1));
     }
 
-    private static NullableState state(NullabilityPass.Report report, TypeInfo type, String method, int index) {
+    private static NullableState state(Report report, TypeInfo type, String method, int index) {
         ParameterInfo pi = type.methods().stream().filter(m -> m.name().equals(method)).findFirst().orElseThrow()
                 .parameters().get(index);
         return report.verdicts().get(pi).nullable();

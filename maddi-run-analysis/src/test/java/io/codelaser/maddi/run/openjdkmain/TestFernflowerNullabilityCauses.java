@@ -11,6 +11,9 @@ import io.codelaser.maddi.modification.analyzer.nullability.AnonymousThis;
 import io.codelaser.maddi.modification.analyzer.nullability.Arg;
 import io.codelaser.maddi.modification.analyzer.nullability.Content;
 import io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass;
+import io.codelaser.maddi.modification.analyzer.nullability.Policy;
+import io.codelaser.maddi.modification.analyzer.nullability.Report;
+import io.codelaser.maddi.modification.analyzer.nullability.World;
 import io.codelaser.maddi.modification.analyzer.nullability.Switches;
 import io.codelaser.maddi.run.analysis.AnalysisEngineImpl;
 import io.codelaser.maddi.run.j2k.JavaToKotlinRatchet;
@@ -79,11 +82,11 @@ public class TestFernflowerNullabilityCauses {
         long analysisMs = (System.nanoTime() - analysisStart) / 1_000_000;
         // NULLABILITY_POLICY=diagnose: the diagnostics' policy (flow only, no contracts, closed world); else Kotlin's.
         // NULLABILITY_WORLD=open: the open world (timefold's diagnostics); NULLABILITY_TEST_NULLS=off: withoutTestNulls
-        NullabilityPass.Policy policy = "diagnose".equals(System.getenv("NULLABILITY_POLICY"))
-                ? NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY.withoutContracts()
-                        .withWorld(NullabilityPass.World.CLOSED)
-                : NullabilityPass.Policy.KOTLIN;
-        if ("open".equals(System.getenv("NULLABILITY_WORLD"))) policy = policy.withWorld(NullabilityPass.World.OPEN);
+        Policy policy = "diagnose".equals(System.getenv("NULLABILITY_POLICY"))
+                ? Policy.NULL_MARKED_FLOW_ONLY.withoutContracts()
+                        .withWorld(World.CLOSED)
+                : Policy.KOTLIN;
+        if ("open".equals(System.getenv("NULLABILITY_WORLD"))) policy = policy.withWorld(World.OPEN);
         if ("off".equals(System.getenv("NULLABILITY_TEST_NULLS"))) policy = policy.withoutTestNulls();
         // NULLABILITY_SIDES=on,NOX,NOY+NOZ: one analysis, then one pass per side with those gates off besides the
         // environment's (Switches), each written to build/<corpus>-nullability-causes-<side>.txt; without it, one pass
@@ -94,7 +97,7 @@ public class TestFernflowerNullabilityCauses {
         for (String side : sides == null ? List.of("") : List.of(sides.split(","))) {
             Switches.offForNextPasses(side.isEmpty() || "on".equals(side) ? Set.of() : Set.of(side.split("\\+")));
             long passStart = System.nanoTime();
-            NullabilityPass.Report report;
+            Report report;
             try {
                 report = new NullabilityPass(policy).go(order);
             } finally {
@@ -117,7 +120,7 @@ public class TestFernflowerNullabilityCauses {
         timing.forEach(t -> System.err.println("NULLTIMING " + corpusName + " " + t));
     }
 
-    private static List<String> lines(NullabilityPass.Report report, JavaToKotlinRatchet.Corpus corpus) {
+    private static List<String> lines(Report report, JavaToKotlinRatchet.Corpus corpus) {
         List<String> lines = new java.util.ArrayList<>();
         report.verdicts().forEach((info, pt) -> {
             String n = info.fullyQualifiedName();

@@ -20,8 +20,6 @@ package io.codelaser.maddi.modification.analyzer.nullability;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
-import io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass.Policy;
-import io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass.World;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
@@ -32,7 +30,7 @@ import java.util.Set;
 import static io.codelaser.maddi.modification.analyzer.nullability.Types.*;
 
 /**
- * {@link NullabilityPass.World#OPEN} and {@link NullabilityPass.World#OPEN_VISIBILITY}: the methods code outside the
+ * {@link World#OPEN} and {@link World#OPEN_VISIBILITY}: the methods code outside the
  * analysis may call, and what the values it passes them reach ({@link #externalClosure}): UNSPECIFIED, where null
  * does not reach.
  */

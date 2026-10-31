@@ -33,8 +33,6 @@ import io.codelaser.maddi.cst.api.statement.ExplicitConstructorInvocation;
 import io.codelaser.maddi.cst.api.statement.ReturnStatement;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
-import io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass.Policy;
-import io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass.World;
 import io.codelaser.maddi.modification.prepwork.variable.VariableData;
 import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
 
@@ -350,5 +348,58 @@ final class GraphCompletion {
         return vd.variableInfoStream().anyMatch(vi -> vi.variable() instanceof FieldReference fr
                                                       && fr.fieldInfo() == fi && fr.scopeIsRecursivelyThis()
                                                       && !vi.assignments().isEmpty());
+    }
+
+    // phase 5: every method's body was walked; the edges and seeds that need all of them, in this order
+    void complete(List<MethodInfo> methods, List<FieldInfo> fields) {
+        keyedEdges(methods);
+        for (FieldInfo fi : fields) seedDefaultValue(fi);
+        linkEdges();
+        holderFields(methods, fields);
+        fieldInitializerNullArguments(fields);
+        assignedParameterSlots(methods);
+        enumValueOfContracts(methods);
+        nullFilteredParameters(methods);
+        callResults.resolveTypeVariableArguments();
+        graph.coupleContent();
+        invariantTies();
+    }
+
+    // the link edges counted by the walk become edges, or flows only
+    private void linkEdges() {
+        graph.linkEdges.forEach((edge, count) -> {
+            // [0] assigned (or passed) where the source is known non-null, [1] where it is not, [2] assigned by a
+            // value not seen through. Never observed at all: only the links' transitive closure. In
+            // 'imp.getNestedName(root ? node.classStruct.qualifiedName : node.simpleName)' both alternatives are '≡'
+            // the argument, and so each other: fernflower's ClassNode.simpleName (compared with null) reached
+            // StructClass.qualifiedName and from there most of the program. A slot is written by calls, without
+            // an assignment the statement shows: kept.
+            // [3] a link of a method's summary (no statement): kept as before, unless guarded somewhere
+            boolean slot = edge.get(1) instanceof Arg || edge.get(1) instanceof Content;
+            if (policy.callResults() && !NullGraph.DIFFERENT_SHAPES_OFF.get() && graph.differentShapes(edge.get(0), edge.get(1))) return;
+            if (graph.liftedIntoNarrower(edge.get(0), edge.get(1))) return;
+            if (count[1] > 0 || count[2] > 0 || count[0] == 0 && slot) {
+                graph.addEdge(edge.get(0), edge.get(1));
+            } else {
+                graph.flows.add(List.of(edge.get(0), edge.get(1))); // the value is not null there; its elements may be
+            }
+        });
+    }
+
+    // Kotlin's invariance ties (instantiatedSlots), once the class type variables' own slots are known
+    private void invariantTies() {
+        if (!graph.invariantTies.isEmpty()) {
+            // a class type variable's slot is reached only by the class's own nulls (coupleContent never ties it
+            // to an instantiation's slot), so that is known before the invariance edges are added
+            Set<Object> own = graph.closure(new HashMap<>());
+            boolean added = false;
+            for (Object[] tie : graph.invariantTies) {
+                if (!own.contains(tie[2])) {
+                    graph.addEdge(tie[0], tie[1]);
+                    added = true;
+                }
+            }
+            if (added) graph.coupleContent(); // the nested slots of the new flows
+        }
     }
 }

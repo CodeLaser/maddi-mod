@@ -21,6 +21,6 @@ package io.codelaser.maddi.modification.analyzer.nullability;
 public record Content(Object of) {
     @Override
     public String toString() {
-        return "elements of " + NullabilityPass.Report.label(of);
+        return "elements of " + Report.label(of);
     }
 }

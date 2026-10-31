@@ -21,6 +21,6 @@ package io.codelaser.maddi.modification.analyzer.nullability;
 public record Arg(Object of, int index) {
     @Override
     public String toString() {
-        return "type argument " + index + " of " + NullabilityPass.Report.label(of);
+        return "type argument " + index + " of " + Report.label(of);
     }
 }

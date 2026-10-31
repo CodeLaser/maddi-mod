@@ -21,6 +21,9 @@ import io.codelaser.maddi.modification.analyzer.nullability.Arg;
 import io.codelaser.maddi.modification.analyzer.nullability.Content;
 import io.codelaser.maddi.modification.analyzer.nullability.NullabilityComparison;
 import io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass;
+import io.codelaser.maddi.modification.analyzer.nullability.Policy;
+import io.codelaser.maddi.modification.analyzer.nullability.Report;
+import io.codelaser.maddi.modification.analyzer.nullability.World;
 import io.codelaser.maddi.run.analysis.AnalysisEngineImpl;
 import io.codelaser.maddi.modification.analyzer.nullability.NullabilityComparison.Kind;
 import io.codelaser.maddi.modification.analyzer.nullability.NullabilityComparison.Outcome;
@@ -206,15 +209,15 @@ public class TestNullabilityOracleGuava {
         List<TypeInfo> types = parsed.types();
         DeclaredNullability dn = declaredNullability(types);
         NullabilityComparison flowOnly = measure("NULL_MARKED_FLOW_ONLY", types, dn,
-                new NullabilityPass(NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY.withoutContracts()).go(order));
+                new NullabilityPass(Policy.NULL_MARKED_FLOW_ONLY.withoutContracts()).go(order));
         NullabilityComparison comparison = measure("NULL_MARKED", types, dn,
-                new NullabilityPass(NullabilityPass.Policy.NULL_MARKED.withoutContracts()).go(order));
+                new NullabilityPass(Policy.NULL_MARKED.withoutContracts()).go(order));
         // guava is a library: its users are callers the analysis does not see (docs/design/nullability.md §8)
         NullabilityComparison openVisibility = measure("OPEN_VISIBILITY", types, dn, new NullabilityPass(
-                NullabilityPass.Policy.NULL_MARKED.withoutContracts().withWorld(NullabilityPass.World.OPEN_VISIBILITY))
+                Policy.NULL_MARKED.withoutContracts().withWorld(World.OPEN_VISIBILITY))
                 .go(order));
         NullabilityComparison open = measure("OPEN", types, dn, new NullabilityPass(
-                NullabilityPass.Policy.NULL_MARKED.withoutContracts().withWorld(NullabilityPass.World.OPEN))
+                Policy.NULL_MARKED.withoutContracts().withWorld(World.OPEN))
                 .go(order));
         assertTrue(flowOnly.count(Outcome.AGREE) >= 10_000, "the inference must cover the reference");
         assertTrue(comparison.count(Outcome.UNSAFE) <= flowOnly.count(Outcome.UNSAFE),
@@ -266,7 +269,7 @@ public class TestNullabilityOracleGuava {
             : List.of(System.getenv("ORACLE_EXPLAIN").split(","));
 
     private static NullabilityComparison measure(String name, List<TypeInfo> types, DeclaredNullability dn,
-                                                 NullabilityPass.Report report) {
+                                                 Report report) {
         NullabilityComparison comparison = new NullabilityComparison();
         int[] missing = new int[1];
         List<String> disagreements = new java.util.ArrayList<>();

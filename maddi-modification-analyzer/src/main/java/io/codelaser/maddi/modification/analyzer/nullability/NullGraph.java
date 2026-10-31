@@ -55,7 +55,7 @@ import static io.codelaser.maddi.modification.analyzer.nullability.Types.*;
  * bookkeeping of gap 9. Filled by the walk and the rules that complete it; read by the closure and the verdicts.
  */
 final class NullGraph {
-    private final NullabilityPass.Policy policy;
+    private final Policy policy;
     private final Trace trace;
     // Culprits: the statement the walk is at, where an edge built now comes from
     private final WalkSite site;
@@ -64,7 +64,7 @@ final class NullGraph {
     private final Seeds seeds;
     private final Contracts contracts;
 
-    NullGraph(NullabilityPass.Policy policy, Trace trace, WalkSite site, Index index, TypeUses typeUses, Seeds seeds,
+    NullGraph(Policy policy, Trace trace, WalkSite site, Index index, TypeUses typeUses, Seeds seeds,
               Contracts contracts) {
         this.policy = policy;
         this.trace = trace;
@@ -449,8 +449,8 @@ final class NullGraph {
      getInteger(key) calls getInteger(key, null): only that call's result is nullable, not 'getInteger(KEY, 5)'.
      */
     boolean callResultNullable(MethodInfo callee, int call, Set<Object> reached,
-                                       java.util.function.Predicate<Object> isReached,
-                                       Map<MethodInfo, Boolean> intrinsicMemo) {
+                               java.util.function.Predicate<Object> isReached,
+                               Map<MethodInfo, Boolean> intrinsicMemo) {
         if (GAP9_OFF.get() || !argumentsSeen.contains(call)) return true;
         Set<ParameterInfo> through = passThrough(callee);
         if (through.isEmpty()) return true;

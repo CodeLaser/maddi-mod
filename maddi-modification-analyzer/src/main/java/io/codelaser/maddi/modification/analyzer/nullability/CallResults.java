@@ -45,7 +45,6 @@ import io.codelaser.maddi.cst.api.variable.This;
 import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
-import io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass.Policy;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -378,7 +377,7 @@ final class CallResults {
      the receiver's slot of that variable. Slot to slot: the content of one object copied into another.
      */
     void contentCopies(MethodInfo mi, Scope scope, Object receiver, MethodInfo callee,
-                               List<Expression> arguments) {
+                       List<Expression> arguments) {
         ParameterizedType type = graph.typeOf(receiver);
         int arity = callee.typeInfo().typeParameters().size();
         if (type == null || type.arrays() > 0 || arity == 0 || type.parameters().size() != arity) return;
@@ -472,7 +471,7 @@ final class CallResults {
 
     // the arguments of a call whose parameters are typed with the callee's class type variables inside a generic type
     void instantiatedArguments(MethodInfo mi, Scope scope, Expression call, MethodInfo callee,
-                                       List<Expression> arguments) {
+                               List<Expression> arguments) {
         if (!(call instanceof MethodCall mc) || callee.typeInfo().typeParameters().isEmpty()) return;
         Object receiver = nodes.receiverNode(mi, scope, mc);
         ParameterizedType receiverType = receiver == null ? null : graph.typeOf(receiver);
@@ -815,7 +814,7 @@ final class CallResults {
      Gate NOMETHODTYPEVARARGS.
      */
     record TypeVariableArgument(ParameterInfo parameter, Expression call, int index, MethodInfo mi,
-                                        Scope scope, Runnable asBefore) {
+                                Scope scope, Runnable asBefore) {
     }
 
     private record CallTarget(Object target, MethodInfo mi, Scope scope) {
@@ -1352,9 +1351,16 @@ final class CallResults {
                 ParameterizedType t = samParameter.parameterizedType();
                 if (t.arrays() == 0 && t.typeParameter() == typeParameter) {
                     seeds.seed(lambdaParameters.get(samParameter.index()), "called back with null by "
-                                                                     + parameter.methodInfo().fullyQualifiedName());
+                                                                           + parameter.methodInfo().fullyQualifiedName());
                 }
             }
+        }
+    }
+
+    // phase 3: the library nulls the next statement exits on (deadNullAssignments)
+    void deadNullAssignments(List<MethodInfo> methods) {
+        if (policy.callResults() && !DEAD_NULLS_OFF.get()) {
+            for (MethodInfo mi : methods) if (mi.methodBody() != null) deadNullAssignments(mi.methodBody());
         }
     }
 }

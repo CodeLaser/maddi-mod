@@ -56,7 +56,6 @@ import io.codelaser.maddi.cst.api.variable.This;
 import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
-import io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass.Policy;
 import io.codelaser.maddi.modification.link.LinkComputer;
 import io.codelaser.maddi.modification.link.impl.LinkComputerImpl;
 import io.codelaser.maddi.modification.link.impl.LinkNatureImpl;
@@ -372,7 +371,7 @@ final class MethodWalker {
                     // method's own summary repeats the link (no statement): skipped once a return guarded it.
                     if (trace.why(mi)) {
                         trace.log("marker", mi, "from " + from + " to " + link.to() + " statement "
-                                             + (statement == null ? "-" : statement.toString().strip()));
+                                                + (statement == null ? "-" : statement.toString().strip()));
                     }
                     if (fromVar instanceof ReturnVariable) {
                         List<Object> key = List.of(mi, link.to());

@@ -27,6 +27,6 @@ package io.codelaser.maddi.modification.analyzer.nullability;
 public record Keyed(Arg slot, Object key) {
     @Override
     public String toString() {
-        return NullabilityPass.Report.label(this);
+        return Report.label(this);
     }
 }

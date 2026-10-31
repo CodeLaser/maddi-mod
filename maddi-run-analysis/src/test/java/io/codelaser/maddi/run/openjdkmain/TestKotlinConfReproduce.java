@@ -2,7 +2,7 @@ package io.codelaser.maddi.run.openjdkmain;
 
 import io.codelaser.maddi.cst.impl.analysis.ModificationFacts;
 import io.codelaser.maddi.cst.print.kotlin.KotlinPrintOptions;
-import io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass;
+import io.codelaser.maddi.modification.analyzer.nullability.Report;
 import io.codelaser.maddi.run.j2k.JavaToKotlinRatchet;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
@@ -31,7 +31,7 @@ public class TestKotlinConfReproduce {
     public void test() throws Exception {
         String corpusName = Objects.requireNonNullElse(System.getenv("ABLATION_CORPUS"), "fernflower");
         JavaToKotlinRatchet.Corpus corpus = JavaToKotlinRatchet.parse(corpusName);
-        NullabilityPass.Report report = CorpusNullability.report(corpus);
+        Report report = CorpusNullability.report(corpus);
         KotlinPrintOptions both = new KotlinPrintOptions(report, KotlinPrintOptions.NullCheck.ASSERT,
                 ModificationFacts.STORED);
         JavaToKotlinRatchet.measureOnly(corpusName + "-reproduce").run(corpus, both);

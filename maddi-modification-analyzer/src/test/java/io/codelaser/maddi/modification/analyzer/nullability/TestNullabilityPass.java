@@ -42,11 +42,11 @@ public class TestNullabilityPass extends CommonTest {
 
     private List<Info> analysisOrder;
 
-    private NullabilityPass.Report run(String fqn, String src) {
-        return run(fqn, src, NullabilityPass.Policy.NULL_MARKED);
+    private Report run(String fqn, String src) {
+        return run(fqn, src, Policy.NULL_MARKED);
     }
 
-    private NullabilityPass.Report run(String fqn, String src, NullabilityPass.Policy policy) {
+    private Report run(String fqn, String src, Policy policy) {
         TypeInfo t = javaInspector.parse(fqn, src);
         parsed = t;
         List<Info> ao = prepWork(t);
@@ -79,7 +79,7 @@ public class TestNullabilityPass extends CommonTest {
     }
 
     // every verdict of the type, sorted: 'f: String?', 'm(0:s): String?' for a parameter, 'm(): String' for a return
-    private static String verdicts(NullabilityPass.Report report) {
+    private static String verdicts(Report report) {
         return report.verdicts().entrySet().stream()
                 .map(e -> label(e.getKey()) + ": " + k(e.getValue()))
                 .sorted().collect(Collectors.joining("\n"));
@@ -94,7 +94,7 @@ public class TestNullabilityPass extends CommonTest {
         };
     }
 
-    private static String explain(NullabilityPass.Report report) {
+    private static String explain(Report report) {
         return report.verdicts().keySet().stream()
                 .filter(i -> report.cause().containsKey(i) || report.seedOrigin().containsKey(i))
                 .map(report::explain).sorted().collect(Collectors.joining("\n"));
@@ -117,7 +117,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("returns: a null literal, through a call, through a ternary; non-null literals and primitives")
     @Test
     public void returns() {
-        NullabilityPass.Report report = run("a.b.R", RETURNS);
+        Report report = run("a.b.R", RETURNS);
         System.out.println(explain(report));
         assertEquals("""
                 direct(): String?
@@ -154,7 +154,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("fields: final, assigned in every constructor, Java's default value, assigned null, initialized null")
     @Test
     public void fields() {
-        NullabilityPass.Report report = run("a.b.F", FIELDS);
+        Report report = run("a.b.F", FIELDS);
         System.out.println(explain(report));
         assertEquals("""
                 <init>(0:fin): String
@@ -188,7 +188,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("parameters: a null argument, a possibly-null local as argument, never null; the field it lands in")
     @Test
     public void parameters() {
-        NullabilityPass.Report report = run("a.b.P", PARAMETERS);
+        Report report = run("a.b.P", PARAMETERS);
         System.out.println(explain(report));
         assertEquals("""
                 f: String?
@@ -222,7 +222,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("overrides: a nullable implementation return makes the interface's nullable; one parameter per chain")
     @Test
     public void overrides() {
-        NullabilityPass.Report report = run("a.b.O", OVERRIDES);
+        Report report = run("a.b.O", OVERRIDES);
         System.out.println(explain(report));
         Map<String, String> byLabel = report.verdicts().entrySet().stream()
                 .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
@@ -253,7 +253,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("JDK null contracts: Map.get and NavigableMap.firstEntry may return null; equals accepts null")
     @Test
     public void library() {
-        NullabilityPass.Report report = run("a.b.L", LIBRARY);
+        Report report = run("a.b.L", LIBRARY);
         System.out.println(explain(report));
         assertEquals("""
                 equals(): boolean
@@ -287,7 +287,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("a type-variable position: implementations are not joined upward through it")
     @Test
     public void genericOverrides() {
-        NullabilityPass.Report report = run("a.b.G", GENERIC_OVERRIDES);
+        Report report = run("a.b.G", GENERIC_OVERRIDES);
         System.out.println(explain(report));
         Map<String, String> byLabel = report.verdicts().entrySet().stream()
                 .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
@@ -327,7 +327,7 @@ public class TestNullabilityPass extends CommonTest {
             """;
 
     // every local verdict, sorted: 'method.name: Type', a counter per method and name so sibling locals both show
-    private static String locals(NullabilityPass.Report report) {
+    private static String locals(Report report) {
         Map<String, Integer> seen = new java.util.HashMap<>();
         return report.locals().entrySet().stream()
                 .map(e -> {
@@ -341,7 +341,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("locals: keyed by declaration, so same-named locals of sibling blocks have their own verdict")
     @Test
     public void locals() {
-        NullabilityPass.Report report = run("a.b.V", LOCALS);
+        Report report = run("a.b.V", LOCALS);
         System.out.println(explain(report));
         assertEquals("""
                 caught.ex: RuntimeException
@@ -406,7 +406,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("locals initialized null, nested in loops after a local class declaration (fernflower)")
     @Test
     public void nestedLocals() {
-        NullabilityPass.Report report = run("a.b.N", NESTED_LOCALS);
+        Report report = run("a.b.N", NESTED_LOCALS);
         String all = locals(report);
         System.out.println(all);
         org.junit.jupiter.api.Assertions.assertTrue(all.contains("flatten.shortEntry: Node?"), all);
@@ -433,7 +433,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("contracts (M2): a nullable annotation seeds, a non-null one stops null and keeps its verdict")
     @Test
     public void contracts() {
-        NullabilityPass.Report report = run("a.b.C", CONTRACTS);
+        Report report = run("a.b.C", CONTRACTS);
         System.out.println(explain(report));
         // make() passes null to the non-null constructor parameter: the caller's error, which does not travel on
         assertEquals("""
@@ -450,7 +450,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("without contracts (the oracle's view): annotations are ignored, the inference alone decides")
     @Test
     public void withoutContracts() {
-        NullabilityPass.Report report = run("a.b.C", CONTRACTS, NullabilityPass.Policy.NULL_MARKED.withoutContracts());
+        Report report = run("a.b.C", CONTRACTS, Policy.NULL_MARKED.withoutContracts());
         Map<String, String> byLabel = report.verdicts().entrySet().stream()
                 .collect(Collectors.toMap(e -> label(e.getKey()), e -> k(e.getValue())));
         assertEquals("String", byLabel.get("echo(0:s)"));
@@ -484,7 +484,7 @@ public class TestNullabilityPass extends CommonTest {
         // what LinkComputerImpl writes when it gives up on a method; its variable data then carries no links
         big.analysis().setAllowControlledOverwrite(io.codelaser.maddi.cst.impl.analysis.PropertyImpl.DEGRADED_ANALYSIS_METHOD,
                 io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.TRUE);
-        NullabilityPass.Report report = new NullabilityPass(NullabilityPass.Policy.NULL_MARKED).go(ao);
+        Report report = new NullabilityPass(Policy.NULL_MARKED).go(ao);
         String all = locals(report);
         org.junit.jupiter.api.Assertions.assertTrue(all.contains("big.none: String?"), all);
         org.junit.jupiter.api.Assertions.assertTrue(all.contains("big.known: String!"), all);
@@ -532,7 +532,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("use sites (M4): a null checked away, dereferenced away, or thrown on does not travel")
     @Test
     public void useSites() {
-        NullabilityPass.Report report = run("a.b.U", USE_SITES);
+        Report report = run("a.b.U", USE_SITES);
         System.out.println(explain(report));
         Map<String, String> byLabel = report.verdicts().entrySet().stream()
                 .collect(Collectors.toMap(e -> label(e.getKey()), e -> k(e.getValue())));
@@ -562,7 +562,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("smart casts: only what Kotlin derives too; requireNonNull is Java's, not Kotlin's")
     @Test
     public void smartCasts() {
-        NullabilityPass.Report report = run("a.b.K", SMART_CASTS);
+        Report report = run("a.b.K", SMART_CASTS);
         io.codelaser.maddi.cst.api.info.MethodInfo checked = parsed.findUniqueMethod("checked", 1);
         io.codelaser.maddi.cst.api.statement.Statement ret = checked.methodBody().statements().getLast();
         assertEquals(true, report.useSites().nonNullAt(ret, checked.parameters().getFirst()));
@@ -604,7 +604,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("smart casts: a captured local is not smart-cast by a correlated check or by requireNonNull's own argument")
     @Test
     public void correlatedCapturedLocal() {
-        NullabilityPass.Report report = run("a.b.TF", """
+        Report report = run("a.b.TF", """
                 package a.b;
                 import java.util.Objects;
                 import java.util.concurrent.atomic.AtomicLong;
@@ -624,7 +624,7 @@ public class TestNullabilityPass extends CommonTest {
                         };
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         MethodInfo build = parsed.findUniqueMethod("build", 1);
         MethodInfo[] make = {null};
         build.methodBody().visit(e -> {
@@ -658,7 +658,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("smart casts: a null check inside synchronized does not smart-cast after it, guava's ListenerCallQueue")
     @Test
     public void synchronizedNoSmartCast() {
-        NullabilityPass.Report report = run("a.b.LQ", """
+        Report report = run("a.b.LQ", """
                 package a.b;
                 import java.util.ArrayDeque;
                 import java.util.Queue;
@@ -677,7 +677,7 @@ public class TestNullabilityPass extends CommonTest {
                         }
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         MethodInfo run = parsed.findUniqueMethod("run", 0);
         io.codelaser.maddi.cst.api.statement.Statement loop = run.methodBody().statements().getFirst();
         io.codelaser.maddi.cst.api.statement.Statement call = loop.block().statements().getLast();
@@ -693,7 +693,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("smart casts: a dereference in super(...) does not smart-cast the constructor body, guava's FinalizableWeakReference")
     @Test
     public void superCallArgumentNoSmartCast() {
-        NullabilityPass.Report report = run("a.b.FW", """
+        Report report = run("a.b.FW", """
                 package a.b;
                 class FW {
                     static class Queue { final Object queue = new Object(); void cleanUp() { } }
@@ -706,7 +706,7 @@ public class TestNullabilityPass extends CommonTest {
                     }
                     static Ref make() { return new Ref("x", null); }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         MethodInfo[] ctor = {null};
         parsed.subTypes().forEach(st -> {
             if ("Ref".equals(st.simpleName())) ctor[0] = st.findConstructor(2);
@@ -720,13 +720,13 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("smart casts: a final field of a parameter or local is a val property Kotlin smart-casts")
     @Test
     public void propertySmartCasts() {
-        NullabilityPass.Report report = run("a.b.SP", PROPERTY_SMART_CASTS, NullabilityPass.Policy.KOTLIN);
+        Report report = run("a.b.SP", PROPERTY_SMART_CASTS, Policy.KOTLIN);
         assertEquals(true, smartCastAtReturn(report, "depth", 1, "superClass"), "'cl.superClass' after the check");
         assertEquals(false, smartCastAtReturn(report, "moved", 2, "superClass"), "'cl' was assigned in between");
         assertEquals(false, smartCastAtReturn(report, "mutable", 1, "next"), "a var property is not smart-cast");
     }
 
-    private boolean smartCastAtReturn(NullabilityPass.Report report, String method, int n, String field) {
+    private boolean smartCastAtReturn(Report report, String method, int n, String field) {
         MethodInfo mi = parsed.findUniqueMethod(method, n);
         io.codelaser.maddi.cst.api.statement.Statement ret = mi.methodBody().statements().getLast();
         io.codelaser.maddi.cst.api.variable.Variable[] found = {null};
@@ -784,7 +784,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("isAnnotationPresent(X.class) makes getAnnotation(X.class) on the same element non-null (diagnose, nacos)")
     @Test
     public void annotationPresent() {
-        NullabilityPass.Report report = run("a.b.AP", ANNOTATION_PRESENT);
+        Report report = run("a.b.AP", ANNOTATION_PRESENT);
         System.out.println(explain(report));
         Map<String, String> byName = byName(report);
         assertEquals("Secured?", byName.get("a.b.AP.unchecked(a.b.AP.Secured):0:secured"),
@@ -797,7 +797,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("a read loop: '(line = reader.readLine()) != null' makes line non-null in the body (diagnose)")
     @Test
     public void readLoop() {
-        NullabilityPass.Report report = run("a.b.RL", READ_LOOP);
+        Report report = run("a.b.RL", READ_LOOP);
         MethodInfo count = parsed.findUniqueMethod("count", 1);
         io.codelaser.maddi.cst.api.statement.WhileStatement loop = (io.codelaser.maddi.cst.api.statement.WhileStatement)
                 count.methodBody().statements().get(2);
@@ -842,7 +842,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("inside a statement (&&, ?:) and fields of this (forgotten at a call)")
     @Test
     public void inStatementAndFields() {
-        NullabilityPass.Report report = run("a.b.S", IN_STATEMENT);
+        Report report = run("a.b.S", IN_STATEMENT);
         System.out.println(explain(report));
         Map<String, String> byLabel = report.verdicts().entrySet().stream()
                 .collect(Collectors.toMap(e -> label(e.getKey()), e -> k(e.getValue())));
@@ -946,7 +946,7 @@ public class TestNullabilityPass extends CommonTest {
                 store(0:s): String!
                 stored: String!
                 use(): String""", verdicts(new NullabilityPass(
-                NullabilityPass.Policy.NULL_MARKED.withWorld(NullabilityPass.World.OPEN_VISIBILITY)).go(analysisOrder)));
+                Policy.NULL_MARKED.withWorld(World.OPEN_VISIBILITY)).go(analysisOrder)));
         // with preconditions: dereferenced on every normal exit is non-null; 'early' returns before the dereference
         assertEquals("""
                 checked(): String
@@ -969,7 +969,7 @@ public class TestNullabilityPass extends CommonTest {
                 store(0:s): String!
                 stored: String!
                 use(): String""", verdicts(new NullabilityPass(
-                NullabilityPass.Policy.NULL_MARKED.withWorld(NullabilityPass.World.OPEN)).go(analysisOrder)));
+                Policy.NULL_MARKED.withWorld(World.OPEN)).go(analysisOrder)));
     }
 
     @Language("java")
@@ -999,7 +999,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("arrays: an element slot per array, tied along every flow of the array; new T[n] holds nulls")
     @Test
     public void arrays() {
-        NullabilityPass.Report report = run("a.b.A", ARRAYS);
+        Report report = run("a.b.A", ARRAYS);
         System.out.println(explain(report));
         assertEquals("""
                 filled: String[]
@@ -1050,7 +1050,7 @@ public class TestNullabilityPass extends CommonTest {
                  + "method nulls it, or an array allocated elsewhere has holes (fernflower SFormsFastMapDirect, 23f8bf65)")
     @Test
     public void subArrayElements() {
-        NullabilityPass.Report report = run("a.b.F", SUB_ARRAYS);
+        Report report = run("a.b.F", SUB_ARRAYS);
         System.out.println(explain(report));
         String locals = locals(report);
         System.out.println(locals);
@@ -1062,7 +1062,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("a for loop's updater assigns its variable the parent field's default null")
     @Test
     public void forLoopUpdater() {
-        NullabilityPass.Report report = run("a.b.FL", """
+        Report report = run("a.b.FL", """
                 package a.b;
                 class FL {
                     static class Node {
@@ -1076,7 +1076,7 @@ public class TestNullabilityPass extends CommonTest {
                         return d;
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         System.out.println(explain(report));
         String locals = locals(report);
         System.out.println(locals);
@@ -1118,7 +1118,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("type arguments: a slot per type argument, from content links, holder fields, and invariance")
     @Test
     public void typeArguments() {
-        NullabilityPass.Report report = run("a.b.G", GENERICS);
+        Report report = run("a.b.G", GENERICS);
         System.out.println(explain(report));
         // 'boxNull' writes its null into its own receiver's slot, not into 'Box.set(T)': 'intBox' and 'unbox' stay
         // clean (before 2026-10-07 the null reached Box.t and from there the slot of every Box)
@@ -1174,7 +1174,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Policy.assertContentWrites: a library-nullable value written into content is asserted, not spread")
     @Test
     public void assertContentWrites() {
-        NullabilityPass.Report java = run("a.b.W", CONTENT_WRITES);
+        Report java = run("a.b.W", CONTENT_WRITES);
         assertEquals("""
                 a(0:k): String
                 b(0:k): String
@@ -1191,7 +1191,7 @@ public class TestNullabilityPass extends CommonTest {
         // Kotlin: 'fromMap.add(map.get(k)!!)', 'viaLocal.add(v!!)', 'slots[0] = map.get(k)!!', 'lateList.add(late!!)'
         // (a field nullable only by its default value); the literal null stays. 'byLength.put(maybe.length(), maybe)':
         // the put only happens with a non-null 'maybe', dereferenced by the first argument
-        NullabilityPass.Report kotlin = new NullabilityPass(NullabilityPass.Policy.KOTLIN).go(analysisOrder);
+        Report kotlin = new NullabilityPass(Policy.KOTLIN).go(analysisOrder);
         assertEquals("""
                 a(0:k): String
                 b(0:k): String
@@ -1236,7 +1236,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("content copies (addAll, putAll, copy constructors) and call results tie the slots")
     @Test
     public void copies() {
-        NullabilityPass.Report report = run("a.b.C", COPIES, NullabilityPass.Policy.KOTLIN);
+        Report report = run("a.b.C", COPIES, Policy.KOTLIN);
         System.out.println(explain(report));
         // 'head' by its default value (it is assigned only where 'r' is checked non-null); the local 'r' holds find's
         // nullable result (Policy.callResults), also assigned inside the condition
@@ -1259,7 +1259,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("use sites: a loop condition sees what the loop assigns; an old-style case does not see the one before")
     @Test
     public void loopsAndCases() {
-        NullabilityPass.Report report = run("a.b.N", """
+        Report report = run("a.b.N", """
                 package a.b;
                 class N {
                     N parent;
@@ -1306,7 +1306,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("lambdas: a lambda's parameter takes the nullability of the functional method's parameter")
     @Test
     public void lambdas() {
-        NullabilityPass.Report report = run("a.b.F", """
+        Report report = run("a.b.F", """
                 package a.b;
                 import java.util.*;
                 class F {
@@ -1329,7 +1329,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("guards: a null-checked conditional with a call branch; a local passed to a constructor once assigned")
     @Test
     public void guards() {
-        NullabilityPass.Report report = run("a.b.G", """
+        Report report = run("a.b.G", """
                 package a.b;
                 import java.util.*;
                 class G {
@@ -1366,7 +1366,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("a null returned through a call: the chain names the callee, not a null written in the caller")
     @Test
     public void returnedNull() {
-        NullabilityPass.Report report = run("a.b.R", """
+        Report report = run("a.b.R", """
                 package a.b;
                 class R {
                     String name = "n";
@@ -1393,7 +1393,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("library factories: an argument for the method's type variable is a value of the result's slot")
     @Test
     public void factories() {
-        NullabilityPass.Report report = run("a.b.Y", """
+        Report report = run("a.b.Y", """
                 package a.b;
                 import java.util.*;
                 class Y {
@@ -1415,7 +1415,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("an analysed generic class: a null written through a receiver goes to its slot, not to 'T?'")
     @Test
     public void classTypeVariables() {
-        NullabilityPass.Report report = run("a.b.Q", """
+        Report report = run("a.b.Q", """
                 package a.b;
                 import java.util.*;
                 class Q {
@@ -1446,7 +1446,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("super(...) and this(...) arguments carry no links: their slots are still tied to the parameter's")
     @Test
     public void explicitConstructorInvocation() {
-        NullabilityPass.Report report = run("a.b.M", """
+        Report report = run("a.b.M", """
                 package a.b;
                 import java.util.*;
                 class M {
@@ -1479,7 +1479,7 @@ public class TestNullabilityPass extends CommonTest {
                     }
                     static Field viaNulls() { return new Field(nulls()); }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         System.out.println(explain(report));
         Map<String, String> byName = report.verdicts().entrySet().stream()
                 .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
@@ -1493,7 +1493,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("an array created and filled by the next loop has no null elements")
     @Test
     public void filledArrays() {
-        NullabilityPass.Report report = run("a.b.A", """
+        Report report = run("a.b.A", """
                 package a.b;
                 class A {
                     static String[] filled(String[] in) {
@@ -1598,7 +1598,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("a reassigned parameter: the parameter is the caller's value, what the body assigns is a shadow (issue #22 gap 5)")
     @Test
     public void reassignedParameter() {
-        NullabilityPass.Report report = run("a.b.R", """
+        Report report = run("a.b.R", """
                 package a.b;
                 class R {
                     static String decode(String s) { return s.isEmpty() ? null : s; }
@@ -1638,7 +1638,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("a map lookup whose key is known present is not the absent key's null (issue #22 gap 1)")
     @Test
     public void keyPresence() {
-        NullabilityPass.Report report = run("a.b.K", """
+        Report report = run("a.b.K", """
                 package a.b;
                 import java.util.*;
                 class K {
@@ -1687,7 +1687,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("key presence: a key from the map's own navigation methods (higherKey, firstKey, navigableKeySet)")
     @Test
     public void keyPresenceNavigated() {
-        NullabilityPass.Report report = run("a.b.KN", """
+        Report report = run("a.b.KN", """
                 package a.b;
                 import java.util.*;
                 class KN {
@@ -1723,7 +1723,7 @@ public class TestNullabilityPass extends CommonTest {
                         };
                     }
                 }
-                """, NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY.withoutContracts().withWorld(NullabilityPass.World.CLOSED));
+                """, Policy.NULL_MARKED_FLOW_ONLY.withoutContracts().withWorld(World.CLOSED));
         System.out.println(explain(report));
         Map<String, Boolean> present = new java.util.TreeMap<>();
         List<MethodInfo> methods = new java.util.ArrayList<>(parsed.methods());
@@ -1750,7 +1750,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("key presence: the key of an entry of the same map, and a put of a defaulted Properties lookup")
     @Test
     public void keyPresenceEntriesAndDefaults() {
-        NullabilityPass.Report report = run("a.b.KE", """
+        Report report = run("a.b.KE", """
                 package a.b;
                 import java.util.*;
                 class KE {
@@ -1782,7 +1782,7 @@ public class TestNullabilityPass extends CommonTest {
                         return m.get(k);
                     }
                 }
-                """, NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY.withoutContracts().withWorld(NullabilityPass.World.CLOSED));
+                """, Policy.NULL_MARKED_FLOW_ONLY.withoutContracts().withWorld(World.CLOSED));
         Map<String, Boolean> present = new java.util.TreeMap<>();
         parsed.methods().forEach(m -> m.methodBody().visit(e -> {
             if (e instanceof MethodCall mc && mc.methodInfo() != null && "get".equals(mc.methodInfo().name())) {
@@ -1819,7 +1819,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("a parameter whose method answers null with its own exception: the fact, and the opt-in policy")
     @Test
     public void rejectsNull() {
-        NullabilityPass.Report report = run("a.b.RJ", REJECTS, NullabilityPass.Policy.KOTLIN);
+        Report report = run("a.b.RJ", REJECTS, Policy.KOTLIN);
         Set<String> rejecting = report.rejectsNull().stream().map(pi -> pi.methodInfo().name() + ":" + pi.name())
                 .collect(Collectors.toCollection(java.util.TreeSet::new));
         assertEquals("[<init>:text, ensureNotBlank:s, helped:s]", rejecting.toString());
@@ -1830,8 +1830,8 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("String?", s.get("a.b.RJ.<init>(String):0:text"), s.toString());
         assertEquals("String", s.get("a.b.RJ.helped(String):0:s"), s.toString());
 
-        NullabilityPass.Report optIn = run("a.b.RJ2", REJECTS.replace("RJ", "RJ2"),
-                NullabilityPass.Policy.KOTLIN.withRejectionsNullable());
+        Report optIn = run("a.b.RJ2", REJECTS.replace("RJ", "RJ2"),
+                Policy.KOTLIN.withRejectionsNullable());
         Map<String, String> o = new java.util.TreeMap<>();
         optIn.verdicts().forEach((info, pt) -> o.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("String?", o.get("a.b.RJ2.helped(String):0:s"), o.toString());
@@ -1843,7 +1843,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Report.reachedByWrittenNull: the strict closure, under a policy that does not assert content writes")
     @Test
     public void reachedByWrittenNull() {
-        NullabilityPass.Report report = run("a.b.WR", """
+        Report report = run("a.b.WR", """
                 package a.b;
                 import java.util.Map;
                 class WR {
@@ -1853,7 +1853,7 @@ public class TestNullabilityPass extends CommonTest {
                     static String through(Map<String, String> m, String k) { return byContract(m, k); }
                     static String none() { return "x"; }
                 }
-                """, NullabilityPass.Policy.NULL_MARKED);
+                """, Policy.NULL_MARKED);
         Map<String, String> s = new java.util.TreeMap<>();
         for (MethodInfo mi : parsed.methods()) {
             String reached = k(report.verdicts().get(mi)).endsWith("?") ? "reached" : "-";
@@ -1889,14 +1889,14 @@ public class TestNullabilityPass extends CommonTest {
                 }
                 """;
         Map<String, String> kotlin = new java.util.TreeMap<>();
-        run("a.b.CV", src, NullabilityPass.Policy.KOTLIN).verdicts()
+        run("a.b.CV", src, Policy.KOTLIN).verdicts()
                 .forEach((info, pt) -> kotlin.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("A?", kotlin.get("a.b.CV.Converter.doForward(Object):0:a"), kotlin.toString());
         assertEquals("String?", kotlin.get("a.b.CV.Upper.doForward(String):0:s"), kotlin.toString());
         assertEquals("String?", kotlin.get("a.b.CV.Length.doForward(String):0:s"), kotlin.toString());
 
         Map<String, String> flow = new java.util.TreeMap<>();
-        run("a.b.CV2", src.replace("CV", "CV2"), NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY).verdicts()
+        run("a.b.CV2", src.replace("CV", "CV2"), Policy.NULL_MARKED_FLOW_ONLY).verdicts()
                 .forEach((info, pt) -> flow.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("String", flow.get("a.b.CV2.Length.doForward(String):0:s"), flow.toString());
     }
@@ -1939,7 +1939,7 @@ public class TestNullabilityPass extends CommonTest {
                     }
                     static String use(Holder<String> h) { return h.get(); }
                 }
-                """, NullabilityPass.Policy.KOTLIN).verdicts()
+                """, Policy.KOTLIN).verdicts()
                 .forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("T!", s.get("a.b.OR.Base.next()"), s.toString()); // unreached, its type variable's own
         assertEquals("String", s.get("a.b.OR.Entries.next()"), s.toString());
@@ -1986,7 +1986,7 @@ public class TestNullabilityPass extends CommonTest {
                         public int size() { return keys.size(); }
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN).verdicts()
+                """, Policy.KOTLIN).verdicts()
                 .forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         // the overridden slot holds a type variable, which stays that variable (typeVariableSlot): Strings, which
         // holds a null, would need 'Source<String?>', a supertype's type argument; Plain no longer follows it
@@ -2054,8 +2054,8 @@ public class TestNullabilityPass extends CommonTest {
                         return n;
                     }
                 }
-                """, NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY.withoutContracts()
-                        .withWorld(NullabilityPass.World.CLOSED)).verdicts()
+                """, Policy.NULL_MARKED_FLOW_ONLY.withoutContracts()
+                        .withWorld(World.CLOSED)).verdicts()
                 .forEach((info, pt) -> s.put(label(info), k(pt)));
         assertEquals("String", s.get("direct(0:s)"), s.toString());
         assertEquals("String", s.get("directKey(0:s)"), s.toString());
@@ -2129,7 +2129,7 @@ public class TestNullabilityPass extends CommonTest {
                     static Box<String> box() { return new Box<>(null); }
                     static Holder<String> holder() { return new Holder<>(null); }
                 }
-                """, NullabilityPass.Policy.KOTLIN).verdicts()
+                """, Policy.KOTLIN).verdicts()
                 .forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Box<String>", s.get("a.b.BS.box()"), s.toString());
         assertEquals("Holder<String?>", s.get("a.b.BS.holder()"), s.toString());
@@ -2157,7 +2157,7 @@ public class TestNullabilityPass extends CommonTest {
                     static <A> Pair<A, String> generic(String b) { return new Pair<>(null, b); }
                     static Pair<String, String> concrete(String b) { return new Pair<>(null, b); }
                 }
-                """, NullabilityPass.Policy.KOTLIN).verdicts()
+                """, Policy.KOTLIN).verdicts()
                 .forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Pair<A!, String>", s.get("a.b.TV.generic(String)"), s.toString());
         assertEquals("Pair<String?, String>", s.get("a.b.TV.concrete(String)"), s.toString());
@@ -2174,7 +2174,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a read-only array parameter's element nulls do not flow back into the caller's array")
     @Test
     public void readOnlyArrayParameter() {
-        NullabilityPass.Report report = run("a.b.RA", """
+        Report report = run("a.b.RA", """
                 package a.b;
                 class RA {
                     static String join(Object[] parts) {
@@ -2202,7 +2202,7 @@ public class TestNullabilityPass extends CommonTest {
                     static Runnable captured(String[] fns) { return capture(fns); }
                     static Runnable nullHashers() { return capture(new Object[]{null}); }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Object?[]", s.get("a.b.RA.join(Object[]):0:parts"), s.toString());
@@ -2220,7 +2220,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a varargs parameter takes a copy: its elements do not flow back into the caller's array")
     @Test
     public void varargsCopy() {
-        NullabilityPass.Report report = run("a.b.VC", """
+        Report report = run("a.b.VC", """
                 package a.b;
                 class VC {
                     @java.lang.annotation.Target(java.lang.annotation.ElementType.TYPE_USE) @interface Nullable {}
@@ -2244,7 +2244,7 @@ public class TestNullabilityPass extends CommonTest {
                     }
                     static Object useBuilder(Builder b) { return b.add("x", null); }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("String[]", s.get("a.b.VC.bounds(String[]):0:bounds"), s + "\n" + explain(report));
@@ -2260,7 +2260,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: guava's Joiner/WildcardCapturer array shape")
     @Test
     public void joinerShape() {
-        NullabilityPass.Report report = run("a.b.JS", """
+        Report report = run("a.b.JS", """
                 package a.b;
                 import java.lang.annotation.ElementType;
                 import java.lang.annotation.Target;
@@ -2289,7 +2289,7 @@ public class TestNullabilityPass extends CommonTest {
                     static Capturer sub() { return new Capturer() { @Override Object capture(String[] upperBounds) { return upperBounds; } }; }
                     static String callerBuilt(Object x, Object y) { return Joiner.on(',').join(new Object[]{x, y}); }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("String[]", s.get("a.b.JS.Capturer.capture(String[]):0:upperBounds"), s + "\n" + explain(report));
@@ -2298,7 +2298,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: an explicitly @Nullable override of a bounded type-variable return widens the overridden")
     @Test
     public void explicitNullableBoundedOverride() {
-        NullabilityPass.Report report = run("a.b.EB", """
+        Report report = run("a.b.EB", """
                 package a.b;
                 import java.lang.annotation.ElementType;
                 import java.lang.annotation.Target;
@@ -2311,7 +2311,7 @@ public class TestNullabilityPass extends CommonTest {
                         @Override public @Nullable Strong copy(Strong entry) { return entry.hashCode() > 0 ? null : entry; }
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Strong?", s.get("a.b.EB.StrongHelper.copy(a.b.EB.Strong)"), s.toString());
@@ -2321,7 +2321,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: an argument to a method's own type variable instantiates it")
     @Test
     public void methodTypeVariableArgument() {
-        NullabilityPass.Report report = run("a.b.MT", """
+        Report report = run("a.b.MT", """
                 package a.b;
                 class MT {
                     interface Entry<E> { E getElement(); }
@@ -2343,7 +2343,7 @@ public class TestNullabilityPass extends CommonTest {
                     static String unchecked() { return checked(null); }
                     static String withDefault() { return getOrDefault(null, "d"); }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("E!", s.get("a.b.MT.Entry.getElement()"), s + "\n" + explain(report));
@@ -2360,7 +2360,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a lambda's parameter is a value of its target's type argument")
     @Test
     public void lambdaParameterFromTarget() {
-        NullabilityPass.Report report = run("a.b.LP", """
+        Report report = run("a.b.LP", """
                 package a.b;
                 class LP {
                     interface ThrowingFunction<T, R> { R apply(T t) throws Exception; }
@@ -2371,7 +2371,7 @@ public class TestNullabilityPass extends CommonTest {
                     static Integer parse(String text) { return extract(text, s -> fromJson(s)); }
                     static Integer none() { return parse(null); }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("ThrowingFunction<String?, T!>", s.get("a.b.LP.extract(String,a.b.LP.ThrowingFunction):1:parser"),
@@ -2382,7 +2382,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a library null the next statement exits on does not seed the local")
     @Test
     public void deadLibraryNull() {
-        NullabilityPass.Report report = run("a.b.DN", """
+        Report report = run("a.b.DN", """
                 package a.b;
                 import java.util.NavigableMap;
                 import java.util.NoSuchElementException;
@@ -2415,7 +2415,7 @@ public class TestNullabilityPass extends CommonTest {
                         return v;
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("String", s.get("a.b.DN.Range.lowerBound"), s + "\n" + explain(report));
@@ -2428,7 +2428,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a generic method's T[] result has the elements of the T[] it is given, guava's ObjectArrays.concat")
     @Test
     public void arrayResultElements() {
-        NullabilityPass.Report report = run("a.b.GC", """
+        Report report = run("a.b.GC", """
                 package a.b;
                 import java.util.Arrays;
                 class GC {
@@ -2453,7 +2453,7 @@ public class TestNullabilityPass extends CommonTest {
                         static Set of(Object a) { Object[] t = new Object[2]; t[1] = a; return new Set(new Object[]{a}, t); }
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         String all = s + "\n" + explain(report);
@@ -2465,7 +2465,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a type-use @Nullable in an array declaration is about the elements, not the array")
     @Test
     public void elementAnnotationOnArray() {
-        NullabilityPass.Report report = run("a.b.EA", """
+        Report report = run("a.b.EA", """
                 package a.b;
                 class EA {
                     @java.lang.annotation.Target(java.lang.annotation.ElementType.TYPE_USE) @interface Nullable {}
@@ -2476,7 +2476,7 @@ public class TestNullabilityPass extends CommonTest {
                     Object[] get() { return entries; }
                     static Object[] pass(@Nullable String[] p) { return p; }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         String all = s + "\n" + explain(report);
@@ -2494,7 +2494,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a list made from an array with null elements has nullable elements, guava's partitionImpl")
     @Test
     public void partitionList() {
-        NullabilityPass.Report report = run("a.b.PT", """
+        Report report = run("a.b.PT", """
                 package a.b;
                 import java.util.Arrays;
                 import java.util.Collections;
@@ -2522,7 +2522,7 @@ public class TestNullabilityPass extends CommonTest {
                         Holder(String... modes) { this.modes = copyOf(modes); }
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         Map<String, String> l = new java.util.TreeMap<>();
@@ -2537,7 +2537,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a null-marked class's type parameter without a @Nullable bound is non-null, and so are its slots")
     @Test
     public void nullMarkedBounds() {
-        NullabilityPass.Report report = run("a.b.NM", """
+        Report report = run("a.b.NM", """
                 package a.b;
                 import java.util.HashMap;
                 import java.util.Map;
@@ -2553,7 +2553,7 @@ public class TestNullabilityPass extends CommonTest {
                     static class Free<F> { }
                     static void use(Box<String, String> b) { b.put("a", null); }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, io.codelaser.maddi.cst.api.info.TypeParameter> tps = new java.util.TreeMap<>();
         parsed.subTypes().forEach(st -> st.typeParameters().forEach(tp -> tps.put(st.simpleName() + "." + tp.simpleName(), tp)));
         assertTrue(report.nonNullTypeParameter(tps.get("Box.K")), tps.toString());
@@ -2569,7 +2569,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a type variable used in a null-marked position is non-null too, or the position is left unbounded")
     @Test
     public void nullMarkedBoundsCarried() {
-        NullabilityPass.Report report = run("a.b.NC", """
+        Report report = run("a.b.NC", """
                 package a.b;
                 class NC {
                     @java.lang.annotation.Target(java.lang.annotation.ElementType.TYPE_USE) @interface Nullable {}
@@ -2611,7 +2611,7 @@ public class TestNullabilityPass extends CommonTest {
                         Wrap(java.util.List<W> list) { }
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, io.codelaser.maddi.cst.api.info.TypeParameter> tps = new java.util.TreeMap<>();
         parsed.subTypes().forEach(st -> st.typeParameters().forEach(tp -> tps.put(st.simpleName() + "." + tp.simpleName(), tp)));
         java.util.stream.Stream.concat(java.util.stream.Stream.of(parsed), parsed.subTypes().stream())
@@ -2635,7 +2635,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a slot whose values reach a null-marked slot is non-null too, ImmutableMultiset.SerializedForm")
     @Test
     public void tiedToNullMarkedSlot() {
-        NullabilityPass.Report report = run("a.b.NT", """
+        Report report = run("a.b.NT", """
                 package a.b;
                 import java.util.ArrayList;
                 import java.util.List;
@@ -2664,7 +2664,7 @@ public class TestNullabilityPass extends CommonTest {
                     }
                     static List<Object> copy(Iterable<?> it) { return new ArrayList<>(); }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> l = new java.util.TreeMap<>();
         report.locals().forEach((local, pt) -> l.put(local.name(), k(pt)));
         assertTrue(l.get("free").contains("?"), l + "\n" + explain(report));
@@ -2675,7 +2675,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a double-brace map's puts are the new map's values, nacos RequestMeta.extractAppLabels")
     @Test
     public void doubleBraceMap() {
-        NullabilityPass.Report report = run("a.b.DB", """
+        Report report = run("a.b.DB", """
                 package a.b;
                 import java.util.HashMap;
                 import java.util.Map;
@@ -2696,7 +2696,7 @@ public class TestNullabilityPass extends CommonTest {
                     Map<String, String> getAppLabels() { return appLabels; }
                     static void use(DB db) { db.setClientVersion(null); }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         Map<String, String> l = new java.util.TreeMap<>();
@@ -2708,7 +2708,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a null argument in a field initializer, nacos GrpcClient.recAbilityContext")
     @Test
     public void nullArgumentInFieldInitializer() {
-        NullabilityPass.Report report = run("a.b.FI", """
+        Report report = run("a.b.FI", """
                 package a.b;
                 class FI {
                     private final Context context = new Context(null);
@@ -2725,7 +2725,7 @@ public class TestNullabilityPass extends CommonTest {
                         V get() { return value; }
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Object?", s.get("a.b.FI.Context.<init>(Object):0:connection"), s + "\n" + explain(report));
@@ -2735,7 +2735,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: 'return null' in an else branch inside try/finally, nacos NacosDelayTaskExecuteEngine.removeTask")
     @Test
     public void returnNullInTryFinally() {
-        NullabilityPass.Report report = run("a.b.RT", """
+        Report report = run("a.b.RT", """
                 package a.b;
                 import java.util.Map;
                 import java.util.concurrent.ConcurrentHashMap;
@@ -2762,7 +2762,7 @@ public class TestNullabilityPass extends CommonTest {
                         }
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Task?", s.get("a.b.RT.Impl.removeTask(Object)"), s + "\n" + explain(report));
@@ -2771,7 +2771,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a field replaced by a parameter shares its nested slots, nacos NamingMetadataManager:207")
     @Test
     public void fieldReplacedByParameter() {
-        NullabilityPass.Report report = run("a.b.FR", """
+        Report report = run("a.b.FR", """
                 package a.b;
                 import java.util.concurrent.ConcurrentHashMap;
                 import java.util.concurrent.ConcurrentMap;
@@ -2788,7 +2788,7 @@ public class TestNullabilityPass extends CommonTest {
                     static void use(FR fr) { fr.update("s", null, "v"); }
                     static void loader(FR fr) { fr.load(new ConcurrentHashMap<>()); }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         String field = s.get("a.b.FR.map");
@@ -2799,7 +2799,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: an enum's valueOf takes a String, nacos ServerStatusManager.java:64")
     @Test
     public void enumValueOf() {
-        NullabilityPass.Report report = run("a.b.EV", """
+        Report report = run("a.b.EV", """
                 package a.b;
                 class EV {
                     enum Status { UP, DOWN }
@@ -2810,7 +2810,7 @@ public class TestNullabilityPass extends CommonTest {
                         return Status.UP;
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("String", s.get("a.b.EV.Status.valueOf(String):0:name"), s + "\n" + explain(report));
@@ -2819,7 +2819,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a map's views share its slots, nacos ServiceManager.getAllNamespaces, Header.iterator")
     @Test
     public void mapViews() {
-        NullabilityPass.Report report = run("a.b.MV", """
+        Report report = run("a.b.MV", """
                 package a.b;
                 import java.util.Iterator;
                 import java.util.Map;
@@ -2837,7 +2837,7 @@ public class TestNullabilityPass extends CommonTest {
                     Iterator<Map.Entry<String, String>> iterator() { return header.entrySet().iterator(); }
                     static void use(MV mv) { mv.add(null, null, "v"); }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Set<String?>", s.get("a.b.MV.namespaces()"), s + "\n" + explain(report));
@@ -2847,7 +2847,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a lambda returning null added to a list of functions makes the slot's result nullable")
     @Test
     public void lambdaIntoReceiverSlot() {
-        NullabilityPass.Report report = run("a.b.LS", """
+        Report report = run("a.b.LS", """
                 package a.b;
                 import java.util.ArrayList;
                 import java.util.HashMap;
@@ -2866,7 +2866,7 @@ public class TestNullabilityPass extends CommonTest {
                         return chain.get(0).apply(current) + "";
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> l = new java.util.TreeMap<>();
         report.locals().forEach((local, pt) -> l.put(local.name(), k(pt)));
         assertEquals("List<Function<String, String?>>", l.get("chain"), l + "\n" + explain(report));
@@ -2875,7 +2875,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a list's nullable function slot reaches a generic constructor through iterator(), jenkins InstallUtil")
     @Test
     public void lambdaSlotThroughIterator() {
-        NullabilityPass.Report report = run("a.b.LI", """
+        Report report = run("a.b.LI", """
                 package a.b;
                 import java.util.ArrayList;
                 import java.util.Iterator;
@@ -2907,7 +2907,7 @@ public class TestNullabilityPass extends CommonTest {
                         }
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> l = new java.util.TreeMap<>();
         report.locals().forEach((local, pt) -> l.put(local.name(), k(pt)));
         Map<String, String> s = new java.util.TreeMap<>();
@@ -2921,7 +2921,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a field initialized with another field or a method's array takes its element nullability, jenkins CrontabLexer, DomainValidator")
     @Test
     public void fieldInitializerContent() {
-        NullabilityPass.Report report = run("a.b.FC", """
+        Report report = run("a.b.FC", """
                 package a.b;
                 class FC {
                     static final String[] EMPTY = new String[0];
@@ -2939,7 +2939,7 @@ public class TestNullabilityPass extends CommonTest {
                         return NAMES.length + plus.length;
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("String?[]", s.get("a.b.FC.NAMES"), s + "\n" + explain(report));
@@ -2949,7 +2949,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a null into a non-modifying abstract consumer on a Funnel<?> stays with the receiver, guava FunnelsTest")
     @Test
     public void nullIntoWildcardConsumer() {
-        NullabilityPass.Report report = run("a.b.WC", """
+        Report report = run("a.b.WC", """
                 package a.b;
                 class WC {
                     interface Funnel<T> {
@@ -2971,7 +2971,7 @@ public class TestNullabilityPass extends CommonTest {
                         assertNullsThrow(new LongFunnel());
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Long", s.get("a.b.WC.LongFunnel.funnel(Long,StringBuilder):0:value"), s + "\n" + explain(report));
@@ -2980,7 +2980,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a null into a non-modifying abstract consumer on an Ordering<@Nullable Object> belongs to the receiver, guava OrderingTest")
     @Test
     public void nullIntoAbstractConsumer() {
-        NullabilityPass.Report report = run("a.b.AC", """
+        Report report = run("a.b.AC", """
                 package a.b;
                 import io.codelaser.maddi.annotation.NotModified;
                 import java.util.Map;
@@ -3020,7 +3020,7 @@ public class TestNullabilityPass extends CommonTest {
                         return new Explicit<>(ranks).compare("a", "b");
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         String context = s + "\n" + explain(report);
@@ -3036,7 +3036,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: 'return null' after a conditional return makes the result nullable, jenkins Hudson.getSlave")
     @Test
     public void returnNullAfterConditionalReturn() {
-        NullabilityPass.Report report = run("a.b.RN", """
+        Report report = run("a.b.RN", """
                 package a.b;
                 class RN {
                     static class Node {
@@ -3067,7 +3067,7 @@ public class TestNullabilityPass extends CommonTest {
                         return null;
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Slave?", s.get("a.b.RN.getSlave(String)"), s + "\n" + explain(report));
@@ -3077,7 +3077,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a stream filtered with Objects::nonNull collects non-null elements, jenkins CspBuilder, Jenkins.getAgentProtocols")
     @Test
     public void streamFilterNonNull() {
-        NullabilityPass.Report report = run("a.b.SF", """
+        Report report = run("a.b.SF", """
                 package a.b;
                 import java.util.ArrayList;
                 import java.util.Arrays;
@@ -3108,7 +3108,7 @@ public class TestNullabilityPass extends CommonTest {
                         sf.protocols.add(new Protocol());
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         Map<String, String> l = new java.util.TreeMap<>();
@@ -3120,7 +3120,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a library view passed to an analysed method shares the receiver's slots, jenkins CLIAction")
     @Test
     public void viewArgumentToMethod() {
-        NullabilityPass.Report report = run("a.b.VA", """
+        Report report = run("a.b.VA", """
                 package a.b;
                 import java.util.ArrayList;
                 import java.util.List;
@@ -3139,7 +3139,7 @@ public class TestNullabilityPass extends CommonTest {
                         va.onArg(null);
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("List<String?>", s.get("a.b.VA.args"), s + "\n" + explain(report));
@@ -3149,7 +3149,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a null argument to an anonymous class's creation in a field initializer reaches the superclass's constructor, jenkins CronTab")
     @Test
     public void anonymousFieldInitializerNull() {
-        NullabilityPass.Report report = run("a.b.CF", """
+        Report report = run("a.b.CF", """
                 package a.b;
                 abstract class CF {
                     private final String name;
@@ -3172,7 +3172,7 @@ public class TestNullabilityPass extends CommonTest {
                         }
                     };
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("CF?", s.get("a.b.CF.<init>(String,a.b.CF):1:lower"), s + "\n" + explain(report));
@@ -3182,7 +3182,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a method reference's nullable result reaches the functional parameter's result slot, jenkins CronTab")
     @Test
     public void methodReferenceResult() {
-        NullabilityPass.Report report = run("a.b.MR", """
+        Report report = run("a.b.MR", """
                 package a.b;
                 import java.util.function.Supplier;
                 class MR {
@@ -3203,7 +3203,7 @@ public class TestNullabilityPass extends CommonTest {
                         return new Listener(this::getErrorMessage);
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Supplier<String?>", s.get("a.b.MR.Listener.<init>(java.util.function.Supplier):0:supplier"),
@@ -3213,7 +3213,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a generic method's result slot that is not a type variable flows into the target, jenkins User.getProperties")
     @Test
     public void genericResultSlot() {
-        NullabilityPass.Report report = run("a.b.GR", """
+        Report report = run("a.b.GR", """
                 package a.b;
                 import java.util.ArrayList;
                 import java.util.LinkedHashMap;
@@ -3244,7 +3244,7 @@ public class TestNullabilityPass extends CommonTest {
                         return toMap(properties);
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Map<Desc<Prop>?, Prop>", s.get("a.b.GR.getProperties()"), s + "\n" + explain(report));
@@ -3253,7 +3253,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a lambda's nullable result given to computeIfAbsent reaches the map's values, jenkins XStream2")
     @Test
     public void computeIfAbsentLambda() {
-        NullabilityPass.Report report = run("a.b.CA", """
+        Report report = run("a.b.CA", """
                 package a.b;
                 import java.util.concurrent.ConcurrentHashMap;
                 class CA {
@@ -3266,7 +3266,7 @@ public class TestNullabilityPass extends CommonTest {
                         return result;
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("ConcurrentHashMap<Class<?!>, String?>", s.get("a.b.CA.cache"), s + "\n" + explain(report));
@@ -3275,7 +3275,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a lambda's nullable result through '<T> T call(Supplier<T>)' makes the call's result nullable, jenkins CrumbIssuer")
     @Test
     public void lambdaThroughGenericSupplier() {
-        NullabilityPass.Report report = run("a.b.LG", """
+        Report report = run("a.b.LG", """
                 package a.b;
                 import java.util.function.Supplier;
                 class LG {
@@ -3292,7 +3292,7 @@ public class TestNullabilityPass extends CommonTest {
                         return ifOverridden(() -> issue(salt), "issue");
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("String?", s.get("a.b.LG.issueOld(String)"), s + "\n" + explain(report));
@@ -3301,7 +3301,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a three-argument collect returns the container its accumulator fills, jenkins PluginManager")
     @Test
     public void collectContainer() {
-        NullabilityPass.Report report = run("a.b.CC", """
+        Report report = run("a.b.CC", """
                 package a.b;
                 import java.util.ArrayList;
                 import java.util.LinkedHashMap;
@@ -3323,7 +3323,7 @@ public class TestNullabilityPass extends CommonTest {
                                 .collect(LinkedHashMap::new, (map, plugin) -> map.put(plugin, plugin.url), Map::putAll);
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Map<Plugin, String?>", s.get("a.b.CC.deprecated()"), s + "\n" + explain(report));
@@ -3332,7 +3332,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: computeIfAbsent's result is the map's value, not its key, fernflower BytecodeSourceMapper")
     @Test
     public void computeIfAbsentValue() {
-        NullabilityPass.Report report = run("a.b.CV", """
+        Report report = run("a.b.CV", """
                 package a.b;
                 import java.util.ArrayList;
                 import java.util.Collections;
@@ -3360,7 +3360,7 @@ public class TestNullabilityPass extends CommonTest {
                         }
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         String l = locals(report);
         assertTrue(l.contains("addMapping.class_mapping: Map<String, Map<Integer, Integer>>\n"), l + "\n" + explain(report));
         assertTrue(l.contains("dump.class_entry: Entry<String?, Map<String, Map<Integer, Integer>>>\n"), l);
@@ -3370,7 +3370,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a local in a lambda body, peeked from a deque and tested for null, is nullable, fernflower ExprProcessor")
     @Test
     public void lambdaLocalPeek() {
-        NullabilityPass.Report report = run("a.b.LP", """
+        Report report = run("a.b.LP", """
                 package a.b;
                 import java.util.ArrayDeque;
                 import java.util.Deque;
@@ -3407,7 +3407,7 @@ public class TestNullabilityPass extends CommonTest {
                         return true;
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         String l = locals(report);
         assertTrue(l.contains("plain.entry: Entry?"), l + "\n" + explain(report));
         assertTrue(l.contains("test.path: Entry?"), l + "\n" + explain(report));
@@ -3416,7 +3416,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a method returning its parameter filtered of nulls takes nullable elements, jenkins Iterators.removeNull")
     @Test
     public void removeNullParameter() {
-        NullabilityPass.Report report = run("a.b.RM", """
+        Report report = run("a.b.RM", """
                 package a.b;
                 import java.util.Iterator;
                 import java.util.Objects;
@@ -3431,7 +3431,7 @@ public class TestNullabilityPass extends CommonTest {
                         return Iterators.filter(itr, Objects::nonNull);
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Iterator<T?>", s.get("a.b.RM.removeNull(java.util.Iterator):0:itr"), s + "\n" + explain(report));
@@ -3441,7 +3441,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a private class writing null into its generic superclass's slots has a nullable supertype argument, jenkins OwnerContext")
     @Test
     public void supertypeSlots() {
-        NullabilityPass.Report report = run("a.b.SS", """
+        Report report = run("a.b.SS", """
                 package a.b;
                 import java.util.HashMap;
                 import java.util.LinkedList;
@@ -3498,7 +3498,7 @@ public class TestNullabilityPass extends CommonTest {
                         }
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> p = new java.util.TreeMap<>();
         report.parentClasses().forEach((type, pt) -> p.put(type.fullyQualifiedName(), k(pt)));
         assertEquals("LinkedList<String?>", p.get("a.b.SS.OwnerContext"), p + "\n" + explain(report));
@@ -3515,7 +3515,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: non-null bounds reach a member-less subinterface and an override family's method type parameter, timefold")
     @Test
     public void nonNullBoundsFamilies() {
-        NullabilityPass.Report report = run("a.b.TF", """
+        Report report = run("a.b.TF", """
                 package a.b;
                 import java.util.Comparator;
                 class TF {
@@ -3567,7 +3567,7 @@ public class TestNullabilityPass extends CommonTest {
                         }
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         java.util.Set<String> nonNull = new java.util.TreeSet<>();
         for (Info info : report.verdicts().keySet()) {
             if (info instanceof io.codelaser.maddi.cst.api.info.MethodInfo mi) {
@@ -3622,7 +3622,7 @@ public class TestNullabilityPass extends CommonTest {
                             return nonNullAdditions;
                         }
                     }
-                    """.formatted(name), NullabilityPass.Policy.KOTLIN)
+                    """.formatted(name), Policy.KOTLIN)
                     .locals().forEach((lv, pt) -> l.put(lv.name(), k(pt)));
             return l.get("nonNullAdditions");
         };
@@ -3639,7 +3639,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: arguments in an assertThrows(NullPointerException) lambda carry no null into the callee, guava ImmutableClassToInstanceMapTest")
     @Test
     public void rejectedNullFlows() {
-        NullabilityPass.Report report = run("a.b.RF", """
+        Report report = run("a.b.RF", """
                 package a.b;
                 import java.util.Collections;
                 import java.util.Map;
@@ -3662,7 +3662,7 @@ public class TestNullabilityPass extends CommonTest {
                         assertThrows(NullPointerException.class, () -> copyOf(nullKey));
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertFalse(s.get("a.b.RF.wrap(Class):0:type").endsWith("?"), s + "\n" + explain(report));
@@ -3672,7 +3672,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: an override of a @NullMarked library method's non-null return stays non-null, jenkins AuthenticationProcessingFilter2")
     @Test
     public void nullMarkedLibraryReturnOverride() {
-        NullabilityPass.Report report = run("a.b.NR", """
+        Report report = run("a.b.NR", """
                 package a.b;
                 import org.junit.jupiter.api.DisplayNameGenerator;
                 class NR extends DisplayNameGenerator.Standard {
@@ -3682,7 +3682,7 @@ public class TestNullabilityPass extends CommonTest {
                         return super.generateDisplayNameForClass(testClass);
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("String", s.get("a.b.NR.generateDisplayNameForClass(Class)"), s + "\n" + explain(report));
@@ -3691,7 +3691,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a @ParametricNullness type-variable parameter is a plain V, guava's TrustedListenableFutureTask.create")
     @Test
     public void parametricParameter() {
-        NullabilityPass.Report report = run("a.b.PP", """
+        Report report = run("a.b.PP", """
                 package a.b;
                 import java.util.concurrent.Callable;
                 import java.util.concurrent.Executors;
@@ -3706,7 +3706,7 @@ public class TestNullabilityPass extends CommonTest {
                     }
                     static Task<Void> submit(Runnable r) { return Task.create(r, null); }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         String all = s + "\n" + explain(report);
@@ -3716,7 +3716,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a call given a variable known non-null returns no null of it, guava's TypeResolver.resolveInternal")
     @Test
     public void knownNonNullArgument() {
-        NullabilityPass.Report report = run("a.b.KA", """
+        Report report = run("a.b.KA", """
                 package a.b;
                 import java.util.HashMap;
                 import java.util.Map;
@@ -3734,7 +3734,7 @@ public class TestNullabilityPass extends CommonTest {
                         return new KA().resolve(type);
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         String all = s + "\n" + explain(report);
@@ -3744,7 +3744,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: no null through a primitive return; a '?' argument's generic result is nullable, guava's Functions/AbstractFuture")
     @Test
     public void primitiveCutAndStarResult() {
-        NullabilityPass.Report report = run("a.b.PC", """
+        Report report = run("a.b.PC", """
                 package a.b;
                 import java.util.concurrent.Future;
                 class PC {
@@ -3765,7 +3765,7 @@ public class TestNullabilityPass extends CommonTest {
                         return v == null ? "NULL" : v;
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         String all = s + "\n" + explain(report);
@@ -3778,7 +3778,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a null into a parameter declared nullable leaves the receiver's type argument, guava's Converter")
     @Test
     public void nullableParameterReceiverSlot() {
-        NullabilityPass.Report report = run("a.b.CV", """
+        Report report = run("a.b.CV", """
                 package a.b;
                 class CV {
                     @java.lang.annotation.Target(java.lang.annotation.ElementType.TYPE_USE) @interface Nullable {}
@@ -3807,7 +3807,7 @@ public class TestNullabilityPass extends CommonTest {
                         return equalTo1.apply(null);
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         String all = s + "\n" + explain(report);
@@ -3820,7 +3820,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a lazily cached view whose factory family returns another map's view is non-null, guava's createKeySet")
     @Test
     public void lazyCacheCycle() {
-        NullabilityPass.Report report = run("a.b.LC", """
+        Report report = run("a.b.LC", """
                 package a.b;
                 import java.util.HashSet;
                 import java.util.Set;
@@ -3850,7 +3850,7 @@ public class TestNullabilityPass extends CommonTest {
                         Set<String> createKeySet() { return new HashSet<>(); }
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         String all = s + "\n" + explain(report);
@@ -3864,7 +3864,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: an annotated nullable lazy-init field returned through a cast is non-null, guava's NaturalOrdering")
     @Test
     public void lazyInitCastReturn() {
-        NullabilityPass.Report report = run("a.b.NO", """
+        Report report = run("a.b.NO", """
                 package a.b;
                 import java.util.Comparator;
                 abstract class NO {
@@ -3899,7 +3899,7 @@ public class TestNullabilityPass extends CommonTest {
                         }
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         String all = s + "\n" + explain(report);
@@ -3912,7 +3912,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a caller's null into an abstract type-variable parameter is its receiver's instantiation's")
     @Test
     public void consumerReceiverSlot() {
-        NullabilityPass.Report report = run("a.b.CS", """
+        Report report = run("a.b.CS", """
                 package a.b;
                 class CS {
                     interface Predicate<T> { boolean apply(T input); }
@@ -3922,7 +3922,7 @@ public class TestNullabilityPass extends CommonTest {
                     }
                     static boolean test(Predicate<? super Integer> p) { return p.apply(null); }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("String", s.get("a.b.CS.Edges.apply(String):0:edge"), s.toString());
@@ -3932,7 +3932,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a local assigned a nullable value inside a loop condition is nullable; an anonymous class's super arguments flow")
     @Test
     public void conditionAssignmentAndAnonymousSuper() {
-        NullabilityPass.Report report = run("a.b.CA", """
+        Report report = run("a.b.CA", """
                 package a.b;
                 class CA {
                     Runnable nextTask;
@@ -3969,7 +3969,7 @@ public class TestNullabilityPass extends CommonTest {
                     }
                     static Base nothing() { return make(null); }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         String l = locals(report);
@@ -3982,7 +3982,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: an explicitly @Nullable type-variable return over a JDK default stays nullable")
     @Test
     public void nullableJdkDefaultOverride() {
-        NullabilityPass.Report report = run("a.b.JD", """
+        Report report = run("a.b.JD", """
                 package a.b;
                 import java.lang.annotation.ElementType;
                 import java.lang.annotation.Target;
@@ -4000,7 +4000,7 @@ public class TestNullabilityPass extends CommonTest {
                         @Override public @Nullable V get(@Nullable Object key) { return getOrDefault(key, null); }
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("V?", s.get("a.b.JD.Fwd.replace(Object,Object)"), s.toString());
@@ -4010,7 +4010,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: an Object-typed singleton's slots hold nothing")
     @Test
     public void erasedSingletonSlots() {
-        NullabilityPass.Report report = run("a.b.ES", """
+        Report report = run("a.b.ES", """
                 package a.b;
                 import java.util.HashMap;
                 import java.util.Map;
@@ -4026,7 +4026,7 @@ public class TestNullabilityPass extends CommonTest {
                         return o;
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Map<Object, Object>", s.get("a.b.ES.EMPTY"), s.toString());
@@ -4036,7 +4036,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a null passed inside assertThrows(NullPointerException.class, ...) is no evidence")
     @Test
     public void rejectedNullArgument() {
-        NullabilityPass.Report report = run("a.b.RN", """
+        Report report = run("a.b.RN", """
                 package a.b;
                 import java.util.Objects;
                 class RN {
@@ -4049,7 +4049,7 @@ public class TestNullabilityPass extends CommonTest {
                         assertThrows(IllegalStateException.class, () -> size(null));
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("String", s.get("a.b.RN.put(String):0:key"), s.toString());
@@ -4059,7 +4059,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: an override of a type-variable parameter keeps the overridden state")
     @Test
     public void typeVariableParameterOverride() {
-        NullabilityPass.Report report = run("a.b.TO", """
+        Report report = run("a.b.TO", """
                 package a.b;
                 import java.lang.annotation.ElementType;
                 import java.lang.annotation.Target;
@@ -4080,7 +4080,7 @@ public class TestNullabilityPass extends CommonTest {
                         return f.apply(null);
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("F!", s.get("a.b.TO.Function.apply(Object):0:input"), s.toString());
@@ -4093,7 +4093,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a call on this ties its result's slots to the target, the instantiation being the caller's")
     @Test
     public void sameInstantiationSlots() {
-        NullabilityPass.Report report = run("a.b.SI", """
+        Report report = run("a.b.SI", """
                 package a.b;
                 import java.util.concurrent.atomic.AtomicReferenceArray;
                 class SI<K, V> {
@@ -4106,7 +4106,7 @@ public class TestNullabilityPass extends CommonTest {
                         table = newTable;
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         String field = s.get("a.b.SI.table");
@@ -4118,7 +4118,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a @ParametricNullness return's own null stays with nullable instantiations")
     @Test
     public void parametricNullnessReturn() {
-        NullabilityPass.Report report = run("a.b.PN", """
+        Report report = run("a.b.PN", """
                 package a.b;
                 import java.lang.annotation.Retention;
                 import java.lang.annotation.RetentionPolicy;
@@ -4149,7 +4149,7 @@ public class TestNullabilityPass extends CommonTest {
                         Map<C, V> create() { return factory.get(); }
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Map<C!, V!>", s.get("a.b.PN.Table.create()"), s + "\n" + explain(report));
@@ -4159,7 +4159,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a callee writing null into a wider array parameter reaches the caller's narrower array")
     @Test
     public void narrowedArrayWrittenThrough() {
-        NullabilityPass.Report report = run("a.b.NW", """
+        Report report = run("a.b.NW", """
                 package a.b;
                 class NW {
                     static void clear(Object[] a) { a[0] = null; }
@@ -4175,7 +4175,7 @@ public class TestNullabilityPass extends CommonTest {
                         return s;
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("String?[]", s.get("a.b.NW.cleared()"), s + "\n" + explain(report));
@@ -4185,7 +4185,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: guava's RegularImmutableMultiset.create fills its entry array with a counted for-each")
     @Test
     public void countedFillGuava() {
-        NullabilityPass.Report report = run("a.b.RM", """
+        Report report = run("a.b.RM", """
                 package a.b;
                 import java.lang.annotation.ElementType;
                 import java.lang.annotation.Target;
@@ -4279,7 +4279,7 @@ public class TestNullabilityPass extends CommonTest {
                     }
                     Entry<E> getEntry(int index) { return entries[index]; }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         String why = s + "\n" + explain(report);
@@ -4296,7 +4296,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a write booked on a field lifted onto a supertype is no write into another array passed in")
     @Test
     public void narrowedArrayThroughLiftedField() {
-        NullabilityPass.Report report = run("a.b.GL", """
+        Report report = run("a.b.GL", """
                 package a.b;
                 import java.lang.annotation.ElementType;
                 import java.lang.annotation.Target;
@@ -4331,7 +4331,7 @@ public class TestNullabilityPass extends CommonTest {
                     }
                     Entry entry(int i) { return entries[i]; }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         String why = s + "\n" + explain(report);
@@ -4342,7 +4342,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: an implementation for a @Nullable type argument keeps its null from the overridden return")
     @Test
     public void nullableInstantiationReturn() {
-        NullabilityPass.Report report = run("a.b.NI", """
+        Report report = run("a.b.NI", """
                 package a.b;
                 import java.lang.annotation.ElementType;
                 import java.lang.annotation.Retention;
@@ -4387,7 +4387,7 @@ public class TestNullabilityPass extends CommonTest {
                         }
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("V!", s.get("a.b.NI.Cell.getValue()"), s + "\n" + explain(report));
@@ -4400,7 +4400,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: what is read from a '?' argument is Any?")
     @Test
     public void starSlotRead() {
-        NullabilityPass.Report report = run("a.b.SR", """
+        Report report = run("a.b.SR", """
                 package a.b;
                 import java.util.ArrayList;
                 import java.util.List;
@@ -4418,7 +4418,7 @@ public class TestNullabilityPass extends CommonTest {
                         all(names);
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Object?", s.get("a.b.SR.getIfPresent(Object):0:key"), s.toString());
@@ -4428,7 +4428,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a lazily initialised field's cached value is non-null at the return")
     @Test
     public void lazyInitReturn() {
-        NullabilityPass.Report report = run("a.b.LZ", """
+        Report report = run("a.b.LZ", """
                 package a.b;
                 import java.util.Collections;
                 import java.util.HashMap;
@@ -4453,7 +4453,7 @@ public class TestNullabilityPass extends CommonTest {
                         return result;
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Map<String, String>", s.get("a.b.LZ.chained()"), s + "\n" + explain(report));
@@ -4463,7 +4463,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: no slot flows back out of an unbound wildcard, nor through an unchecked cast of an Object slot")
     @Test
     public void wildcardAndUncheckedSlots() {
-        NullabilityPass.Report report = run("a.b.WS", """
+        Report report = run("a.b.WS", """
                 package a.b;
                 import java.util.HashMap;
                 import java.util.Map;
@@ -4488,7 +4488,7 @@ public class TestNullabilityPass extends CommonTest {
                         m.put("x", null);
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         String l = locals(report);
@@ -4500,7 +4500,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("a null returned by a method that may return its argument does not flow back into the argument")
     @Test
     public void identityReturn() {
-        NullabilityPass.Report report = run("a.b.I", """
+        Report report = run("a.b.I", """
                 package a.b;
                 import java.util.*;
                 class I {
@@ -4535,7 +4535,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("null-check predicates: an analysed one inferred, as a condition; not for Kotlin's smart casts")
     @Test
     public void predicates() {
-        NullabilityPass.Report report = run("a.b.P", """
+        Report report = run("a.b.P", """
                 package a.b;
                 import java.util.*;
                 class P {
@@ -4586,7 +4586,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: an analysed generic method's own null (E?) reaches the variable its result is assigned to")
     @Test
     public void classTypeVariableResults() {
-        NullabilityPass.Report report = run("a.b.V", """
+        Report report = run("a.b.V", """
                 package a.b;
                 import java.util.*;
                 class V {
@@ -4619,7 +4619,7 @@ public class TestNullabilityPass extends CommonTest {
                         return out;
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         System.out.println(explain(report));
         Map<String, String> byName = report.verdicts().entrySet().stream()
                 .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
@@ -4638,7 +4638,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("two alternatives of one argument are not each other's value")
     @Test
     public void alternativesInAnArgument() {
-        NullabilityPass.Report report = run("a.b.T", """
+        Report report = run("a.b.T", """
                 package a.b;
                 class T {
                     static class Struct { final String qualifiedName; Struct(String q) { qualifiedName = q; } }
@@ -4669,7 +4669,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("a java.util lookup's Object argument is not known non-null after the call, for Kotlin")
     @Test
     public void lookupArguments() {
-        NullabilityPass.Report report = run("a.b.L2", """
+        Report report = run("a.b.L2", """
                 package a.b;
                 import java.util.*;
                 class L2 {
@@ -4685,7 +4685,7 @@ public class TestNullabilityPass extends CommonTest {
                         return n;
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         MethodInfo count = parsed.findUniqueMethod("count", 2);
         List<io.codelaser.maddi.cst.api.expression.VariableExpression> derefs = new java.util.ArrayList<>();
         List<Statement> inner = new java.util.ArrayList<>();
@@ -4703,11 +4703,11 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("a try-with-resources resource is a declaration: its initializer's null reaches what it is passed to")
     @Test
     public void tryResources() {
-        List<NullabilityPass.Policy> policies = List.of(NullabilityPass.Policy.NULL_MARKED, NullabilityPass.Policy.KOTLIN);
+        List<Policy> policies = List.of(Policy.NULL_MARKED, Policy.KOTLIN);
         for (int p = 0; p < policies.size(); p++) {
-            NullabilityPass.Policy policy = policies.get(p);
+            Policy policy = policies.get(p);
             String name = "W" + p; // one parse per type and test
-            NullabilityPass.Report report = run("a.b." + name, """
+            Report report = run("a.b." + name, """
                     package a.b;
                     import java.io.*;
                     import java.util.*;
@@ -4736,7 +4736,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("a null-checked array element (constant index) guards the argument it is passed as")
     @Test
     public void checkedElements() {
-        NullabilityPass.Report report = run("a.b.E2", """
+        Report report = run("a.b.E2", """
                 package a.b;
                 import java.util.*;
                 class E2 {
@@ -4755,7 +4755,7 @@ public class TestNullabilityPass extends CommonTest {
                     static class Op2 { final Op op; Op2(String s) { op = new Op("y"); take(s); } }
                     static void take(String s) { }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         System.out.println(explain(report));
         Map<String, String> byName = report.verdicts().entrySet().stream()
                 .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
@@ -4767,7 +4767,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("statements in a switch expression's block arms are statements: their seeds, links and fills")
     @Test
     public void switchExpressionArms() {
-        NullabilityPass.Report report = run("a.b.SA", """
+        Report report = run("a.b.SA", """
                 package a.b;
                 class SA {
                     static String[] arm(int k, int n) {
@@ -4799,7 +4799,7 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("String[]", byName.get("a.b.SA.arm(int,int)"), "fernflower StructTypeAnnotationAttribute:52");
         assertEquals("String?", byName.get("a.b.SA.take(String):0:s"), "a null in a block arm");
 
-        NullabilityPass.Report report2 = run("a.b.SB", """
+        Report report2 = run("a.b.SB", """
                 package a.b;
                 class SB {
                     interface Info {
@@ -4849,7 +4849,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("a library call's nullable result as an alternative of the value: a switch arm, a conditional branch")
     @Test
     public void callResultAlternatives() {
-        NullabilityPass.Report report = run("a.b.SC", """
+        Report report = run("a.b.SC", """
                 package a.b;
                 import java.util.Map;
                 class SC {
@@ -4894,7 +4894,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("a null written through a getter's result goes to the receiver's slot, as through a variable")
     @Test
     public void slotThroughGetter() {
-        NullabilityPass.Report report = run("a.b.SG", """
+        Report report = run("a.b.SG", """
                 package a.b;
                 import java.util.*;
                 class SG {
@@ -4970,7 +4970,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a local its block dereferences unconditionally is asserted at its declaration")
     @Test
     public void assertedAtDeclaration() {
-        NullabilityPass.Report report = run("a.b.AD", ASSERTED, NullabilityPass.Policy.KOTLIN);
+        Report report = run("a.b.AD", ASSERTED, Policy.KOTLIN);
         System.out.println(explain(report));
         Map<String, String> byName = report.verdicts().entrySet().stream()
                 .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
@@ -4999,7 +4999,7 @@ public class TestNullabilityPass extends CommonTest {
         }
         assertEquals("[edges.block]", asserted.toString(), "not where nothing null arrives (nonNull)");
 
-        NullabilityPass.Report java = run("a.b.AD2", ASSERTED.replace("class AD ", "class AD2 "));
+        Report java = run("a.b.AD2", ASSERTED.replace("class AD ", "class AD2 "));
         Map<String, String> javaByName = java.verdicts().entrySet().stream()
                 .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
         assertEquals("List<Block?>", javaByName.get("a.b.AD2.edges(int,int,java.util.List):2:range"),
@@ -5009,7 +5009,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a local a for loop's init clause or condition dereferences is asserted at its declaration")
     @Test
     public void assertedBeforeForLoop() {
-        NullabilityPass.Report report = run("a.b.AF", """
+        Report report = run("a.b.AF", """
                 package a.b;
                 class AF {
                     static class Block { void touch() { } }
@@ -5030,7 +5030,7 @@ public class TestNullabilityPass extends CommonTest {
                         for (int i = 0; i < n; i++) { System.out.println(arr.length); }
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         List<String> asserted = new java.util.ArrayList<>();
         for (MethodInfo mi : parsed.methods()) {
             mi.methodBody().visit(e -> {
@@ -5095,7 +5095,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("'stats.addWithKey(first, first.id)': a later argument dereferences a field of this before the write")
     @Test
     public void dereferencedFieldOfThis() {
-        NullabilityPass.Report report = run("a.b.LK", LOOKUP, NullabilityPass.Policy.KOTLIN);
+        Report report = run("a.b.LK", LOOKUP, Policy.KOTLIN);
         System.out.println(explain(report));
         Map<String, String> byName = report.verdicts().entrySet().stream()
                 .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
@@ -5103,7 +5103,7 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("Stmt?", byName.get("a.b.LK.Stmt.first"), "the value itself is still nullable");
         assertEquals("Keyed<Stmt>", byName.get("a.b.LK.Stmt.stats"), "fernflower RootStatement(head, dummyExit)");
 
-        NullabilityPass.Report java = run("a.b.LK2", LOOKUP.replace("class LK ", "class LK2 "));
+        Report java = run("a.b.LK2", LOOKUP.replace("class LK ", "class LK2 "));
         Map<String, String> javaByName = java.verdicts().entrySet().stream()
                 .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
         assertEquals("E?", javaByName.get("a.b.LK2.Keyed.getWithKey(int)"));
@@ -5112,7 +5112,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: an asserted local is unobserved before its dereference only with the links' proof")
     @Test
     public void unobservedBeforeDereference() {
-        NullabilityPass.Report report = run("a.b.UO", """
+        Report report = run("a.b.UO", """
                 package a.b;
                 import java.util.*;
                 class UO {
@@ -5144,7 +5144,7 @@ public class TestNullabilityPass extends CommonTest {
                         block.touch();
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         System.out.println(explain(report));
         List<String> asserted = new java.util.ArrayList<>();
         List<String> unobserved = new java.util.ArrayList<>();
@@ -5211,7 +5211,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("nulls Kotlin must carry: a null alternative in an array initializer; a null added to a '? super' list")
     @Test
     public void runtimeNulls() {
-        NullabilityPass.Report report = run("a.b.RN", RUNTIME_NULLS, NullabilityPass.Policy.KOTLIN);
+        Report report = run("a.b.RN", RUNTIME_NULLS, Policy.KOTLIN);
         System.out.println(explain(report));
         Map<String, String> byName = report.verdicts().entrySet().stream()
                 .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
@@ -5228,7 +5228,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("JDK hint: JarFile.getManifest() returns null for a jar without a manifest")
     @Test
     public void jarManifest() {
-        NullabilityPass.Report report = run("a.b.JM", """
+        Report report = run("a.b.JM", """
                 package a.b;
                 import java.io.IOException;
                 import java.util.jar.JarFile;
@@ -5242,7 +5242,7 @@ public class TestNullabilityPass extends CommonTest {
                         unit.setManifest(archive.getManifest());
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         System.out.println(explain(report));
         Map<String, String> byName = report.verdicts().entrySet().stream()
                 .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
@@ -5295,7 +5295,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("a class type variable inside a generic type is instantiated by the receiver's slot, not tied to it")
     @Test
     public void classTypeVariableInstantiation() {
-        NullabilityPass.Report report = run("a.b.CI", INSTANTIATION, NullabilityPass.Policy.KOTLIN);
+        Report report = run("a.b.CI", INSTANTIATION, Policy.KOTLIN);
         System.out.println(explain(report));
         Map<String, String> byName = report.verdicts().entrySet().stream()
                 .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
@@ -5321,8 +5321,8 @@ public class TestNullabilityPass extends CommonTest {
         assertTrue(locals.contains("ints.s: FSet<Integer>"), locals);
 
         // Java annotations: the argument flows into the receiver; a result is tied to its receiver by the links only
-        NullabilityPass.Report java = run("a.b.CJ", INSTANTIATION.replace("class CI", "class CJ"),
-                NullabilityPass.Policy.NULL_MARKED);
+        Report java = run("a.b.CJ", INSTANTIATION.replace("class CI", "class CJ"),
+                Policy.NULL_MARKED);
         Map<String, String> javaByName = java.verdicts().entrySet().stream()
                 .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
         String javaLocals = locals(java);
@@ -5373,7 +5373,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("stream pipelines: map, filter, toList, collect(toList/toSet/toMap) carry the elements' nodes (Kotlin)")
     @Test
     public void streamPipelines() {
-        NullabilityPass.Report report = run("a.b.SP", STREAMS, NullabilityPass.Policy.KOTLIN);
+        Report report = run("a.b.SP", STREAMS, Policy.KOTLIN);
         System.out.println(explain(report));
         Map<String, String> byName = report.verdicts().entrySet().stream()
                 .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
@@ -5423,7 +5423,7 @@ public class TestNullabilityPass extends CommonTest {
                     }
                 }
                 """;
-        NullabilityPass.Report kotlin = run("a.b.LN", source, NullabilityPass.Policy.KOTLIN);
+        Report kotlin = run("a.b.LN", source, Policy.KOTLIN);
         System.out.println(explain(kotlin));
         Map<String, String> k = kotlin.verdicts().entrySet().stream()
                 .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
@@ -5473,7 +5473,7 @@ public class TestNullabilityPass extends CommonTest {
                     }
                 }
                 """;
-        NullabilityPass.Report kotlin = run("a.b.LO", source, NullabilityPass.Policy.KOTLIN);
+        Report kotlin = run("a.b.LO", source, Policy.KOTLIN);
         System.out.println(explain(kotlin));
         Map<String, String> k = kotlin.verdicts().entrySet().stream()
                 .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
@@ -5489,8 +5489,8 @@ public class TestNullabilityPass extends CommonTest {
         // no hint (java.nio.channels has none): the library calls it back with what it likes
         assertEquals("Throwable?", k.get("a.b.LO.Completion.failed(Throwable,Void):0:exc"));
 
-        NullabilityPass.Report java = run("a.b.LJ", source.replace("class LO", "class LJ"),
-                NullabilityPass.Policy.NULL_MARKED);
+        Report java = run("a.b.LJ", source.replace("class LO", "class LJ"),
+                Policy.NULL_MARKED);
         Map<String, String> j = java.verdicts().entrySet().stream()
                 .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
         assertEquals("IOException?", j.get("a.b.LJ.$0.postVisitDirectory(java.nio.file.Path,java.io.IOException):1:exc"));
@@ -5502,7 +5502,7 @@ public class TestNullabilityPass extends CommonTest {
     public void nullMarkedLibraryOverride() {
         // JUnit 6 marks its packages (package-info.class): Kotlin reads publishEntry(Map) as non-null, and an
         // override with a nullable parameter overrides nothing (fernflower's JavaCompilerArgumentsProvider)
-        NullabilityPass.Report report = run("a.b.NM", """
+        Report report = run("a.b.NM", """
                 package a.b;
                 import java.util.Map;
                 import org.junit.jupiter.api.TestReporter;
@@ -5512,7 +5512,7 @@ public class TestNullabilityPass extends CommonTest {
                         public void publishEntry(Map<String, String> map) { }
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         System.out.println(explain(report));
         Map<String, String> byName = report.verdicts().entrySet().stream()
                 .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
@@ -5525,7 +5525,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("a nullable helper result handed to a builder setter, as langchain4j's JsonSchemaElementJsonUtils.fromMap")
     @Test
     public void builderSetterFromHelper() {
-        NullabilityPass.Report report = run("a.b.BS", """
+        Report report = run("a.b.BS", """
                 package a.b;
                 import java.util.Map;
                 class BS {
@@ -5586,7 +5586,7 @@ public class TestNullabilityPass extends CommonTest {
                         };
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         System.out.println(explain(report));
         Map<String, String> byName = report.verdicts().entrySet().stream()
                 .filter(e -> e.getKey().fullyQualifiedName().contains("Builder.description(String)"))
@@ -5596,12 +5596,12 @@ public class TestNullabilityPass extends CommonTest {
     }
 
     // the verdict of every declaration, by fully qualified name
-    private static Map<String, String> byName(NullabilityPass.Report report) {
+    private static Map<String, String> byName(Report report) {
         return report.verdicts().entrySet().stream()
                 .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
     }
 
-    private static Map<String, String> localsByName(NullabilityPass.Report report) {
+    private static Map<String, String> localsByName(Report report) {
         return report.locals().entrySet().stream()
                 .collect(Collectors.toMap(e -> e.getKey().methodInfo().name() + "." + e.getKey().name(),
                         e -> k(e.getValue()), (a, b) -> a + "|" + b));
@@ -5615,7 +5615,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("keyed maps: a constant key's values are its own, through accessors or directly (gap 2)")
     @Test
     public void keyedMaps() {
-        NullabilityPass.Report report = run("a.b.KM", """
+        Report report = run("a.b.KM", """
                 package a.b;
                 import java.util.*;
                 class KM {
@@ -5658,7 +5658,7 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("Map<String, String?>", byName.get("a.b.KM.Ctx.direct"));
 
         // a write under a key not known reaches every key; a map that escapes keeps one slot
-        NullabilityPass.Report unknown = run("a.b.KU", """
+        Report unknown = run("a.b.KU", """
                 package a.b;
                 import java.util.*;
                 class KU {
@@ -5693,7 +5693,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("narrowed reads: a getter's value on an instance of a subclass that never stores null (gap 3)")
     @Test
     public void narrowedReads() {
-        NullabilityPass.Report report = run("a.b.EV", """
+        Report report = run("a.b.EV", """
                 package a.b;
                 import java.util.*;
                 class EV {
@@ -5769,7 +5769,7 @@ public class TestNullabilityPass extends CommonTest {
         assertEquals("Service?", byName.get("a.b.EV.Op.getService()"));
 
         // a subclass of the narrowed type that stores null, an overriding getter, a non-final field: no narrowing
-        NullabilityPass.Report sub = run("a.b.EW", """
+        Report sub = run("a.b.EW", """
                 package a.b;
                 import java.util.*;
                 class EW {
@@ -5812,7 +5812,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("a value null on the throwing branch passed as a vararg element")
     @Test
     public void varargElementAfterNullTest() {
-        NullabilityPass.Report report = run("a.b.VA", """
+        Report report = run("a.b.VA", """
                 package a.b;
                 class VA {
                     static IllegalArgumentException illegalArgument(String format, Object... args) {
@@ -5828,7 +5828,7 @@ public class TestNullabilityPass extends CommonTest {
                     static Object plain(Integer j) { return runtime("%s", j); }
                     static void caller() { plain(null); }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(label(info), k(pt)));
         assertEquals("Integer?", s.get("ensureNotNegative(0:i)"), s.toString());
@@ -5843,7 +5843,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("a holder field's own null makes the field nullable, an outside null the instance's slot")
     @Test
     public void holderFieldOwnNull() {
-        NullabilityPass.Report report = run("a.b.HF", """
+        Report report = run("a.b.HF", """
                 package a.b;
                 class HF {
                     static class Store<E> { }
@@ -5861,7 +5861,7 @@ public class TestNullabilityPass extends CommonTest {
                     static <X> Ctx<X> make(Store<X> s) { return new Ctx<>(s); }
                     static Box<String> box() { return new Box<>(null); }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(label(info), k(pt)));
         assertEquals("E?", s.get("embedded"), s.toString());
@@ -5878,7 +5878,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("a library return annotated nullable in its class file seeds, like a hinted one")
     @Test
     public void libraryReturnAnnotatedInClassFile() {
-        NullabilityPass.Report report = run("a.b.LR", """
+        Report report = run("a.b.LR", """
                 package a.b;
                 import io.codelaser.maddi.support.SetOnce;
                 class LR {
@@ -5897,7 +5897,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("getClassLoader() of an analysed type's class is not a null source")
     @Test
     public void applicationClassLoader() {
-        NullabilityPass.Report report = run("a.b.CL", """
+        Report report = run("a.b.CL", """
                 package a.b;
                 class CL {
                     ClassLoader own() { return getClass().getClassLoader(); }
@@ -5956,7 +5956,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("gap 9: a return nullable only through a parameter is not nullable at a call whose argument is not")
     @Test
     public void returnThroughParameterPerCall() {
-        NullabilityPass.Report report = run("a.b.G9", GAP9);
+        Report report = run("a.b.G9", GAP9);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(label(info), k(pt)));
         assertEquals("Integer?", s.get("getInteger(1:defaultValue)"), s.toString());
@@ -5972,7 +5972,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("gap 9, Kotlin: a return assigned a call passing a non-null default is non-null")
     @Test
     public void returnThroughParameterPerCallKotlin() {
-        NullabilityPass.Report report = run("a.b.G9", GAP9, NullabilityPass.Policy.KOTLIN);
+        Report report = run("a.b.G9", GAP9, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(label(info), k(pt)));
         assertEquals("Integer", s.get("timeoutValue()"), s.toString());
@@ -5983,7 +5983,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("gap 8: a repeated pure call after its own null check is not the library's null")
     @Test
     public void repeatedPureCall() {
-        NullabilityPass.Report report = run("a.b.G8", """
+        Report report = run("a.b.G8", """
                 package a.b;
                 import java.io.IOException;
                 class G8 {
@@ -6019,7 +6019,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("gap 7: a local is non-null after an assignment no null reaches, whatever its other assignments")
     @Test
     public void reassignedLocalUseSite() {
-        NullabilityPass.Report report = run("a.b.G7", """
+        Report report = run("a.b.G7", """
                 package a.b;
                 class G7 {
                     interface Stmt { void timeout(int t); void close(); }
@@ -6049,7 +6049,7 @@ public class TestNullabilityPass extends CommonTest {
         assertFalse(timeoutCallNonNull(report, "risky"), "maybe(b) may return null");
     }
 
-    private boolean timeoutCallNonNull(NullabilityPass.Report report, String method) {
+    private boolean timeoutCallNonNull(Report report, String method) {
         MethodInfo mi = parsed.methods().stream().filter(m -> m.name().equals(method)).findFirst().orElseThrow();
         boolean[] found = {false, false};
         mi.methodBody().visit(e -> {
@@ -6071,7 +6071,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("gap 1 residue: computeIfAbsent, containsKey-or-throw, a putting helper, ThreadLocal.withInitial")
     @Test
     public void keyPresentResidue() {
-        NullabilityPass.Report report = run("a.b.G1", """
+        Report report = run("a.b.G1", """
                 package a.b;
                 import java.util.HashMap;
                 import java.util.Map;
@@ -6119,7 +6119,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("System.getProperty of a standard key is not null; of another key it may be")
     @Test
     public void standardSystemProperty() {
-        NullabilityPass.Report report = run("a.b.SP", """
+        Report report = run("a.b.SP", """
                 package a.b;
                 class SP {
                     static String os() { return System.getProperty("os.name"); }
@@ -6140,7 +6140,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("a null passed through this(...) makes the parameter nullable")
     @Test
     public void nullThroughThis() {
-        NullabilityPass.Report report = run("a.b.OG", """
+        Report report = run("a.b.OG", """
                 package a.b;
                 import java.util.List;
                 class OG {
@@ -6210,8 +6210,8 @@ public class TestNullabilityPass extends CommonTest {
             }
             """;
 
-    private void overloadedThis(NullabilityPass.Policy policy) {
-        NullabilityPass.Report report = run("a.b.OGR", OVERLOADED_THIS, policy);
+    private void overloadedThis(Policy policy) {
+        Report report = run("a.b.OGR", OVERLOADED_THIS, policy);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(label(info) + (info instanceof ParameterInfo pi
                 ? pi.methodInfo().parameters().stream().map(q -> q.parameterizedType().typeInfo().simpleName())
@@ -6223,19 +6223,19 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("a cast null through an overloaded this(...) makes the parameter nullable")
     @Test
     public void nullThroughOverloadedThis() {
-        overloadedThis(NullabilityPass.Policy.NULL_MARKED);
+        overloadedThis(Policy.NULL_MARKED);
     }
 
     @DisplayName("a cast null through an overloaded this(...) makes the parameter nullable: Kotlin")
     @Test
     public void nullThroughOverloadedThisKotlin() {
-        overloadedThis(NullabilityPass.Policy.KOTLIN);
+        overloadedThis(Policy.KOTLIN);
     }
 
     @DisplayName("a conditional's null branch through an overloaded this(...) makes the parameter nullable")
     @Test
     public void conditionalNullThroughOverloadedThis() {
-        NullabilityPass.Report report = run("a.b.OGC", """
+        Report report = run("a.b.OGC", """
                 package a.b;
                 final class OGC {
                     static final class Msg { static Msg from(String s) { return new Msg(); } }
@@ -6246,7 +6246,7 @@ public class TestNullabilityPass extends CommonTest {
                     static OGC of(Msg msg) { return new OGC(1, java.util.Objects.requireNonNull(msg)); }
                     Msg msg() { return msg; }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(label(info) + (info instanceof ParameterInfo pi
                 ? pi.methodInfo().parameters().stream().map(q -> q.parameterizedType().typeInfo().simpleName())
@@ -6263,7 +6263,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("gap 8: a library getter repeated after its own null test")
     @Test
     public void libraryGetterRepeated() {
-        NullabilityPass.Report report = run("a.b.LG", """
+        Report report = run("a.b.LG", """
                 package a.b;
                 import org.opentest4j.AssertionFailedError;
                 import org.opentest4j.ValueWrapper;
@@ -6297,7 +6297,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("a parameter only stored into a nullable field takes null")
     @Test
     public void storedOnlyIntoNullableField() {
-        NullabilityPass.Report report = run("a.b.RA", """
+        Report report = run("a.b.RA", """
                 package a.b;
                 import java.util.Objects;
                 import java.util.concurrent.Executor;
@@ -6319,7 +6319,7 @@ public class TestNullabilityPass extends CommonTest {
                         RA build() { return new RA(executor); }
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Executor?", s.get("a.b.RA.Builder.executor(java.util.concurrent.Executor):0:executor"), s.toString());
@@ -6332,7 +6332,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("a parameter only stored into a nullable field: not in an override hierarchy")
     @Test
     public void storedOnlyIntoNullableFieldOverride() {
-        NullabilityPass.Report report = run("a.b.SO", """
+        Report report = run("a.b.SO", """
                 package a.b;
                 class SO {
                     static class Statement {
@@ -6352,7 +6352,7 @@ public class TestNullabilityPass extends CommonTest {
                         @Override void name(String name) { super.name(name.trim()); }
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("String", s.get("a.b.SO.Switch.replace(String,String):1:newValue"), s.toString());
@@ -6365,7 +6365,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("a library factory's argument known non-null at the call: no null element")
     @Test
     public void factoryArgumentUnderCondition() {
-        NullabilityPass.Report report = run("a.b.LF", """
+        Report report = run("a.b.LF", """
                 package a.b;
                 import java.util.List;
                 class LF {
@@ -6378,7 +6378,7 @@ public class TestNullabilityPass extends CommonTest {
                     static LF none() { return of(null); }
                     List<String> items() { return items; }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("String?", s.get("a.b.LF.of(String):0:s"), s.toString());
@@ -6390,7 +6390,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Optional.ofNullable of a nullable value: the Optional's type argument stays non-null")
     @Test
     public void optionalOfNullable() {
-        NullabilityPass.Report report = run("a.b.OE", """
+        Report report = run("a.b.OE", """
                 package a.b;
                 import java.util.Optional;
                 class OE {
@@ -6399,7 +6399,7 @@ public class TestNullabilityPass extends CommonTest {
                     static OE none() { return new OE(null); }
                     Optional<String> name() { return Optional.ofNullable(name); }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("String?", s.get("a.b.OE.name"), s.toString());
@@ -6411,7 +6411,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a generic method handing its argument's type on ties the type arguments")
     @Test
     public void passedThroughGenericMethod() {
-        NullabilityPass.Report report = run("a.b.PT", """
+        Report report = run("a.b.PT", """
                 package a.b;
                 import java.util.ArrayList;
                 import java.util.Collections;
@@ -6445,7 +6445,7 @@ public class TestNullabilityPass extends CommonTest {
                         return new Builder().items(list).names(List.of("a")).build();
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("List<String?>?", s.get("a.b.PT.Builder.items"), s.toString());
@@ -6457,7 +6457,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: a lambda's nullable result makes the functional parameter's result type argument nullable")
     @Test
     public void lambdaResultIntoTypeArgument() {
-        NullabilityPass.Report report = run("a.b.LR", """
+        Report report = run("a.b.LR", """
                 package a.b;
                 import java.util.function.Function;
                 class LR {
@@ -6471,7 +6471,7 @@ public class TestNullabilityPass extends CommonTest {
                     static String named() throws Exception { return call(() -> "x"); }
                     static Object none(int i) throws Exception { return call(() -> null); }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Integer?", s.get("a.b.LR.<init>(Integer):0:max"), s.toString());
@@ -6486,7 +6486,7 @@ public class TestNullabilityPass extends CommonTest {
     // type argument is the result's type: a nullable map value in the result is one in the field (maddi-mod#38)
     @Test
     public void typeArgumentArgumentGivesTheResultsType() {
-        NullabilityPass.Report report = run("a.b.TR", """
+        Report report = run("a.b.TR", """
                 package a.b;
                 import java.util.Map;
                 class TR {
@@ -6502,7 +6502,7 @@ public class TestNullabilityPass extends CommonTest {
                         return variables.toString();
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Map<String, Object?>", s.get("a.b.TR.extract(a.b.TR.Mapper,String)"), s.toString());
@@ -6514,7 +6514,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Kotlin: an override of a bounded type variable's return stays non-null")
     @Test
     public void boundedTypeVariableOverrideReturn() {
-        NullabilityPass.Report report = run("a.b.BO", """
+        Report report = run("a.b.BO", """
                 package a.b;
                 class BO {
                     interface Result<R extends Result<R>> { boolean ok(); }
@@ -6538,7 +6538,7 @@ public class TestNullabilityPass extends CommonTest {
                         Res find(int attempts) { return attempts > 0 ? new Res() : null; }
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Res", s.get("a.b.BO.Exec.execute(int)"), s.toString());
@@ -6550,7 +6550,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("use sites: a call that cannot reach this keeps the facts on its fields")
     @Test
     public void callsThatCannotReachThis() {
-        NullabilityPass.Report report = run("a.b.BB", """
+        Report report = run("a.b.BB", """
                 package a.b;
                 import java.util.Objects;
                 class BB {
@@ -6604,7 +6604,7 @@ public class TestNullabilityPass extends CommonTest {
     }
 
     // the facts on 'buffer' when the block's 'System.arraycopy(buffer, ...)' starts
-    private static boolean bufferKnownAtArraycopy(NullabilityPass.Report report, Block block) {
+    private static boolean bufferKnownAtArraycopy(Report report, Block block) {
         Statement copy = block.statements().stream()
                 .filter(st -> st.expression() instanceof MethodCall mc && "arraycopy".equals(mc.methodInfo().name()))
                 .findFirst().orElseThrow();
@@ -6618,7 +6618,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("use sites: a field a private helper leaves non-null is non-null after the call")
     @Test
     public void fieldNonNullAtExit() {
-        NullabilityPass.Report report = run("a.b.EB", """
+        Report report = run("a.b.EB", """
                 package a.b;
                 class EB {
                     private byte[] buffer;
@@ -6662,7 +6662,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("use sites: a field non-null at every call of a private method is non-null at its entry")
     @Test
     public void fieldNonNullAtEntry() {
-        NullabilityPass.Report report = run("a.b.FE", """
+        Report report = run("a.b.FE", """
                 package a.b;
                 import java.util.function.IntSupplier;
                 class FE {
@@ -6734,7 +6734,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("use sites: a ternary that replaces null is non-null by its condition")
     @Test
     public void ternaryReplacingNull() {
-        NullabilityPass.Report report = run("a.b.TR", """
+        Report report = run("a.b.TR", """
                 package a.b;
                 import java.io.InputStream;
                 import java.util.Map;
@@ -6769,8 +6769,8 @@ public class TestNullabilityPass extends CommonTest {
                     }
                     static Reader load(String p) { return new Reader(conf(p)); }
                 }
-                """, NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY.withoutContracts()
-                        .withWorld(NullabilityPass.World.CLOSED).withoutTestNulls());
+                """, Policy.NULL_MARKED_FLOW_ONLY.withoutContracts()
+                        .withWorld(World.CLOSED).withoutTestNulls());
         assertTrue(keyKnownAtRemove(report, "free"), "app != null ? app : \"none\"");
         assertFalse(keyKnownAtRemove(report, "unguarded"), "b ? app : \"none\"");
         Map<String, String> s = new java.util.TreeMap<>();
@@ -6788,7 +6788,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("key presence: a constant key in a map reached through pure calls")
     @Test
     public void keyPresenceConstantKey() {
-        NullabilityPass.Report report = run("a.b.KC", """
+        Report report = run("a.b.KC", """
                 package a.b;
                 import java.util.HashMap;
                 import java.util.Map;
@@ -6834,7 +6834,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("loops: a variable non-null at the loop's entry and at every way back")
     @Test
     public void loopBackEdges() {
-        NullabilityPass.Report report = run("a.b.LB", """
+        Report report = run("a.b.LB", """
                 package a.b;
                 class LB {
                     static abstract class H { }
@@ -6862,7 +6862,7 @@ public class TestNullabilityPass extends CommonTest {
     }
 
     // the facts on clazz at the loop condition's first call, 'clazz.getX()'
-    private boolean receiverKnownInCondition(NullabilityPass.Report report, String method) {
+    private boolean receiverKnownInCondition(Report report, String method) {
         MethodInfo mi = parsed.methods().stream().filter(m -> m.name().equals(method)).findFirst().orElseThrow();
         Statement loop = mi.methodBody().statements().get(1);
         List<io.codelaser.maddi.cst.api.expression.MethodCall> calls = new java.util.ArrayList<>();
@@ -6877,7 +6877,7 @@ public class TestNullabilityPass extends CommonTest {
     }
 
     // the facts on key at 'INSTANCES.remove(key)', the method's second statement
-    private boolean keyKnownAtRemove(NullabilityPass.Report report, String method) {
+    private boolean keyKnownAtRemove(Report report, String method) {
         MethodInfo mi = parsed.methods().stream()
                 .filter(m -> m.name().equals(method) && m.parameters().size() >= 1).findFirst().orElseThrow();
         Statement st = mi.methodBody().statements().get(1);
@@ -6894,7 +6894,7 @@ public class TestNullabilityPass extends CommonTest {
     }
 
     // the facts on x when the method's 'return x.m();' starts
-    private static boolean receiverKnownAtReturn(NullabilityPass.Report report, MethodInfo method) {
+    private static boolean receiverKnownAtReturn(Report report, MethodInfo method) {
         Statement rs = method.methodBody().statements().getFirst();
         io.codelaser.maddi.cst.api.expression.MethodCall mc =
                 (io.codelaser.maddi.cst.api.expression.MethodCall) rs.expression();
@@ -6903,7 +6903,7 @@ public class TestNullabilityPass extends CommonTest {
     }
 
     // the facts on 'buffer' when the method's 'buffer[pos++] = v' starts
-    private static boolean bufferKnownAtWrite(NullabilityPass.Report report, MethodInfo method) {
+    private static boolean bufferKnownAtWrite(Report report, MethodInfo method) {
         Statement write = method.methodBody().statements().getLast();
         io.codelaser.maddi.cst.api.expression.Assignment a =
                 (io.codelaser.maddi.cst.api.expression.Assignment) write.expression();
@@ -6952,10 +6952,10 @@ public class TestNullabilityPass extends CommonTest {
         StringBuilder out = new StringBuilder();
         int[] round = {0};
         for (String variant : List.of(src, src.replace("var d = find(c);", "String d = find(c);"))) {
-            for (NullabilityPass.Policy policy : List.of(NullabilityPass.Policy.KOTLIN, NullabilityPass.Policy.NULL_MARKED,
-                    NullabilityPass.Policy.CAUTIOUS)) {
+            for (Policy policy : List.of(Policy.KOTLIN, Policy.NULL_MARKED,
+                    Policy.CAUTIOUS)) {
                 String name = "FD" + (++round[0]);
-                NullabilityPass.Report report = run("a.b." + name, variant.replace("class FD ", "class " + name + " "),
+                Report report = run("a.b." + name, variant.replace("class FD ", "class " + name + " "),
                         policy);
                 Map<String, String> s = new java.util.TreeMap<>();
                 report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName().replace(name, "FD"), k(pt)));
@@ -6974,7 +6974,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("use sites: a try body starts with the facts at the try, a catch with those its body keeps")
     @Test
     public void tryBodyKeepsLoopCondition() {
-        NullabilityPass.Report report = run("a.b.RH", """
+        Report report = run("a.b.RH", """
                 package a.b;
                 import java.lang.reflect.Field;
                 class RH {
@@ -7024,7 +7024,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("an immutable collection factory stores no null element")
     @Test
     public void immutableFactoryRejectsNull() {
-        NullabilityPass.Report report = run("a.b.IF", """
+        Report report = run("a.b.IF", """
                 package a.b;
                 import java.util.ArrayList;
                 import java.util.List;
@@ -7037,7 +7037,7 @@ public class TestNullabilityPass extends CommonTest {
                         return list;
                     }
                 }
-                """, NullabilityPass.Policy.KOTLIN);
+                """, Policy.KOTLIN);
         Map<String, String> s = new java.util.TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("String?", s.get("a.b.IF.find(int)"), s.toString());
@@ -7050,7 +7050,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("use sites: a no-argument test of a field of this, as a condition")
     @Test
     public void fieldTestingPredicate() {
-        NullabilityPass.Report report = run("a.b.IT", """
+        Report report = run("a.b.IT", """
                 package a.b;
                 final class IT {
                     static final class Node {
@@ -7093,7 +7093,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("narrowed reads: a final field of this, in a subclass that never reaches the constructor storing null")
     @Test
     public void narrowedThisField() {
-        NullabilityPass.Report report = run("a.b.BS", """
+        Report report = run("a.b.BS", """
                 package a.b;
                 class BS {
                     abstract static class Stream {
@@ -7140,7 +7140,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("narrowed reads: this's final field through an abstract middle class with both constructors (timefold Bavet)")
     @Test
     public void narrowedThisFieldThreeLevels() {
-        NullabilityPass.Report report = run("a.b.BV", """
+        Report report = run("a.b.BV", """
                 package a.b;
                 class BV {
                     enum Semantics { STANDARD, LEGACY }
@@ -7209,7 +7209,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("narrowed reads in an open world: by the constructors outside code can call or extend")
     @Test
     public void narrowedThisFieldOpenWorld() {
-        NullabilityPass.Report report = run("a.b.OW", """
+        Report report = run("a.b.OW", """
                 package a.b;
                 public class OW {
                     public enum Semantics { A }
@@ -7239,8 +7239,8 @@ public class TestNullabilityPass extends CommonTest {
                     }
                     static Semantics make() { return new Group(new Source()).up(); }
                 }
-                """, NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY.withoutContracts()
-                .withWorld(NullabilityPass.World.OPEN));
+                """, Policy.NULL_MARKED_FLOW_ONLY.withoutContracts()
+                .withWorld(World.OPEN));
         System.out.println(explain(report));
         assertEquals(true, parentReadNonNull(report, "Group"), "every Group constructor dereferences its parent");
         assertEquals(false, parentReadNonNull(report, "Loose"), "outside code may call new Loose(null)");
@@ -7249,7 +7249,7 @@ public class TestNullabilityPass extends CommonTest {
     }
 
     // 'Semantics n = parent.semantics;' in up(): is 'this.parent' non-null there?
-    private Boolean parentReadNonNull(NullabilityPass.Report report, String type) {
+    private Boolean parentReadNonNull(Report report, String type) {
         TypeInfo t = parsed.subTypes().stream().filter(x -> type.equals(x.simpleName())).findFirst().orElseThrow();
         Statement read = t.findUniqueMethod("up", 0).methodBody().statements().getFirst();
         var value = ((io.codelaser.maddi.cst.api.statement.LocalVariableCreation) read).localVariable().assignmentExpression();
@@ -7263,7 +7263,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("narrowed reads: this's final field in a method no null-storing class can run (timefold exhaustive search)")
     @Test
     public void narrowedThisFieldByMethod() {
-        NullabilityPass.Report report = run("a.b.ED", """
+        Report report = run("a.b.ED", """
                 package a.b;
                 import java.util.List;
                 class ED {
@@ -7324,7 +7324,7 @@ public class TestNullabilityPass extends CommonTest {
                 "public: reflection may call it on a Mixed, although only a Basic receives it here");
     }
 
-    private static boolean movesKnown(NullabilityPass.Report report, MethodInfo method) {
+    private static boolean movesKnown(Report report, MethodInfo method) {
         Statement read = method.methodBody().statements().getFirst();
         io.codelaser.maddi.cst.api.expression.Expression size = ((io.codelaser.maddi.cst.api.statement.LocalVariableCreation) read).localVariable().assignmentExpression();
         Variable moves = ((VariableExpression) ((MethodCall) size).object()).variable();
@@ -7332,7 +7332,7 @@ public class TestNullabilityPass extends CommonTest {
     }
 
     // the facts on 'parent' when the method's 'String n = parent.name;' starts
-    private static boolean parentKnown(NullabilityPass.Report report, MethodInfo method) {
+    private static boolean parentKnown(Report report, MethodInfo method) {
         Statement read = method.methodBody().statements().getFirst();
         io.codelaser.maddi.cst.api.variable.FieldReference name = (io.codelaser.maddi.cst.api.variable.FieldReference)
                 ((VariableExpression) ((io.codelaser.maddi.cst.api.statement.LocalVariableCreation) read).localVariable()
@@ -7345,7 +7345,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("an array filled by a loop that returns early: no null element")
     @Test
     public void arrayFillWithEarlyReturn() {
-        NullabilityPass.Report report = run("a.b.EX", """
+        Report report = run("a.b.EX", """
                 package a.b;
                 import java.util.function.Function;
                 class EX {
@@ -7385,7 +7385,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("JUnit: a parameterized test's null source passes null to its parameters (langchain4j DocumentTest)")
     @Test
     public void junitNullSource() {
-        NullabilityPass.Report report = run("a.b.JN", """
+        Report report = run("a.b.JN", """
                 package a.b;
                 class JN {
                     @interface NullSource {}
@@ -7416,7 +7416,7 @@ public class TestNullabilityPass extends CommonTest {
         // the closure had tied the result to x through the Optional's hidden content ('orElseGet ← this.§$' after
         // 'ofNullable.§$ ← 0:t'); the pass reads the statements' own links only (Link.derived), and no statement
         // assigns the result from x
-        NullabilityPass.Report report = run("a.b.OG", """
+        Report report = run("a.b.OG", """
                 package a.b;
                 import java.util.Optional;
                 import java.util.concurrent.atomic.AtomicReference;
@@ -7443,7 +7443,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("direct links: the timefold shapes whose verdict moved (createMergedResult, getReachableValues, cloneCollection)")
     @Test
     public void directLinksTimefoldShapes() {
-        NullabilityPass.Report report = run("a.b.RG", """
+        Report report = run("a.b.RG", """
                 package a.b;
                 import java.util.*;
                 class RG {
@@ -7471,7 +7471,7 @@ public class TestNullabilityPass extends CommonTest {
                     }
                     <E> E cloneIf(E e) { if (e instanceof String) return null; return e; }
                 }
-                """, NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY.withoutContracts().withWorld(NullabilityPass.World.CLOSED));
+                """, Policy.NULL_MARKED_FLOW_ONLY.withoutContracts().withWorld(World.CLOSED));
         System.out.println(explain(report));
         Map<String, String> byName = report.verdicts().entrySet().stream()
                 .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
@@ -7487,7 +7487,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("direct links: the guava shapes whose verdict moved (HashBiMap.hashTableVToK, RegularImmutableMap.table, removeExactly)")
     @Test
     public void directLinksGuavaShapes() {
-        NullabilityPass.Report report = run("a.b.HB", """
+        Report report = run("a.b.HB", """
                 package a.b;
                 import java.util.Arrays;
                 import java.util.concurrent.ConcurrentHashMap;
@@ -7605,7 +7605,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("Preconditions: a parameter every member of its override family throws on null (maddi-mod#41)")
     @Test
     public void preconditionFamilies() {
-        NullabilityPass.Report report = run("a.b.PF", PRECONDITIONS, NullabilityPass.Policy.KOTLIN);
+        Report report = run("a.b.PF", PRECONDITIONS, Policy.KOTLIN);
         System.out.println(explain(report));
         Set<String> preconditions = report.preconditions().stream().map(pi -> pi.methodInfo().typeInfo().simpleName()
                 + "." + pi.methodInfo().name() + ":" + pi.name()).collect(Collectors.toCollection(java.util.TreeSet::new));
@@ -7622,8 +7622,8 @@ public class TestNullabilityPass extends CommonTest {
         Map<String, String> byName = byName(report);
         assertEquals("Node?", byName.get("a.b.PF.Visitor.visit(a.b.PF.Node):0:n"), "the policy is off in KOTLIN");
 
-        NullabilityPass.Report declared = run("a.b.PE", PRECONDITIONS.replace("PF", "PE"),
-                NullabilityPass.Policy.KOTLIN.withPreconditionsNonNull());
+        Report declared = run("a.b.PE", PRECONDITIONS.replace("PF", "PE"),
+                Policy.KOTLIN.withPreconditionsNonNull());
         Map<String, String> declaredByName = byName(declared);
         assertEquals("Node", declaredByName.get("a.b.PE.Visitor.visit(a.b.PE.Node):0:n"), "the interface with its family");
         assertEquals("Node", declaredByName.get("a.b.PE.Printer.visit(a.b.PE.Node):0:n"));
@@ -7647,7 +7647,7 @@ public class TestNullabilityPass extends CommonTest {
         // no null flows on from a declared precondition; under KOTLIN the content write would be asserted anyway
         assertEquals("List<St?>", byName(run("a.b.PG", PRECONDITIONS.replace("PF", "PG"))).get("a.b.PG.St.stats"));
         assertEquals("List<St>", byName(run("a.b.PH", PRECONDITIONS.replace("PF", "PH"),
-                NullabilityPass.Policy.NULL_MARKED.withPreconditionsNonNull())).get("a.b.PH.St.stats"));
+                Policy.NULL_MARKED.withPreconditionsNonNull())).get("a.b.PH.St.stats"));
     }
     @Language("java")
     private static final String TOLERANT = """
@@ -7732,7 +7732,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("#68: a parameter an overridden method never reads is not tolerant")
     @Test
     public void toleratedNullsNotUnread() {
-        Map<String, String> v = byName(run("a.b.LS", TOLERANT_UNREAD, NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY));
+        Map<String, String> v = byName(run("a.b.LS", TOLERANT_UNREAD, Policy.NULL_MARKED_FLOW_ONLY));
         assertEquals("String", v.get("a.b.LS.Listener.failed(String,Throwable):0:from"));
         assertEquals("Throwable", v.get("a.b.LS.Listener.failed(String,Throwable):1:failure"));
         assertEquals("String?", v.get("a.b.LS.Listener.logged(String):0:message"));
@@ -7782,7 +7782,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("#68: a parameter an overload shares the position and type of is not tolerant")
     @Test
     public void toleratedNullsNotOverloaded() {
-        Map<String, String> v = byName(run("a.b.VU", TOLERANT_OVERLOADED, NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY));
+        Map<String, String> v = byName(run("a.b.VU", TOLERANT_OVERLOADED, Policy.NULL_MARKED_FLOW_ONLY));
         assertEquals("String", v.get("a.b.VU.ensureNotNull(Object,String):1:name"));
         // each overload's own T: the same erasure, Object
         assertEquals("String", v.get("a.b.VU.ensureGeneric(Object,String):1:name"));
@@ -7812,9 +7812,9 @@ public class TestNullabilityPass extends CommonTest {
     public void toleratedNullsAnnotatedNonNull() {
         // flow only: a null test would seed the parameter by itself; without contracts in a closed world is the policy
         // of diagnostics' Analyses
-        Map<String, NullabilityPass.Policy> policies = Map.of("GC", NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY,
-                "GW", NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY.withoutContracts()
-                        .withWorld(NullabilityPass.World.CLOSED));
+        Map<String, Policy> policies = Map.of("GC", Policy.NULL_MARKED_FLOW_ONLY,
+                "GW", Policy.NULL_MARKED_FLOW_ONLY.withoutContracts()
+                        .withWorld(World.CLOSED));
         policies.forEach((name, policy) -> {
             Map<String, String> v = byName(run("a.b." + name, TOLERANT_ANNOTATED.replace("GD", name), policy));
             assertEquals("String", v.get("a.b." + name + ".guarded(String):0:s"), name);
@@ -7825,7 +7825,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("#68: a visible parameter whose body tolerates null is nullable, whatever the analysed callers pass")
     @Test
     public void toleratedNulls() {
-        NullabilityPass.Report report = run("a.b.TL", TOLERANT, NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY);
+        Report report = run("a.b.TL", TOLERANT, Policy.NULL_MARKED_FLOW_ONLY);
         System.out.println(explain(report));
         Map<String, String> v = byName(report);
         // Preconditions' message argument, through lenientFormat's varargs into lenientToString's null check; the
@@ -7857,7 +7857,7 @@ public class TestNullabilityPass extends CommonTest {
         // gate NOTOLERANT: the closed world, as before
         Switches.offForNextPasses(Set.of("NOTOLERANT"));
         try {
-            Map<String, String> off = byName(new NullabilityPass(NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY)
+            Map<String, String> off = byName(new NullabilityPass(Policy.NULL_MARKED_FLOW_ONLY)
                     .go(analysisOrder));
             assertEquals("Object", off.get("a.b.TL.checkArgument(boolean,String,Object):2:p1"));
             assertEquals("Object", off.get("a.b.TL.<init>(Object,Object):1:mutex"));
@@ -7972,7 +7972,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("#68: a demand in an enclosed class or lambda, a bound method reference, a filled array (timefold, langchain4j C#)")
     @Test
     public void toleratedNullsMissedDemands() {
-        NullabilityPass.Report report = run("a.b.TD", TOLERANT_DEMANDS, NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY);
+        Report report = run("a.b.TD", TOLERANT_DEMANDS, Policy.NULL_MARKED_FLOW_ONLY);
         System.out.println(explain(report));
         Map<String, String> v = byName(report);
         // the consumer is called in the anonymous class that captures it, or in the lambda
@@ -7999,7 +7999,7 @@ public class TestNullabilityPass extends CommonTest {
         gates.forEach((gate, key) -> {
             Switches.offForNextPasses(Set.of(gate));
             try {
-                Map<String, String> off = byName(new NullabilityPass(NullabilityPass.Policy.NULL_MARKED_FLOW_ONLY)
+                Map<String, String> off = byName(new NullabilityPass(Policy.NULL_MARKED_FLOW_ONLY)
                         .go(analysisOrder));
                 assertTrue(off.get(key).endsWith("?"), gate + ": " + off.get(key));
             } finally {
@@ -8026,7 +8026,7 @@ public class TestNullabilityPass extends CommonTest {
     @DisplayName("a local assigned a value known non-null takes no null through the closure (jenkins CLIRegisterer.main)")
     @Test
     public void assignedNonNullLocal() {
-        NullabilityPass.Report report = run("a.b.CR", """
+        Report report = run("a.b.CR", """
                 package a.b;
                 import java.util.*;
                 class CR {

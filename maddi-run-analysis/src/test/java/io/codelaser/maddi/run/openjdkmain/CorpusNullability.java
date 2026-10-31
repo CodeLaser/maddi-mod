@@ -13,6 +13,8 @@ import io.codelaser.maddi.cst.print.kotlin.KotlinPrintOptions;
 import io.codelaser.maddi.inspection.api.integration.JavaInspector;
 import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
 import io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass;
+import io.codelaser.maddi.modification.analyzer.nullability.Policy;
+import io.codelaser.maddi.modification.analyzer.nullability.Report;
 import io.codelaser.maddi.run.analysis.AnalysisEngineImpl;
 import io.codelaser.maddi.run.j2k.JavaToKotlinRatchet;
 
@@ -42,8 +44,8 @@ final class CorpusNullability {
     }
 
     /** Analyses the parsed corpus, main and test sources. */
-    static NullabilityPass.Report report(JavaToKotlinRatchet.Corpus corpus) throws IOException {
-        return report(corpus, corpus.summary().parseResult().primaryTypes(), NullabilityPass.Policy.KOTLIN);
+    static Report report(JavaToKotlinRatchet.Corpus corpus) throws IOException {
+        return report(corpus, corpus.summary().parseResult().primaryTypes(), Policy.KOTLIN);
     }
 
     /**
@@ -51,14 +53,14 @@ final class CorpusNullability {
      * MODREACH and nullability, then the pass. A large reactor's translated source set (timefold's core/main) rather
      * than everything it parses.
      */
-    static NullabilityPass.Report report(JavaToKotlinRatchet.Corpus corpus, Collection<TypeInfo> types,
-                                         NullabilityPass.Policy policy) throws IOException {
+    static Report report(JavaToKotlinRatchet.Corpus corpus, Collection<TypeInfo> types,
+                         Policy policy) throws IOException {
         return reports(corpus, types, List.of(policy)).getFirst();
     }
 
     /** One analysis, one pass per policy: a measurement that compares policies. */
-    static List<NullabilityPass.Report> reports(JavaToKotlinRatchet.Corpus corpus, Collection<TypeInfo> types,
-                                                List<NullabilityPass.Policy> policies) throws IOException {
+    static List<Report> reports(JavaToKotlinRatchet.Corpus corpus, Collection<TypeInfo> types,
+                                List<Policy> policies) throws IOException {
         JavaInspector javaInspector = corpus.javaInspector();
         AnalysisEngineImpl engine = new AnalysisEngineImpl();
         engine.resultsLoader(javaInspector.runtime(), javaInspector.mainSources()).load(List.of(JDK_HINTS));
@@ -86,11 +88,11 @@ final class CorpusNullability {
 
     /** The Kotlin printer with the pass's report: its verdicts, and {@code !!} where Kotlin needs a non-null value. */
     static KotlinPrintOptions kotlinOptions(JavaToKotlinRatchet.Corpus corpus) throws IOException {
-        return kotlinOptions(corpus, NullabilityPass.Policy.KOTLIN);
+        return kotlinOptions(corpus, Policy.KOTLIN);
     }
 
     /** As {@link #kotlinOptions(JavaToKotlinRatchet.Corpus)}, under another policy: a measurement. */
-    static KotlinPrintOptions kotlinOptions(JavaToKotlinRatchet.Corpus corpus, NullabilityPass.Policy policy)
+    static KotlinPrintOptions kotlinOptions(JavaToKotlinRatchet.Corpus corpus, Policy policy)
             throws IOException {
         return new KotlinPrintOptions(report(corpus, corpus.summary().parseResult().primaryTypes(), policy),
                 KotlinPrintOptions.NullCheck.ASSERT);
@@ -108,7 +110,7 @@ final class CorpusNullability {
      */
     static CSharpProgram.Policy csharpPolicy(JavaToKotlinRatchet.Corpus corpus, Collection<TypeInfo> types)
             throws IOException {
-        NullabilityFacts facts = report(corpus, types, NullabilityPass.Policy.KOTLIN.withPreconditionsNonNull())
+        NullabilityFacts facts = report(corpus, types, Policy.KOTLIN.withPreconditionsNonNull())
                 .orElse(NullabilityFacts.STORED);
         return CSharpProgram.Policy.DEFAULT.withFacts(CSharpFacts.of(facts, ParameterInfo::isUnmodified));
     }

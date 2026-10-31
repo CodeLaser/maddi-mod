@@ -31,9 +31,6 @@ import io.codelaser.maddi.cst.api.statement.ExplicitConstructorInvocation;
 import io.codelaser.maddi.cst.api.statement.ExpressionAsStatement;
 import io.codelaser.maddi.cst.api.statement.Statement;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
-import io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass.NullArgument;
-import io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass.Policy;
-import io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass.World;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -47,7 +44,7 @@ import static io.codelaser.maddi.modification.analyzer.nullability.Types.*;
 
 /**
  * Parameters a null argument makes throw before their method completes (CodeLaser/maddi-mod#41), with the calls
- * that may pass null to one ({@link NullabilityPass.Report#nullArguments}); those declared non-null under
+ * that may pass null to one ({@link Report#nullArguments}); those declared non-null under
  * Policy.preconditionsNonNull; and those a method rejects with its own exception (CodeLaser/maddi-mod#28).
  */
 final class Preconditions {
@@ -136,7 +133,7 @@ final class Preconditions {
     // decided after the closure (nullArguments). Not the caller's own precondition parameter passed on
     // ('super.replace(oldstat, newstat)'): a null there is reported where it enters the caller
     void preconditionArgument(MethodInfo mi, Scope scope, Statement statement, Expression call,
-                                      ParameterInfo parameter, Expression argument) {
+                              ParameterInfo parameter, Expression argument) {
         if (NonNullFacts.unwrap(argument) instanceof VariableExpression own && own.variable() instanceof ParameterInfo pi
             && preconditions.contains(pi) && !this.nodes.reassigned.contains(pi)) {
             return;
