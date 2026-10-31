@@ -475,10 +475,7 @@ public final class NullabilityPass {
     private static final Switches.Gate ROUND_KEYS_OFF = Switches.gate("NOROUNDKEYS");
     // gate NOENTRYFIELDS: no field of this is non-null at a private method's entry by its calls (A/B for #48 A5)
     private static final Switches.Gate ENTRY_FIELDS_OFF = Switches.gate("NOENTRYFIELDS");
-    private final Map<Arg, Set<Object>> keysUsed = new LinkedHashMap<>();
     private Set<Object> reached = Set.of();
-    // what a written null reaches (the strict closure, from strictSeeds), as of the last closure: Report.writtenReach
-    private Set<Object> writtenReach = Set.of();
     // locals their block dereferences unconditionally further on (Policy.assertAtDeclaration), and those null reaches
     private final Set<Local> assertCandidates = new HashSet<>();
     private final Set<Local> asserted = new HashSet<>();
@@ -507,8 +504,6 @@ public final class NullabilityPass {
     private NonNullFacts facts;
     private NullPredicates predicates;
     private java.util.function.BiPredicate<Object, TypeInfo> narrowedReads;
-    // gate NOGAP9 for A/B: every call's result is the callee's return, as before
-    private static final Switches.Gate GAP9_OFF = Switches.gate("NOGAP9");
     // NODIRECT: read the closure's products (Link.derived()) as before, for an A/B against the direct links only
     private static final Switches.Gate DERIVED_LINKS = Switches.gate("NODIRECT");
     // see the element-slot identity rule in the link walk
@@ -519,8 +514,6 @@ public final class NullabilityPass {
     // inside a loop)
     private final Set<ParameterInfo> reassigned = new HashSet<>();
     private final Set<ParameterInfo> shadowed = new HashSet<>(); // walk state: reads resolve to the shadow from here on
-    // per method (a lambda is its own), the declarations of each name: the fallback when scopes do not resolve one
-    private final Map<MethodInfo, Map<String, List<Local>>> declaredByName = new HashMap<>();
 
     public NullabilityPass(Policy policy) {
         this(policy, Trace.NULL_WHY, Set.of(), Set.of(), NarrowedReads.NONE, Map.of(), Set.of());
@@ -535,7 +528,7 @@ public final class NullabilityPass {
         this.typeUses = new TypeUses(policy, index);
         this.seeds = new Seeds(trace, index, site);
         this.contracts = new Contracts(policy, trace, index, seeds, trustedReturns, preconditions, presentLookups);
-        this.graph = new NullGraph(policy, trace, site);
+        this.graph = new NullGraph(policy, trace, site, index, typeUses, seeds, contracts);
         this.trustedReturns = trustedReturns;
         this.preconditions = preconditions;
         this.narrowed = narrowed;
@@ -1213,8 +1206,8 @@ public final class NullabilityPass {
             // an assignment the statement shows: kept.
             // [3] a link of a method's summary (no statement): kept as before, unless guarded somewhere
             boolean slot = edge.get(1) instanceof Arg || edge.get(1) instanceof Content;
-            if (policy.callResults() && !DIFFERENT_SHAPES_OFF.get() && differentShapes(edge.get(0), edge.get(1))) return;
-            if (liftedIntoNarrower(edge.get(0), edge.get(1))) return;
+            if (policy.callResults() && !NullGraph.DIFFERENT_SHAPES_OFF.get() && graph.differentShapes(edge.get(0), edge.get(1))) return;
+            if (graph.liftedIntoNarrower(edge.get(0), edge.get(1))) return;
             if (count[1] > 0 || count[2] > 0 || count[0] == 0 && slot) {
                 graph.addEdge(edge.get(0), edge.get(1));
             } else {
@@ -1227,11 +1220,11 @@ public final class NullabilityPass {
         enumValueOfContracts(methods);
         nullFilteredParameters(methods);
         resolveTypeVariableArguments();
-        coupleContent();
+        graph.coupleContent();
         if (!graph.invariantTies.isEmpty()) {
             // a class type variable's slot is reached only by the class's own nulls (coupleContent never ties it
             // to an instantiation's slot), so that is known before the invariance edges are added
-            Set<Object> own = closure(new HashMap<>());
+            Set<Object> own = graph.closure(new HashMap<>());
             boolean added = false;
             for (Object[] tie : graph.invariantTies) {
                 if (!own.contains(tie[2])) {
@@ -1239,13 +1232,13 @@ public final class NullabilityPass {
                     added = true;
                 }
             }
-            if (added) coupleContent(); // the nested slots of the new flows
+            if (added) graph.coupleContent(); // the nested slots of the new flows
         }
 
         contracts.libraryParameterContracts(graph.successors);
         if (!TOLERANT_OFF.get()) tolerantParameters(methods);
         Map<Object, Object> cause = new LinkedHashMap<>();
-        reached = closure(cause);
+        reached = graph.closure(cause);
         List<NullArgument> nullArguments = nullArguments(reached);
         Set<ParameterInfo> preconditionsNonNull = Set.of();
         if (policy.preconditionsNonNull()) {
@@ -1257,7 +1250,7 @@ public final class NullabilityPass {
             if (!declared.isEmpty()) {
                 contracts.addAll(declared);
                 cause.clear();
-                reached = closure(cause);
+                reached = graph.closure(cause);
             }
         }
         if (policy.assertAtDeclaration()) {
@@ -1268,7 +1261,7 @@ public final class NullabilityPass {
             if (!asserted.isEmpty()) {
                 contracts.addAll(asserted);
                 cause.clear();
-                reached = closure(cause);
+                reached = graph.closure(cause);
             }
         }
         if (policy.world() != World.CLOSED) external = externalClosure(methods);
@@ -1318,7 +1311,7 @@ public final class NullabilityPass {
         graph.callIds.forEach((call, id) -> {
             MethodInfo callee = graph.callees.get(id);
             if (finalReached.contains(callee)
-                && !callResultNullable(callee, id, finalReached, finalReached::contains, intrinsic)) {
+                && !graph.callResultNullable(callee, id, finalReached, finalReached::contains, intrinsic)) {
                 nonNullCallResults.add(call);
             }
         });
@@ -1338,7 +1331,7 @@ public final class NullabilityPass {
         }
         return new Report(verdicts, locals, cause, seeds.seedOrigin, useSites, smartCasts, Set.copyOf(asserted),
                 Set.copyOf(unobservedCandidates), nonNullCallResults, preconditions, nullArguments, preconditionsNonNull,
-                rejectsNull(), writtenReach, Set.copyOf(typeUses.nonNullTypeParameters), parentClassVerdicts(methods));
+                rejectsNull(), graph.writtenReach, Set.copyOf(typeUses.nonNullTypeParameters), parentClassVerdicts(methods));
     }
 
     /*
@@ -1528,7 +1521,7 @@ public final class NullabilityPass {
      */
     private void tolerantParameters(List<MethodInfo> methods) {
         // what null reaches without these seeds: a field or a return that is nullable anyway may take the parameter
-        Set<Object> before = closure(new HashMap<>());
+        Set<Object> before = graph.closure(new HashMap<>());
         for (MethodInfo mi : methods) {
             if (!hasBody(mi) || !externallyCallable(mi)) continue;
             for (ParameterInfo pi : mi.parameters()) {
@@ -1795,240 +1788,7 @@ public final class NullabilityPass {
                 : pt.withParameters(pt.parameters().stream().map(NullabilityPass::unspecified).toList());
         return arguments.withNullable(NullableState.UNSPECIFIED);
     }
-
-    private Set<Object> closure(Map<Object, Object> cause) {
-        if (!policy.assertContentWrites()) {
-            // the strict closure only for the Report (CodeLaser/maddi-mod#49): the verdicts are the full closure's
-            writtenReach = Set.copyOf(closure(new HashMap<>(), this.seeds.strictSeeds, null));
-            return closure(cause, this.seeds.seedOrigin.keySet(), null);
-        }
-        // Policy.assertContentWrites: first what null reaches without the library contracts; a value outside it
-        // enters a slot only as an asserted write, so that edge is not followed, and a library seed on a slot itself
-        // is an asserted write too
-        Map<Object, Object> strictCause = new HashMap<>();
-        Set<Object> strict = closure(strictCause, this.seeds.strictSeeds, null);
-        writtenReach = Set.copyOf(strict);
-        Set<Object> seeds = new LinkedHashSet<>(this.seeds.seedOrigin.keySet());
-        seeds.removeIf(n -> isSlot(n) && !this.seeds.strictSeeds.contains(n));
-        Set<Object> reached = closure(cause, seeds, strict);
-        // explain a node null reaches by a written null with that chain: it is the one that lets the node's value
-        // into a slot, where the first chain found may begin at a library contract or a default value
-        strict.forEach(n -> {
-            if (this.seeds.strictSeeds.contains(n)) cause.remove(n);
-            else if (strictCause.containsKey(n)) cause.put(n, strictCause.get(n));
-        });
-        return reached;
-    }
-
-    /*
-     The value an Optional holds is never null: 'Optional.ofNullable(x)' is empty for a null x, 'Optional.of(null)'
-     throws. So its type argument stays non-null, as the interfaces declare it (langchain4j
-     DefaultAiServiceStartedEvent.systemMessage(): 'Optional.ofNullable(this.systemMessage)' of a @Nullable field
-     is an Optional<SystemMessage>, and Kotlin refused the override returning Optional<SystemMessage?>).
-     */
-    private boolean optionalValue(Object node) {
-        if (!(node instanceof Arg arg) || arg.index() != 0) return false;
-        ParameterizedType type = graph.typeOf(arg.of());
-        return type != null && type.arrays() == 0 && type.typeInfo() != null
-               && "java.util.Optional".equals(type.typeInfo().fullyQualifiedName());
-    }
-
-    /*
-     The elements of a varargs parameter are not stored content: the call builds the array from its arguments, so an
-     argument nullable only through indirect evidence ('if (i == null || i < 0) throw illegalArgument("%s", i)')
-     still makes them nullable. Asserting at the call instead ('i!!') would throw where Java formats "null"
-     (langchain4j Exceptions.illegalArgument(format, vararg args: Any?)).
-     */
-    private static boolean isVarargElements(Object node) {
-        return node instanceof Content c && c.of() instanceof ParameterInfo pi && pi.isVarArgs();
-    }
-
-    /*
-     Kotlin: the slot of a type parameter bounded by something other than Object ('Range<C extends Comparable>',
-     'EnumSet<E extends Enum<E>>') cannot hold a nullable argument, so null stops there as at a non-null contract; a
-     write of a value that may be null is asserted (guava, worktree-maddi-all 2026-10-16: 'DiscreteDomain<C?>',
-     'TreeRangeMap<K?, ...>', 'EnumSet<E?>', most of 129 "type argument is not within its bounds").
-     */
-    private boolean boundedSlot(Object node) {
-        if (!policy.callResults() || !(node instanceof Arg a)) return false;
-        Boolean known = boundedSlots.get(node);
-        if (known != null) return known;
-        ParameterizedType outer = graph.typeOf(a.of());
-        TypeInfo ti = outer == null || outer.arrays() > 0 ? null : outer.typeInfo();
-        boolean bounded = !BOUNDED_SLOTS_OFF.get() && ti != null && a.index() < ti.typeParameters().size()
-                          && ti.typeParameters().get(a.index()).typeBounds().stream()
-                                  .anyMatch(b -> b.typeParameter() == null && b.typeInfo() != null
-                                                 && !b.typeInfo().isJavaLangObject())
-                          // a slot holding a type variable stays that variable ('Converter<A, B>', never
-                          // 'Converter<A?, B>'): it already ranges over nullable instantiations, and Kotlin's
-                          // invariant generics make the two incompatible (guava's Converter, Maps, TreeRangeSet, ...)
-                          || !TYPE_VARIABLE_SLOTS_OFF.get() && outer != null && a.index() < outer.parameters().size()
-                             && isTypeVariable(outer.parameters().get(a.index()))
-                             && !typeVariableElementSlots.contains(a)
-                          || erasedSingleton(a, outer)
-                          || nonNullSlot(a)
-                          || tiedToNonNullSlots().contains(a);
-        boundedSlots.put(node, bounded);
-        return bounded;
-    }
-
-    // the slot of a null-marked type parameter, or one holding a type variable the null-marked bounds hold non-null
-    private boolean nonNullSlot(Arg a) {
-        if (typeUses.nonNullTypeParameters.isEmpty()) return false;
-        ParameterizedType outer = graph.typeOf(a.of());
-        if (outer == null || outer.arrays() > 0) return false;
-        TypeInfo ti = outer.typeInfo();
-        if (ti != null && a.index() < ti.typeParameters().size()
-            && typeUses.nonNullTypeParameters.contains(ti.typeParameters().get(a.index()))) return true;
-        if (a.index() >= outer.parameters().size()) return false;
-        ParameterizedType p = outer.parameters().get(a.index());
-        return p.typeParameter() != null && (p.wildcard() == null || !p.wildcard().isSuper())
-               && typeUses.nonNullTypeParameters.contains(p.typeParameter());
-    }
-
-    /*
-     Kotlin's generics are invariant, and an 'out' projection of a non-null bound is non-null too: a container given
-     to a null-marked slot ('LinkedHashMultiset<Object> multiset' given to '<E : Any> copyOf(Iterable<out E>)')
-     is bounded as well, so null stops there and its writes are asserted ('multiset.add(elements[i]!!, ...)').
-     ImmutableMultiset.kt:182 had 'LinkedHashMultiset<Any?>' (2026-10-19). Not into a '? super' slot. Computed once,
-     when the graph is complete. Gate NOTIEDBOUNDS.
-     */
-    private Set<Arg> tiedToNonNullSlots() {
-        if (tiedToNonNull != null) return tiedToNonNull;
-        tiedToNonNull = new HashSet<>();
-        if (TIED_BOUNDS_OFF.get() || typeUses.nonNullTypeParameters.isEmpty()) return tiedToNonNull;
-        List<String> why = TypeUses.NULL_MARKED_DEBUG == null ? null : new ArrayList<>();
-        // the container itself given to a null-marked slot that the graph does not tie, a method type variable's:
-        // 'copyOf(multiset)'. Not along the slot edges: those carry values ('accessQueue.add(table.get(i))'), which
-        // Kotlin asserts at the write, and had made Segment.table's elements non-null through
-        // ImmutableList.copyOf(accessQueue), where Segment.clear() writes null (guava, 2026-10-19)
-        for (List<Object> flow : graph.flows) {
-            ParameterizedType t0 = graph.typeOf(flow.get(0));
-            ParameterizedType t1 = graph.typeOf(flow.get(1));
-            if (t0 == null || t1 == null || t0.arrays() > 0 || t1.arrays() > 0
-                || t0.parameters().size() != t1.parameters().size() || fedByUnboundWildcard(flow.get(0))) continue;
-            for (int i = 0; i < t0.parameters().size(); i++) {
-                Arg from = new Arg(flow.get(0), i);
-                if (nonNullSlot(new Arg(flow.get(1), i)) && tiedToNonNull.add(from) && why != null) {
-                    why.add(from + " <- " + flow.get(1));
-                }
-            }
-        }
-        if (why != null) {
-            try {
-                java.nio.file.Files.write(java.nio.file.Path.of(TypeUses.NULL_MARKED_DEBUG + ".tied"), why);
-            } catch (java.io.IOException ignored) {
-            }
-        }
-        return tiedToNonNull;
-    }
-
-    /*
-     a local made from a '?' argument ('List<Object> result = newArrayList(keys)' of an 'Iterable<? extends Object>'):
-     Kotlin infers its initializer's elements as 'Any?' from the '*', so it cannot be declared non-null. The model
-     does not tell '? extends Object' from '?' (Striped.kt:34, 2026-10-19)
-     */
-    private static boolean fedByUnboundWildcard(Object node) {
-        if (!(node instanceof Local l) || !(l.declaration() instanceof LocalVariableCreation lvc)) return false;
-        return lvc.localVariableStream().filter(lv -> lv.simpleName().equals(l.name()))
-                .map(lv -> lv.assignmentExpression() == null ? null : NonNullFacts.unwrap(lv.assignmentExpression()))
-                .anyMatch(init -> {
-                    List<Expression> args = switch (init) {
-                        case MethodCall mc -> mc.parameterExpressions();
-                        case ConstructorCall cc -> cc.parameterExpressions();
-                        case null, default -> List.of();
-                    };
-                    return args.stream().map(Expression::parameterizedType).anyMatch(t -> t != null
-                            && t.parameters().stream().anyMatch(p -> p.wildcard() != null && p.wildcard().isUnbound()));
-                });
-    }
-
-    private Set<Arg> tiedToNonNull;
-    private static final Switches.Gate TIED_BOUNDS_OFF = Switches.gate("NOTIEDBOUNDS");
-
-    /*
-     Kotlin: a static final singleton with Object type arguments ('RegularImmutableMap.EMPTY', an
-     ImmutableMap<Object, Object>) is cast to each instantiation at its use; its slots hold nothing. Tied to every
-     Object-keyed map that the links see as it, it carried a test's null ('read from *' in
-     ImmutableMapFloodingTest) into ImmutableListMultimap.readObject's tmpMap (guava 2026-10-17, after 594f20b7).
-     */
-    private static boolean erasedSingleton(Arg a, ParameterizedType outer) {
-        return !ERASED_SINGLETONS_OFF.get() && a.of() instanceof FieldInfo fi && fi.isStatic() && fi.isFinal()
-               && outer != null && outer.arrays() == 0 && !outer.parameters().isEmpty()
-               && outer.parameters().stream().allMatch(p -> p.wildcard() == null && p.typeParameter() == null
-                                                            && p.arrays() == 0 && p.typeInfo() != null
-                                                            && p.typeInfo().isJavaLangObject());
-    }
-
-    // gate NOERASEDSINGLETONS: an Object-typed singleton's slots take null as any other (A/B)
-    private static final Switches.Gate ERASED_SINGLETONS_OFF = Switches.gate("NOERASEDSINGLETONS");
-
-    private final Map<Object, Boolean> boundedSlots = new HashMap<>();
     private static final Switches.Gate REJECTED_FLOWS_OFF = Switches.gate("NOREJECTEDFLOWS");
-    // slots holding a type variable that a 'T[]' of the same method fills (arrayElementsPassedThrough): 'List<T?>'
-    // where the array is an 'Array<T?>'
-    private final Set<Arg> typeVariableElementSlots = new HashSet<>();
-    // gate NOBOUNDEDSLOTS: a bounded type parameter's slot takes null as any other (A/B)
-    private static final Switches.Gate BOUNDED_SLOTS_OFF = Switches.gate("NOBOUNDEDSLOTS");
-    // gate NOWILDCARDSLOTS: a slot flows back out of an unbound '?' parameter (A/B)
-    private static final Switches.Gate WILDCARD_SLOTS_OFF = Switches.gate("NOWILDCARDSLOTS");
-    // gate NOUNCHECKEDSLOTS: slots of different concrete type arguments are tied as any other (A/B)
-    private static final Switches.Gate UNCHECKED_SLOTS_OFF = Switches.gate("NOUNCHECKEDSLOTS");
-    // gate NOTYPEVARSLOTS: a slot holding a type variable takes null as any other (A/B)
-    private static final Switches.Gate TYPE_VARIABLE_SLOTS_OFF = Switches.gate("NOTYPEVARSLOTS");
-
-    // strict: when not null, an edge from a value into a slot is followed only from a node in it
-    private Set<Object> closure(Map<Object, Object> cause, Set<Object> seeds, Set<Object> strict) {
-        // a seed on a non-null contract is the caller's error (an M5 finding), not a source of null
-        Set<Object> reached = new LinkedHashSet<>(seeds);
-        reached.removeAll(contracts.nonNullContracts);
-        reached.removeIf(this::optionalValue);
-        reached.removeIf(this::boundedSlot);
-        Deque<Object> queue = new ArrayDeque<>(reached);
-        while (true) {
-            while (!queue.isEmpty()) {
-                Object n = queue.removeFirst();
-                for (Object s : graph.successors.getOrDefault(n, Set.of())) {
-                    if (strict != null && isSlot(s) && !isSlot(n) && !strict.contains(n) && !isVarargElements(s)) continue;
-                    if (optionalValue(s) || boundedSlot(s)) continue;
-                    if (!contracts.nonNullContracts.contains(s) && reached.add(s)) {
-                        cause.put(s, n);
-                        queue.addLast(s);
-                    }
-                }
-            }
-            // gap 9: the gated call results, once nothing else moves; monotone, so repeated until none opens
-            Map<MethodInfo, Boolean> intrinsic = new HashMap<>();
-            for (GatedSite site : graph.gatedSites) {
-                if (!reached.contains(site.callee()) || reached.contains(site.target())
-                    || contracts.nonNullContracts.contains(site.target())
-                    || !callResultNullable(site.callee(), site.call(), reached, reached::contains, intrinsic)) continue;
-                reached.add(site.target());
-                cause.put(site.target(), site.callee());
-                queue.addLast(site.target());
-            }
-            if (queue.isEmpty()) return reached;
-        }
-    }
-
-    /*
-     Gap 9. Whether the result of call 'call' to 'callee' may be null, the callee's return being reached: by itself
-     (reached without passing through one of its own parameters), or through a parameter whose argument at this call is
-     (its SiteArg reached). SearchableProperties.getInteger(key, defaultValue) is 'search(key).orElse(defaultValue)', and
-     getInteger(key) calls getInteger(key, null): only that call's result is nullable, not 'getInteger(KEY, 5)'.
-     */
-    private boolean callResultNullable(MethodInfo callee, int call, Set<Object> reached,
-                                       java.util.function.Predicate<Object> isReached,
-                                       Map<MethodInfo, Boolean> intrinsicMemo) {
-        if (GAP9_OFF.get() || !graph.argumentsSeen.contains(call)) return true;
-        Set<ParameterInfo> through = graph.passThrough(callee);
-        if (through.isEmpty()) return true;
-        if (intrinsicMemo.computeIfAbsent(callee, m -> reachedWithout(m, through, reached))) return true;
-        for (ParameterInfo pi : through) {
-            if (isReached.test(new SiteArg(call, pi.index()))) return true;
-        }
-        return false;
-    }
 
     /*
      Gap 7, for the facts the report hands out: a value no null of the analysis reaches, once the closure is known. A
@@ -2049,20 +1809,6 @@ public final class NullabilityPass {
                 case FieldReference fr -> fr.fieldInfo().isFinal() && !reached.contains(fr.fieldInfo());
                 default -> false;
             };
-        }
-        return false;
-    }
-
-    /* whether null reaches 'callee' backwards from a seed, without passing through one of 'through' */
-    private boolean reachedWithout(MethodInfo callee, Set<ParameterInfo> through, Set<Object> reached) {
-        Map<Object, Set<Object>> pred = graph.predecessors();
-        Set<Object> seen = new HashSet<>();
-        Deque<Object> todo = new ArrayDeque<>(List.of(callee));
-        while (!todo.isEmpty()) {
-            Object n = todo.removeFirst();
-            if (!seen.add(n) || through.contains(n) || !reached.contains(n)) continue;
-            if (seeds.seedOrigin.containsKey(n)) return true;
-            todo.addAll(pred.getOrDefault(n, Set.of()));
         }
         return false;
     }
@@ -2207,7 +1953,7 @@ public final class NullabilityPass {
                 List<TypeInfo> writers = seeds.seedWriters.getOrDefault(seed, List.of());
                 if (writers.isEmpty() || writers.stream().anyMatch(w -> !within(w, holder))) outside.add(seed);
             });
-            Set<Object> reachedFromOutside = closure(new HashMap<>(), outside, null);
+            Set<Object> reachedFromOutside = graph.closure(new HashMap<>(), outside, null);
             for (FieldInfo fi : holders) {
                 if (reachedFromOutside.contains(fi)) graph.pendingHolders.get(fi).forEach(arg -> graph.addEdge(fi, arg));
             }
@@ -2224,307 +1970,9 @@ public final class NullabilityPass {
         return false;
     }
 
-    /*
-     Arrays are invariant in what they hold (Kotlin's Array<T>; Java's covariance is a store check at run time, not a
-     licence): wherever an array flows, both ends denote the same objects, so their elements are one slot. Every
-     flow between two array nodes, also one the top-level verdict drops because the array is known non-null there,
-     ties their Contents both ways, recursively for nested arrays.
-     */
-    /*
-     Kotlin: an array passed where an array of a wider element type is expected ('asImmutableList(entryArray)' with
-     an ImmutableEntry<E>[] for guava's 'asImmutableList(@Nullable Object[] elements)') is cast by the printer
-     ('entryArray as Array<Any?>'): the two are no one Array<T>. Elements flow on from the narrower array into the
-     wider one, but not back, unless the wider one is written through. Without this, the parameter's nullable
-     elements made RegularImmutableMultiset.create's entryArray, and with it entries, getEntry and
-     IndexedImmutableSet.get, nullable (worktree-maddi-all, 2026-10-27). True when 'to' holds a proper subtype of what
-     'from' holds. Gate NOARRAYWIDENING.
-     */
-    private boolean narrowedArray(ParameterizedType from, ParameterizedType to) {
-        if (!policy.callResults() || ARRAY_WIDENING_OFF.get() || from.arrays() != to.arrays()) return false;
-        TypeInfo f = from.copyWithoutArrays().typeInfo();
-        TypeInfo t = to.copyWithoutArrays().typeInfo();
-        if (f == null || t == null || f == t || t.isJavaLangObject()) return false;
-        return f.isJavaLangObject() || t.superTypesExcludingJavaLangObject().contains(f);
-    }
-
-    // gate NOARRAYWIDENING: a wider array parameter's element nulls flow back into the argument (A/B)
-    private static final Switches.Gate ARRAY_WIDENING_OFF = Switches.gate("NOARRAYWIDENING");
-
-    private void coupleContent() {
-        Set<Object> writtenThrough = writtenThrough(true);
-        // narrowedArray: an element annotation alone writes nothing into the caller's array
-        Set<Object> written = policy.callResults() && !ARRAY_WIDENING_OFF.get() ? writtenThrough(false) : writtenThrough;
-        Set<ParameterInfo> readOnlyArrays = readOnlyArrayParameters();
-        Deque<List<Object>> queue = new ArrayDeque<>(graph.flows);
-        Set<List<Object>> seen = new HashSet<>();
-        while (!queue.isEmpty()) {
-            List<Object> flow = queue.removeFirst();
-            if (!seen.add(flow)) continue;
-            // not through a library method: its parameter would tie together the arrays of all its callers
-            if (index.library(flow.get(0)) || index.library(flow.get(1))) continue;
-            ParameterizedType t0 = graph.typeOf(flow.get(0));
-            ParameterizedType t1 = graph.typeOf(flow.get(1));
-            if (t0 == null || t1 == null) continue;
-            if (t0.arrays() > 0 && t1.arrays() > 0) {
-                Content c0 = new Content(flow.get(0));
-                Content c1 = new Content(flow.get(1));
-                // the links run both ways: 'join(upperBounds)' also gives a flow from join's 'parts' to the caller's
-                // array. A read-only parameter flows on only into another or a library's (readOnlyArrayParameters);
-                // anything else is that reversed link
-                if ((!readOnlyArrayParameter(flow.get(0), readOnlyArrays)
-                     || readOnlyArrayParameter(flow.get(1), readOnlyArrays))
-                    && !graph.varargsPasses.contains(List.of(flow.get(1), flow.get(0)))
-                    && !(narrowedArray(t0, t1) && !written.contains(flow.get(0)))) {
-                    graph.successors.computeIfAbsent(c0, _ -> new LinkedHashSet<>()).add(c1);
-                    if (trace.why(c1.of())) trace.log("coupled forward", c1.of(), "from " + Trace.name(c0.of()) + " " + t0 + " -> " + t1);
-                }
-                if (!readOnlyArrayParameter(flow.get(1), readOnlyArrays) && !graph.varargsPasses.contains(flow)
-                    && (narrowedArray(t1, t0) ? written.contains(flow.get(1))
-                        : policy.assertContentWrites() || writtenThrough.contains(flow.get(1)))) {
-                    graph.successors.computeIfAbsent(c1, _ -> new LinkedHashSet<>()).add(c0);
-                    if (trace.why(c0.of())) trace.log("coupled back", c0.of(), "from " + Trace.name(c1.of()) + " " + t1 + " -> " + t0);
-                }
-                queue.add(List.of(c0, c1));
-            } else if (t0.arrays() == 0 && t1.arrays() == 0 && !t0.parameters().isEmpty()
-                       && t0.parameters().size() == t1.parameters().size()) {
-                // generic types are invariant too (List<String?> is not a List<String>), except into a
-                // '? extends' argument, which only receives; matched by position (ArrayList<E> -> List<E>)
-                for (int i = 0; i < t0.parameters().size(); i++) {
-                    ParameterizedType p0 = t0.parameters().get(i);
-                    ParameterizedType p1 = t1.parameters().get(i);
-                    // not through a generic method's own type variable: each call instantiates it anew
-                    // ('ImmutableMap.copyOf(Map<? extends K, ? extends V>)' would tie the maps of all its callers)
-                    if (isMethodTypeVariable(p0) || isMethodTypeVariable(p1)) continue;
-                    // Kotlin: nor between two different concrete arguments, which only an unchecked conversion
-                    // relates ('(ImmutableMap<K, V>) RegularImmutableMap.EMPTY', an ImmutableMap<Object, Object> the
-                    // links see as every caller's map): each conversion starts an instantiation of its own
-                    if (policy.callResults() && !UNCHECKED_SLOTS_OFF.get() && uncheckedConversion(p0, p1)) continue;
-                    // A slot typed by a CLASS type variable ('FastFixedSet<E> spawnEmptySet()' in Factory<E>,
-                    // 'union(FastFixedSet<E> set)', 'Factory(Collection<E> set)') is parametric: it receives nothing
-                    // from one instantiation's slot ('FastFixedSet<Statement?> tmpSet'), or Kotlin would see 'E?'
-                    // inside the class (fernflower FastFixedSetFactory.kt:19/33). What the class itself puts into
-                    // such a slot reaches every instantiation, so that direction stays. The instantiation's null
-                    // belongs to the receiver's slot: instantiatedSlots ties it there.
-                    boolean class0 = isClassTypeVariable(p0);
-                    boolean class1 = isClassTypeVariable(p1);
-                    Arg a0 = new Arg(flow.get(0), i);
-                    Arg a1 = new Arg(flow.get(1), i);
-                    if (!class1 || class0) graph.successors.computeIfAbsent(a0, _ -> new LinkedHashSet<>()).add(a1);
-                    // Kotlin: nor out of an unbound '?' ('Joiner.MapJoiner.join(Map<?, ?>)'): Kotlin's '*' only
-                    // receives too. Back out, JoinerTest's null reached every map passed to join, and through
-                    // ImmutableMap.of()'s RegularImmutableMap.EMPTY all of guava's empty maps (2026-10-17)
-                    boolean unbound = policy.callResults() && !WILDCARD_SLOTS_OFF.get() && p1.wildcard() != null
-                                      && p1.wildcard().isUnbound();
-                    // Kotlin: nor out of a position declared nullable ('Predicate<@Nullable Object> equalTo1 =
-                    // Equivalence.equals().equivalentTo("1")'): it is 'T?' whatever flows in, and its null is not the
-                    // source's (EquivalenceTest's 'equalTo1.apply(null)' made Equivalence.equals() an
-                    // Equivalence<Any?>, Equivalence.kt:98/99, 2026-10-18)
-                    boolean declaredNullable = policy.callResults() && !NULLABLE_PARAMETER_SLOTS_OFF.get()
-                                               && explicit(p1.annotations()) == NullableState.NULLABLE;
-                    boolean read = graph.viewLoopReads.contains(flow);
-                    if (!isExtendsWildcard(p1) && !unbound && !declaredNullable && (!class0 || class1) && !read) {
-                        graph.successors.computeIfAbsent(a1, _ -> new LinkedHashSet<>()).add(a0);
-                    }
-                    if (read) graph.viewLoopReads.add(List.of(a0, a1));
-                    queue.add(List.of(a0, a1));
-                }
-            }
-        }
-    }
-
-    /*
-     Kotlin: an array parameter the method only reads prints as 'Array<out T>' (the printer, maddi cd8372ee4), which
-     takes the caller's Array<Type> as it is: its elements need not flow back. Joiner.join(@Nullable Object[] parts)
-     had pushed its '?' into every array joined, TypeResolver's upperBounds and from there resolveTypes' result and
-     TypeToken (guava kotlinc-97a.log, 2026-10-17). "Only reads", as the printer decides it, from the source: the
-     method assigns no element ('parts[i] = ...'; not writtenThrough, which also counts the elements a caller puts
-     into 'join(new Object[]{x, y})', nor the unmodified verdict, absent where the modification analysis did not
-     run); no lambda or anonymous class captures the array (AbstractCompositeHashFunction's fromHashers hands it on
-     from there); and the array flows on only into other such parameters (cycles allowed) or a library's: not
-     returned, assigned, or held. Not a varargs parameter, nor one of an override or an overridden method.
-     Gate NOREADONLYARRAYS.
-     */
-    private Set<ParameterInfo> readOnlyArrayParameters() {
-        if (READ_ONLY_ARRAYS_OFF.get() || !policy.callResults()) return Set.of();
-        Set<ParameterInfo> candidates = new HashSet<>();
-        Map<ParameterInfo, Set<Object>> out = new HashMap<>();
-        for (List<Object> flow : graph.flows) {
-            if (flow.get(0) instanceof ParameterInfo pi) out.computeIfAbsent(pi, _ -> new HashSet<>()).add(flow.get(1));
-        }
-        for (MethodInfo mi : index.analysed) {
-            if (!overrides(mi).isEmpty() || index.implementations.containsKey(mi)) continue;
-            for (ParameterInfo pi : mi.parameters()) {
-                ParameterizedType t = pi.parameterizedType();
-                if (t.arrays() == 1 && !pi.isVarArgs() && !t.copyWithoutArrays().isPrimitiveExcludingVoid()
-                    && !writesOrCaptures(mi, pi)) {
-                    candidates.add(pi);
-                }
-            }
-        }
-        boolean changed = true;
-        while (changed) {
-            changed = false;
-            for (java.util.Iterator<ParameterInfo> it = candidates.iterator(); it.hasNext(); ) {
-                ParameterInfo pi = it.next();
-                for (Object to : out.getOrDefault(pi, Set.of())) {
-                    if (to instanceof ParameterInfo target && (candidates.contains(target) || index.library(target))) continue;
-                    it.remove();
-                    changed = true;
-                    break;
-                }
-            }
-        }
-        return candidates;
-    }
-
-    // does the method's body assign an element of the array parameter, or capture it in a lambda or anonymous class
-    private static boolean writesOrCaptures(MethodInfo mi, ParameterInfo pi) {
-        if (mi.methodBody() == null) return true;
-        boolean[] found = {false};
-        mi.methodBody().visit(e -> {
-            if (found[0]) return false;
-            if (e instanceof Assignment a && a.variableTarget() instanceof DependentVariable dv
-                && pi.equals(dv.arrayVariable())) {
-                found[0] = true;
-            } else if (e instanceof Lambda lambda) {
-                if (lambda.methodBody() != null && mentionsParameter(lambda.methodBody(), pi)) found[0] = true;
-                return false;
-            } else if (e instanceof ConstructorCall cc && cc.anonymousClass() != null) {
-                if (cc.parameterExpressions().stream().anyMatch(x -> mentionsParameter(x, pi))) found[0] = true;
-                for (MethodInfo m : cc.anonymousClass().methods()) {
-                    if (m.methodBody() != null && mentionsParameter(m.methodBody(), pi)) found[0] = true;
-                }
-                return false;
-            }
-            return true;
-        });
-        return found[0];
-    }
-
-    private static boolean mentionsParameter(Element e, ParameterInfo pi) {
-        boolean[] found = {false};
-        e.visit(x -> {
-            if (x instanceof VariableExpression ve && pi.equals(ve.variable())) found[0] = true;
-            return !found[0];
-        });
-        return found[0];
-    }
-
     private static final Switches.Gate VIEW_LOOP_WRITES_OFF = Switches.gate("NOVIEWLOOPWRITES");
 
     private static final Switches.Gate VARARG_COPIES_OFF = Switches.gate("NOVARARGCOPIES");
-
-    private static boolean readOnlyArrayParameter(Object node, Set<ParameterInfo> readOnlyArrays) {
-        Object root = node;
-        while (root instanceof Content c) root = c.of();
-        return root instanceof ParameterInfo pi && readOnlyArrays.contains(pi);
-    }
-
-    private static final Switches.Gate READ_ONLY_ARRAYS_OFF = Switches.gate("NOREADONLYARRAYS");
-
-    /*
-     For Java annotations an array's elements need to flow only forward: Java arrays are covariant, and so is
-     JSpecify. Backward only where the downstream array is written through ('void f(Object[] a) { a[0] = null; }'
-     puts the null in the caller's array), directly or via another array it flows on into. Kotlin's Array<T> is
-     invariant, so under Policy.assertContentWrites both ways regardless. Guava 2026-10-07: coupling both ways made
-     ImmutableMap.Builder.entries, ImmutableList.array, Joiner.join(Object[]) and TypeToken's Type[] one slot.
-     */
-    private Set<Object> writtenThrough(boolean annotations) {
-        // 'annotations': whether an element annotation counts ('join(@Nullable Object[] parts)'); not for narrowedArray
-        Set<Object> written = new HashSet<>();
-        // NULLWHY: why a node is written, its downstream node or the write itself
-        Map<Object, String> because = !trace.enabled() ? null : new HashMap<>();
-        graph.successors.forEach((from, tos) -> {
-            // narrowedArray: nor is an element "written" from a lifted field ('RegularImmutableList.array ∋
-            // RegularImmutableList.element'), the links' stand-in for any element, not code writing into the array
-            if (from instanceof Content || !annotations && liftedField(from)) return;
-            for (Object to : tos) {
-                if (to instanceof Content c && written.add(c.of()) && because != null) {
-                    because.put(c.of(), "written from " + Trace.name(from));
-                }
-            }
-        });
-        seeds.seedOrigin.forEach((node, origin) -> {
-            if (node instanceof Content c && !origin.startsWith("array created") && !origin.startsWith("null in an array initializer")
-                && (annotations || !origin.startsWith("annotated"))) {
-                if (written.add(c.of()) && because != null) because.put(c.of(), "seed " + origin);
-            }
-        });
-        Map<Object, List<Object>> upstream = new HashMap<>();
-        for (List<Object> flow : graph.flows) upstream.computeIfAbsent(flow.get(1), _ -> new ArrayList<>()).add(flow.get(0));
-        Deque<Object> queue = new ArrayDeque<>(written);
-        while (!queue.isEmpty()) {
-            Object down = queue.removeFirst();
-            if (!annotations && (liftedField(down) || index.library(down))) {
-                if (because != null && trace.why(down)) trace.print("NULLWHY written(false) stops at " + Trace.name(down));
-                continue;
-            }
-            for (Object up : upstream.getOrDefault(down, List.of())) {
-                // narrowedArray: an array is written through arrays only, not through a type argument's slot, a
-                // return value or a call's argument that happens to link to it
-                if (!annotations && !LIFTED_WRITES_OFF.get() && !(isArray(up) && isArray(down))) continue;
-                if (written.add(up)) {
-                    queue.add(up);
-                    if (because != null) because.put(up, "flows into " + Trace.name(down));
-                }
-            }
-        }
-        // narrowedArray: nor is the lifted field itself written, nor does it pass its elements on as if it were
-        if (!annotations) written.removeIf(NullabilityPass::liftedField);
-        if (because != null) {
-            for (Object node : written) {
-                if (!trace.why(node)) continue;
-                StringBuilder sb = new StringBuilder("NULLWHY written(" + annotations + ") " + Trace.name(node)
-                        + (liftedField(node) ? " (lifted)" : ""));
-                Object n = node;
-                for (int i = 0; i < 40 && because.get(n) != null; i++) {
-                    String b = because.get(n);
-                    sb.append("\n    ").append(b);
-                    if (!b.startsWith("flows into ")) break;
-                    n = written.stream().filter(w -> Trace.name(w).equals(b.substring(11))).findFirst().orElse(null);
-                    if (n == null) break;
-                }
-                trace.print(sb);
-            }
-        }
-        return written;
-    }
-
-    /*
-     Kotlin, for narrowedArray: a write booked on a field its owner does not declare does not travel upstream to what
-     flows into it. Such a field is the link engine's lift of a subtype's field onto a supertype
-     (VariableTranslationAllowHierarchy): 'ImmutableList.array' for RegularImmutableList.array, the content of every
-     list of the type. So 'ImmutableList.of(e1, ..)' filling its own array before that became a list would count as a
-     write into every array passed in, guava's 'asImmutableList(@Nullable Object[], int)' included: it made
-     RegularImmutableMultiset.create's entryArray, and with it entries and IndexedImmutableSet.get, nullable
-     (CodeLaser/maddi-mod#74). For the same reason the lifted field is not written itself, and its elements, linked
-     into a narrower array, are not that array's (liftedIntoNarrower): they are what the other arrays of the type
-     hold. Nor does a write travel upstream out of a library method's parameter, which ties together the arrays of
-     all its callers (as in coupleContent), or through anything but arrays. The declared field, written through,
-     still counts. Gate NOLIFTEDWRITES.
-     */
-    private static boolean liftedField(Object node) {
-        Object root = node;
-        while (root instanceof Content c) root = c.of(); // also its elements, at any depth
-        return root instanceof FieldInfo fi && !LIFTED_WRITES_OFF.get() && fi.owner() != null
-               && !fi.owner().fields().contains(fi);
-    }
-
-    private boolean isArray(Object node) {
-        if (node instanceof Content || node instanceof Arg) return false;
-        ParameterizedType t = graph.typeOf(node);
-        return t != null && t.arrays() > 0;
-    }
-
-    // the elements of a lifted field (liftedField) linked into a narrower array: what other arrays of the type hold
-    private boolean liftedIntoNarrower(Object from, Object to) {
-        if (!(from instanceof Content cf) || !(to instanceof Content ct) || !liftedField(cf)) return false;
-        ParameterizedType tf = graph.typeOf(cf.of());
-        ParameterizedType tt = graph.typeOf(ct.of());
-        return tf != null && tt != null && narrowedArray(tf, tt);
-    }
-
-    private static final Switches.Gate LIFTED_WRITES_OFF = Switches.gate("NOLIFTEDWRITES");
 
     /*
      Kotlin: a parameter's '?' argument prints as '*', whose values read as Any?: 'for (key in keys)' over
@@ -2580,46 +2028,6 @@ public final class NullabilityPass {
     // gate NOSAMEINSTANTIATION: a call on this does not tie its result's slots to the target's (A/B)
     private static final Switches.Gate SAME_INSTANTIATION_OFF = Switches.gate("NOSAMEINSTANTIATION");
 
-    /*
-     Kotlin: two generic types that differ in a concrete type argument at some depth are not one object, whatever
-     the links say. fernflower's 'class_mapping = mapping.computeIfAbsent(className, k -> new LinkedHashMap<>())' has
-     the link class_mapping ← mapping: a Map<String, Map<String, Map<Integer, Integer>>> into a Map<String,
-     Map<Integer, Integer>>. Matched by position, mapping's key slot (a nullable className) became class_mapping's,
-     and through the view loops of dumpMapping lstBytecodeOffsets a List<Int?> that Collections.sort rejects
-     (BytecodeSourceMapper.kt:40, worktree-maddi-all 2026-10-23). Link edges between such nodes, or between their slots
-     at the same depth, are dropped. uncheckedConversion skips only the one position that differs. Gate NODIFFERENTSHAPES.
-     */
-    private boolean differentShapes(Object from, Object to) {
-        while (from instanceof Arg(Object f, int _) && to instanceof Arg(Object t, int _)) {
-            from = f;
-            to = t;
-        }
-        ParameterizedType t0 = graph.typeOf(from);
-        ParameterizedType t1 = graph.typeOf(to);
-        return t0 != null && t1 != null && t0.arrays() == 0 && t1.arrays() == 0 && t0.typeInfo() != null
-               && t0.typeInfo() == t1.typeInfo() && differentShapes(t0, t1);
-    }
-
-    private static boolean differentShapes(ParameterizedType t0, ParameterizedType t1) {
-        for (int i = 0; i < t0.parameters().size() && i < t1.parameters().size(); i++) {
-            ParameterizedType p0 = t0.parameters().get(i);
-            ParameterizedType p1 = t1.parameters().get(i);
-            if (uncheckedConversion(p0, p1)) return true;
-            if (p0.wildcard() == null && p1.wildcard() == null && p0.typeParameter() == null
-                && p1.typeParameter() == null && p0.typeInfo() != null && p0.typeInfo() == p1.typeInfo()
-                && p0.arrays() == p1.arrays() && differentShapes(p0, p1)) return true;
-        }
-        return false;
-    }
-
-    private static final Switches.Gate DIFFERENT_SHAPES_OFF = Switches.gate("NODIFFERENTSHAPES");
-
-    private static boolean uncheckedConversion(ParameterizedType p0, ParameterizedType p1) {
-        return p0.wildcard() == null && p1.wildcard() == null && p0.typeParameter() == null
-               && p1.typeParameter() == null && p0.typeInfo() != null && p1.typeInfo() != null
-               && p0.arrays() == p1.arrays() && p0.typeInfo() != p1.typeInfo();
-    }
-
     // the shadow local of a reassigned parameter; created once, the caller's value flows into it
     private Local shadow(ParameterInfo pi) {
         Local local = new Local(pi.methodInfo(), null, pi.name());
@@ -2656,7 +2064,7 @@ public final class NullabilityPass {
         scope.names().put(lv.simpleName(), local);
         graph.declaredLocals.put(local, lv);
         graph.localOwner.put(local, owner);
-        declaredByName.computeIfAbsent(mi, _ -> new HashMap<>())
+        graph.declaredByName.computeIfAbsent(mi, _ -> new HashMap<>())
                 .computeIfAbsent(lv.simpleName(), _ -> new ArrayList<>()).add(local);
     }
 
@@ -2722,7 +2130,7 @@ public final class NullabilityPass {
     private Local local(MethodInfo mi, Scope scope, String name) {
         Local inScope = scope == null ? null : scope.resolve(name);
         if (inScope != null) return inScope;
-        List<Local> declared = declaredByName.getOrDefault(mi, Map.of()).getOrDefault(name, List.of());
+        List<Local> declared = graph.declaredByName.getOrDefault(mi, Map.of()).getOrDefault(name, List.of());
         return declared.size() == 1 ? declared.getFirst() : new Local(mi, null, name);
     }
 
@@ -3854,7 +3262,7 @@ public final class NullabilityPass {
                 // instantiation: it ties nothing back into the receiver's slot. EquivalenceTest's 'equalTo1.apply(null)'
                 // on a Predicate<@Nullable Object> had made Equivalence.equals() an Equivalence<Any?>, which
                 // Equals (an Equivalence<Object>) is not (Equivalence.kt:98/99, 2026-10-18)
-                boolean declaredNullable = policy.callResults() && !NULLABLE_PARAMETER_SLOTS_OFF.get()
+                boolean declaredNullable = policy.callResults() && !NullGraph.NULLABLE_PARAMETER_SLOTS_OFF.get()
                                            && explicit(f.annotations()) == NullableState.NULLABLE;
                 boolean receivesOnly = isExtendsWildcard(f) || declaredNullable;
                 boolean consumes = f.wildcard() != null && f.wildcard().isSuper(); // 'sort(Comparator<? super E>)'
@@ -4126,7 +3534,7 @@ public final class NullabilityPass {
                         ParameterizedType type = graph.typeOf(node);
                         if (node instanceof Local && type != null && type.arrays() == 1
                             && isTypeVariable(type.copyWithOneFewerArrays())) {
-                            typeVariableElementSlots.add(slot);
+                            graph.typeVariableElementSlots.add(slot);
                         }
                     });
                 }
@@ -4164,7 +3572,7 @@ public final class NullabilityPass {
                                   || callee.parameters().stream().noneMatch(pi ->
                                          rt.typeParameter().equals(pi.parameterizedType().typeParameter())));
             if (policy.callResults() && (!isTypeVariable(rt) || ownNull && !parametricNullness(callee))) {
-                if (GAP9_OFF.get() || callee.parameters().isEmpty()) graph.addEdge(callee, target);
+                if (NullGraph.GAP9_OFF.get() || callee.parameters().isEmpty()) graph.addEdge(callee, target);
                 else graph.gatedSites.add(new GatedSite(callee, target, graph.callId(mc, callee)));
             }
             // a result typed with the callee's class type variables inside a generic type ('FastFixedSet<E>
@@ -4544,13 +3952,6 @@ public final class NullabilityPass {
         }
     }
 
-    private Keyed keyed(Arg slot, Object key) {
-        keysUsed.computeIfAbsent(slot, _ -> new LinkedHashSet<>()).add(key == null ? NO_KEY : key);
-        return new Keyed(slot, key);
-    }
-
-    private static final Object NO_KEY = new Object();
-
     /*
      A write into a keyed map: through a keyed putter, the key its caller passes; directly ('field.put(k, v)'), the
      key k, except in a keyed putter itself, whose callers write. A key not known writes the values every key reads.
@@ -4563,7 +3964,7 @@ public final class NullabilityPass {
         if (putter != null && arguments.size() > Math.max(putter.keyIndex(), putter.valueIndex())) {
             Arg slot = index.keyedSlots.get(putter.field());
             argument(mi, scope, statement, call, list, arguments, putter.valueIndex(),
-                    keyed(slot, Index.keyOf(arguments.get(putter.keyIndex()))));
+                    graph.keyed(slot, Index.keyOf(arguments.get(putter.keyIndex()))));
             return;
         }
         if (!(call instanceof MethodCall mc) || !"put".equals(callee.name()) || arguments.size() != 2
@@ -4575,7 +3976,7 @@ public final class NullabilityPass {
         if (own != null && own.field() == fr.fieldInfo() && Index.ownParameter(mi, arguments.getFirst()) == own.keyIndex()) {
             return;
         }
-        argument(mi, scope, statement, call, list, arguments, 1, keyed(slot, Index.keyOf(arguments.getFirst())));
+        argument(mi, scope, statement, call, list, arguments, 1, graph.keyed(slot, Index.keyOf(arguments.getFirst())));
     }
 
     // the keyed node a statement reads: 'x = ctx.get(KEY)' through a keyed getter, or 'x = field.get(KEY)'
@@ -4586,13 +3987,13 @@ public final class NullabilityPass {
         KeyedAccessor getter = index.keyedGetters.get(mc.methodInfo());
         if (getter != null && getter.keyIndex() < mc.parameterExpressions().size()) {
             Object key = Index.keyOf(mc.parameterExpressions().get(getter.keyIndex()));
-            return key == null ? null : keyed(index.keyedSlots.get(getter.field()), key);
+            return key == null ? null : graph.keyed(index.keyedSlots.get(getter.field()), key);
         }
         if ("get".equals(mc.methodInfo().name()) && mc.parameterExpressions().size() == 1 && mc.object() != null
             && NonNullFacts.unwrap(mc.object()) instanceof VariableExpression ve
             && ve.variable() instanceof FieldReference fr && index.keyedSlots.containsKey(fr.fieldInfo())) {
             Object key = Index.keyOf(mc.parameterExpressions().getFirst());
-            return key == null ? null : keyed(index.keyedSlots.get(fr.fieldInfo()), key);
+            return key == null ? null : graph.keyed(index.keyedSlots.get(fr.fieldInfo()), key);
         }
         return null;
     }
@@ -4608,10 +4009,10 @@ public final class NullabilityPass {
      keyed putter writes under any key.
      */
     private void keyedEdges(List<MethodInfo> methods) {
-        keysUsed.forEach((slot, keys) -> {
+        graph.keysUsed.forEach((slot, keys) -> {
             Keyed unknown = new Keyed(slot, null);
             for (Object key : keys) {
-                if (key == NO_KEY) continue;
+                if (key == NullGraph.NO_KEY) continue;
                 Keyed k = new Keyed(slot, key);
                 graph.addEdge(unknown, k);
                 graph.addEdge(k, slot);
@@ -4621,8 +4022,8 @@ public final class NullabilityPass {
         index.keyedPutters.forEach((mi, putter) -> {
             if (externallyCallable(mi)) {
                 graph.addEdge(mi.parameters().get(putter.valueIndex()), new Keyed(index.keyedSlots.get(putter.field()), null));
-                for (Object key : keysUsed.getOrDefault(index.keyedSlots.get(putter.field()), Set.of())) {
-                    if (key != NO_KEY) graph.addEdge(new Keyed(index.keyedSlots.get(putter.field()), null),
+                for (Object key : graph.keysUsed.getOrDefault(index.keyedSlots.get(putter.field()), Set.of())) {
+                    if (key != NullGraph.NO_KEY) graph.addEdge(new Keyed(index.keyedSlots.get(putter.field()), null),
                             new Keyed(index.keyedSlots.get(putter.field()), key));
                 }
             }
@@ -4852,16 +4253,13 @@ public final class NullabilityPass {
             // instantiation stays. guava's tests' 'Ints.stringConverter().convert(null)' had made
             // IntConverter.INSTANCE a Converter<String?, Int>, which an IntConverter (a Converter<String, Int>) is
             // not; likewise 'Equivalence.equals().equivalentTo(null)' (Ints.kt:101, Equivalence.kt:98, 2026-10-18)
-            if (policy.callResults() && !NULLABLE_PARAMETER_SLOTS_OFF.get()
+            if (policy.callResults() && !NullGraph.NULLABLE_PARAMETER_SLOTS_OFF.get()
                 && contracts.explicitState(parameters.get(i)) == NullableState.NULLABLE) continue;
             int index = slotIndex(type, callee.typeInfo(), pt.typeParameter().getIndex());
             if (index >= 0) argument(mi, scope, statement, call, list, arguments, i, new Arg(receiver, index));
         }
         contentCopies(mi, scope, receiver, callee, arguments);
     }
-
-    // gate NONULLABLEPARAMETERSLOTS: a null into a parameter declared nullable writes the receiver's slot too (A/B)
-    private static final Switches.Gate NULLABLE_PARAMETER_SLOTS_OFF = Switches.gate("NONULLABLEPARAMETERSLOTS");
 
     // the receiver whose slots a call writes: a variable of the callee's generic class, with as many type arguments;
     // or an analysed method's result, whose slots are those of what it returns ('wrapper.getInits().addWithKey(v, k)'
@@ -5135,7 +4533,7 @@ public final class NullabilityPass {
             if (type.arrays() == 0 && type.parameters().size() == 1 && isTypeVariable(type.parameters().getFirst())
                 && ("java.util.Iterator".equals(container) || "java.lang.Iterable".equals(container))) {
                 Arg slot = new Arg(pi, 0);
-                typeVariableElementSlots.add(slot); // a T? slot, not held at T (boundedSlot)
+                graph.typeVariableElementSlots.add(slot); // a T? slot, not held at T (boundedSlot)
                 seeds.seed(slot, "filtered of nulls in " + mi.fullyQualifiedName(), mi.typeInfo());
             }
         }
