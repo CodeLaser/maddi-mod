@@ -406,6 +406,13 @@ public class TypeModIndyAnalyzerImpl extends CommonAnalyzerImpl implements TypeM
         if (TolerantWrite.setAllowControlledOverwrite(methodInfo.analysis(), NON_MODIFYING_METHOD, nonModifying, methodInfo)) {
             propertyChanges.incrementAndGet();
         }
+        if (fieldValue.setter()
+            && TolerantWrite.setAllowControlledOverwrite(methodInfo.analysis(), INDEPENDENT_METHOD, INDEPENDENT, methodInfo)) {
+            // a setter returns nothing or this (fluent): independent by definition, whatever the field holds, as
+            // doIndependentMethod has it for every method. Setters never reached that, and had no verdict at all
+            DECIDE.debug("MI: Decide independent of setter {} = independent", methodInfo);
+            propertyChanges.incrementAndGet();
+        }
         ParameterizedType type;
         boolean wholeField;
         if (fieldValue.hasIndex() && !fieldValue.list()) {
