@@ -1064,7 +1064,7 @@ Guava: `NULL_MARKED` and `NULL_MARKED_FLOW_ONLY` unchanged, declaration for decl
 Fernflower: **199 files, 0 type errors** (4dc2fec6: 197 / 3). Printer messages against the same code before the
 change: ASSERT_INTO_NON_NULL 288 → 263, ASSERT_AT_DECLARATION 32 → 33, ASSERT_AT_DEREFERENCE 2,187 → 2,387 (the nullable
 `Statement` slots DomHelper and the FastFixedSets now carry are read with `!!`).
-Tests: `TestNullabilityPass.classTypeVariableInstantiation` (both policies), `streamPipelines` (Kotlin).
+Tests: `TestNullGraph.classTypeVariableInstantiation` (both policies), `TestCallResults.streamPipelines` (Kotlin).
 
 Measuring: a second Gradle build in the same worktree while a slow test's JVM runs recompiles classes that JVM loads
 from `build/classes` and kills it (`ClassFormatError`; Gradle reports an `EOFException`), leaving the previous
@@ -1119,7 +1119,7 @@ assignment statement, to a field (the constructor's shape) or to a local declare
 same, narrow one. Gate `NOFIELDFILL` for A/B.
 
 Guava: −1 noise under every policy (`Striped.CompactStriped.array`, exactly this shape), unsafe unchanged.
-Fernflower: 199 files, 0 type errors, unchanged. `TestNullabilityPass.filledArrays` pins the field, the assigned
+Fernflower: 199 files, 0 type errors, unchanged. `TestNullGraph.filledArrays` pins the field, the assigned
 local and a conditional fill of a field that stays nullable.
 
 ### 2026-10-09 — issue #22 gap 1: a map key known present (`NonNullFacts.KeyPresence`)
@@ -1135,7 +1135,7 @@ for `k` still flows through its value slot, so a null stored in the map still ar
 smart-cast a lookup. `MapUtil.computeIfAbsent(map, k, …)` (a static helper) is not covered.
 
 Guava: unchanged under all four policies (one cause chain spelled differently). Fernflower: 199 files, 0 type
-errors, unchanged. `TestNullabilityPass.keyPresence` pins eleven shapes, including the ones that must forget the
+errors, unchanged. `TestMethodWalker.keyPresence` pins eleven shapes, including the ones that must forget the
 fact (a call on the map, the map handed to a call, the key reassigned, a null put).
 
 ### 2026-10-09 — issue #22 gap 5, issue #9: a parameter the body assigns (`var p = p`)
@@ -1157,7 +1157,7 @@ consults the method's own shadow; a first version matched by name alone and type
 the caller's locals: 29 type errors in fernflower).
 
 Gate `NOPARAMSHADOW` restores one node. Guava: unchanged under all four policies. Fernflower: 199 files, 0 type
-errors, unchanged. `TestNullabilityPass.reassignedParameter` pins the incoming, loop, conditional and constant
+errors, unchanged. `TestNullGraph.reassignedParameter` pins the incoming, loop, conditional and constant
 shapes. The link-engine side of #9 (the reassigned parameter in `MethodLinkedVariables` summaries) stays open.
 
 ### 2026-10-09 — issue #22 gap 2: a map field's values per constant key (`NullabilityPass.Keyed`)
@@ -1195,7 +1195,7 @@ Measured: guava unchanged under all four policies (the same disagreements; cause
 Fernflower: 199 files, 0 type errors, the translation unchanged. nacos (`NULL_MARKED_FLOW_ONLY.withoutContracts()`,
 the 15 compilation units that fail to inspect left out, gates off versus on): `tagArr` in both mappers, `ids` in
 `ConfigMigrateMapper`, the three index methods' `service`, `ServiceEvent.service` and `PushExecuteTask.service` go
-from reached to unreached; nothing else of the sites #22 names changes. `TestNullabilityPass.keyedMaps` and
+from reached to unreached; nothing else of the sites #22 names changes. `TestNullGraph.keyedMaps` and
 `narrowedReads` pin the shapes, including those that must stay nullable (a key not known, a map that escapes, a
 subclass that stores null, an overriding getter, a non-final field, the tested variable reassigned).
 
@@ -1266,7 +1266,7 @@ really flow: `Document.from` and `DefaultDocument` `text`; `EmbeddingStore.remov
 `EmbeddingStoreWithRemovalIT.should_fail_to_remove_by_id`; `UriUtilsTest`'s and `ValidationUtilsTest`'s boxed
 parameters; and `MetadataTest.should_fail_to_create_from_map_when_key_is_null`'s null key, which makes the key
 slot of `Metadata.validate(Map)`, `from(Map)` and, by invariance, the stored map nullable (the printer's "Metadata's
-null key" item: the K type argument). `TestNullabilityPass.junitNullSource`.
+null key" item: the K type argument). `TestSeeds.junitNullSource`.
 
 ### 2026-10-12 — a final field of this, by the methods a class can run (CodeLaser/maddi-mod#30)
 
@@ -1308,7 +1308,7 @@ count as reads of the map. A presence fact whose key or map is a non-final field
 may assign that field, the rule other non-final fields already follow; before, nothing forgot it. Gate
 `NONAVKEYS` turns both off. On timefold, `TreeMultiSet.MultiSetIterator.next` and
 `ConsecutiveSetTree.addFirstItem` now know their key present, and `BreakImpl.nextSequence` with its three
-upstream declarations is no longer nullable. `TestNullabilityPass.keyPresenceNavigated`.
+upstream declarations is no longer nullable. `TestMethodWalker.keyPresenceNavigated`.
 
 **A, not taken.** Through an interface or overridden method, a call would pass a parameter through where any
 analysed implementation does, so `properties.getInteger(KEY, 5)` on nacos' `NacosClientProperties` would get
@@ -1367,7 +1367,7 @@ Guava oracle (Mac, current configuration), `NULL_MARKED`: unsafe 357 → 341 (th
 replaced a null with `NO_ARGS`, which the pass does not see; `ConcurrentHashMultiset` and `EvictingQueue` declare
 their `toArray()` elements non-null where the contract allows null). `OPEN`: unsafe 221 → 211. J2K ratchets unchanged
 (fernflower 199/199, 264 tests; langchain4j 344/346, 1,106): their corpora have one `compute` lambda each and no
-`toArray()` call. `TestNullabilityPass.libraryNestedNullability`.
+`toArray()` call. `TestContracts.libraryNestedNullability`.
 
 The Kotlin printer's own list of nullable JDK results (`KotlinNullability.NULLABLE_JDK_RESULTS`) stays: it serves a
 translation without the analysis, where no hints are loaded; with the analysis the stored verdicts already decide.
@@ -1406,4 +1406,4 @@ replaces, and used it between rounds as the callee's contract (an argument is no
 Guava oracle against the gate `NOFAMILYPRECONDITIONS`: the same disagreements under all four policies
 (NULL_MARKED 416 unsafe / 2,184 noise, OPEN 271 / 2,190). Only the cause chain the explanation picks differs for
 52 of them, an equally long path through another override (`ForwardingSet.delegate()` against
-`ForwardingCollection.delegate()`). `TestNullabilityPass.preconditionFamilies`.
+`ForwardingCollection.delegate()`). `TestPreconditions.preconditionFamilies`.
