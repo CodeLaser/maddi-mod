@@ -69,7 +69,10 @@ public class TestKotlinAnalyzerCollections extends CommonKotlinAnalyzerTest {
     public void mutableCopyIsNotEventual() {
         assertEquals("type Lines: @FinalFields @Dependent", a.java("Lines").lines().findFirst().orElseThrow());
         assertEquals("type Lines: @FinalFields @Dependent", a.kotlin("Lines").lines().findFirst().orElseThrow());
-        assertEquals("type Entries: @FinalFields @Dependent", a.kotlin("Entries").lines().findFirst().orElseThrow());
+        // Entries hands out only a String of its private copy: hidden content, nothing shared. It read @FinalFields
+        // @Dependent while a link through the map's value slice was graded as the slice's array (maddi-mod b472c588)
+        assertEquals("type Entries: @Immutable(hc=true) @Independent",
+                a.kotlin("Entries").lines().findFirst().orElseThrow());
         for (String name : new String[]{"Lines", "Entries"}) {
             assertEquals(ValueImpl.EventuallyImmutableImpl.NOT_EVENTUAL, a.kotlinType(name).analysis()
                     .getOrDefault(PropertyImpl.EVENTUALLY_IMMUTABLE_TYPE, ValueImpl.EventuallyImmutableImpl.NOT_EVENTUAL), name);
