@@ -381,9 +381,15 @@ public class FieldAnalyzerImpl extends CommonAnalyzerImpl implements FieldAnalyz
                         // Adjudicated in immutability-transform-divergence.md: this imprecision
                         // capped Point at @FinalFields while its loop-desugared twin (whose bridge
                         // drops the spurious link) correctly reached @Immutable(hc=true).
+                        // A slice (this.items.§kvs[-1], a map's keys) is typed as the array of its component
+                        // (SliceFactory): what one link transports is the component. Read as the array, every
+                        // link into a map's keys or values was mutable content, and a Map<String, Item> of
+                        // immutable records made its field, and its type, @Dependent (2026-10-31)
                         io.codelaser.maddi.cst.api.type.ParameterizedType transported =
                                 link.from() instanceof io.codelaser.maddi.cst.api.variable.DependentVariable dv
-                                        ? dv.parameterizedType()
+                                        ? Util.isSlice(dv) && dv.parameterizedType().arrays() > 0
+                                          ? dv.parameterizedType().copyWithOneFewerArrays()
+                                          : dv.parameterizedType()
                                         : fieldInfo.type().arrays() > 0
                                         ? fieldInfo.type().copyWithOneFewerArrays()
                                         : link.to().parameterizedType();
