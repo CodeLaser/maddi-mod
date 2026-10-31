@@ -288,4 +288,8 @@ final class Types {
         ParameterizedType type = arguments.get(i).parameterizedType();
         return type != null && type.arrays() == parameters.get(i).parameterizedType().arrays();
     }
+
+    static boolean isSubtype(TypeInfo sub, TypeInfo sup) {
+        return sub == sup || sub.superTypesExcludingJavaLangObject().contains(sup);
+    }
 }
