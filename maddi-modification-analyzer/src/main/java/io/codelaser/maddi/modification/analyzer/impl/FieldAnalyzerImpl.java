@@ -344,6 +344,16 @@ public class FieldAnalyzerImpl extends CommonAnalyzerImpl implements FieldAnalyz
                 return null;
             }
             if (independentOfType.isIndependent()) return INDEPENDENT;
+            // a non-private field is reached directly: an external modification (road 080, "on a field, directly
+            // accessed from the object") needs no method to hand it out. Its content's own independence, and no
+            // better, as rule 2 judges such a field on the immutability side. A public List that no method touched
+            // had no links, and left its type @Independent (maddi-java-demo's AddNewClass, 2026-10-31).
+            // Static fields too: a public static List is modified from outside just the same. Not a self-referencing
+            // field, which the type's own verdict publishes (an enum's constants waited on the enum, and stuck at
+            // dependent)
+            if (!fieldInfo.access().isPrivate() && !owner.equals(fieldInfo.type().bestTypeInfo())) {
+                return independentOfType;
+            }
             // a method referring to the field degraded (work ceiling, crash): whatever it did with the field is
             // unknown, so grade as if it linked the field directly to a parameter or return value: the content's
             // own independence, and no better

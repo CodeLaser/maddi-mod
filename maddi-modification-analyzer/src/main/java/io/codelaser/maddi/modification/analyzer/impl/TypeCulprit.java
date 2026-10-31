@@ -233,7 +233,13 @@ final class TypeCulprit {
         Value.Independent independent = field.analysis().getOrNull(INDEPENDENT_FIELD, ValueImpl.IndependentImpl.class);
         if (independent == null || !independent.isDependent() || isSelf(field)) return false;
         List<GuardAnalyzerImpl.Culprit> exposing = guard.culpritsExposing(field);
-        if (exposing.isEmpty()) return false;
+        if (exposing.isEmpty()) {
+            // a non-private field needs no method to expose it (FieldAnalyzerImpl.computeIndependent)
+            if (field.access().isPrivate()) return false;
+            Culprits.add(steps, Culprits.step(field, field, "field " + field.name() + " is not private: the outside"
+                    + " world can modify its " + field.type().simpleString() + " directly" + rule));
+            return true;
+        }
         Culprits.add(steps, Culprits.step(field, field, "field " + field.name() + " is dependent: exposed to, or"
                                                         + " shared with, the outside world" + rule));
         steps.add(step(exposing.getFirst()));
