@@ -7,6 +7,9 @@ import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.inspection.api.integration.JavaInspector;
 import io.codelaser.maddi.modification.analyzer.IteratingAnalyzer;
 import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
+import io.codelaser.maddi.modification.analyzer.nullability.AnonymousThis;
+import io.codelaser.maddi.modification.analyzer.nullability.Arg;
+import io.codelaser.maddi.modification.analyzer.nullability.Content;
 import io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass;
 import io.codelaser.maddi.modification.analyzer.nullability.Switches;
 import io.codelaser.maddi.run.analysis.AnalysisEngineImpl;
@@ -120,7 +123,7 @@ public class TestFernflowerNullabilityCauses {
             String n = info.fullyQualifiedName();
             for (int i = 0; i < pt.parameters().size(); i++) {
                 if (pt.parameters().get(i).nullable() == io.codelaser.maddi.cst.api.type.NullableState.NULLABLE) {
-                    lines.add(n + " [" + i + "] :: " + report.explain(new NullabilityPass.Arg(info, i)));
+                    lines.add(n + " [" + i + "] :: " + report.explain(new Arg(info, i)));
                 }
             }
             if (pt.nullable() == io.codelaser.maddi.cst.api.type.NullableState.NULLABLE) {
@@ -132,7 +135,7 @@ public class TestFernflowerNullabilityCauses {
             for (int i = 0; i < parent.parameters().size(); i++) {
                 if (parent.parameters().get(i).nullable() == io.codelaser.maddi.cst.api.type.NullableState.NULLABLE) {
                     lines.add(type.fullyQualifiedName() + " SUPER [" + i + "] :: "
-                              + report.explain(new NullabilityPass.Arg(new NullabilityPass.AnonymousThis(type), i)));
+                              + report.explain(new Arg(new AnonymousThis(type), i)));
                 }
             }
         });
@@ -145,12 +148,12 @@ public class TestFernflowerNullabilityCauses {
             for (int i = 0; i < pt.parameters().size(); i++) {
                 if (pt.parameters().get(i).nullable() == io.codelaser.maddi.cst.api.type.NullableState.NULLABLE) {
                     lines.add(where + " LOCAL " + local.name() + " [" + i + "] :: "
-                              + report.explain(new NullabilityPass.Arg(local, i)));
+                              + report.explain(new Arg(local, i)));
                 }
             }
             if (nullableElements) {
                 lines.add(where + " LOCAL " + local.name() + " ELEMENTS :: "
-                          + report.explain(new NullabilityPass.Content(local)));
+                          + report.explain(new Content(local)));
             } else if (!probe.isEmpty() && where.contains(probe)) {
                 lines.add(where + " LOCAL " + local.name() + " " + pt + " " + pt.nullable()
                           + (pt.arrays() > 0 ? " elements " + pt.componentType().nullable() : ""));

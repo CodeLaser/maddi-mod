@@ -95,6 +95,8 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.stream.IntStream;
 
+import static io.codelaser.maddi.modification.analyzer.nullability.Types.*;
+
 /**
  * Declaration nullability as reachability over the converged link facts (docs/design/nullability.md §4.1, M3).
  * Modelled on {@code ShadowModificationPass}: a one-shot pass after the iterating analyzer has converged, so no
@@ -509,11 +511,6 @@ public final class NullabilityPass {
     private final Set<Local> unobservedCandidates = new HashSet<>();
     // not reached by null, but by a value of an outside caller (World.OPEN*): UNSPECIFIED
     private Set<Object> external = Set.of();
-    // every flow between two nodes, also one dropped as known non-null: the array Contents they tie (coupleContent)
-    private final List<List<Object>> flows = new ArrayList<>();
-    // Kotlin's invariance between an instantiation's slot and the receiver's: {from, to, the formal slot}; added as
-    // edges in once, unless the class itself makes the formal slot nullable (instantiatedSlots)
-    private final List<Object[]> invariantTies = new ArrayList<>();
     // nodes seeded by a null that is written (a literal, an argument, an initializer, an annotation), not by indirect
     // evidence only (seedLibrary): Policy.assertContentWrites. Insertion-ordered: it seeds a closure whose cause
     // chains are reported, and a Local hashes by identity, so a hash order differs between runs (maddi-mod#33)
@@ -521,23 +518,11 @@ public final class NullabilityPass {
     // per seed, the types whose code writes its null (a literal, a default value, a comparison); a null element: a
     // seed without a writer in the code (an annotation, a library contract). Read by holderFields.
     private final Map<Object, List<TypeInfo>> seedWriters = new HashMap<>();
-    // holderFields under Policy.assertContentWrites: a field's edges to the instances' slots, added only when a null
-    // written outside the field's class reaches it
-    private final Map<FieldInfo, List<Arg>> pendingHolders = new LinkedHashMap<>();
-    private final Map<Object, Set<Object>> successors = new LinkedHashMap<>();
-
-    /*
-     Culprits (Culprits.ENABLED, off by default): where each edge and seed was first built, the statement the walk was
-     at (narrowed to the call it was visiting), so the chain that made a node nullable can be told as statements.
-     */
-    private record Site(MethodInfo in, Element element) {
-    }
-
-    private final boolean recordSites = io.codelaser.maddi.modification.common.util.Culprits.ENABLED;
-    private final Map<Object, Map<Object, Site>> edgeSites = new HashMap<>();
     private final Map<Object, Site> seedSites = new HashMap<>();
-    private Element currentSite;
-    private MethodInfo currentSiteMethod;
+    // Culprits: the statement the walk is at (WalkSite)
+    private final WalkSite site = new WalkSite();
+    // the nodes and edges of this round
+    private final NullGraph graph;
     private static final int CULPRIT_STEPS = 12;
     private final Map<Object, String> seedOrigin = new LinkedHashMap<>();
     private final Set<MethodInfo> degraded = new LinkedHashSet<>();
@@ -560,21 +545,8 @@ public final class NullabilityPass {
     private final Set<List<Object>> guardedLocalMarkers = new HashSet<>();
     // (method, null marker): a statement carried the marker's link into the method's return (linksOf)
     private final Set<List<Object>> returnMarkersSeen = new HashSet<>();
-    // the analysed method a local belongs to (a lambda's local: the method the lambda is in)
-    private final Map<Local, MethodInfo> localOwner = new HashMap<>();
     private MethodInfo owner;
     private NonNullFacts facts;
-    // link-derived edges, decided after every statement was seen: dropped when the source is known non-null at every
-    // statement that assigns it directly to the recipient (M4)
-    private final Map<List<Object>, int[]> linkEdges = new LinkedHashMap<>();
-    private final Map<Local, LocalVariable> declaredLocals = new LinkedHashMap<>();
-    // CodeLaser/maddi-mod#22 gap 9: a call's own arguments. Each analysed call gets an id; SiteArg(id, i) receives what
-    // argument i of that call carries, and nothing more (no successors). A call's result is the callee's return only
-    // where that return is nullable by itself, or through a parameter whose argument at THIS call is nullable
-    private final Map<Expression, Integer> callIds = new IdentityHashMap<>();
-    private final Map<Integer, MethodInfo> callees = new HashMap<>();
-    private final List<GatedSite> gatedSites = new ArrayList<>();
-    private final Set<Integer> argumentsSeen = new HashSet<>();
     private NullPredicates predicates;
     private java.util.function.BiPredicate<Object, TypeInfo> narrowedReads;
     // gate NOGAP9 for A/B: every call's result is the callee's return, as before
@@ -588,7 +560,6 @@ public final class NullabilityPass {
     // flows into, and which reads after the first assignment resolve to (from the loop's start, for an assignment
     // inside a loop)
     private final Set<ParameterInfo> reassigned = new HashSet<>();
-    private final Map<Local, ParameterInfo> shadows = new LinkedHashMap<>();
     private final Set<ParameterInfo> shadowed = new HashSet<>(); // walk state: reads resolve to the shadow from here on
     // per method (a lambda is its own), the declarations of each name: the fallback when scopes do not resolve one
     private final Map<MethodInfo, Map<String, List<Local>>> declaredByName = new HashMap<>();
@@ -602,6 +573,7 @@ public final class NullabilityPass {
                             Map<MethodInfo, Set<Variable>> fieldsAtEntry, Set<Expression> presentLookups) {
         this.policy = policy;
         this.trace = trace;
+        this.graph = new NullGraph(policy, trace, site);
         this.trustedReturns = trustedReturns;
         this.preconditions = preconditions;
         this.narrowed = narrowed;
@@ -1381,7 +1353,7 @@ public final class NullabilityPass {
         }
         keyedEdges(methods);
         for (FieldInfo fi : fields) seedDefaultValue(fi);
-        linkEdges.forEach((edge, count) -> {
+        graph.linkEdges.forEach((edge, count) -> {
             // [0] assigned (or passed) where the source is known non-null, [1] where it is not, [2] assigned by a
             // value not seen through. Never observed at all: only the links' transitive closure. In
             // 'imp.getNestedName(root ? node.classStruct.qualifiedName : node.simpleName)' both alternatives are '≡'
@@ -1393,9 +1365,9 @@ public final class NullabilityPass {
             if (policy.callResults() && !DIFFERENT_SHAPES_OFF.get() && differentShapes(edge.get(0), edge.get(1))) return;
             if (liftedIntoNarrower(edge.get(0), edge.get(1))) return;
             if (count[1] > 0 || count[2] > 0 || count[0] == 0 && slot) {
-                addEdge(edge.get(0), edge.get(1));
+                graph.addEdge(edge.get(0), edge.get(1));
             } else {
-                flows.add(List.of(edge.get(0), edge.get(1))); // the value is not null there; its elements may be
+                graph.flows.add(List.of(edge.get(0), edge.get(1))); // the value is not null there; its elements may be
             }
         });
         holderFields(methods, fields);
@@ -1405,14 +1377,14 @@ public final class NullabilityPass {
         nullFilteredParameters(methods);
         resolveTypeVariableArguments();
         coupleContent();
-        if (!invariantTies.isEmpty()) {
+        if (!graph.invariantTies.isEmpty()) {
             // a class type variable's slot is reached only by the class's own nulls (coupleContent never ties it
             // to an instantiation's slot), so that is known before the invariance edges are added
             Set<Object> own = closure(new HashMap<>());
             boolean added = false;
-            for (Object[] tie : invariantTies) {
+            for (Object[] tie : graph.invariantTies) {
                 if (!own.contains(tie[2])) {
-                    addEdge(tie[0], tie[1]);
+                    graph.addEdge(tie[0], tie[1]);
                     added = true;
                 }
             }
@@ -1454,12 +1426,12 @@ public final class NullabilityPass {
         Map<Info, ParameterizedType> verdicts = new LinkedHashMap<>();
         Map<Local, ParameterizedType> locals = new LinkedHashMap<>();
         // an unreached local of a degraded method: its links are missing, so "no null reaches it" is not known
-        declaredLocals.forEach((local, lv) -> {
-            ParameterizedType v = verdict(lv.parameterizedType(), local, degraded.contains(localOwner.get(local)));
+        graph.declaredLocals.forEach((local, lv) -> {
+            ParameterizedType v = verdict(lv.parameterizedType(), local, degraded.contains(graph.localOwner.get(local)));
             locals.put(local, guardedLocals.contains(local) && !(v.isPrimitiveExcludingVoid() && v.arrays() == 0)
                     ? v.withNullable(NullableState.NULLABLE) : v);
         });
-        shadows.forEach((local, pi) -> locals.put(local, verdict(pi.parameterizedType(), local,
+        graph.shadows.forEach((local, pi) -> locals.put(local, verdict(pi.parameterizedType(), local,
                 degraded.contains(pi.methodInfo()))));
         for (FieldInfo fi : fields) {
             verdicts.put(fi, contracted(fi, verdict(fi.type(), fi, false)));
@@ -1492,8 +1464,8 @@ public final class NullabilityPass {
         Set<Expression> nonNullCallResults = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
         Map<MethodInfo, Boolean> intrinsic = new HashMap<>();
         Set<Object> finalReached = reached;
-        callIds.forEach((call, id) -> {
-            MethodInfo callee = callees.get(id);
+        graph.callIds.forEach((call, id) -> {
+            MethodInfo callee = graph.callees.get(id);
             if (finalReached.contains(callee)
                 && !callResultNullable(callee, id, finalReached, finalReached::contains, intrinsic)) {
                 nonNullCallResults.add(call);
@@ -1627,7 +1599,7 @@ public final class NullabilityPass {
             Set<Object> seen = new HashSet<>();
             while (report.cause().containsKey(at) && seen.add(at) && steps.size() < CULPRIT_STEPS) {
                 Object from = report.cause().get(at);
-                Site site = edgeSites.getOrDefault(from, Map.of()).get(at);
+                Site site = graph.edgeSites.getOrDefault(from, Map.of()).get(at);
                 if (site != null) {
                     io.codelaser.maddi.modification.common.util.Culprits.add(steps,
                             io.codelaser.maddi.modification.common.util.Culprits.step(site.in(), site.element(),
@@ -1722,8 +1694,8 @@ public final class NullabilityPass {
         if (ours == null || theirs == null || ours.arrays() != 0 || theirs.arrays() != 0 || ours.typeInfo() == null
             || ours.typeInfo() != theirs.typeInfo() || ours.parameters().size() != theirs.parameters().size()) return;
         for (int j = 0; j < ours.parameters().size(); j++) {
-            if (upward) addEdge(new Arg(node, j), new Arg(theirNode, j));
-            addEdge(new Arg(theirNode, j), new Arg(node, j));
+            if (upward) graph.addEdge(new Arg(node, j), new Arg(theirNode, j));
+            graph.addEdge(new Arg(theirNode, j), new Arg(node, j));
         }
     }
 
@@ -2245,7 +2217,7 @@ public final class NullabilityPass {
     private void libraryParameterContracts() {
         if (LIBRARY_CONTRACTS_OFF.get() || !policy.callResults()) return;
         Set<ParameterInfo> seen = new HashSet<>();
-        for (Set<Object> targets : successors.values()) {
+        for (Set<Object> targets : graph.successors.values()) {
             for (Object t : targets) {
                 if (t instanceof ParameterInfo pi && !analysed.contains(pi.methodInfo()) && seen.add(pi)
                     && libraryParameterState(pi) == NullableState.NONNULL) {
@@ -2425,7 +2397,7 @@ public final class NullabilityPass {
                 default -> {
                 }
             }
-            for (Object s : successors.getOrDefault(n, Set.of())) {
+            for (Object s : graph.successors.getOrDefault(n, Set.of())) {
                 if (seen.add(s)) {
                     queue.addLast(s);
                     if (from != null) from.put(s, n);
@@ -2515,7 +2487,7 @@ public final class NullabilityPass {
         Deque<Object> queue = new ArrayDeque<>(set);
         while (!queue.isEmpty()) {
             Object n = queue.removeFirst();
-            for (Object s : successors.getOrDefault(n, Set.of())) {
+            for (Object s : graph.successors.getOrDefault(n, Set.of())) {
                 if (!nonNullContracts.contains(s) && !reached.contains(s) && set.add(s)) queue.add(s);
             }
         }
@@ -2605,33 +2577,6 @@ public final class NullabilityPass {
         return arguments.withNullable(NullableState.UNSPECIFIED);
     }
 
-    // ------------------------------------------------------------------ graph
-
-    private void addEdge(Object from, Object to) {
-        if (from == null || to == null || from.equals(to)) return;
-        if (!policy.testNulls() && testCode(from) && !testCode(to)) return;
-        // Kotlin: a primitive value carries no null on: unboxing into it already threw. guava's
-        // 'Boolean apply(T t) { return predicate.apply(t); }' over 'boolean Predicate.apply' was 'Boolean?' through a
-        // test's MockEquivalence.doEquivalent and the boolean equivalent()/doEquivalent() family (Functions.kt:103,
-        // 2026-10-18). Gate NOPRIMITIVECUTS.
-        if (policy.callResults() && !PRIMITIVE_CUTS_OFF.get() && !(from instanceof Content) && primitive(typeOf(from))) return;
-        flows.add(List.of(from, to));
-        if (recordSites && currentSite != null) {
-            edgeSites.computeIfAbsent(from, _ -> new HashMap<>()).putIfAbsent(to, new Site(currentSiteMethod, currentSite));
-        }
-        if (successors.computeIfAbsent(from, _ -> new LinkedHashSet<>()).add(to) && to instanceof Content c
-            && trace.why(c.of())) {
-            trace.log(from instanceof Content ? "content edge" : "element write", c.of(),
-                    "from " + Trace.name(from) + " (" + from.getClass().getSimpleName() + ")");
-        }
-    }
-
-    private static boolean primitive(ParameterizedType type) {
-        return type != null && type.arrays() == 0 && type.isPrimitiveExcludingVoid();
-    }
-
-    private static final Switches.Gate PRIMITIVE_CUTS_OFF = Switches.gate("NOPRIMITIVECUTS");
-
     private void seed(Object node, String origin) {
         seed(node, origin, null);
     }
@@ -2644,7 +2589,7 @@ public final class NullabilityPass {
         if (node != null) {
             if (trace.why(node)) trace.log("seed", node, origin);
             seedOrigin.putIfAbsent(node, origin);
-            if (recordSites && currentSite != null) seedSites.putIfAbsent(node, new Site(currentSiteMethod, currentSite));
+            if (graph.recordSites && site.element != null) seedSites.putIfAbsent(node, new Site(site.method, site.element));
             strictSeeds.add(node);
             seedWriters.computeIfAbsent(node, _ -> new ArrayList<>()).add(writer);
         }
@@ -2660,29 +2605,9 @@ public final class NullabilityPass {
         if (node != null) {
             if (trace.why(node)) trace.log("indirect seed", node, origin);
             seedOrigin.putIfAbsent(node, origin);
-            if (recordSites && currentSite != null) seedSites.putIfAbsent(node, new Site(currentSiteMethod, currentSite));
+            if (graph.recordSites && site.element != null) seedSites.putIfAbsent(node, new Site(site.method, site.element));
             seedWriters.computeIfAbsent(node, _ -> new ArrayList<>()).add(writer);
         }
-    }
-
-    /*
-     Policy.withoutTestNulls: whether a node of the graph belongs to test code, by the source set of the type that
-     declares it. A node without a type (a library's, the null markers' own) is not test code.
-     */
-    private static boolean testCode(Object node) {
-        if (node instanceof Content c) return testCode(c.of());
-        if (node instanceof Arg a) return testCode(a.of());
-        TypeInfo type = switch (node) {
-            case TypeInfo t -> t;
-            case ParameterInfo pi -> pi.methodInfo().typeInfo();
-            case MethodInfo mi -> mi.typeInfo();
-            case FieldInfo fi -> fi.owner();
-            case Local l -> l.methodInfo() == null ? null : l.methodInfo().typeInfo();
-            case null, default -> null;
-        };
-        if (type == null) return false;
-        var cu = type.primaryType().compilationUnit();
-        return cu != null && cu.sourceSet() != null && cu.sourceSet().test();
     }
 
     private static TypeInfo writer(MethodInfo mi) {
@@ -2721,13 +2646,9 @@ public final class NullabilityPass {
      */
     private boolean optionalValue(Object node) {
         if (!(node instanceof Arg arg) || arg.index() != 0) return false;
-        ParameterizedType type = typeOf(arg.of());
+        ParameterizedType type = graph.typeOf(arg.of());
         return type != null && type.arrays() == 0 && type.typeInfo() != null
                && "java.util.Optional".equals(type.typeInfo().fullyQualifiedName());
-    }
-
-    private static boolean isSlot(Object node) {
-        return node instanceof Arg || node instanceof Content || node instanceof Keyed;
     }
 
     /*
@@ -2750,7 +2671,7 @@ public final class NullabilityPass {
         if (!policy.callResults() || !(node instanceof Arg a)) return false;
         Boolean known = boundedSlots.get(node);
         if (known != null) return known;
-        ParameterizedType outer = typeOf(a.of());
+        ParameterizedType outer = graph.typeOf(a.of());
         TypeInfo ti = outer == null || outer.arrays() > 0 ? null : outer.typeInfo();
         boolean bounded = !BOUNDED_SLOTS_OFF.get() && ti != null && a.index() < ti.typeParameters().size()
                           && ti.typeParameters().get(a.index()).typeBounds().stream()
@@ -2772,7 +2693,7 @@ public final class NullabilityPass {
     // the slot of a null-marked type parameter, or one holding a type variable the null-marked bounds hold non-null
     private boolean nonNullSlot(Arg a) {
         if (nonNullTypeParameters.isEmpty()) return false;
-        ParameterizedType outer = typeOf(a.of());
+        ParameterizedType outer = graph.typeOf(a.of());
         if (outer == null || outer.arrays() > 0) return false;
         TypeInfo ti = outer.typeInfo();
         if (ti != null && a.index() < ti.typeParameters().size()
@@ -2799,9 +2720,9 @@ public final class NullabilityPass {
         // 'copyOf(multiset)'. Not along the slot edges: those carry values ('accessQueue.add(table.get(i))'), which
         // Kotlin asserts at the write, and had made Segment.table's elements non-null through
         // ImmutableList.copyOf(accessQueue), where Segment.clear() writes null (guava, 2026-10-19)
-        for (List<Object> flow : flows) {
-            ParameterizedType t0 = typeOf(flow.get(0));
-            ParameterizedType t1 = typeOf(flow.get(1));
+        for (List<Object> flow : graph.flows) {
+            ParameterizedType t0 = graph.typeOf(flow.get(0));
+            ParameterizedType t1 = graph.typeOf(flow.get(1));
             if (t0 == null || t1 == null || t0.arrays() > 0 || t1.arrays() > 0
                 || t0.parameters().size() != t1.parameters().size() || fedByUnboundWildcard(flow.get(0))) continue;
             for (int i = 0; i < t0.parameters().size(); i++) {
@@ -3215,7 +3136,7 @@ public final class NullabilityPass {
         while (true) {
             while (!queue.isEmpty()) {
                 Object n = queue.removeFirst();
-                for (Object s : successors.getOrDefault(n, Set.of())) {
+                for (Object s : graph.successors.getOrDefault(n, Set.of())) {
                     if (strict != null && isSlot(s) && !isSlot(n) && !strict.contains(n) && !isVarargElements(s)) continue;
                     if (optionalValue(s) || boundedSlot(s)) continue;
                     if (!nonNullContracts.contains(s) && reached.add(s)) {
@@ -3226,7 +3147,7 @@ public final class NullabilityPass {
             }
             // gap 9: the gated call results, once nothing else moves; monotone, so repeated until none opens
             Map<MethodInfo, Boolean> intrinsic = new HashMap<>();
-            for (GatedSite site : gatedSites) {
+            for (GatedSite site : graph.gatedSites) {
                 if (!reached.contains(site.callee()) || reached.contains(site.target())
                     || nonNullContracts.contains(site.target())
                     || !callResultNullable(site.callee(), site.call(), reached, reached::contains, intrinsic)) continue;
@@ -3247,8 +3168,8 @@ public final class NullabilityPass {
     private boolean callResultNullable(MethodInfo callee, int call, Set<Object> reached,
                                        java.util.function.Predicate<Object> isReached,
                                        Map<MethodInfo, Boolean> intrinsicMemo) {
-        if (GAP9_OFF.get() || !argumentsSeen.contains(call)) return true;
-        Set<ParameterInfo> through = passThrough(callee);
+        if (GAP9_OFF.get() || !graph.argumentsSeen.contains(call)) return true;
+        Set<ParameterInfo> through = graph.passThrough(callee);
         if (through.isEmpty()) return true;
         if (intrinsicMemo.computeIfAbsent(callee, m -> reachedWithout(m, through, reached))) return true;
         for (ParameterInfo pi : through) {
@@ -3280,47 +3201,9 @@ public final class NullabilityPass {
         return false;
     }
 
-    private Map<Object, Set<Object>> predecessors;
-    private int predecessorsOf = -1;
-    private final Map<MethodInfo, Set<ParameterInfo>> passThroughMemo = new HashMap<>();
-
-    private Map<Object, Set<Object>> predecessors() {
-        int size = flows.size() + gatedSites.size();
-        if (predecessors == null || predecessorsOf != size) {
-            predecessors = new HashMap<>();
-            successors.forEach((from, tos) -> tos.forEach(to ->
-                    predecessors.computeIfAbsent(to, _ -> new HashSet<>()).add(from)));
-            // a gated result's predecessor is its callee: over-approximates "by itself" (conservative)
-            gatedSites.forEach(g -> predecessors.computeIfAbsent(g.target(), _ -> new HashSet<>()).add(g.callee()));
-            predecessorsOf = size;
-            passThroughMemo.clear();
-        }
-        return predecessors;
-    }
-
-    /* the callee's own (non-varargs) parameters from which the graph reaches its return value */
-    private Set<ParameterInfo> passThrough(MethodInfo callee) {
-        Map<Object, Set<Object>> pred = predecessors();
-        return passThroughMemo.computeIfAbsent(callee, m -> {
-            Set<ParameterInfo> out = new HashSet<>();
-            Set<Object> seen = new HashSet<>();
-            Deque<Object> todo = new ArrayDeque<>(List.of(m));
-            while (!todo.isEmpty()) {
-                Object n = todo.removeFirst();
-                if (!seen.add(n)) continue;
-                if (n instanceof ParameterInfo pi && pi.methodInfo() == m && !pi.isVarArgs()) {
-                    out.add(pi);
-                    continue;
-                }
-                todo.addAll(pred.getOrDefault(n, Set.of()));
-            }
-            return out;
-        });
-    }
-
     /* whether null reaches 'callee' backwards from a seed, without passing through one of 'through' */
     private boolean reachedWithout(MethodInfo callee, Set<ParameterInfo> through, Set<Object> reached) {
-        Map<Object, Set<Object>> pred = predecessors();
+        Map<Object, Set<Object>> pred = graph.predecessors();
         Set<Object> seen = new HashSet<>();
         Deque<Object> todo = new ArrayDeque<>(List.of(callee));
         while (!todo.isEmpty()) {
@@ -3334,64 +3217,6 @@ public final class NullabilityPass {
 
     private static boolean isTypeVariable(ParameterizedType pt) {
         return pt.typeParameter() != null && pt.arrays() == 0;
-    }
-
-    /**
-     * A local variable as a graph node, keyed by its DECLARATION (by identity) and name: Java forbids a local to
-     * shadow a local, so in scope a name denotes one declaration, but same-named locals of sibling blocks or of
-     * different methods are different variables. The method is for display; a key without a declaration (a pattern
-     * variable, a name no scope resolved) is per method and name.
-     */
-    /** The elements of an array node (a field, parameter, return, local, or the elements of an outer array). */
-    public record Content(Object of) {
-        @Override
-        public String toString() {
-            return "elements of " + Report.label(of);
-        }
-    }
-
-    /** What argument {@code index} of call {@code call} carries (gap 9): a node with no successors. */
-    record SiteArg(int call, int index) {
-        @Override
-        public String toString() {
-            return "argument " + index + " of call #" + call;
-        }
-    }
-
-    /** {@code callee -> target}, followed only where that call's own arguments let the null through (gap 9). */
-    record GatedSite(MethodInfo callee, Object target, int call) {
-    }
-
-    /** Type argument {@code index} of a node's declared type: the elements of a {@code List<String>}, a map's values. */
-    public record Arg(Object of, int index) {
-        @Override
-        public String toString() {
-            return "type argument " + index + " of " + Report.label(of);
-        }
-    }
-
-    // the declared type of a node; null when unknown (a local the pass did not see declared)
-    private ParameterizedType typeOf(Object node) {
-        return switch (node) {
-            case Arg a -> {
-                ParameterizedType outer = typeOf(a.of());
-                yield outer == null || outer.arrays() > 0 || a.index() >= outer.parameters().size() ? null
-                        : outer.parameters().get(a.index());
-            }
-            case Keyed k -> typeOf(k.slot());
-            case AnonymousThis at -> at.type().parentClass();
-            case CallResult cr -> cr.call().concreteReturnType();
-            case ParameterInfo pi -> pi.parameterizedType();
-            case FieldInfo fi -> fi.type();
-            case MethodInfo mi -> mi.returnType();
-            case Local local -> declaredLocals.containsKey(local) ? declaredLocals.get(local).parameterizedType()
-                    : shadows.containsKey(local) ? shadows.get(local).parameterizedType() : null;
-            case Content c -> {
-                ParameterizedType outer = typeOf(c.of());
-                yield outer == null || outer.arrays() == 0 ? null : outer.componentType();
-            }
-            default -> null;
-        };
     }
 
     /*
@@ -3455,7 +3280,7 @@ public final class NullabilityPass {
                     && ve.variable() instanceof ParameterInfo pi && !reassigned.contains(pi)
                     && pi.methodInfo() == mi && !pi.parameterizedType().parameters().isEmpty()
                     && pi.parameterizedType().arrays() == 0) {
-                    flows.add(List.of(pi, fr.fieldInfo()));
+                    graph.flows.add(List.of(pi, fr.fieldInfo()));
                 }
                 return true;
             });
@@ -3498,21 +3323,21 @@ public final class NullabilityPass {
             nodes.addAll(mi.parameters());
             if (!mi.isConstructor() && !mi.returnType().isVoid()) nodes.add(mi);
         }
-        nodes.addAll(declaredLocals.keySet());
+        nodes.addAll(graph.declaredLocals.keySet());
         for (Object n : nodes) {
-            ParameterizedType type = typeOf(n);
+            ParameterizedType type = graph.typeOf(n);
             if (type == null || type.arrays() > 0 || type.typeInfo() == null) continue;
             for (FieldInfo fi : byOwner.getOrDefault(type.typeInfo(), List.of())) {
                 int index = classTypeVariable(fi);
                 if (index >= type.parameters().size()) continue;
                 if (policy.assertContentWrites()) {
-                    pendingHolders.computeIfAbsent(fi, _ -> new ArrayList<>()).add(new Arg(n, index));
+                    graph.pendingHolders.computeIfAbsent(fi, _ -> new ArrayList<>()).add(new Arg(n, index));
                 } else {
-                    addEdge(fi, new Arg(n, index));
+                    graph.addEdge(fi, new Arg(n, index));
                 }
             }
         }
-        if (!pendingHolders.isEmpty()) holdersReachedFromOutside();
+        if (!graph.pendingHolders.isEmpty()) holdersReachedFromOutside();
     }
 
     /*
@@ -3527,7 +3352,7 @@ public final class NullabilityPass {
      */
     private void holdersReachedFromOutside() {
         Map<TypeInfo, List<FieldInfo>> byOwner = new LinkedHashMap<>();
-        pendingHolders.keySet().forEach(fi -> byOwner.computeIfAbsent(fi.owner(), _ -> new ArrayList<>()).add(fi));
+        graph.pendingHolders.keySet().forEach(fi -> byOwner.computeIfAbsent(fi.owner(), _ -> new ArrayList<>()).add(fi));
         byOwner.forEach((holder, holders) -> {
             Set<Object> outside = new LinkedHashSet<>();
             seedOrigin.keySet().forEach(seed -> {
@@ -3536,7 +3361,7 @@ public final class NullabilityPass {
             });
             Set<Object> reachedFromOutside = closure(new HashMap<>(), outside, null);
             for (FieldInfo fi : holders) {
-                if (reachedFromOutside.contains(fi)) pendingHolders.get(fi).forEach(arg -> addEdge(fi, arg));
+                if (reachedFromOutside.contains(fi)) graph.pendingHolders.get(fi).forEach(arg -> graph.addEdge(fi, arg));
             }
         });
     }
@@ -3582,15 +3407,15 @@ public final class NullabilityPass {
         // narrowedArray: an element annotation alone writes nothing into the caller's array
         Set<Object> written = policy.callResults() && !ARRAY_WIDENING_OFF.get() ? writtenThrough(false) : writtenThrough;
         Set<ParameterInfo> readOnlyArrays = readOnlyArrayParameters();
-        Deque<List<Object>> queue = new ArrayDeque<>(flows);
+        Deque<List<Object>> queue = new ArrayDeque<>(graph.flows);
         Set<List<Object>> seen = new HashSet<>();
         while (!queue.isEmpty()) {
             List<Object> flow = queue.removeFirst();
             if (!seen.add(flow)) continue;
             // not through a library method: its parameter would tie together the arrays of all its callers
             if (library(flow.get(0)) || library(flow.get(1))) continue;
-            ParameterizedType t0 = typeOf(flow.get(0));
-            ParameterizedType t1 = typeOf(flow.get(1));
+            ParameterizedType t0 = graph.typeOf(flow.get(0));
+            ParameterizedType t1 = graph.typeOf(flow.get(1));
             if (t0 == null || t1 == null) continue;
             if (t0.arrays() > 0 && t1.arrays() > 0) {
                 Content c0 = new Content(flow.get(0));
@@ -3600,15 +3425,15 @@ public final class NullabilityPass {
                 // anything else is that reversed link
                 if ((!readOnlyArrayParameter(flow.get(0), readOnlyArrays)
                      || readOnlyArrayParameter(flow.get(1), readOnlyArrays))
-                    && !varargsPasses.contains(List.of(flow.get(1), flow.get(0)))
+                    && !graph.varargsPasses.contains(List.of(flow.get(1), flow.get(0)))
                     && !(narrowedArray(t0, t1) && !written.contains(flow.get(0)))) {
-                    successors.computeIfAbsent(c0, _ -> new LinkedHashSet<>()).add(c1);
+                    graph.successors.computeIfAbsent(c0, _ -> new LinkedHashSet<>()).add(c1);
                     if (trace.why(c1.of())) trace.log("coupled forward", c1.of(), "from " + Trace.name(c0.of()) + " " + t0 + " -> " + t1);
                 }
-                if (!readOnlyArrayParameter(flow.get(1), readOnlyArrays) && !varargsPasses.contains(flow)
+                if (!readOnlyArrayParameter(flow.get(1), readOnlyArrays) && !graph.varargsPasses.contains(flow)
                     && (narrowedArray(t1, t0) ? written.contains(flow.get(1))
                         : policy.assertContentWrites() || writtenThrough.contains(flow.get(1)))) {
-                    successors.computeIfAbsent(c1, _ -> new LinkedHashSet<>()).add(c0);
+                    graph.successors.computeIfAbsent(c1, _ -> new LinkedHashSet<>()).add(c0);
                     if (trace.why(c0.of())) trace.log("coupled back", c0.of(), "from " + Trace.name(c1.of()) + " " + t1 + " -> " + t0);
                 }
                 queue.add(List.of(c0, c1));
@@ -3636,7 +3461,7 @@ public final class NullabilityPass {
                     boolean class1 = isClassTypeVariable(p1);
                     Arg a0 = new Arg(flow.get(0), i);
                     Arg a1 = new Arg(flow.get(1), i);
-                    if (!class1 || class0) successors.computeIfAbsent(a0, _ -> new LinkedHashSet<>()).add(a1);
+                    if (!class1 || class0) graph.successors.computeIfAbsent(a0, _ -> new LinkedHashSet<>()).add(a1);
                     // Kotlin: nor out of an unbound '?' ('Joiner.MapJoiner.join(Map<?, ?>)'): Kotlin's '*' only
                     // receives too. Back out, JoinerTest's null reached every map passed to join, and through
                     // ImmutableMap.of()'s RegularImmutableMap.EMPTY all of guava's empty maps (2026-10-17)
@@ -3648,11 +3473,11 @@ public final class NullabilityPass {
                     // Equivalence<Any?>, Equivalence.kt:98/99, 2026-10-18)
                     boolean declaredNullable = policy.callResults() && !NULLABLE_PARAMETER_SLOTS_OFF.get()
                                                && explicit(p1.annotations()) == NullableState.NULLABLE;
-                    boolean read = viewLoopReads.contains(flow);
+                    boolean read = graph.viewLoopReads.contains(flow);
                     if (!isExtendsWildcard(p1) && !unbound && !declaredNullable && (!class0 || class1) && !read) {
-                        successors.computeIfAbsent(a1, _ -> new LinkedHashSet<>()).add(a0);
+                        graph.successors.computeIfAbsent(a1, _ -> new LinkedHashSet<>()).add(a0);
                     }
-                    if (read) viewLoopReads.add(List.of(a0, a1));
+                    if (read) graph.viewLoopReads.add(List.of(a0, a1));
                     queue.add(List.of(a0, a1));
                 }
             }
@@ -3675,7 +3500,7 @@ public final class NullabilityPass {
         if (READ_ONLY_ARRAYS_OFF.get() || !policy.callResults()) return Set.of();
         Set<ParameterInfo> candidates = new HashSet<>();
         Map<ParameterInfo, Set<Object>> out = new HashMap<>();
-        for (List<Object> flow : flows) {
+        for (List<Object> flow : graph.flows) {
             if (flow.get(0) instanceof ParameterInfo pi) out.computeIfAbsent(pi, _ -> new HashSet<>()).add(flow.get(1));
         }
         for (MethodInfo mi : analysed) {
@@ -3737,31 +3562,6 @@ public final class NullabilityPass {
         return found[0];
     }
 
-    /*
-     Kotlin: a varargs parameter takes a copy ('newParameterizedType(Map.class, *typesIn)'), so its elements do not
-     flow back into the caller's array, whatever the method or the caller does with either afterwards. TypesTest's
-     'typesIn[0] = null' after the call (testing guava's defensive copy) reached resolveTypes' result through
-     newParameterizedType(Class, Type...); ImmutableList.construct(Object... elements)'s annotated elements reached
-     Types.newTypeVariableImpl's and newArtificialTypeVariable's bounds and captureAsTypeVariable's upperBounds
-     (TypeResolver.kt:234, Types.kt:325). Exactly the (array, varargs parameter) pairs of such calls: the caller's
-     elements still flow forward into the parameter's ('isVarReferenced(obj, *whitelist)' with a nullable element,
-     fernflower VarExprent.kt:205), only the back edge and the forward edge of the reversed link go. An override
-     family's varargs parameters stay tied as any other (ImmutableCollection.Builder.add(E...)). Only under
-     Policy.callResults. Gate NOVARARGCOPIES.
-     */
-    private final Set<List<Object>> varargsPasses = new HashSet<>();
-
-    /*
-     Kotlin: the loop variable over a library view reads the map's slots, but what the loop writes through it does not
-     flow back. jenkins' EnvVars.resolve 'entry.setValue(Util.replaceMacro(entry.getValue(), env))' (an @Nullable
-     return, null only for a null input) made masterEnvVars, EnvVars(Map) and through them EnvVars a map of 'String?'
-     (EnvVars.kt:22/25/79, AbstractBuild.kt:179); DiskSpaceMonitorDescriptor.monitor() a Map<Computer, DiskSpace?>
-     against its superclass's (DiskSpaceMonitorDescriptor.kt:20/42): 127 -> 133 errors (worktree-maddi-all
-     2026-10-22). The write stays one mismatch at the loop. The (view slot, loop variable) flows, and the slot pairs
-     under them. Gate NOVIEWLOOPWRITES.
-     */
-    private final Set<List<Object>> viewLoopReads = new HashSet<>();
-
     private static final Switches.Gate VIEW_LOOP_WRITES_OFF = Switches.gate("NOVIEWLOOPWRITES");
 
     private static final Switches.Gate VARARG_COPIES_OFF = Switches.gate("NOVARARGCOPIES");
@@ -3786,7 +3586,7 @@ public final class NullabilityPass {
         Set<Object> written = new HashSet<>();
         // NULLWHY: why a node is written, its downstream node or the write itself
         Map<Object, String> because = !trace.enabled() ? null : new HashMap<>();
-        successors.forEach((from, tos) -> {
+        graph.successors.forEach((from, tos) -> {
             // narrowedArray: nor is an element "written" from a lifted field ('RegularImmutableList.array ∋
             // RegularImmutableList.element'), the links' stand-in for any element, not code writing into the array
             if (from instanceof Content || !annotations && liftedField(from)) return;
@@ -3803,7 +3603,7 @@ public final class NullabilityPass {
             }
         });
         Map<Object, List<Object>> upstream = new HashMap<>();
-        for (List<Object> flow : flows) upstream.computeIfAbsent(flow.get(1), _ -> new ArrayList<>()).add(flow.get(0));
+        for (List<Object> flow : graph.flows) upstream.computeIfAbsent(flow.get(1), _ -> new ArrayList<>()).add(flow.get(0));
         Deque<Object> queue = new ArrayDeque<>(written);
         while (!queue.isEmpty()) {
             Object down = queue.removeFirst();
@@ -3864,15 +3664,15 @@ public final class NullabilityPass {
 
     private boolean isArray(Object node) {
         if (node instanceof Content || node instanceof Arg) return false;
-        ParameterizedType t = typeOf(node);
+        ParameterizedType t = graph.typeOf(node);
         return t != null && t.arrays() > 0;
     }
 
     // the elements of a lifted field (liftedField) linked into a narrower array: what other arrays of the type hold
     private boolean liftedIntoNarrower(Object from, Object to) {
         if (!(from instanceof Content cf) || !(to instanceof Content ct) || !liftedField(cf)) return false;
-        ParameterizedType tf = typeOf(cf.of());
-        ParameterizedType tt = typeOf(ct.of());
+        ParameterizedType tf = graph.typeOf(cf.of());
+        ParameterizedType tt = graph.typeOf(ct.of());
         return tf != null && tt != null && narrowedArray(tf, tt);
     }
 
@@ -3968,8 +3768,8 @@ public final class NullabilityPass {
             from = f;
             to = t;
         }
-        ParameterizedType t0 = typeOf(from);
-        ParameterizedType t1 = typeOf(to);
+        ParameterizedType t0 = graph.typeOf(from);
+        ParameterizedType t1 = graph.typeOf(to);
         return t0 != null && t1 != null && t0.arrays() == 0 && t1.arrays() == 0 && t0.typeInfo() != null
                && t0.typeInfo() == t1.typeInfo() && differentShapes(t0, t1);
     }
@@ -4009,25 +3809,6 @@ public final class NullabilityPass {
         };
     }
 
-    public record Local(MethodInfo methodInfo, Element declaration, String name) {
-        @Override
-        public boolean equals(Object o) {
-            if (!(o instanceof Local(MethodInfo m, Element d, String n)) || !name.equals(n)) return false;
-            return declaration == null ? d == null && methodInfo.equals(m) : declaration == d;
-        }
-
-        @Override
-        public int hashCode() {
-            return declaration == null ? Objects.hash(methodInfo, name)
-                    : 31 * System.identityHashCode(declaration) + name.hashCode();
-        }
-
-        @Override
-        public String toString() {
-            return name + " in " + methodInfo.fullyQualifiedName();
-        }
-    }
-
     // the locals in scope: a block, or a statement's own (for initializers, for-each variable, try resources)
     private record Scope(Scope parent, Map<String, Local> names) {
         Scope(Scope parent) {
@@ -4046,9 +3827,9 @@ public final class NullabilityPass {
     // the shadow local of a reassigned parameter; created once, the caller's value flows into it
     private Local shadow(ParameterInfo pi) {
         Local local = new Local(pi.methodInfo(), null, pi.name());
-        if (shadows.putIfAbsent(local, pi) == null) {
-            localOwner.put(local, pi.methodInfo());
-            addEdge(pi, local);
+        if (graph.shadows.putIfAbsent(local, pi) == null) {
+            graph.localOwner.put(local, pi.methodInfo());
+            graph.addEdge(pi, local);
         }
         return local;
     }
@@ -4077,8 +3858,8 @@ public final class NullabilityPass {
     private void declare(Scope scope, MethodInfo mi, Element declaration, LocalVariable lv) {
         Local local = new Local(mi, declaration, lv.simpleName());
         scope.names.put(lv.simpleName(), local);
-        declaredLocals.put(local, lv);
-        localOwner.put(local, owner);
+        graph.declaredLocals.put(local, lv);
+        graph.localOwner.put(local, owner);
         declaredByName.computeIfAbsent(mi, _ -> new HashMap<>())
                 .computeIfAbsent(lv.simpleName(), _ -> new ArrayList<>()).add(local);
     }
@@ -4103,14 +3884,14 @@ public final class NullabilityPass {
                 // the hidden content of a one-parameter type: 'list.§$s', 'opt.§$' (not '§m', the modification marker)
                 if (fr.fieldInfo().name().startsWith("§m")) yield null;
                 Object base = node(mi, scope, fr.scopeVariable());
-                ParameterizedType type = base == null ? null : typeOf(base);
+                ParameterizedType type = base == null ? null : graph.typeOf(base);
                 yield type == null || type.arrays() > 0 || type.parameters().size() != 1 ? null : argSlot(base, 0);
             }
             case FieldReference fr when !fr.scopeIsRecursivelyThis() && fr.scopeVariable() != null
                                         && classTypeVariable(fr.fieldInfo()) >= 0 -> {
                 // 'b.t' of a generic holder 'Box<String> b': its type argument, not the field shared by all boxes
                 Object base = node(mi, scope, fr.scopeVariable());
-                ParameterizedType type = base == null ? null : typeOf(base);
+                ParameterizedType type = base == null ? null : graph.typeOf(base);
                 int index = classTypeVariable(fr.fieldInfo());
                 yield type != null && type.arrays() == 0 && type.typeInfo() == fr.fieldInfo().owner()
                       && index < type.parameters().size() ? argSlot(base, index) : fr.fieldInfo();
@@ -4145,7 +3926,7 @@ public final class NullabilityPass {
 
     // the slot of type argument 'index' of 'base', when its declared type has one there
     private Object argSlot(Object base, int index) {
-        ParameterizedType type = typeOf(base);
+        ParameterizedType type = graph.typeOf(base);
         if (type == null || type.arrays() > 0 || index >= type.parameters().size()) return null;
         return new Arg(base, index);
     }
@@ -4167,7 +3948,7 @@ public final class NullabilityPass {
         if (!policy.testNulls() && testCode(mi.typeInfo()) && !testCode(target)) return;
         MethodInfo owner = nullOwner(((LocalVariable) marker).assignmentExpression());
         if (owner != null && !owner.equals(mi) && analysed.contains(owner) && !owner.returnType().isVoid()) {
-            addEdge(owner, target);
+            graph.addEdge(owner, target);
         } else {
             seed(target, origin, writer(mi));
         }
@@ -4311,7 +4092,7 @@ public final class NullabilityPass {
                 // by an implementation makes an analysed type-variable return nullable too ('Holder<T>.get(): T?')
                 if (!isTypeVariable(overridden.returnType())
                     || policy.callResults() && analysed.contains(overridden) && !nullableInstantiation(mi, overridden)) {
-                    addEdge(mi, overridden);
+                    graph.addEdge(mi, overridden);
                 }
                 if (policy.callResults() && analysed.contains(overridden)) {
                     invariantSlots(mi.returnType(), mi, overridden.returnType(), overridden, true);
@@ -4337,10 +4118,10 @@ public final class NullabilityPass {
                         || isTypeVariable(implementationType)
                         || implementationType.typeInfo() != null && implementationType.arrays() == 0
                            && implementationType.typeInfo().isJavaLangObject()) {
-                        addEdge(overridden.parameters().get(i), mi.parameters().get(i));
+                        graph.addEdge(overridden.parameters().get(i), mi.parameters().get(i));
                     }
                     if (upward && !isTypeVariable(overridden.parameters().get(i).parameterizedType())) {
-                        addEdge(mi.parameters().get(i), overridden.parameters().get(i));
+                        graph.addEdge(mi.parameters().get(i), overridden.parameters().get(i));
                     }
                 }
             }
@@ -4404,7 +4185,7 @@ public final class NullabilityPass {
             // was nullable (SwitchPatternHelper.kt:109). The getter/setter association says what it returns.
             io.codelaser.maddi.cst.api.analysis.Value.FieldValue getter = mi.getSetField();
             if (getter != null && getter.field() != null && !getter.setter() && !getter.hasIndex()) {
-                addEdge(getter.field(), mi);
+                graph.addEdge(getter.field(), mi);
             }
         }
     }
@@ -4458,8 +4239,8 @@ public final class NullabilityPass {
                 // content copied: 'copy.§$s ⊆ in.§$s', the elements of 'in' flow into those of 'copy'
                 Object other = node(mi, scope, link.to());
                 if ((other instanceof Arg || other instanceof Content) && (from instanceof Arg || from instanceof Content)) {
-                    if (nature == LinkNatureImpl.IS_SUBSET_OF) addEdge(other, from);
-                    else addEdge(from, other);
+                    if (nature == LinkNatureImpl.IS_SUBSET_OF) graph.addEdge(other, from);
+                    else graph.addEdge(from, other);
                 }
                 continue;
             }
@@ -4578,9 +4359,9 @@ public final class NullabilityPass {
         switch (memberVar) {
             case ParameterInfo _ -> {
             }
-            case ReturnVariable _ -> addEdge(container, member);
+            case ReturnVariable _ -> graph.addEdge(container, member);
             default -> {
-                if (statement != null && assignsHere(statement, memberVar)) addEdge(container, member);
+                if (statement != null && assignsHere(statement, memberVar)) graph.addEdge(container, member);
             }
         }
     }
@@ -4598,7 +4379,7 @@ public final class NullabilityPass {
     // is known non-null, the statement carries no null from it (M4)
     private void linkEdge(Object from, Object to, Variable sourceVar, Variable recipientVar, Statement statement) {
         if (from == null || to == null || from.equals(to)) return;
-        int[] count = linkEdges.computeIfAbsent(List.of(from, to), _ -> new int[4]);
+        int[] count = graph.linkEdges.computeIfAbsent(List.of(from, to), _ -> new int[4]);
         if (statement == null) {
             count[3]++; // a link of the method's summary, not of one statement
             return;
@@ -4856,8 +4637,8 @@ public final class NullabilityPass {
             });
             Set<ParameterInfo> shadowedBySubBlocks = new HashSet<>(shadowed);
             shadowed.retainAll(shadowedBefore);
-            currentSite = statement;
-            currentSiteMethod = mi;
+            site.element = statement;
+            site.method = mi;
             VariableData vd = VariableDataImpl.of(statement);
             if (vd != null) vd.variableInfoStream().forEach(vi -> linksOf(mi, own, vi, statement));
             if (statement instanceof TryStatement ts) {
@@ -4884,8 +4665,8 @@ public final class NullabilityPass {
                 if (e instanceof Block) return false; // nested statements are handled with their own vd
                 if (policy.nullTests() && e instanceof BinaryOperator bo) nullTest(mi, own, bo);
                 if (e instanceof MethodCall || e instanceof ConstructorCall) {
-                    currentSite = e;
-                    currentSiteMethod = mi;
+                    site.element = e;
+                    site.method = mi;
                 }
                 if (e instanceof MethodCall mc && mc.methodInfo() != null) {
                     callSite(mi, own, statement, mc, mc.methodInfo(), mc.analysis(), mc.parameterExpressions());
@@ -4898,8 +4679,8 @@ public final class NullabilityPass {
                 }
                 return true;
             });
-            currentSite = statement;
-            currentSiteMethod = mi;
+            site.element = statement;
+            site.method = mi;
             syntacticSeeds(mi, own, statement);
             if (statement instanceof ExplicitConstructorInvocation eci && eci.methodInfo() != null) {
                 callSite(mi, own, statement, null, eci.methodInfo(), eci.analysis(), eci.parameterExpressions());
@@ -4907,7 +4688,7 @@ public final class NullabilityPass {
             // from here on a read of a parameter the statement assigned is a read of the shadow
             shadowed.addAll(shadowedBySubBlocks);
             shadowed.addAll(parametersAssignedIn(statement, mi));
-            currentSite = null;
+            site.element = null;
         }
         return scope;
     }
@@ -5178,7 +4959,7 @@ public final class NullabilityPass {
             // variable's slots are the map's, so 'e.setValue(null)' writes it (jenkins DiskSpaceMonitorDescriptor.kt:38,
             // 2026-10-22). Gate NOVIEWLOOPS.
             if (array == null && policy.callResults() && !VIEW_LOOPS_OFF.get()) array = viewArgument(mi, scope, iterated);
-            ParameterizedType type = array == null ? null : typeOf(array);
+            ParameterizedType type = array == null ? null : graph.typeOf(array);
             if (type != null && (type.arrays() > 0 || type.parameters().size() == 1)) {
                 // over an array its elements, over an Iterable<T> its one type argument; the statement's own scope
                 // declares the loop variable
@@ -5186,8 +4967,8 @@ public final class NullabilityPass {
                 boolean view = !(iterated instanceof VariableExpression) && !(array instanceof MethodInfo);
                 fe.initializer().localVariableStream().forEach(lv -> {
                     Object local = local(mi, scope, lv.simpleName());
-                    addEdge(elements, local);
-                    if (view && !VIEW_LOOP_WRITES_OFF.get()) viewLoopReads.add(List.of(elements, local));
+                    graph.addEdge(elements, local);
+                    if (view && !VIEW_LOOP_WRITES_OFF.get()) graph.viewLoopReads.add(List.of(elements, local));
                 });
             }
         }
@@ -5220,8 +5001,8 @@ public final class NullabilityPass {
             || !(NonNullFacts.unwrap(value) instanceof VariableExpression ve)) return;
         Object source = node(mi, scope, ve.variable());
         if (source == null) return;
-        if (facts.nonNull(value, facts.before(statement))) flows.add(List.of(source, target));
-        else addEdge(source, target);
+        if (facts.nonNull(value, facts.before(statement))) graph.flows.add(List.of(source, target));
+        else graph.addEdge(source, target);
     }
 
     /*
@@ -5236,7 +5017,7 @@ public final class NullabilityPass {
         // generic type ('Factory(Collection<E> set)') instantiates them with the new object's, i.e. the target's,
         // slots (instantiatedSlots)
         MethodInfo constructor = cc.constructor();
-        ParameterizedType targetType = typeOf(target);
+        ParameterizedType targetType = graph.typeOf(target);
         if (!analysed.contains(constructor) || targetType == null || constructor.typeInfo().typeParameters().isEmpty()) {
             return;
         }
@@ -5248,7 +5029,7 @@ public final class NullabilityPass {
             Object argument = argumentNode(mi, scope, arguments.get(i));
             if (argument == null) argument = viewArgument(mi, scope, arguments.get(i));
             if (argument == null) continue;
-            ParameterizedType type = typeOf(argument);
+            ParameterizedType type = graph.typeOf(argument);
             instantiatedSlots(argument, type != null ? type : arguments.get(i).parameterizedType(), parameters.get(i),
                     formal, target, targetType, constructor.typeInfo(), true);
         }
@@ -5285,7 +5066,7 @@ public final class NullabilityPass {
      */
     private void contentCopies(MethodInfo mi, Scope scope, Object receiver, MethodInfo callee,
                                List<Expression> arguments) {
-        ParameterizedType type = typeOf(receiver);
+        ParameterizedType type = graph.typeOf(receiver);
         int arity = callee.typeInfo().typeParameters().size();
         if (type == null || type.arrays() > 0 || arity == 0 || type.parameters().size() != arity) return;
         List<ParameterInfo> parameters = callee.parameters();
@@ -5299,7 +5080,7 @@ public final class NullabilityPass {
                 int index = a.typeParameter().getIndex();
                 if (index >= arity) continue;
                 for (Object source : slotSources(mi, scope, arguments.get(i), j)) {
-                    addEdge(source, new Arg(receiver, index));
+                    graph.addEdge(source, new Arg(receiver, index));
                 }
             }
         }
@@ -5321,7 +5102,7 @@ public final class NullabilityPass {
         if (!isTypeVariable(a) || a.typeParameter().isMethodTypeParameter()
             || a.typeParameter().getOwner().getLeft() != mc.methodInfo().typeInfo()) return null;
         Object receiver = argumentNode(mi, scope, mc.object());
-        ParameterizedType receiverType = receiver == null ? null : typeOf(receiver);
+        ParameterizedType receiverType = receiver == null ? null : graph.typeOf(receiver);
         int index = receiverType == null ? -1
                 : slotIndex(receiverType, mc.methodInfo().typeInfo(), a.typeParameter().getIndex());
         return index < 0 ? null : new Arg(receiver, index);
@@ -5341,7 +5122,7 @@ public final class NullabilityPass {
         if (!callee.isStatic() && mc.object() != null && rt.arrays() == 0 && rt.typeParameter() != null
             && !rt.typeParameter().isMethodTypeParameter()) {
             Object receiver = argumentNode(mi, scope, mc.object());
-            ParameterizedType type = receiver == null ? null : typeOf(receiver);
+            ParameterizedType type = receiver == null ? null : graph.typeOf(receiver);
             int index = type == null ? -1 : slotIndex(type, callee.typeInfo(), rt.typeParameter().getIndex());
             return index < 0 ? null : new Arg(receiver, index);
         }
@@ -5417,20 +5198,20 @@ public final class NullabilityPass {
                 // Java annotations they carried guava's flow-insensitive '@Nullable Object key' (AsMap.get) through
                 // the ImmutableSet<E> override hub into the EMPTY singletons: +246 noise (2026-10-09). The Java
                 // policies keep the ties the links give them, as before.
-                if (policy.callResults()) addEdge(formalSlot, slot);
+                if (policy.callResults()) graph.addEdge(formalSlot, slot);
                 if (intoReceiver) {
                     if (consumes) {
-                        if (policy.callResults()) addEdge(receiverSlot, slot);
+                        if (policy.callResults()) graph.addEdge(receiverSlot, slot);
                     } else {
-                        addEdge(slot, receiverSlot);
+                        graph.addEdge(slot, receiverSlot);
                         if (policy.assertContentWrites() && !receivesOnly) {
-                            invariantTies.add(new Object[]{receiverSlot, slot, formalSlot});
+                            graph.invariantTies.add(new Object[]{receiverSlot, slot, formalSlot});
                         }
                     }
                 } else {
-                    if (policy.callResults()) addEdge(receiverSlot, slot);
+                    if (policy.callResults()) graph.addEdge(receiverSlot, slot);
                     if (policy.assertContentWrites() && !receivesOnly) {
-                        invariantTies.add(new Object[]{slot, receiverSlot, formalSlot});
+                        graph.invariantTies.add(new Object[]{slot, receiverSlot, formalSlot});
                     }
                 }
             } else if (!f.parameters().isEmpty() && c.typeParameter() == null && c.arrays() == 0) {
@@ -5444,7 +5225,7 @@ public final class NullabilityPass {
                                        List<Expression> arguments) {
         if (!(call instanceof MethodCall mc) || callee.typeInfo().typeParameters().isEmpty()) return;
         Object receiver = receiverNode(mi, scope, mc);
-        ParameterizedType receiverType = receiver == null ? null : typeOf(receiver);
+        ParameterizedType receiverType = receiver == null ? null : graph.typeOf(receiver);
         if (receiverType == null) return;
         List<ParameterInfo> parameters = callee.parameters();
         for (int i = 0; i < arguments.size() && i < parameters.size(); i++) {
@@ -5452,7 +5233,7 @@ public final class NullabilityPass {
             if (formal.arrays() > 0 || formal.parameters().isEmpty()) continue;
             Object argument = argumentNode(mi, scope, arguments.get(i));
             if (argument == null) continue;
-            ParameterizedType type = typeOf(argument);
+            ParameterizedType type = graph.typeOf(argument);
             instantiatedSlots(argument, type != null ? type : arguments.get(i).parameterizedType(), parameters.get(i),
                     formal, receiver, receiverType, callee.typeInfo(), true);
         }
@@ -5934,7 +5715,7 @@ public final class NullabilityPass {
         if (policy.callResults() && readScope != null) {
             for (Expression source : passedThrough(mc)) {
                 Object node = argumentNode(readScope.mi(), readScope.scope(), source);
-                if (node != null) flows.add(List.of(node, target)); // Kotlin infers one type: content slots tied
+                if (node != null) graph.flows.add(List.of(node, target)); // Kotlin infers one type: content slots tied
             }
             if (readScope != null) {
                 callTargets.computeIfAbsent(mc, _ -> new ArrayList<>())
@@ -5945,18 +5726,18 @@ public final class NullabilityPass {
                 // returns the call's result (jenkins CrumbIssuer.kt:60, 2026-10-21). Gate NOLAMBDATYPEVARRESULTS.
                 if (!LAMBDA_TYPE_VARIABLE_RESULTS_OFF.get() && NonNullFacts.unwrap(source) instanceof Lambda lambda
                     && lambda.methodInfo() != null && lambdaResultsPosition(lambda, k)) {
-                    addEdge(lambda.methodInfo(), target);
+                    graph.addEdge(lambda.methodInfo(), target);
                     return;
                 }
                 Object node = argumentNode(readScope.mi(), readScope.scope(), source);
-                if (node != null) flows.add(List.of(new Arg(node, k), target));
+                if (node != null) graph.flows.add(List.of(new Arg(node, k), target));
                 // Kotlin: from a '?' argument the result is the star projection's value, Any? ('Object v =
                 // getUninterruptibly(future)' on a ListenableFuture<?>: guava AbstractFuture.getFutureValue then tests
                 // 'v == null', AbstractFuture.kt:346, 2026-10-18). Gate NOSTARRESULTS.
-                ParameterizedType st = node == null ? null : typeOf(node);
+                ParameterizedType st = node == null ? null : graph.typeOf(node);
                 if (!STAR_RESULTS_OFF.get() && st != null && k < st.parameters().size()
                     && st.parameters().get(k).wildcard() != null) {
-                    addEdge(new Arg(node, k), target);
+                    graph.addEdge(new Arg(node, k), target);
                 }
             });
             arrayResultElements(target, mc);
@@ -5977,12 +5758,12 @@ public final class NullabilityPass {
                         Object node = argumentNode(readScope.mi(), readScope.scope(), source);
                         if (node == null) return;
                         Arg slot = new Arg(target, k);
-                        addEdge(new Content(node), slot);
+                        graph.addEdge(new Content(node), slot);
                         // a local array of the method's own type variable: its null is the slot's, not an
                         // instantiation's. Not a parameter's array, whose elements are each caller's: through
                         // 'ImmutableSet.copyOf(E[])' and 'Iterators.forArray(T...)' the tests' nulls had made
                         // their results ImmutableSet<E?> and UnmodifiableIterator<T?> (guava 2026-10-17)
-                        ParameterizedType type = typeOf(node);
+                        ParameterizedType type = graph.typeOf(node);
                         if (node instanceof Local && type != null && type.arrays() == 1
                             && isTypeVariable(type.copyWithOneFewerArrays())) {
                             typeVariableElementSlots.add(slot);
@@ -6000,18 +5781,18 @@ public final class NullabilityPass {
             // type variable ('<T> T[] toArray(T[] a)'), which would tie the arrays of all its callers
             if (concreteArguments(rt) || rt.arrays() > 0 && !isMethodTypeVariable(rt.componentType())
                 || policy.callResults() && readScope != null && sameInstantiation(mc, readScope.mi())) {
-                flows.add(List.of(callee, target));
+                graph.flows.add(List.of(callee, target));
             } else if (policy.callResults() && !GENERIC_RESULT_SLOTS_OFF.get() && rt.arrays() == 0) {
                 // Kotlin: a slot whose argument is not a type variable has its own nullability whatever the
                 // instantiation: 'Map<Descriptor<T>, T> toMap(…)' with a nullable key makes 'return toMap(properties)'
                 // a Map<Descriptor<UserProperty>?, UserProperty> (jenkins User.kt:143, 2026-10-21). Gate
                 // NOGENERICRESULTSLOTS.
-                ParameterizedType tt = typeOf(target);
+                ParameterizedType tt = graph.typeOf(target);
                 for (int j = 0; j < rt.parameters().size(); j++) {
                     ParameterizedType a = rt.parameters().get(j);
                     if (a.typeParameter() == null && a.wildcard() == null && tt != null && tt.arrays() == 0
                         && j < tt.parameters().size()) {
-                        addEdge(new Arg(callee, j), new Arg(target, j));
+                        graph.addEdge(new Arg(callee, j), new Arg(target, j));
                     }
                 }
             }
@@ -6023,17 +5804,17 @@ public final class NullabilityPass {
                                   || callee.parameters().stream().noneMatch(pi ->
                                          rt.typeParameter().equals(pi.parameterizedType().typeParameter())));
             if (policy.callResults() && (!isTypeVariable(rt) || ownNull && !parametricNullness(callee))) {
-                if (GAP9_OFF.get() || callee.parameters().isEmpty()) addEdge(callee, target);
-                else gatedSites.add(new GatedSite(callee, target, callId(mc, callee)));
+                if (GAP9_OFF.get() || callee.parameters().isEmpty()) graph.addEdge(callee, target);
+                else graph.gatedSites.add(new GatedSite(callee, target, graph.callId(mc, callee)));
             }
             // a result typed with the callee's class type variables inside a generic type ('FastFixedSet<E>
             // spawnEmptySet()'): those positions are the receiver's slots (instantiatedSlots)
             if (readScope != null && !callee.isStatic() && rt.arrays() == 0 && !rt.parameters().isEmpty()
                 && !concreteArguments(rt)) {
                 Object receiver = receiverNode(readScope.mi(), readScope.scope(), mc);
-                ParameterizedType receiverType = receiver == null ? null : typeOf(receiver);
+                ParameterizedType receiverType = receiver == null ? null : graph.typeOf(receiver);
                 if (receiverType != null) {
-                    instantiatedSlots(target, typeOf(target), callee, rt, receiver, receiverType, callee.typeInfo(),
+                    instantiatedSlots(target, graph.typeOf(target), callee, rt, receiver, receiverType, callee.typeInfo(),
                             false);
                 }
             }
@@ -6041,7 +5822,7 @@ public final class NullabilityPass {
         if (readScope != null) {
             // a stream's terminal operation: its elements are values of the result's slot
             streamTerminal(readScope.mi(), readScope.scope(), unwrapped)
-                    .forEach((j, nodes) -> nodes.forEach(n -> addEdge(n, new Arg(target, j))));
+                    .forEach((j, nodes) -> nodes.forEach(n -> graph.addEdge(n, new Arg(target, j))));
         }
         // Kotlin: 'collect(LinkedHashMap::new, (map, plugin) -> map.put(plugin, url), Map::putAll)' returns the
         // container its accumulator fills: the lambda's first parameter is the result, slots and all (jenkins
@@ -6050,15 +5831,15 @@ public final class NullabilityPass {
             && mc.parameterExpressions().size() == 3
             && NonNullFacts.unwrap(mc.parameterExpressions().get(1)) instanceof Lambda accumulator
             && accumulator.methodInfo() != null && !accumulator.methodInfo().parameters().isEmpty()) {
-            flows.add(List.of(accumulator.methodInfo().parameters().getFirst(), target));
+            graph.flows.add(List.of(accumulator.methodInfo().parameters().getFirst(), target));
         }
         if (readScope != null && argumentNode(readScope.mi(), readScope.scope(), unwrapped) instanceof Arg slot) {
             if (!analysed.contains(callee)) {
-                flows.add(List.of(slot, target)); // 'x = map.get(k)': x is the map's value, its slots are the value's
+                graph.flows.add(List.of(slot, target)); // 'x = map.get(k)': x is the map's value, its slots are the value's
             }
             // Kotlin: the value read is the receiver's slot ('block = blocks.getWithKey(j)', 'st = stats.get(0)' on a
             // VBStyleCollection<Statement?, ...>): a nullable slot gives a nullable value
-            if (policy.callResults()) addEdge(slot, target);
+            if (policy.callResults()) graph.addEdge(slot, target);
         }
         // 'x = map.get(k)' with k known present (NonNullFacts, CodeLaser/maddi-mod#22 gap 1): not the absent key's null; what
         // the map holds for k still flows through its value slot above
@@ -6143,15 +5924,15 @@ public final class NullabilityPass {
     private boolean passedOnUnchecked(ParameterInfo pi) {
         MethodInfo method = pi.methodInfo();
         Set<Object> seen = new HashSet<>();
-        Deque<Object> todo = new ArrayDeque<>(successors.getOrDefault(pi, Set.of()));
+        Deque<Object> todo = new ArrayDeque<>(graph.successors.getOrDefault(pi, Set.of()));
         while (!todo.isEmpty() && seen.size() < 2000) {
             Object n = todo.removeFirst();
             if (!seen.add(n)) continue;
             if (n.equals(method)) return true;
-            ParameterizedType type = typeOf(n);
+            ParameterizedType type = graph.typeOf(n);
             if (type != null && isClassTypeVariable(type)) return true;
             if (n instanceof Local || n instanceof ParameterInfo p && p.methodInfo() == method) {
-                todo.addAll(successors.getOrDefault(n, Set.of()));
+                todo.addAll(graph.successors.getOrDefault(n, Set.of()));
             }
         }
         return false;
@@ -6164,10 +5945,10 @@ public final class NullabilityPass {
         } else if (argument instanceof VariableExpression ve) {
             if (facts.nonNullWhenCalled(mc, ve.variable())) return;
             Object node = node(ct.mi(), ct.scope(), ve.variable());
-            if (node != null) addEdge(node, target);
+            if (node != null) graph.addEdge(node, target);
         } else if (argument instanceof MethodCall inner && inner.methodInfo() != null) {
             Object node = argumentNode(ct.mi(), ct.scope(), inner);
-            if (node != null) addEdge(node, target);
+            if (node != null) graph.addEdge(node, target);
             String lib = libraryNullableCall(inner);
             if (lib != null) seedIndirect(target, "assigned " + lib);
         }
@@ -6284,7 +6065,7 @@ public final class NullabilityPass {
             if (formal.arrays() != 1 || !rt.typeParameter().equals(formal.typeParameter())) continue;
             if (parameters.get(i).isVarArgs() && !passesTheArray(arguments, parameters, i)) continue;
             Object node = argumentNode(readScope.mi(), readScope.scope(), arguments.get(i));
-            if (node != null) addEdge(new Content(node), new Content(target));
+            if (node != null) graph.addEdge(new Content(node), new Content(target));
         }
     }
 
@@ -6330,7 +6111,7 @@ public final class NullabilityPass {
         MethodInfo callee = mc.methodInfo();
         if (analysed.contains(callee)) return;
         ParameterizedType returnType = callee.returnType();
-        ParameterizedType targetType = typeOf(target);
+        ParameterizedType targetType = graph.typeOf(target);
         if (returnType.arrays() > 0 || returnType.parameters().isEmpty() || targetType == null
             || targetType.arrays() > 0 || targetType.parameters().size() != returnType.parameters().size()) {
             return;
@@ -6352,7 +6133,7 @@ public final class NullabilityPass {
                 if (rejectsNull(callee)) {
                     seedCreated(slot, argument, mi); // the elements of an array stored as one ('new Integer[]{null}')
                     Object source = readScope == null ? null : argumentNode(readScope.mi(), readScope.scope(), argument);
-                    if (source != null) flows.add(List.of(source, slot)); // its content slots still are the slot's
+                    if (source != null) graph.flows.add(List.of(source, slot)); // its content slots still are the slot's
                     continue;
                 }
                 if (NonNullFacts.unwrap(argument) instanceof NullConstant) {
@@ -6366,9 +6147,9 @@ public final class NullabilityPass {
                     // ? List.of() : List.of(textSegment)', langchain4j ListeningEmbeddingModel.embed)
                     if (!(NonNullFacts.unwrap(argument) instanceof VariableExpression ve
                           && facts.nonNullAt(mc, ve.variable()))) {
-                        addEdge(source, slot);
+                        graph.addEdge(source, slot);
                     }
-                    flows.add(List.of(source, slot)); // the same object: its content slots are the slot's
+                    graph.flows.add(List.of(source, slot)); // the same object: its content slots are the slot's
                 }
             }
         }
@@ -6468,20 +6249,6 @@ public final class NullabilityPass {
 
     // gate NOKEYEDMAPS: a map field's values stay one slot for all keys (A/B)
     private static final Switches.Gate KEYED_MAPS_OFF = Switches.gate("NOKEYEDMAPS");
-
-    /**
-     * The values a keyed map field holds under one constant key: nacos's {@code MapperContext.whereParamMap}, a
-     * {@code Map<String, Object>} written and read through {@code putWhereParameter(KEY, value)} and
-     * {@code getWhereParameter(KEY)}, where a null {@code dataId} put under one key made every key's value nullable.
-     * The key is the constant's value ({@link #keyOf}); a null key stands for the values put under a key not known,
-     * which every keyed node receives. A keyed node flows into the field's value slot, which keeps every value.
-     */
-    public record Keyed(Arg slot, Object key) {
-        @Override
-        public String toString() {
-            return Report.label(this);
-        }
-    }
 
     /** An accessor of a keyed map: {@code get(key)} returning the value, or {@code put(key, value)}. */
     record KeyedAccessor(FieldInfo field, int keyIndex, int valueIndex) {
@@ -6714,16 +6481,16 @@ public final class NullabilityPass {
             for (Object key : keys) {
                 if (key == NO_KEY) continue;
                 Keyed k = new Keyed(slot, key);
-                addEdge(unknown, k);
-                addEdge(k, slot);
+                graph.addEdge(unknown, k);
+                graph.addEdge(k, slot);
             }
         });
         if (policy.world() == World.CLOSED) return;
         keyedPutters.forEach((mi, putter) -> {
             if (externallyCallable(mi)) {
-                addEdge(mi.parameters().get(putter.valueIndex()), new Keyed(keyedSlots.get(putter.field()), null));
+                graph.addEdge(mi.parameters().get(putter.valueIndex()), new Keyed(keyedSlots.get(putter.field()), null));
                 for (Object key : keysUsed.getOrDefault(keyedSlots.get(putter.field()), Set.of())) {
-                    if (key != NO_KEY) addEdge(new Keyed(keyedSlots.get(putter.field()), null),
+                    if (key != NO_KEY) graph.addEdge(new Keyed(keyedSlots.get(putter.field()), null),
                             new Keyed(keyedSlots.get(putter.field()), key));
                 }
             }
@@ -6755,9 +6522,9 @@ public final class NullabilityPass {
                 Object source = node(mi, scope, ve.variable());
                 if (source == null) continue;
                 if (facts.nonNullWhenCalled(cc, ve.variable()) || facts.nonNullAt(statement, ve.variable())) {
-                    flows.add(List.of(source, pi));
+                    graph.flows.add(List.of(source, pi));
                 } else {
-                    addEdge(source, pi);
+                    graph.addEdge(source, pi);
                 }
             }
         }
@@ -6780,13 +6547,6 @@ public final class NullabilityPass {
      generic superclass, whose slots flow into what the creation is assigned to (nacos RequestMeta.java:103,
      ConnectionMeta.java:164, 2026-10-19: a HashMap<String, String> given nulls). Gate NOANONYMOUSTHIS.
      */
-    public record AnonymousThis(TypeInfo type) {
-        @Override
-        public String toString() {
-            return "this of " + type.fullyQualifiedName();
-        }
-    }
-
     private static final Switches.Gate ANONYMOUS_THIS_OFF = Switches.gate("NOANONYMOUSTHIS");
 
     private AnonymousThis anonymousThis(Variable v) {
@@ -6813,7 +6573,7 @@ public final class NullabilityPass {
         };
         if (target == null) return;
         AnonymousThis at = new AnonymousThis(anonymous);
-        for (int i = 0; i < anonymous.parentClass().parameters().size(); i++) addEdge(new Arg(at, i), new Arg(target, i));
+        for (int i = 0; i < anonymous.parentClass().parameters().size(); i++) graph.addEdge(new Arg(at, i), new Arg(target, i));
     }
 
     /*
@@ -6824,29 +6584,12 @@ public final class NullabilityPass {
      call in between ('header.entrySet()') is a node of its own, typed by its inferred type (nacos
      ServiceManager.java:92, Header.java:85, 2026-10-19). Gate NOLIBRARYVIEWS.
      */
-    public record CallResult(MethodCall call) {
-        @Override
-        public boolean equals(Object o) {
-            return o instanceof CallResult(MethodCall c) && c == call;
-        }
-
-        @Override
-        public int hashCode() {
-            return System.identityHashCode(call);
-        }
-
-        @Override
-        public String toString() {
-            return "result of " + call;
-        }
-    }
-
     private static final Switches.Gate LIBRARY_VIEWS_OFF = Switches.gate("NOLIBRARYVIEWS");
 
     private void libraryView(Object target, MethodCall mc, int depth) {
         if (LIBRARY_VIEWS_OFF.get() || readScope == null || depth > 3) return;
         MethodInfo callee = mc.methodInfo();
-        ParameterizedType tt = typeOf(target);
+        ParameterizedType tt = graph.typeOf(target);
         if (callee == null || analysed.contains(callee) || callee.isStatic() || mc.object() == null || tt == null
             || tt.arrays() > 0 || tt.parameters().isEmpty() || tt.typeInfo() == null) return;
         ParameterizedType rt = callee.returnType();
@@ -6863,7 +6606,7 @@ public final class NullabilityPass {
         } else {
             receiver = receiverNode(readScope.mi(), readScope.scope(), mc);
         }
-        ParameterizedType receiverType = receiver == null ? null : typeOf(receiver);
+        ParameterizedType receiverType = receiver == null ? null : graph.typeOf(receiver);
         if (receiverType == null || receiverType.arrays() > 0) return;
         for (int j = 0; j < lifted.parameters().size(); j++) {
             viewSlot(new Arg(target, j), lifted.parameters().get(j), receiver, receiverType, callee.typeInfo());
@@ -6879,8 +6622,8 @@ public final class NullabilityPass {
             int index = slotIndex(receiverType, calleeClass, tp.getIndex());
             if (index < 0) return;
             Arg own = new Arg(receiver, index);
-            addEdge(own, slot);
-            addEdge(slot, own);
+            graph.addEdge(own, slot);
+            graph.addEdge(slot, own);
             return;
         }
         for (int m = 0; m < formal.parameters().size(); m++) {
@@ -6904,8 +6647,8 @@ public final class NullabilityPass {
         receiverSlots(mi, scope, statement, call, callee, list, arguments);
         instantiatedArguments(mi, scope, call, callee, arguments);
         if (call instanceof MethodCall && analysed.contains(callee) && !callee.returnType().isVoid()) {
-            int id = callId(call, callee);
-            argumentsSeen.add(id);
+            int id = graph.callId(call, callee);
+            graph.argumentsSeen.add(id);
             for (int i = 0; i < arguments.size() && i < parameters.size(); i++) {
                 if (parameters.get(i).isVarArgs()) break;
                 siteArgument(mi, scope, statement, call, list, arguments, i, new SiteArg(id, i));
@@ -6921,7 +6664,7 @@ public final class NullabilityPass {
             if (parameter.isVarArgs() && policy.callResults() && !VARARG_COPIES_OFF.get()) {
                 // an array spread into varargs ('*array'): the callee holds a copy (varargsCopy)
                 Object source = argumentNode(mi, scope, arguments.get(i));
-                if (source != null) varargsPasses.add(List.of(source, parameter));
+                if (source != null) graph.varargsPasses.add(List.of(source, parameter));
             }
             if (preconditions.contains(parameter)) {
                 preconditionArgument(mi, scope, statement, call, parameter, arguments.get(i));
@@ -6980,7 +6723,7 @@ public final class NullabilityPass {
                                LinkComputer.ListOfLinks list, List<Expression> arguments) {
         Object receiver = slotReceiver(mi, scope, call, callee);
         if (receiver == null) return;
-        ParameterizedType type = typeOf(receiver);
+        ParameterizedType type = graph.typeOf(receiver);
         List<ParameterInfo> parameters = callee.parameters();
         for (int i = 0; i < arguments.size() && i < parameters.size(); i++) {
             ParameterizedType pt = parameters.get(i).parameterizedType();
@@ -7071,7 +6814,7 @@ public final class NullabilityPass {
             && !familyConsumer(callee)) {
             return null;
         }
-        ParameterizedType type = receiver == null ? null : typeOf(receiver);
+        ParameterizedType type = receiver == null ? null : graph.typeOf(receiver);
         if (type == null || type.arrays() > 0 || callee.typeInfo().typeParameters().isEmpty()) return null;
         boolean anySlot = false;
         for (int i = 0; i < callee.typeInfo().typeParameters().size(); i++) {
@@ -7138,16 +6881,6 @@ public final class NullabilityPass {
         return targets;
     }
 
-    private int callId(Expression call, MethodInfo callee) {
-        Integer id = callIds.get(call);
-        if (id == null) {
-            id = callIds.size();
-            callIds.put(call, id);
-            callees.put(id, callee);
-        }
-        return id;
-    }
-
     /*
      Gap 9: the null-carrying half of argument(), into this call's own SiteArg instead of the shared parameter (no
      slots, no content: only whether the argument itself may be null here).
@@ -7171,10 +6904,10 @@ public final class NullabilityPass {
         }
         if (unwrapped instanceof MethodCall amc && amc.methodInfo() != null && analysed.contains(amc.methodInfo())
             && !amc.methodInfo().isConstructor() && !amc.methodInfo().returnType().isVoid()) {
-            addEdge(amc.methodInfo(), site); // conservative: the nested call's result, ungated
+            graph.addEdge(amc.methodInfo(), site); // conservative: the nested call's result, ungated
         }
         if (list == null || i >= list.list().size()) {
-            if (!(unwrapped instanceof MethodCall)) addEdge(argumentNode(mi, scope, argument), site);
+            if (!(unwrapped instanceof MethodCall)) graph.addEdge(argumentNode(mi, scope, argument), site);
             return;
         }
         Links links = list.list().get(i);
@@ -7185,7 +6918,7 @@ public final class NullabilityPass {
             return;
         }
         Object node = node(mi, scope, primary);
-        if (node != null) addEdge(node, site);
+        if (node != null) graph.addEdge(node, site);
         sourcesOf(mi, scope, primary, links, site);
     }
 
@@ -7204,7 +6937,7 @@ public final class NullabilityPass {
         } else if (!LAMBDA_SLOTS_OFF.get() && policy.callResults() && pi instanceof Arg slot) {
             // a receiver's slot: 'chain.add(input -> states.get(current))' on a List<Function<Provider<S>, S>> makes
             // it a List<Function<Provider<S>, S?>> (jenkins InstallUtil.kt:48/60, 2026-10-20). Gate NOLAMBDASLOTS.
-            formal = typeOf(slot);
+            formal = graph.typeOf(slot);
             if (formal == null) return;
         } else {
             return;
@@ -7215,7 +6948,7 @@ public final class NullabilityPass {
         int j = formal.typeInfo().typeParameters().indexOf(sam.returnType().typeParameter());
         // not into a type variable ('<T> T withRetry(Callable<T> action)'): each call instantiates it anew
         if (j >= 0 && j < formal.parameters().size() && formal.parameters().get(j).typeParameter() == null) {
-            addEdge(body, new Arg(pi, j));
+            graph.addEdge(body, new Arg(pi, j));
         }
     }
 
@@ -7235,7 +6968,7 @@ public final class NullabilityPass {
         if (pi instanceof ParameterInfo parameter && analysed.contains(parameter.methodInfo())) {
             formal = parameter.parameterizedType();
         } else if (pi instanceof Arg slot) {
-            formal = typeOf(slot);
+            formal = graph.typeOf(slot);
             if (formal == null) return;
         } else {
             return;
@@ -7245,7 +6978,7 @@ public final class NullabilityPass {
         if (sam == null || !isClassTypeVariable(sam.returnType())) return;
         int j = formal.typeInfo().typeParameters().indexOf(sam.returnType().typeParameter());
         if (j >= 0 && j < formal.parameters().size() && formal.parameters().get(j).typeParameter() == null) {
-            addEdge(method, new Arg(pi, j));
+            graph.addEdge(method, new Arg(pi, j));
         }
     }
 
@@ -7280,10 +7013,10 @@ public final class NullabilityPass {
             return;
         }
         Object receiver = receiverNode(mi, scope, mc);
-        ParameterizedType receiverType = receiver == null ? null : typeOf(receiver);
+        ParameterizedType receiverType = receiver == null ? null : graph.typeOf(receiver);
         if (receiverType == null || receiverType.arrays() > 0) return;
         int index = slotIndex(receiverType, callee.typeInfo(), tp.getIndex());
-        if (index >= 0) addEdge(lambda.methodInfo(), new Arg(receiver, index));
+        if (index >= 0) graph.addEdge(lambda.methodInfo(), new Arg(receiver, index));
     }
 
     private static final Switches.Gate RECEIVER_LAMBDAS_OFF = Switches.gate("NORECEIVERLAMBDAS");
@@ -7350,7 +7083,7 @@ public final class NullabilityPass {
             // a receiver's slot, as in lambdaResult: 'chain.add(next -> filter.getNextInstallState(current, next))'
             // on a List<Function<Provider<S?>, S?>> makes 'next' a Provider<S?>, which it passes on (jenkins
             // InstallUtil.kt:44, 2026-10-20). Gate NOLAMBDAPARAMETERSLOTS.
-            formal = typeOf(slot);
+            formal = graph.typeOf(slot);
             if (formal == null) return;
         } else {
             return;
@@ -7366,10 +7099,10 @@ public final class NullabilityPass {
             int j = formal.typeInfo().typeParameters().indexOf(t.typeParameter());
             if (j >= 0 && j < formal.parameters().size() && formal.parameters().get(j).typeParameter() == null) {
                 Object lambdaParameter = body.parameters().get(samParameter.index());
-                addEdge(new Arg(pi, j), lambdaParameter);
+                graph.addEdge(new Arg(pi, j), lambdaParameter);
                 // a generic argument ('Provider<S>'): the lambda's parameter is that object, its slots tied both ways
                 if (pi instanceof Arg && !formal.parameters().get(j).parameters().isEmpty()) {
-                    flows.add(List.of(new Arg(pi, j), lambdaParameter));
+                    graph.flows.add(List.of(new Arg(pi, j), lambdaParameter));
                 }
             }
         }
@@ -7430,7 +7163,7 @@ public final class NullabilityPass {
             && (call != null && facts.nonNullWhenCalled(call, ve.variable())
                 || facts.nonNullAt(statement, ve.variable()))) {
             Object node = node(mi, scope, ve.variable());
-            if (node != null) flows.add(List.of(node, pi)); // an array known non-null: its elements still flow
+            if (node != null) graph.flows.add(List.of(node, pi)); // an array known non-null: its elements still flow
             return;
         }
         seedCreated(pi, arguments.get(i), mi);
@@ -7452,20 +7185,20 @@ public final class NullabilityPass {
         if (unwrappedArgument instanceof MethodCall amc && amc.methodInfo() != null) {
             Object source = argumentNode(mi, scope, unwrappedArgument);
             if (source instanceof Arg || source instanceof MethodInfo m && concreteArguments(m.returnType())) {
-                flows.add(List.of(source, pi)); // the same object: content slots tied (coupleContent)
+                graph.flows.add(List.of(source, pi)); // the same object: content slots tied (coupleContent)
             }
             // Kotlin: a library view ('main(args.subList(1, args.size()))') is the receiver's data: the parameter's
             // slots are the receiver's (jenkins CLIAction.kt:232, 2026-10-21). Gate NOVIEWMETHODARGUMENTS.
             if (source == null && policy.callResults() && !VIEW_METHOD_ARGUMENTS_OFF.get() && pi instanceof ParameterInfo) {
                 Object view = viewArgument(mi, scope, unwrappedArgument);
-                if (view != null) flows.add(List.of(view, pi));
+                if (view != null) graph.flows.add(List.of(view, pi));
             }
             // Kotlin: a slot read passed on ('new Pair(cv.get(i), i)') gives the parameter the slot's value, as
             // callResult does for an assignment; the Java policies leave this to the links
-            if (policy.callResults() && source instanceof Arg) addEdge(source, pi);
+            if (policy.callResults() && source instanceof Arg) graph.addEdge(source, pi);
             // a stream's terminal operation as the argument: its elements are values of the parameter's slot
             streamTerminal(mi, scope, unwrappedArgument)
-                    .forEach((j, nodes) -> nodes.forEach(n -> addEdge(n, new Arg(pi, j))));
+                    .forEach((j, nodes) -> nodes.forEach(n -> graph.addEdge(n, new Arg(pi, j))));
         }
         String lib = nullableLibraryCall(arguments.get(i));
         if (lib != null) {
@@ -7481,7 +7214,7 @@ public final class NullabilityPass {
                 if (unwrappedAlternative instanceof NullConstant) {
                     seed(pi, "null argument in " + mi.fullyQualifiedName(), mi.typeInfo());
                 } else if (!(unwrappedAlternative instanceof MethodCall)) {
-                    addEdge(argumentNode(mi, scope, alternative), pi);
+                    graph.addEdge(argumentNode(mi, scope, alternative), pi);
                     initializerElements(mi, scope, unwrappedAlternative, pi);
                 } else {
                     callResultArgument(unwrappedAlternative, pi);
@@ -7500,7 +7233,7 @@ public final class NullabilityPass {
             return;
         }
         Object node = node(mi, scope, primary);
-        if (node != null) addEdge(node, pi);
+        if (node != null) graph.addEdge(node, pi);
         // an intermediate (or a local assigned in this very statement): its sources, in the argument's own links
         sourcesOf(mi, scope, primary, links, pi);
     }
@@ -7519,7 +7252,7 @@ public final class NullabilityPass {
         for (Expression element : initializer.expressions()) {
             for (Expression alternative : alternatives(element)) {
                 if (!(NonNullFacts.unwrap(alternative) instanceof NullConstant)) {
-                    addEdge(argumentNode(mi, scope, alternative), new Content(pi));
+                    graph.addEdge(argumentNode(mi, scope, alternative), new Content(pi));
                 }
             }
         }
@@ -7544,7 +7277,7 @@ public final class NullabilityPass {
                           && (!rt.typeParameter().isMethodTypeParameter()
                               || callee.parameters().stream().noneMatch(p ->
                                      rt.typeParameter().equals(p.parameterizedType().typeParameter())));
-        if (!isTypeVariable(rt) || ownNull) addEdge(callee, pi);
+        if (!isTypeVariable(rt) || ownNull) graph.addEdge(callee, pi);
     }
 
     private void sourcesOf(MethodInfo mi, Scope scope, Variable primary, Links links, Object pi) {
@@ -7555,7 +7288,7 @@ public final class NullabilityPass {
                 nullMarker(mi, link.to(), pi,
                         "null argument (via " + primary.simpleName() + ") in " + mi.fullyQualifiedName());
             } else {
-                addEdge(node(mi, scope, link.to()), pi);
+                graph.addEdge(node(mi, scope, link.to()), pi);
             }
         }
     }
@@ -7605,7 +7338,7 @@ public final class NullabilityPass {
                    && !mc.methodInfo().returnType().isVoid()) {
             source = mc.methodInfo();
         }
-        if (source != null && source != fi) flows.add(List.of(source, fi));
+        if (source != null && source != fi) graph.flows.add(List.of(source, fi));
     }
 
     private static final Switches.Gate FIELD_INIT_CONTENT_OFF = Switches.gate("NOFIELDINITCONTENT");

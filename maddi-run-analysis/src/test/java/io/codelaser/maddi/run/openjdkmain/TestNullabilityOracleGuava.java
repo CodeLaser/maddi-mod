@@ -17,6 +17,8 @@ import io.codelaser.maddi.inspection.api.parser.Summary;
 import io.codelaser.maddi.inspection.openjdk.JavaInspectorImpl;
 import io.codelaser.maddi.inspection.resource.InputConfigurationImpl;
 import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
+import io.codelaser.maddi.modification.analyzer.nullability.Arg;
+import io.codelaser.maddi.modification.analyzer.nullability.Content;
 import io.codelaser.maddi.modification.analyzer.nullability.NullabilityComparison;
 import io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass;
 import io.codelaser.maddi.run.analysis.AnalysisEngineImpl;
@@ -278,7 +280,7 @@ public class TestNullabilityOracleGuava {
             // agreement has no row), for an A/B of what carried a null before a change
             if (EXPLAIN.stream().anyMatch(info.fullyQualifiedName()::contains)) {
                 disagreements.add("EXPLAIN\t" + kind + "\t" + info.fullyQualifiedName() + "\t" + report.explain(info)
-                                  + "\t|\t" + report.explain(new NullabilityPass.Content(info)));
+                                  + "\t|\t" + report.explain(new Content(info)));
             }
             int unsafeBefore = comparison.count(Outcome.UNSAFE);
             int noiseBefore = comparison.count(Outcome.NOISE);
@@ -299,12 +301,12 @@ public class TestNullabilityOracleGuava {
                             verdict.parameters().get(i).nullable());
                     if (o == Outcome.UNSAFE || o == Outcome.NOISE) {
                         disagreements.add(o + "\t" + kind + "\targument" + i + "\t" + info.fullyQualifiedName()
-                                          + "\t" + report.explain(new NullabilityPass.Arg(info, i)));
+                                          + "\t" + report.explain(new Arg(info, i)));
                     }
                 }
                 disagreements.add((unsafe ? "UNSAFE" : "NOISE") + "\t" + kind + "\t" + shape
                                   + (element ? "/element" : "") + "\t" + info.fullyQualifiedName() + "\t"
-                                  + report.explain(element ? new NullabilityPass.Content(info) : info));
+                                  + report.explain(element ? new Content(info) : info));
             }
         });
         LOGGER.info("INFERENCE ({} policy), {} declarations without a verdict\n{}", name, missing[0],
