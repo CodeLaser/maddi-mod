@@ -451,6 +451,8 @@ public final class NullabilityPass {
     }
 
     private final Policy policy;
+    // NULLWHY: every print of the pass goes through it
+    private final Trace trace;
     // analysed implementations per overridden method (any overridden method, also a library one)
     private final Map<MethodInfo, List<MethodInfo>> implementations = new HashMap<>();
     // each null literal of an analysed body, by identity: a NullConstant equals every other, a Source only compares
@@ -537,7 +539,6 @@ public final class NullabilityPass {
     private Element currentSite;
     private MethodInfo currentSiteMethod;
     private static final int CULPRIT_STEPS = 12;
-    private static final int CULPRIT_TEXT = 60;
     private final Map<Object, String> seedOrigin = new LinkedHashMap<>();
     private final Set<MethodInfo> degraded = new LinkedHashSet<>();
     // the methods of this analysis: their own NULLABILITY_* may be this pass's output of an earlier run, so only the
@@ -548,48 +549,11 @@ public final class NullabilityPass {
         @Override
         public boolean add(Object o) {
             boolean added = super.add(o);
-            if (added && why(o)) whyLog("contract", o, null);
+            if (added && trace.why(o)) trace.log("contract", o, null);
             return added;
         }
     };
 
-    // NULLWHY=<substring>[|<substring>…]: why a node matching one is (not) nullable: its seeds, the non-null contracts put on it
-    // (with the code that did), and its final state. A debugging aid, as NULLMARKEDDEBUG.
-    private static final String NULL_WHY = System.getenv("NULLWHY");
-
-    private static boolean why(Object node) {
-        if (NULL_WHY == null || node == null) return false;
-        String name = whyName(node);
-        for (String part : NULL_WHY.split("\\|")) if (name.contains(part)) return true;
-        return false;
-    }
-
-    private static String whyName(Object node) {
-        return node instanceof Info info ? info.fullyQualifiedName() : String.valueOf(node);
-    }
-
-    // ' chain=' and the nodes the closure reached this one through, back to the seed and its origin
-    private String whyChain(Map<Object, Object> cause, Object node) {
-        StringBuilder sb = new StringBuilder(" chain=");
-        Object n = node;
-        Set<Object> seen = new HashSet<>();
-        while (cause.containsKey(n) && seen.add(n)) {
-            n = cause.get(n);
-            sb.append(" <- ").append(Report.label(n));
-        }
-        String origin = seedOrigin.get(n);
-        return origin == null ? sb.toString() : sb.append(" <- ").append(origin).toString();
-    }
-
-    private static void whyLog(String what, Object node, String detail) {
-        StringBuilder sb = new StringBuilder("NULLWHY ").append(what).append(' ').append(whyName(node));
-        if (detail != null) sb.append(" :: ").append(detail);
-        StackTraceElement[] trace = Thread.currentThread().getStackTrace();
-        for (int i = 3; i < Math.min(trace.length, 7); i++) {
-            sb.append("\n    at ").append(trace[i].getMethodName()).append(':').append(trace[i].getLineNumber());
-        }
-        System.err.println(sb);
-    }
     // (method, null marker): a return statement guarded the marker's link into the method's return (linksOf)
     private final Set<List<Object>> guardedReturnMarkers = new HashSet<>();
     // the same for a local: (method, marker, local) whose every assignment carrying the marker was guarded
@@ -630,13 +594,14 @@ public final class NullabilityPass {
     private final Map<MethodInfo, Map<String, List<Local>>> declaredByName = new HashMap<>();
 
     public NullabilityPass(Policy policy) {
-        this(policy, Set.of(), Set.of(), NarrowedReads.NONE, Map.of(), Set.of());
+        this(policy, Trace.NULL_WHY, Set.of(), Set.of(), NarrowedReads.NONE, Map.of(), Set.of());
     }
 
-    private NullabilityPass(Policy policy, Set<MethodInfo> trustedReturns, Set<ParameterInfo> preconditions,
-                            NarrowedReads narrowed, Map<MethodInfo, Set<Variable>> fieldsAtEntry,
-                            Set<Expression> presentLookups) {
+    private NullabilityPass(Policy policy, Trace trace, Set<MethodInfo> trustedReturns,
+                            Set<ParameterInfo> preconditions, NarrowedReads narrowed,
+                            Map<MethodInfo, Set<Variable>> fieldsAtEntry, Set<Expression> presentLookups) {
         this.policy = policy;
+        this.trace = trace;
         this.trustedReturns = trustedReturns;
         this.preconditions = preconditions;
         this.narrowed = narrowed;
@@ -709,7 +674,7 @@ public final class NullabilityPass {
         Map<MethodInfo, Set<Variable>> atEntry = Map.of();
         Set<Expression> present = Set.of();
         for (int round = 1; ; round++) {
-            NullabilityPass pass = new NullabilityPass(policy, trusted, nonNullAtExit, narrowedReads, atEntry, present);
+            NullabilityPass pass = new NullabilityPass(policy, trace, trusted, nonNullAtExit, narrowedReads, atEntry, present);
             Report report = pass.once(analysisOrder);
             Set<MethodInfo> next = pass.unreachedReturns();
             Set<ParameterInfo> nextPreconditions = pass.preconditions();
@@ -1498,10 +1463,10 @@ public final class NullabilityPass {
                 degraded.contains(pi.methodInfo()))));
         for (FieldInfo fi : fields) {
             verdicts.put(fi, contracted(fi, verdict(fi.type(), fi, false)));
-            if (why(fi)) {
-                System.err.println("NULLWHY final " + fi.fullyQualifiedName() + " reached=" + reached.contains(fi)
-                                   + whyChain(cause, fi) + " elements reached=" + reached.contains(new Content(fi))
-                                   + whyChain(cause, new Content(fi)) + " verdict=" + verdicts.get(fi));
+            if (trace.why(fi)) {
+                trace.print("NULLWHY final " + fi.fullyQualifiedName() + " reached=" + reached.contains(fi)
+                                   + trace.chain(cause, seedOrigin, fi) + " elements reached=" + reached.contains(new Content(fi))
+                                   + trace.chain(cause, seedOrigin, new Content(fi)) + " verdict=" + verdicts.get(fi));
             }
         }
         for (MethodInfo mi : methods) {
@@ -1512,10 +1477,10 @@ public final class NullabilityPass {
             if (!mi.isConstructor() && !mi.returnType().isVoid()) {
                 verdicts.put(mi, contracted(mi, verdict(mi.returnType(), mi, deg)));
             }
-            if (why(mi)) {
-                System.err.println("NULLWHY final " + mi.fullyQualifiedName() + " reached=" + reached.contains(mi)
+            if (trace.why(mi)) {
+                trace.print("NULLWHY final " + mi.fullyQualifiedName() + " reached=" + reached.contains(mi)
                                    + " seed=" + seedOrigin.get(mi) + " contract=" + nonNullContracts.contains(mi)
-                                   + " degraded=" + deg + " verdict=" + verdicts.get(mi) + whyChain(cause, mi));
+                                   + " degraded=" + deg + " verdict=" + verdicts.get(mi) + trace.chain(cause, seedOrigin, mi));
             }
         }
         if (policy.callResults()) {
@@ -1666,7 +1631,7 @@ public final class NullabilityPass {
                 if (site != null) {
                     io.codelaser.maddi.modification.common.util.Culprits.add(steps,
                             io.codelaser.maddi.modification.common.util.Culprits.step(site.in(), site.element(),
-                                    culpritText(site.element())));
+                                    Trace.culpritText(site.element())));
                 }
                 at = from;
             }
@@ -1675,9 +1640,9 @@ public final class NullabilityPass {
             if (seed != null) {
                 io.codelaser.maddi.modification.common.util.Culprits.add(steps,
                         io.codelaser.maddi.modification.common.util.Culprits.step(seed.in(), seed.element(),
-                                culpritText(seed.element()) + (origin == null ? "" : " (" + shorten(origin) + ")")));
+                                Trace.culpritText(seed.element()) + (origin == null ? "" : " (" + Trace.shorten(origin) + ")")));
             } else if (origin != null) {
-                steps.add(new Value.Culprit.Step(null, 0, 0, shorten(origin)));
+                steps.add(new Value.Culprit.Step(null, 0, 0, Trace.shorten(origin)));
             }
             if (steps.isEmpty()) return;
             ValueImpl.CulpritImpl culprit = new ValueImpl.CulpritImpl(steps);
@@ -1687,14 +1652,6 @@ public final class NullabilityPass {
                 info.analysis().set(PropertyImpl.NULLABLE_CULPRIT, culprit);
             }
         });
-    }
-
-    private static String culpritText(Element element) {
-        return shorten(element.toString().replaceAll("\\s+", " ").strip());
-    }
-
-    private static String shorten(String s) {
-        return s.length() <= CULPRIT_TEXT ? s : s.substring(0, CULPRIT_TEXT - 1) + "…";
     }
 
     public static void write(Report report) {
@@ -2433,7 +2390,7 @@ public final class NullabilityPass {
      */
     private boolean tolerates(ParameterInfo start, Set<Object> before) {
         // NULLWHY: the node the walk reached each node from, to print the paths of a traced parameter
-        Map<Object, Object> from = why(start) ? new HashMap<>() : null;
+        Map<Object, Object> from = trace.why(start) ? new HashMap<>() : null;
         Set<Object> seen = new HashSet<>();
         Deque<Object> queue = new ArrayDeque<>();
         seen.add(start);
@@ -2441,28 +2398,28 @@ public final class NullabilityPass {
         while (!queue.isEmpty()) {
             Object n = queue.removeFirst();
             if (seen.size() > MAX_TOLERANCE_SEARCH || nonNullContracts.contains(n)) {
-                return whyTolerance(from, n, seen.size() > MAX_TOLERANCE_SEARCH ? "search too large" : "contract");
+                return trace.tolerance(from, n, seen.size() > MAX_TOLERANCE_SEARCH ? "search too large" : "contract");
             }
             switch (n) {
                 case ParameterInfo pi -> {
                     MethodInfo m = pi.methodInfo();
-                    if (!hasBody(m) || demanded(m, v -> pi.equals(v))) return whyTolerance(from, n, "demanded");
+                    if (!hasBody(m) || demanded(m, v -> pi.equals(v))) return trace.tolerance(from, n, "demanded");
                 }
                 case Local local -> {
                     // by name, as NonNullFacts compares locals; a reassigned parameter's shadow is the parameter
                     if (demanded(local.methodInfo(), v -> (v instanceof LocalVariable || v instanceof ParameterInfo)
                                                           && v.simpleName().equals(local.name()))) {
-                        return whyTolerance(from, n, "demanded");
+                        return trace.tolerance(from, n, "demanded");
                     }
                 }
                 case FieldInfo _, MethodInfo _ -> {
-                    if (!before.contains(n)) return whyTolerance(from, n, "non-null sink");
-                    whyTolerance(from, n, "nullable anyway");
+                    if (!before.contains(n)) return trace.tolerance(from, n, "non-null sink");
+                    trace.tolerance(from, n, "nullable anyway");
                     continue; // nullable anyway: what it flows into is decided without this parameter
                 }
                 case Content _, Arg _ when declaredSlot(n) && !TOLERANT_SLOTS_OFF.get() -> {
-                    if (!before.contains(n)) return whyTolerance(from, n, "non-null slot");
-                    whyTolerance(from, n, "nullable anyway");
+                    if (!before.contains(n)) return trace.tolerance(from, n, "non-null slot");
+                    trace.tolerance(from, n, "nullable anyway");
                     continue;
                 }
                 default -> {
@@ -2475,21 +2432,8 @@ public final class NullabilityPass {
                 }
             }
         }
-        if (from != null) System.err.println("NULLWHY tolerates " + whyName(start) + " visited=" + seen.size());
+        if (from != null) trace.print("NULLWHY tolerates " + Trace.name(start) + " visited=" + seen.size());
         return true;
-    }
-
-    // NULLWHY: the path from the traced parameter to the node where its tolerance walk ended or passed; false
-    private static boolean whyTolerance(Map<Object, Object> from, Object node, String what) {
-        if (from == null) return false;
-        StringBuilder sb = new StringBuilder("NULLWHY tolerance " + what + " at " + Report.label(node));
-        Object n = node;
-        for (int i = 0; i < 40 && from.get(n) != null; i++) {
-            n = from.get(n);
-            sb.append(" <- ").append(Report.label(n));
-        }
-        System.err.println(sb);
-        return false;
     }
 
     /*
@@ -2676,9 +2620,9 @@ public final class NullabilityPass {
             edgeSites.computeIfAbsent(from, _ -> new HashMap<>()).putIfAbsent(to, new Site(currentSiteMethod, currentSite));
         }
         if (successors.computeIfAbsent(from, _ -> new LinkedHashSet<>()).add(to) && to instanceof Content c
-            && why(c.of())) {
-            whyLog(from instanceof Content ? "content edge" : "element write", c.of(),
-                    "from " + whyName(from) + " (" + from.getClass().getSimpleName() + ")");
+            && trace.why(c.of())) {
+            trace.log(from instanceof Content ? "content edge" : "element write", c.of(),
+                    "from " + Trace.name(from) + " (" + from.getClass().getSimpleName() + ")");
         }
     }
 
@@ -2698,7 +2642,7 @@ public final class NullabilityPass {
             return;
         }
         if (node != null) {
-            if (why(node)) whyLog("seed", node, origin);
+            if (trace.why(node)) trace.log("seed", node, origin);
             seedOrigin.putIfAbsent(node, origin);
             if (recordSites && currentSite != null) seedSites.putIfAbsent(node, new Site(currentSiteMethod, currentSite));
             strictSeeds.add(node);
@@ -2714,7 +2658,7 @@ public final class NullabilityPass {
     // reading is a 'lateinit' field), a comparison with null (the nullTests heuristic). Not a null that is written.
     private void seedIndirect(Object node, String origin, TypeInfo writer) {
         if (node != null) {
-            if (why(node)) whyLog("indirect seed", node, origin);
+            if (trace.why(node)) trace.log("indirect seed", node, origin);
             seedOrigin.putIfAbsent(node, origin);
             if (recordSites && currentSite != null) seedSites.putIfAbsent(node, new Site(currentSiteMethod, currentSite));
             seedWriters.computeIfAbsent(node, _ -> new ArrayList<>()).add(writer);
@@ -3659,13 +3603,13 @@ public final class NullabilityPass {
                     && !varargsPasses.contains(List.of(flow.get(1), flow.get(0)))
                     && !(narrowedArray(t0, t1) && !written.contains(flow.get(0)))) {
                     successors.computeIfAbsent(c0, _ -> new LinkedHashSet<>()).add(c1);
-                    if (why(c1.of())) whyLog("coupled forward", c1.of(), "from " + whyName(c0.of()) + " " + t0 + " -> " + t1);
+                    if (trace.why(c1.of())) trace.log("coupled forward", c1.of(), "from " + Trace.name(c0.of()) + " " + t0 + " -> " + t1);
                 }
                 if (!readOnlyArrayParameter(flow.get(1), readOnlyArrays) && !varargsPasses.contains(flow)
                     && (narrowedArray(t1, t0) ? written.contains(flow.get(1))
                         : policy.assertContentWrites() || writtenThrough.contains(flow.get(1)))) {
                     successors.computeIfAbsent(c1, _ -> new LinkedHashSet<>()).add(c0);
-                    if (why(c0.of())) whyLog("coupled back", c0.of(), "from " + whyName(c1.of()) + " " + t1 + " -> " + t0);
+                    if (trace.why(c0.of())) trace.log("coupled back", c0.of(), "from " + Trace.name(c1.of()) + " " + t1 + " -> " + t0);
                 }
                 queue.add(List.of(c0, c1));
             } else if (t0.arrays() == 0 && t1.arrays() == 0 && !t0.parameters().isEmpty()
@@ -3841,14 +3785,14 @@ public final class NullabilityPass {
         // 'annotations': whether an element annotation counts ('join(@Nullable Object[] parts)'); not for narrowedArray
         Set<Object> written = new HashSet<>();
         // NULLWHY: why a node is written, its downstream node or the write itself
-        Map<Object, String> because = NULL_WHY == null ? null : new HashMap<>();
+        Map<Object, String> because = !trace.enabled() ? null : new HashMap<>();
         successors.forEach((from, tos) -> {
             // narrowedArray: nor is an element "written" from a lifted field ('RegularImmutableList.array ∋
             // RegularImmutableList.element'), the links' stand-in for any element, not code writing into the array
             if (from instanceof Content || !annotations && liftedField(from)) return;
             for (Object to : tos) {
                 if (to instanceof Content c && written.add(c.of()) && because != null) {
-                    because.put(c.of(), "written from " + whyName(from));
+                    because.put(c.of(), "written from " + Trace.name(from));
                 }
             }
         });
@@ -3864,7 +3808,7 @@ public final class NullabilityPass {
         while (!queue.isEmpty()) {
             Object down = queue.removeFirst();
             if (!annotations && (liftedField(down) || library(down))) {
-                if (because != null && why(down)) System.err.println("NULLWHY written(false) stops at " + whyName(down));
+                if (because != null && trace.why(down)) trace.print("NULLWHY written(false) stops at " + Trace.name(down));
                 continue;
             }
             for (Object up : upstream.getOrDefault(down, List.of())) {
@@ -3873,7 +3817,7 @@ public final class NullabilityPass {
                 if (!annotations && !LIFTED_WRITES_OFF.get() && !(isArray(up) && isArray(down))) continue;
                 if (written.add(up)) {
                     queue.add(up);
-                    if (because != null) because.put(up, "flows into " + whyName(down));
+                    if (because != null) because.put(up, "flows into " + Trace.name(down));
                 }
             }
         }
@@ -3881,18 +3825,18 @@ public final class NullabilityPass {
         if (!annotations) written.removeIf(NullabilityPass::liftedField);
         if (because != null) {
             for (Object node : written) {
-                if (!why(node)) continue;
-                StringBuilder sb = new StringBuilder("NULLWHY written(" + annotations + ") " + whyName(node)
+                if (!trace.why(node)) continue;
+                StringBuilder sb = new StringBuilder("NULLWHY written(" + annotations + ") " + Trace.name(node)
                         + (liftedField(node) ? " (lifted)" : ""));
                 Object n = node;
                 for (int i = 0; i < 40 && because.get(n) != null; i++) {
                     String b = because.get(n);
                     sb.append("\n    ").append(b);
                     if (!b.startsWith("flows into ")) break;
-                    n = written.stream().filter(w -> whyName(w).equals(b.substring(11))).findFirst().orElse(null);
+                    n = written.stream().filter(w -> Trace.name(w).equals(b.substring(11))).findFirst().orElse(null);
                     if (n == null) break;
                 }
-                System.err.println(sb);
+                trace.print(sb);
             }
         }
         return written;
@@ -4537,8 +4481,8 @@ public final class NullabilityPass {
                     // find(c); if (d == null) throw ...; return d;' the return is linked to find's 'return null'
                     // through d (timefold SolutionDescriptor.findEntityDescriptorOrFail, the diagnose session). The
                     // method's own summary repeats the link (no statement): skipped once a return guarded it.
-                    if (why(mi)) {
-                        whyLog("marker", mi, "from " + from + " to " + link.to() + " statement "
+                    if (trace.why(mi)) {
+                        trace.log("marker", mi, "from " + from + " to " + link.to() + " statement "
                                              + (statement == null ? "-" : statement.toString().strip()));
                     }
                     if (fromVar instanceof ReturnVariable) {
