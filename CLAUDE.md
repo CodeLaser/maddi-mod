@@ -16,7 +16,12 @@ Deeper references in this repository, in reading order per topic:
 - Link engine: `maddi-modification-link/linking-manual.md` (start at §5 LinkMethodCall + §6 worked examples;
   `TestLinkMethodCall` is the spec-by-example), `maddi-modification-link/README.md`,
   `maddi-modification-link/src/main/java/.../vf/virtual-fields.md`.
-- Shared-variable reconstruction: `maddi-modification-link/sv-reconstruction-techniques.md`.
+- The engine layer (collapse and reconstruction): `maddi-modification-link/sv-reconstruction-techniques.md`;
+  the other `sv-*.md` files are closed records of the July 2026 integration.
+- The analyzer: `maddi-modification-analyzer/README.md` (what runs, in what order, which component writes which
+  property), `maddi-modification-analyzer/definitions.md` (the concepts mapped onto properties);
+  `docs/README.md` §Module references lists the status of every module-level document.
+- Nullability: `docs/design/nullability.md`.
 
 Before quoting a `slowTest` run as evidence for an engine change, read `../maddi/AGENTS.md` §Commands: a green
 corpus run can be cached, skipped, vacuous, or heap-starved, and each looks like success.

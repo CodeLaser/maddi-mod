@@ -1,4 +1,8 @@
-# sv engine — semantic differences from the legacy link model
+# sv engine — semantic differences from the legacy link model (July 2026)
+
+> **Status (2026-11): historical.** Written while the port was at 194 failing tests, to explain the new model
+> against the old one; the model it describes is the current one, the failure counts are not. The "Purpose" section
+> is still the best short statement of why the collapse exists.
 
 Assuming the sv label-algebra + engine changes are **intentional**, the 194 test
 diffs are not bugs but the visible signature of a redesigned link semantics. This

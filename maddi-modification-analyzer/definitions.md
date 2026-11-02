@@ -295,14 +295,22 @@ A single state transition inside an object, from a mutable *before* phase to an 
   the transition.
 
 `@Mark` and `@Only` also apply to parameters, when marked methods are called on a parameter of eventually immutable
-type. **Contracted eventual immutability is not yet implemented in the analyzer** (§060).
+type. The analyzer reads these as contracts and **computes them by propagation** (`TypeEventualAnalyzerImpl`,
+`AbstractMethodAnalyzerImpl.methodEventual`): a type holding a field of eventually immutable type inherits the
+marks, because the callee's own contract says which side of the transition it belongs to; no preconditions are
+revived. Properties `EVENTUAL_METHOD`, `EVENTUALLY_NON_MODIFYING_METHOD`, `EVENTUALLY_UNMODIFIED_PARAMETER`,
+`EVENTUALLY_IMMUTABLE_TYPE`; eventuality stays out of the `IMMUTABLE_TYPE` lattice. `@BeforeMark` is not read.
+`docs/design/eventual-immutability.md` is the plan and status; `docs/design/eventual-info-hierarchy.md` the record of
+certifying the `Info` family.
 
 ## Other annotations (§120)
 
-- **Not-null**: `@NotNull` / `@Nullable` (default for non-primitive parameters and return values is nullable);
-  `@NotNull(content=true)` says none of the object's elements can be null, `content2=true` goes one level deeper (for
-  entry sets). Computed in order: context not-null of parameters → field not-null → external not-null of parameters
-  linked to fields.
+- **Nullability**: computed since 2026-10 by the nullability pass (`nullability/NullabilityPass`, after the fixpoint,
+  as reachability of null over the converged link facts; `docs/design/nullability.md`, book chapter 085). Properties
+  `NULLABILITY_METHOD/PARAMETER/FIELD` with the three states `NULLABLE`, `NONNULL`, `UNSPECIFIED`, recursively per
+  type argument; the old `NOT_NULL_*` properties and `@NotNull(content=…)` are gone. Output through
+  `NullabilityDecorator` in the JSpecify, Checker, JetBrains, JSR-305 and maddi flavours, and to the Kotlin and C#
+  printers.
 - **`@Identity`**: returns its first parameter. **`@Fluent`**: returns `this`. Fluent methods are always `@Independent`
   (returning the type itself exposes nothing new), and in a container, fluent and void methods are assumed `@Modified`
   unless marked `@NotModified`/`@StaticSideEffects` (appendix).
@@ -366,6 +374,9 @@ Written by `AnnotationToProperty.annotationsToMap` on the contract side; compute
 | Container | `CONTAINER_TYPE` | `CONTAINER_METHOD` | `CONTAINER_PARAMETER` | `CONTAINER_FIELD` |
 | Independence | `INDEPENDENT_TYPE` | `INDEPENDENT_METHOD` | `INDEPENDENT_PARAMETER` | `INDEPENDENT_FIELD` |
 | Modification | — | `NON_MODIFYING_METHOD` | `UNMODIFIED_PARAMETER` | `UNMODIFIED_FIELD` |
+| Structural modification (`@Modified(hc=true)`) | — | `STRUCTURALLY_NON_MODIFYING_METHOD` | `STRUCTURALLY_UNMODIFIED_PARAMETER` | `STRUCTURALLY_UNMODIFIED_FIELD` |
+| Unmodifiable view | `UNMODIFIABLE_TYPE` | `UNMODIFIABLE_VIEW_METHOD` | — | — |
+| Static side effects | — | `STATIC_SIDE_EFFECTS_METHOD` (from `STATIC_STATE_MODIFIED_METHOD`) | — | — |
 | Finality | — (see below) | — | — | `FINAL_FIELD` |
 | Nullability | — | `NULLABILITY_METHOD` | `NULLABILITY_PARAMETER` | `NULLABILITY_FIELD` |
 | Ignore modifications | — | `IGNORE_MODIFICATION_METHOD` | `IGNORE_MODIFICATIONS_PARAMETER` | `IGNORE_MODIFICATIONS_FIELD` |
@@ -390,7 +401,8 @@ Three **dead channels**, each dead in a different way — check before building 
   analysis-hints output, but never written by anyone.
 - `PARAMETER_ASSIGNED_TO_FIELD` (`Value.AssignedToField`): its only writer,
   `TypeModIndyAnalyzerImpl.fromNonFinalFieldToParameter`, has its entire body commented out behind a FIXME. The
-  method is still called, so it is a silent no-op, and `ParameterInfo.assignedToField()` always returns EMPTY.
+  method is still called, so it is a silent no-op, and `ParameterInfo.assignedToField()` always returns EMPTY
+  (`TypeEventualAnalyzerImpl` reads it with that empty default and says so).
 
 Where a parameter's link to a field is needed, the live source is the field's `LinksImpl.LINKS` (written by
 `FieldAnalyzerImpl`, phase 2), which is also what `INDEPENDENT_FIELD` is derived from.
@@ -427,7 +439,9 @@ Consequences of the above that shape `GuardAnalyzerImpl`:
    anything* — the modification is in `changeFirst`, a different method, reached via the field. `blameParameterModified`
    scans only `target`'s own body for a direct site, so it finds nothing and returns `null`: the violation is reported
    without a "where". Blame for a linked parameter has to follow the link chain (parameter → field → the method that
-   modifies the field's object graph), which is the link module's data, not the CST's.
+   modifies the field's object graph), which is the link module's data, not the CST's. That chain is what the
+   culprits give since 2026-10 (`MODIFIED_CULPRIT` from the reachability pass, `DependentCulprit`, `TypeCulprit`,
+   with `LinkToField` naming the link a verdict rests on), written beside the verdicts when a run asks for them.
 3. **Contracts bind implementations only through inherited methods.** A subtype may add modifying methods of its own
    without violating a parent's `@Container` (§050). The guard's traversal must go through `IMPLEMENTATIONS` of the
    contracted type's own methods, not over all methods of the implementation.

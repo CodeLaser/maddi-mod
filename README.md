@@ -19,7 +19,8 @@ what they are for; this repository is where they are implemented and tested.
 Where to start reading:
 - the linking engine: [`maddi-modification-link/README.md`](maddi-modification-link/README.md), then
   [`linking-manual.md`](maddi-modification-link/linking-manual.md) §5 and §6;
-- the analyzer's phases: [`maddi-modification-analyzer/README.md`](maddi-modification-analyzer/README.md);
+- the analyzer, what runs in what order: [`maddi-modification-analyzer/README.md`](maddi-modification-analyzer/README.md);
+  the concepts mapped onto properties: [`definitions.md`](maddi-modification-analyzer/definitions.md);
 - nullability: [`docs/design/nullability.md`](docs/design/nullability.md);
 - the vocabulary: maddi's
   [`road-to-immutability/llm-summary.md`](https://github.com/CodeLaser/maddi/blob/main/road-to-immutability/llm-summary.md).

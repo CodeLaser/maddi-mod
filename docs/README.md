@@ -4,6 +4,26 @@ The working documents of this repository. The index of all three repositories, w
 and what it covers, is maddi's [`docs/README.md`](https://github.com/CodeLaser/maddi/blob/main/docs/README.md);
 documents cited here by relative path from the other two repositories live there.
 
+## Module references
+
+The documents kept next to the code; these describe the current state and are updated in place.
+
+| Document | Status | What it covers |
+|---|---|---|
+| [`maddi-modification-link/README.md`](../maddi-modification-link/README.md) | reference | The link natures and the operator table, the engine in one paragraph, virtual fields, the shallow summaries, the special variables. |
+| [`maddi-modification-link/linking-manual.md`](../maddi-modification-link/linking-manual.md) | reference | The working manual: pipeline, data model, notation, `LinkMethodCall`, worked examples, functional interfaces, the probe loop, the file map. |
+| [`maddi-modification-link/src/main/java/.../vf/virtual-fields.md`](../maddi-modification-link/src/main/java/io/codelaser/maddi/modification/link/vf/virtual-fields.md) | reference | The `§` virtual fields: `§m`, hidden content, multiplicity, naming, the formal→concrete translation. |
+| [`maddi-modification-link/sv-reconstruction-techniques.md`](../maddi-modification-link/sv-reconstruction-techniques.md) | reference | The engine layer: how links are reconstructed on real variables after the shared-variable collapse; every guard and its gate. |
+| `maddi-modification-link/sv-*.md` (the other five), `semantic-audit-2026-07-18.md`, `org-review-2026-07-18.md`, `notes/` | closed records | The sv-engine integration of July 2026 and the audits of that month; headers say what is history. |
+| [`maddi-modification-analyzer/README.md`](../maddi-modification-analyzer/README.md) | reference | What the analyzer runs, in what order: one pass, the iteration (worklist, certification, cycle breaking, the reachability pass, the eventual deferral, the guard, nullability), configuration, properties by writer. |
+| [`maddi-modification-analyzer/definitions.md`](../maddi-modification-analyzer/definitions.md) | reference | The concept chain of the book mapped onto properties and values; what that means for the guard. |
+| [`maddi-modification-analyzer/PLAN-modification-reachability.md`](../maddi-modification-analyzer/PLAN-modification-reachability.md) | implemented | The reachability pass (`ShadowModificationPass`, on by default): the design and the thread that delivered it. |
+| [`maddi-modification-analyzer/DESIGN-incremental-v2.md`](../maddi-modification-analyzer/DESIGN-incremental-v2.md) | partly implemented | Incremental reuse: type granularity exists (`INCREMENTAL=<dir>`), element granularity does not. |
+| [`maddi-modification-analyzer/DESIGN-vardata-flatten.md`](../maddi-modification-analyzer/DESIGN-vardata-flatten.md) | implemented, off | Bounding the heap on a single giant SCC (`Configuration.flattenVariableData`); not compatible with the reachability pass. |
+| [`maddi-modification-analyzer/immutability-transform-divergence.md`](../maddi-modification-analyzer/immutability-transform-divergence.md) | resolved | Transported content decides dependence; the adjudication that led to the rule in `FieldAnalyzerImpl`. |
+
+## Design notes and roadmaps
+
 - [defects/sam-linking-reconciliation.md](defects/sam-linking-reconciliation.md) — The two SAM conventions: what actually diverges
 - [design/analysis-rewiring.md](design/analysis-rewiring.md) — Analysis rewiring: the analysisFingerprint
 - [design/builder-interface-split-impact.md](design/builder-interface-split-impact.md) — Splitting the mutable Builder off the read-only Inspection interfaces — impact survey (2026-07)

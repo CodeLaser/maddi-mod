@@ -1,9 +1,16 @@
 # Incremental reuse v2 — the single-module giant-SCC monorepo (task #35)
 
-Status: DESIGN, 2026-07-19 (post checkpoint/resume v1); RECONCILED same day with the kotlin-side
-early-cutoff machinery after the merge (see §0). Owner: sv-integration thread.
-**Partly delivered the same day** — §3 at type granularity and the `INCREMENTAL=<dir>` gate both carry
-their own DELIVERED notes below; §5 (open questions for the user) is what is still outstanding.
+**Status (2026-11): delivered at type granularity, not at element granularity.** What exists: `IncrementalState`
+(prepwork `io`) persists per-primary-type source and output fingerprints plus consumption edges beside a
+`CHECKPOINT` run; `INCREMENTAL=<dir>` seeds `IteratingAnalyzer.analyze(order, graph, initialDirty, clearHook)`,
+which runs the worklist from the changed types and stops when it runs dry, without verification or cycle breaking
+(`AnalysisEngineImpl.incrementalSeed`; `docs/design/analysis-rewiring.md`); the persisted consumption edges are
+unioned into the worklist's wake edges (`setExternalWakeEdges`). §5's open questions were never answered and the
+element-granularity design (§3.1, §3.3 inside a giant SCC) was not built. Kept as the design.
+
+Original status: DESIGN, 2026-07-19 (post checkpoint/resume v1); RECONCILED same day with the kotlin-side
+early-cutoff machinery after the merge (see §0). §3 at type granularity and the `INCREMENTAL=<dir>` gate carry
+their own DELIVERED notes below.
 
 ## 0. Reconciliation with the delivered early-cutoff worklist (kotlin branch, 2026-07-18)
 

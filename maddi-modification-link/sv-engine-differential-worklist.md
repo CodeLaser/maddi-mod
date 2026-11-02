@@ -1,5 +1,8 @@
-# sv engine — differential worklist (194 assertion failures)
+# sv engine — differential worklist (194 assertion failures, July 2026)
 
+> **Status (2026-11): closed.** All of it was worked off; the suite is green. Kept as the record of what the
+> port got wrong first. The paragraph below is the status as of mid-July.
+>
 > **STATUS (superseded in large part):** the reconstruct half is now implemented; suite
 > is **144/383 failing** (was 196). The dominant `←`-drop cluster and the active-collapse
 > coarsening described below are **fixed** (commits `ad0ebd41`, `3b0fc4fd`, `59bdf744`,

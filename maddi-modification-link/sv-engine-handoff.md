@@ -1,7 +1,13 @@
-# sv engine integration — handoff / status
+# sv engine integration — handoff / status (closed record, July 2026)
 
-Entry point for the `sv` (shared-variable) engine integration. Read this first, then
-the companion docs:
+> **Status (2026-11): the integration is complete.** The `sv` engine (`impl/graph/IncrementalFixpointEngine`
+> under `impl/linkgraph/Graph`) is the only link engine; the legacy engine was deleted; the link suite is green
+> and the corpora certify. This document and its companions describe how the port went and what was wrong on the
+> way; nothing below is a current open item. For the current design read `sv-reconstruction-techniques.md`; for
+> how the engine is used, `linking-manual.md` and `README.md`. Branch and commit names below refer to the
+> pre-split `maddi` history (rewritten 2026-08-04).
+
+The original text follows. Companion docs:
 - `sv-reconstruction-techniques.md` — the design reference for the collapse-reconstruction
   machinery (techniques, guards, direction rules, open shapes).
 - `sv-integration-plan.md` — the overall port strategy + delta map + phases.

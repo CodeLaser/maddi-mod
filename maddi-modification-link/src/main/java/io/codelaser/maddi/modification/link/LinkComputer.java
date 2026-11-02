@@ -45,9 +45,9 @@ public interface LinkComputer {
     void reset();
 
     /**
-     * Which fixpoint engine to use. {@link #LEGACY} is optimize's algorithm (the current default);
-     * {@link #INCREMENTAL} is the witness-based incremental engine being ported from branch 'sv'.
-     * Inert until Phase 3 of sv-integration-plan.md wires it into LinkComputerImpl.
+     * Vestigial. There is one fixpoint engine, the witness-based incremental one ({@code impl.graph.IncrementalFixpointEngine},
+     * the former 'sv' engine); the legacy engine was deleted when the port completed (2026-07). The option is kept
+     * for source compatibility and is read by nothing.
      */
     enum Engine {LEGACY, INCREMENTAL}
 

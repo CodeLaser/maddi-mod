@@ -1,4 +1,8 @@
-# Integrating the `sv` engine into `openjdk` — incremental plan
+# Integrating the `sv` engine into `openjdk` — incremental plan (executed, July 2026)
+
+> **Status (2026-11): done.** The plan below was carried out in July 2026: the `sv` engine is the only link engine,
+> the "Deleted" list below is deleted, and `LinkComputer.Options.Engine` is a vestige. Kept as the record of the
+> port's reasoning; branch names refer to the pre-split `maddi` history.
 
 Goal: bring the `sv` branch's work (a new incremental fixpoint engine + shared-variable
 reassignment/modification tracking) onto `openjdk` in small, independently-green steps.
