@@ -1,8 +1,17 @@
 # Plan: modification as reachability over the link graph
 
-Status: proposal, written 2026-07-18 from the jfocus-metrics dataflow hardening session.
-Audience: the thread working on the linking/modification engine.
-External evidence lives in `jfocus-metrics/codelaser-metrics-dataflow` (see "Tripwires" at the end).
+**Status (2026-11): implemented and on by default.** The pass is `shadow/ShadowModificationPass`; `AnalysisEngineImpl`
+turns it on unless `MODREACH=0` (ungated 2026-08-01), the cutover writes and freezes the three modification
+properties and their structural twins, and the pass repeats with the re-derivation of the derived family to a
+joint fixpoint (`MODREACH_ROUNDS`, default 3; a round that only strengthens re-derives through the worklist,
+CodeLaser/maddi-mod#76). What it does today is in `README.md` §The iteration and in the class comment, which
+names the seeds (primitive evidence for walkable bodies) and the edges E1–E7. §§1–8 below are the original
+design (2026-07-18), §§9–17 the thread between the two sessions that delivered it the next day; the rollout
+table in §17 was completed on the corpora before the default flipped.
+
+Written 2026-07-18 from the jfocus-metrics dataflow hardening session, for the thread working on the
+linking/modification engine. External evidence lived in `jfocus-metrics/codelaser-metrics-dataflow` (see
+"Tripwires" at the end).
 
 ## 1. Symptom
 

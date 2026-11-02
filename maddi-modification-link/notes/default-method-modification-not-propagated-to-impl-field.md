@@ -1,5 +1,8 @@
 # Bug report: modification via an inherited interface `default` method is not propagated to the implementation's field
 
+**Fixed.** `maddi-modification-analyzer`'s `nolink/TestDefaultMethodModification` pins the reproducer below and its
+variants: `Impl.list` is modified through the inherited `default` method. The report is kept for the shape.
+
 **Reported:** 2026-07-12, from the `openjdk` branch of `maddi-aapi`, during an independent hardening sweep of
 `maddi-modification-analyzer`. **For:** the linking thread (`sv-integration`). This is a false negative in
 `UNMODIFIED_FIELD` and is rooted in the linking / virtual-field machinery (`link.vf.VirtualFieldComputer`,

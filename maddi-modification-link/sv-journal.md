@@ -3,8 +3,8 @@
 Reverse-chronological engineering journal of the sv-integration work: corpus certification,
 worklist/parallelism, profiling, audits, first contacts. Split out of `sv-remaining-catalogue.md`
 on 2026-07-18 when that file's catalogue function had long since closed (see "catalogue CLOSED"
-below). The LIVE state and open items are in `sv-remaining-catalogue.md`; new journal entries
-go THERE first and are periodically moved here.
+below). Both files closed on 2026-08-04; open items are GitHub issues since, and the current design is
+`sv-reconstruction-techniques.md`. Commit names refer to the pre-split `maddi` history.
 
 ---
 

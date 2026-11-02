@@ -3,7 +3,10 @@
 **For:** the link/analyzer thread.
 **From:** the jfocus-transform thread (preservation stress-testing).
 **Date:** 2026-07-19.
-**Status:** open question — needs adjudication. Pinned as a test tripwire, not yet resolved.
+**Status:** resolved 2026-07-19, hypothesis 1 (§Adjudication, §#43 CLOSED): the untransformed verdict was the
+imprecise one. The rule it produced stands in `FieldAnalyzerImpl`: transported content decides dependence, not the
+container, so a content-tier link over immutable elements (the `int[]` defensive copy) is no dependence. Kept for the
+mechanism.
 
 ## One-line summary
 

@@ -1,10 +1,9 @@
-# sv engine — live state and open items
+# sv engine — state and open items as of July 2026 (closed record)
 
-> This file is the LIVE summary. The full engineering journal (all dated UPDATE sections since the
-> original link-failure catalogue closed) is in **`sv-journal.md`**. Design references:
-> `sv-reconstruction-techniques.md` (reconstruction techniques + guards), `sv-engine-handoff.md`
-> (sv-doc entry point), `linking-manual.md` (link module manual), `org-review-2026-07-18.md`
-> (module organization review + 13-point plan).
+> **Status (2026-11): closed.** This was the live state file of the sv-integration work until 2026-08-04; since
+> then open items are GitHub issues (CodeLaser/maddi-mod), and the current design is `sv-reconstruction-techniques.md`.
+> The engineering journal of the same period is `sv-journal.md`; `sv-engine-handoff.md` is the entry point of the
+> history. Branch and commit names refer to the pre-split `maddi` history.
 
 ## HANDOFF (2026-07-19 evening) — mechanical steps anyone (or any session) can run
 

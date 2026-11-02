@@ -1,11 +1,19 @@
 # sv reconstruction: the techniques catalogue
 
 How field-precise, direction-correct links are **reconstructed at extraction time** after the
-shared-variable collapse has folded them into equivalence groups. Companion to
-`sv-engine-handoff.md` (history) and `sv-remaining-catalogue.md` (open items); this document is
-the *design reference*: one section per technique, each with the triggering example, the
+shared-variable collapse has folded them into equivalence groups. This document is the *design
+reference* of the engine layer (the history of its integration is in `sv-engine-handoff.md`; open
+items are GitHub issues): one section per technique, each with the triggering example, the
 mechanism, and — most importantly — the guards, because **every guard below traces to a specific
 observed failure**. When extending the machinery, violate a guard only with a full-suite A/B.
+
+Since this was written the graph has gained the fork/join of alternatives (2026-09): the blocks of an
+if/else are linked from copies of the graph and joined by union; a variable stays in an assignment
+group only when every alternative puts it there, otherwise it is evicted with an assignment edge to
+the rep and detached provenance (`SharedVariables.planJoin`, `detachedAliases`); a reassigned local,
+field or array slot leaves its group (CodeLaser/maddi-mod#77). The direction rules of §1 and the
+reconstruction of §2–§4 apply unchanged to the joined graph. The short description is in maddi's
+`road-to-immutability/llm-summary.md` §The link system.
 
 ## 0. The problem in one picture
 
@@ -333,8 +341,9 @@ original DV's element type when the translated array has no array dimension).
 
 ## 7. Open shapes, in this vocabulary
 
-> The authoritative, current list lives at the TOP of `sv-remaining-catalogue.md` (15 link
-> tests at the time of writing). The shapes below are the ones with a sketched mechanism:
+> Written when 15 link tests were still red; the suite has been green since 2026-07-18, so each shape
+> below is now either solved or an accepted output the tests pin. Open engine work is tracked as
+> GitHub issues. The shapes with a sketched mechanism, for the record:
 
 - **Directional §m from content flow** (test4b/4c): the old engine generated DIRECTIONAL §m
   links from content-flow links, not just the ≡ companions of assignments — `0:in → r.§t`

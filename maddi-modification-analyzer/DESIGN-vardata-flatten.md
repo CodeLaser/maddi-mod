@@ -1,6 +1,13 @@
 # VariableData flatten-snapshot — bounding pass-1 peak heap on a single giant SCC
 
-Status: DESIGN, 2026-07-22. Owner: extract-interface engine-stress thread. Gated, OFF by default.
+**Status (2026-11): implemented, off by default, used by no production runner.** `IteratingAnalyzer.Configuration
+.flattenVariableData()` switches it on; `SingleIterationAnalyzerImpl.flattenMethod` / `regenerateFlattened` are the
+three moves of §3 (flatten after a method's summary is written, regenerate before it is re-linked). It is not
+compatible with the reachability pass, which reads every statement's variable data, and that pass is on by
+default, so the flag is a tool for the single-SCC heap case only. The `EI_*` gates of §5b belonged to the
+extract-interface harness, not to this repository.
+
+Original status: DESIGN, 2026-07-22. Owner: extract-interface engine-stress thread.
 
 ## 1. Problem
 

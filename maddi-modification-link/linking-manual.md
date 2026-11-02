@@ -43,7 +43,21 @@ parse (openjdk or maddi parser) → CST
   `impl/graph/IncrementalFixpointEngine` (facts, witnesses, incremental removal) runs under the domain
   graph of `impl/linkgraph/` (`LinkGraph` is the per-statement commit driver), combining link natures with
   a binary operator (see README table). The shared-variable collapse and its reconstruction are described
-  in `sv-reconstruction-techniques.md`.
+  in `sv-reconstruction-techniques.md`. The `LinkComputer.Options.Engine` option is vestigial: this is the
+  only engine.
+- **Alternatives are linked apart, then joined** (since 2026-09): the then- and else-blocks of an if/else each
+  start from the graph as it stood before the statement; afterwards the graph is the union of the states they end
+  in (plus the state before, without an else). A variable stays in an assignment group only when every alternative
+  puts it there (`SharedVariables.planJoin`; evicted members keep detached provenance). Gate `NOFORK` restores
+  sequential linking; switches, loops and `try` are linked sequentially, the old-style switch fork being opt-in
+  (`SWITCHFORK`) until the defects it exposes are fixed (CodeLaser/maddi-mod#72).
+- **Work ceiling**: a method whose closure costs more than `-Dmaddi.workCeiling` edge visits (10M; `NOWORKCEILING`)
+  throws `DegradedAnalysisException`, keeps its shallow summary and is marked `DEGRADED_ANALYSIS_METHOD`; the
+  analyzer reads a degraded method pessimistically. `LINKWORK` lines (above `-Dmaddi.workReport`) name the
+  expensive methods. The cause is usually a saturated closure (`docs/roadmap/handoff-saturated-closure-collapse.md`).
+- The analyzer skips a method's link computation when nothing it read during the previous one has changed
+  (the link cache, CodeLaser/maddi-mod#76), and records which summaries a computation read
+  (`LinkComputer.recordSummaryConsumption`) to wake the right consumers in its worklist.
 
 ---
 
@@ -93,8 +107,12 @@ The `toString()` of an mlv is `[<param links>] --> <return links>`, e.g. `[0:box
 - **`*`** after a variable = it is (or may be) **modified** at that point (e.g. `box*`, `this.myBox*.t`).
 - **`0:` / `1:`** = parameter index; **`.t` / `.a`** = a field; **`[0]`** = array access; **`§…`** = a virtual field
   / hidden content (e.g. `§xs`, `§es`, `§m`); **`∈∈`** = element-of-element (nested).
-- **`$__rv`** return-value intermediate, **`$_ce`** constant expression (a literal/constant value; `MarkerVariable.constant`),
-  **`$_fi`** functional-interface variable, **`$_afi`** applied-functional-interface, **`Λ`** functional-interface marker.
+- **`$__rv`** return-value intermediate, **`$_ce`** constant expression (a literal/constant value; `MarkerVariable.constant`;
+  the null constant is one), **`$_v`** some value, **`$__sv_`** a shared variable (an assignment group's representative;
+  never in a summary), **`$_fi`** functional-interface variable, **`$_afi`** applied-functional-interface, **`Λ`**
+  functional-interface marker.
+- **`☷`** after a `≡` between `§m` faces: the identity survived the named modifying methods (print-only, summaries).
+  **`∈?`/`∋?`**: tentative element relations.
 - `[-]` = one parameter with no links; `[-, -]` = two; `--> -` = no return links.
 
 ---
@@ -365,15 +383,17 @@ System.out.println(mlv + "  MOD[" + mlv.sortedModifiedString() + "]");
 - Language-construct coverage (var, ternary, switch/patterns, try-with-resources, wildcards, arrays, enum, inner
   classes, …) lives in `src/test/java/.../typelink/TestLanguageConstructs.java`.
 
-**Baseline** (updated 2026-07-18): the full link suite is **green** — the two former long-standing failures
-(`TestList.shallow`, `TestShallowFunctional.find`) were fixed during the sv work. Treat **any** enabled-test
-failure as a regression. The only intentionally skipped items are documented `@Disabled` tests: the four
-`impl/large/` files (synthetic mocks that do not type-check under the openjdk javac) and three methods in
-`typelink/TestStaticBiFunction` (CongoCC parser regression). Watch for a flaky
+**Baseline**: the full link suite is **green** (122 test classes, about 525 tests; `./gradlew
+:maddi-modification-link:test`). Treat **any** enabled-test failure as a regression. The only intentionally
+skipped items are documented `@Disabled` tests: four `impl/large/` files (`Test1`–`Test3`, `TestLinkGraph`:
+synthetic mocks that do not type-check under the openjdk javac; the `*Bench` files there do run) and three
+methods in `typelink/TestStaticBiFunction` (CongoCC parser regression). Watch for a flaky
 `IllegalStateException: tree.starImportScope is null` / `CompilationProblems` — that is the openjdk
 parser's javac concurrency issue (mitigated by `-XDuseUnsharedTable=true` and a synchronized lazy
-`getOrLoad`); it is not a linking bug. For the full story see the authoritative
-[`maddi-inspection-openjdk/parsing-stability.md`](../maddi-inspection-openjdk/parsing-stability.md).
+`getOrLoad`); it is not a linking bug. For the full story see maddi's
+`maddi-inspection-openjdk/parsing-stability.md`. Run `impl/large/TestParSeqLinkBench` after every engine-level
+change (`sv-reconstruction-techniques.md` §6b), and the corpus A/B (`FPDUMP`, repository README) before quoting a
+verdict change.
 
 ---
 
@@ -396,14 +416,26 @@ parser's javac concurrency issue (mitigated by `-XDuseUnsharedTable=true` and a 
 
 ## 10. File map (module `maddi-modification-link`, package `…link.impl`)
 
-- `LinkComputerImpl` — driver: `doMethod`/`doPrimaryType`, `doBlock`/`doStatement`, for-each/for handling,
-  `subBlocksForLinking` (try-with-resources), fixpoint.
+- `LinkComputerImpl` — driver: `doMethod`/`doPrimaryType`, `doBlock`/`doStatement`, for-each/for handling
+  (`ForEach`), `subBlocksForLinking` (try-with-resources), the fork/join of alternatives, the work ceiling and
+  degradation, the per-method verdicts (`NON_MODIFYING_METHOD`, `UNMODIFIED_PARAMETER`, the structural twins,
+  `VARIABLES_LINKED_TO_OBJECT`, `LINKED_VARIABLES_ARGUMENTS`). `LinkComputerRecursion`/`RecursionPrevention`: the
+  on-demand computation of a callee's summary, and the cycle guard that falls back to the shallow summary.
 - `ExpressionVisitor` — per-expression visit; dispatches method/constructor calls to `LinkMethodCall`, handles
-  lambdas/method refs (`methodReference`), conditionals, switch expressions, array access (`DependentVariable`).
-- `LinkMethodCall` — §5.
+  lambdas/method refs (`methodReference`), conditionals, switch expressions, array access (`DependentVariable`),
+  `AssignLinksToLocal`.
+- `LinkMethodCall` — §5. `MethodModification` decides what a call modifies (receiver, arguments), with the
+  `@Finalizer` and `@IgnoreModifications` exemptions, `PassedFunction` (a parameter modified only by handing it to
+  one of the method's own functional parameters, CodeLaser/maddi-mod#67, #69) and `ReceiverLevel` (the receiver's
+  immutability level and cone, prototype behind `RECEIVERLEVEL`; `docs/design/receiver-level.md`).
 - `LinkFunctionalInterface` (the lifting engine, §7.3), `LinkAppliedFunctionalInterface` (`$_afi` expansion) — FI
-  application (§7). `ShallowMethodLinkComputer` builds the `Λ`-marked summaries of JDK FI-consuming methods.
-- `LinkGraph`, `LinkNatureImpl`, `Result`, `LinkedVariablesImpl`, `Links`/`Link` (in prepwork `…variable.impl`).
+  application (§7). `ShallowMethodLinkComputer` builds the summaries of bodiless and library methods from virtual
+  fields and annotations, among them the `Λ`-marked summaries of JDK FI-consuming methods.
+- `LinkGraph`, `LinkNatureImpl`, `Result`, `LinkedVariablesImpl`, `Links`/`Link` (in prepwork `…variable.impl`);
+  `LinkFactsImpl` reads a summary back as facts about a call's result (new or existing object, what it keeps);
+  `SliceFactory` the `[-n]` slices; `Gate` the cached environment gates.
+- `impl/translate/` — the translation maps that rewrite a callee's formal variables (and their virtual fields) to the
+  call site's; `io/LinkCodec` — the on-the-wire encoding of links and summaries in the analysis results.
 - `impl/graph/` — the GENERIC incremental fixpoint engine: `IncrementalFixpointEngine` (facts, witnesses,
   incremental removal), `Closure`, `LabeledGraph`, `Fact`, `Witness`, `WitnessIndex`. No domain knowledge;
   all semantics are injected at construction (see `LinkComputerImpl`).
@@ -421,5 +453,6 @@ parser's javac concurrency issue (mitigated by `-XDuseUnsharedTable=true` and a 
 ---
 
 *Starting point for a new session: read §5 (`LinkMethodCall`) + §6 (worked examples) + `TestLinkMethodCall`; for
-functional interfaces read §7 + the three §7.4 specs. Collectors (§7.5) are the next target. Prove changes with the §8
-probe loop against the green-suite baseline noted in §8.*
+functional interfaces read §7 + the three §7.4 specs; for the engine underneath, `sv-reconstruction-techniques.md`.
+Open work is in the GitHub issues of CodeLaser/maddi-mod. Prove changes with the §8 probe loop against the
+green-suite baseline noted in §8.*
