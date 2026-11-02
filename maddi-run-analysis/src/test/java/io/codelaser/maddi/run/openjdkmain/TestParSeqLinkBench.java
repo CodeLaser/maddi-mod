@@ -3,7 +3,7 @@ package io.codelaser.maddi.run.openjdkmain;
 import ch.qos.logback.classic.Level;
 import io.codelaser.maddi.modification.link.impl.LinkComputerImpl;
 import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
-import io.codelaser.maddi.run.openjdkmain.javac.ParseJavacList;
+import io.codelaser.maddi.run.config.javac.ParseJavacList;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.inspection.api.integration.JavaInspector;
 import io.codelaser.maddi.inspection.api.parser.ParseResult;
