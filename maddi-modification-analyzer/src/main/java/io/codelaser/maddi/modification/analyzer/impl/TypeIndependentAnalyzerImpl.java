@@ -90,6 +90,20 @@ public class TypeIndependentAnalyzerImpl extends CommonAnalyzerImpl implements T
         if (typeIndependent.isIndependent()) return; // nothing to be gained
         Independent independent = computeIndependentType(typeInfo, activateCycleBreaking,
                 TypeImmutableAnalyzer.AfterMark.NONE, false);
+        if (ecTypeDebug(typeInfo)) {
+            // (#82) per pass: what the type computed, from which supertype verdicts, on which thread
+            StringBuilder supers = new StringBuilder();
+            for (ParameterizedType superType : typeInfo.parentAndInterfacesImplemented()) {
+                TypeInfo st = superType.typeInfo();
+                if (st == null) continue;
+                supers.append(' ').append(st.simpleName()).append('=')
+                        .append(st.analysis().getOrNull(INDEPENDENT_TYPE, ValueImpl.IndependentImpl.class));
+            }
+            System.out.println("ECINDY it=" + EventualCluster.ITERATION + " cb=" + activateCycleBreaking
+                               + " " + Thread.currentThread().getName() + " " + typeInfo.fullyQualifiedName()
+                               + " was=" + typeInfo.analysis().getOrNull(INDEPENDENT_TYPE, ValueImpl.IndependentImpl.class)
+                               + " computed=" + independent + " supers:" + supers);
+        }
         if (independent != null) {
             if (TolerantWrite.setAllowControlledOverwrite(typeInfo.analysis(), INDEPENDENT_TYPE, independent, typeInfo)) {
                 DECIDE.debug("Ti: Decide independent of type {} = {}", typeInfo, independent);
