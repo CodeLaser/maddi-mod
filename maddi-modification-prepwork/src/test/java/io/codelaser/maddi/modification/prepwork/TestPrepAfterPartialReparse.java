@@ -120,7 +120,11 @@ public class TestPrepAfterPartialReparse {
             assertTrue(uses.analysis().haveAnalyzedValueFor(PrepAnalyzer.PREPPED), "the prep marker is carried");
             assertNotNull(uses.findUniqueMethod("m", 1).analysis()
                     .getOrNull(VariableDataImpl.VARIABLE_DATA, VariableDataImpl.class), "VariableData is carried");
-            new PrepAnalyzer(inspector.runtime()).doPrimaryTypes(Set.copyOf(pr.primaryTypes()));
+            PrepAnalyzer prep = new PrepAnalyzer(inspector.runtime());
+            prep.doPrimaryTypes(Set.copyOf(pr.primaryTypes()));
+            // the whole universe passed, only the re-parsed type prepped: "these, into that" (§7 item 6)
+            assertEquals(1, prep.typesPrepped(), "round " + round + ": only " + fqn);
+            assertEquals(2, prep.typesCarried(), "round " + round + ": Uses rewired, the third kept");
             assertLive(pr, "round " + round + " (" + fqn + " edited)");
             assertEquals(prepDump(coldPrep(set)), prepDump(pr), "round " + round + ": warm prep as a cold one");
         }
@@ -175,7 +179,11 @@ public class TestPrepAfterPartialReparse {
                         : ti.fullyQualifiedName().equals("g.Caller") ? REWIRE : UNCHANGED)
                 .build();
         pr = inspector.parse(Map.of(), options).parseResult();
-        new PrepAnalyzer(inspector.runtime()).doPrimaryTypes(Set.copyOf(pr.primaryTypes()));
+        PrepAnalyzer prep = new PrepAnalyzer(inspector.runtime());
+        prep.doPrimaryTypes(Set.copyOf(pr.primaryTypes()));
+        assertEquals(1, prep.typesPrepped(), "Holder");
+        assertEquals(1, prep.typesCarried(), "Caller");
+        assertEquals(1, prep.typesReprepped(), "Caller: getX is no longer a getter");
         assertEquals(prepDump(coldPrep(set)), prepDump(pr), "warm prep as a cold one");
     }
 

@@ -147,6 +147,29 @@ public class PrepAnalyzer {
 
     // the primary types doType skipped because they arrived prepped, in this run; see doPrimaryTypesReturnComputeCallGraph
     private final Set<TypeInfo> skipped = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    // of the last doPrimaryTypesReturnComputeCallGraph; see typesPrepped()
+    private int typesPrepped;
+    private int typesCarried;
+    private int typesReprepped;
+
+    /**
+     * Of the last run over a set of primary types: how many were prepped, and how many arrived prepped (kept, or
+     * rewired with their prep data carried) and were skipped. Passing the whole universe after a partial re-parse is
+     * how a caller preps "these, into that" (docs/design/incremental-and-overlay.md §7 item 6): only the re-parsed
+     * types, and the rewired ones whose data could not be carried, are prepped.
+     */
+    public int typesPrepped() {
+        return typesPrepped;
+    }
+
+    public int typesCarried() {
+        return typesCarried;
+    }
+
+    /** Of the last run: carried types prepped again because a callee's getter/setter status changed. */
+    public int typesReprepped() {
+        return typesReprepped;
+    }
 
     private final MethodAnalyzer methodAnalyzer;
     private final Runtime runtime;
@@ -273,7 +296,12 @@ public class PrepAnalyzer {
             TIMED_LOGGER.info("Done {} of {} primary types", count, total);
             count.incrementAndGet();
         });
+        typesCarried = skipped.size();
+        typesPrepped = total - typesCarried;
+        typesReprepped = 0;
         reprepWhereGetSetChanged(primaryTypes);
+        LOGGER.info("Prep: {} primary type(s) prepped, {} arrived prepped, {} of those prepped again", typesPrepped,
+                typesCarried, typesReprepped);
 
         LOGGER.info("Start compute call graph");
         ComputeCallGraph ccg = new ComputeCallGraph(runtime, primaryTypes, moduleInfos, externalsToAccept)
@@ -333,6 +361,7 @@ public class PrepAnalyzer {
             if (!skipped.remove(primaryType) || getSetAssumptionsHold(primaryType)) continue;
             LOGGER.debug("Re-prepping {}: a callee's getter/setter status changed", primaryType);
             clearCarriedPrep(primaryType);
+            ++typesReprepped;
             doType(primaryType);
         }
         skipped.clear();
