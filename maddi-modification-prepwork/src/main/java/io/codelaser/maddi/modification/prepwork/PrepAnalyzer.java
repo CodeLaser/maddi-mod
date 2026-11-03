@@ -75,8 +75,9 @@ public class PrepAnalyzer {
      * <p>
      * INTRINSIC, and CARRIED on a rewire, together with everything this marker vouches for: a rewired type keeps
      * its methods', statements' and field initializers' {@code VariableData} ({@code VariableDataImpl.rewire}), its
-     * {@code ALWAYS_ESCAPES}, {@code INSTANCEOF_SCOPE}, {@code FLUENT_METHOD} and the anonymous types'
-     * {@code VARIABLES_OF_ENCLOSING_METHOD}, so prep skips it exactly as it skips a kept type. The graph-wide values
+     * {@code ALWAYS_ESCAPES}, {@code INSTANCEOF_SCOPE} and the anonymous types'
+     * {@code VARIABLES_OF_ENCLOSING_METHOD}, so prep skips it exactly as it skips a kept type -- except for the one
+     * thing a type's prep writes onto OTHER types, its methods' entries in IMPLEMENTATIONS, which doType repeats. The graph-wide values
      * ({@code PART_OF_CONSTRUCTION}, {@code FINAL_FIELD}, {@code RECURSIVE_METHOD}) are not carried; the global
      * passes recompute them. {@code AnalysisFingerprint} only fingerprints {@code CROSS_TYPE_DERIVED} properties.
      * <p>
@@ -269,6 +270,9 @@ public class PrepAnalyzer {
         // method-less types were never stamped and a KEEP carry re-prepped them — throwing on their field
         // initializers. Setting the marker here covers those too.
         if (typeInfo.analysis().haveAnalyzedValueFor(PREPPED)) {
+            // kept, or rewired with its prep data carried: only the side effect on other types is repeated
+            typeInfo.recursiveSubTypeStream().flatMap(TypeInfo::constructorAndMethodStream)
+                    .forEach(MethodAnalyzer::registerImplementation);
             return;
         }
         try {

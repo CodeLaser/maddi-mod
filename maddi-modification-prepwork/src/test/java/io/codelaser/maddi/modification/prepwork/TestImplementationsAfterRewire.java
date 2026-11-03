@@ -118,7 +118,8 @@ public class TestImplementationsAfterRewire extends CommonTest {
         assertSame(xGetEmail, y2GetEmail.overrides().iterator().next(),
                 "the rewired Y still overrides the very same, upstream X.getEmail()");
 
-        // prep re-runs over the rewired type, as it must: a rewire drops all analysis
+        // prep over the rewired type: it arrives prepped (the intrinsic carry), and prep re-registers its methods'
+        // implementations, the one side effect of a type's prep on other types
         new PrepAnalyzer(runtime).doPrimaryType(y2);
 
         List<MethodInfo> after = implementationsOf(xGetEmail);

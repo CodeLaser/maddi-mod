@@ -378,6 +378,16 @@ public class MethodAnalyzer {
             LOGGER.error("Caught exception in method {}", methodInfo);
             throw t;
         }
+        registerImplementation(methodInfo);
+    }
+
+    /**
+     * Enter a concrete method into the IMPLEMENTATIONS of the methods it overrides. A side effect on OTHER types,
+     * so it is not part of what a rewired type carries: {@code PrepAnalyzer.doType} repeats it for a type it skips,
+     * which re-points an upstream method's set at the rewired copy ({@code SetOfMethodInfo.add} replaces an equal
+     * entry) and changes nothing for a kept type.
+     */
+    static void registerImplementation(MethodInfo methodInfo) {
         if (!methodInfo.isAbstract()) {
             // a concrete method of the sources collects its overrides too, the bodies a call through it may
             // dispatch to (CodeLaser/maddi-mod#84); only an abstract method or a placeholder takes their union
