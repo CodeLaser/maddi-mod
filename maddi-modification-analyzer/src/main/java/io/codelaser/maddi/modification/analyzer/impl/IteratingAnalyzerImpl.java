@@ -549,10 +549,15 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
         String nextPassKind = incremental ? "incremental" : null;
         // strata-parallel first iteration (PARALLEL=n): dependency waves from the same call graph
         java.util.List<java.util.List<java.util.List<Info>>> firstIterationWaves;
-        if (!incremental && SingleIterationAnalyzerImpl.PARALLEL_THREADS > 1 && dependencyGraph != null
-            && analysisOrder.size() >= SingleIterationAnalyzerImpl.MIN_ELEMENTS_FOR_PARALLEL) {
-            firstIterationWaves = io.codelaser.maddi.callgraph.ComputeAnalysisOrder
+        if (SingleIterationAnalyzerImpl.PARALLEL_THREADS > 1 && dependencyGraph != null
+            && (incremental ? initialDirty.size() : analysisOrder.size())
+               >= SingleIterationAnalyzerImpl.MIN_ELEMENTS_FOR_PARALLEL) {
+            java.util.List<java.util.List<java.util.List<Info>>> waves = io.codelaser.maddi.callgraph.ComputeAnalysisOrder
                     .waves(dependencyGraph);
+            // incremental: the seed's first pass runs as a cold first iteration does, over the seed only. The
+            // sequential fallback recursed into the seed's cleared callees in another order, and tripped the link
+            // computer's work ceiling twice as often as a cold run (fernflower: 150 against 71).
+            firstIterationWaves = incremental ? restrictWaves(waves, initialDirty) : waves;
             LOGGER.info("Computed {} first-iteration waves", firstIterationWaves.size());
         } else {
             firstIterationWaves = null;
@@ -587,9 +592,15 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                 // clear-before-recompute: newly-dirtied elements (never analysed before in this run) may be carried
                 // types whose stale cross-type-derived values must be cleared before the fresh, possibly-lowering
                 // re-analysis. Fire the hook once per element, before it enters go().
+                java.util.Set<Info> firstVisits = new java.util.HashSet<>();
                 for (Info info : subset) {
-                    if (everAnalyzed.add(info) && beforeFirstRecompute != null) beforeFirstRecompute.accept(info);
+                    if (everAnalyzed.add(info)) {
+                        firstVisits.add(info);
+                        if (beforeFirstRecompute != null) beforeFirstRecompute.accept(info);
+                    }
                 }
+                // what a cold run does in its first iteration only, for the elements cleared just now
+                if (iterations > 1) singleIterationAnalyzer.setFirstVisits(firstVisits);
             }
             Instant start = Instant.now();
             singleIterationAnalyzer.go(subset, cycleBreakingActive, iterations == 1,
@@ -976,6 +987,16 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
             LOGGER.info("Run again, properties changed {}", propertiesChanged);
             // TODO any strategy, e.g. after 3 iterations, activate cycle breaking
         }
+    }
+
+    // the waves with only the elements of the seed, empty units and waves dropped: a wave stays a barrier
+    private static java.util.List<java.util.List<java.util.List<Info>>> restrictWaves(
+            java.util.List<java.util.List<java.util.List<Info>>> waves, java.util.Set<Info> seed) {
+        return waves.stream()
+                .map(wave -> wave.stream().map(unit -> unit.stream().filter(seed::contains).toList())
+                        .filter(unit -> !unit.isEmpty()).toList())
+                .filter(wave -> !wave.isEmpty())
+                .toList();
     }
 
     /*

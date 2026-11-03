@@ -244,6 +244,23 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
     @Override
     public void go(List<Info> analysisOrder, boolean activateCycleBreaking, boolean firstIteration,
                    List<List<List<Info>>> firstIterationWaves) {
+        try {
+            goInternal(analysisOrder, activateCycleBreaking, firstIteration, firstIterationWaves);
+        } finally {
+            firstVisits = Set.of();
+        }
+    }
+
+    // see SingleIterationAnalyzer.setFirstVisits; read by processElement, possibly from worker threads
+    private volatile Set<Info> firstVisits = Set.of();
+
+    @Override
+    public void setFirstVisits(Set<Info> firstVisits) {
+        this.firstVisits = firstVisits == null ? Set.of() : Set.copyOf(firstVisits);
+    }
+
+    private void goInternal(List<Info> analysisOrder, boolean activateCycleBreaking, boolean firstIteration,
+                            List<List<List<Info>>> firstIterationWaves) {
         linkComputer.reset();
         elementsDoneInPass.set(0);
         changedInfos.clear();
@@ -365,7 +382,14 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
         long startAbstract = System.currentTimeMillis();
         int changesBeforeAbstract = propertiesChanged.get();
         try {
-            abstractMethodAnalyzer.go(firstIteration, abstractMethods);
+            Set<Info> visits = firstVisits;
+            if (firstIteration || visits.isEmpty()) {
+                abstractMethodAnalyzer.go(firstIteration, abstractMethods);
+            } else {
+                // a seeded run: an abstract method visited for the first time gets the first-iteration treatment
+                abstractMethodAnalyzer.go(false, abstractMethods.stream().filter(mi -> !visits.contains(mi)).toList());
+                abstractMethodAnalyzer.go(true, abstractMethods.stream().filter(visits::contains).toList());
+            }
         } catch (RuntimeException | AssertionError | StackOverflowError e) {
             LOGGER.error("Caught exception in the abstract-method analyzer", e);
             if (!faultTolerant) throw e;
@@ -571,7 +595,8 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
         try {
             if (info instanceof MethodInfo methodInfo) {
                 sourceContractMaterializer.materialize(methodInfo);
-                if (firstIteration && methodInfo.isAbstract() && abstractTypes.add(info.typeInfo())) {
+                if ((firstIteration || firstVisits.contains(info)) && methodInfo.isAbstract()
+                    && abstractTypes.add(info.typeInfo())) {
                     shallowTypeAnalyzer.analyze(info.typeInfo());
                 }
                 if ((!firstIteration || !methodInfo.analysis().haveAnalyzedValueFor(METHOD_LINKS))
@@ -615,7 +640,7 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
                 // after materialization (a contract wins over inference) and before fieldAnalyzer.go, which is
                 // the first consumer of IMMUTABLE_FIELD via DynamicImmutability
                 dynamicImmutabilityInference.infer(fieldInfo);
-                if (fieldInfo.owner().isAbstract() && firstIteration) {
+                if (fieldInfo.owner().isAbstract() && (firstIteration || firstVisits.contains(info))) {
                     shallowTypeAnalyzer.analyzeField(fieldInfo);
                 }
                 fieldAnalyzer.go(fieldInfo, activateCycleBreaking);

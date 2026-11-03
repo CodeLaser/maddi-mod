@@ -40,6 +40,15 @@ public interface SingleIterationAnalyzer {
         go(analysisOrder, activateCycleBreaking, firstIteration);
     }
 
+    /**
+     * A seeded (incremental) run: the elements the next {@code go} analyses for the first time in this run. Their
+     * cross-type-derived values were just cleared, so the work a cold run does only in its first iteration (the
+     * shallow analysis of an abstract type's methods and fields, an abstract method without implementations) is
+     * done for them too, whatever the pass. Holds for the next {@code go} only.
+     */
+    default void setFirstVisits(java.util.Set<Info> firstVisits) {
+    }
+
     int propertiesChanged();
 
     /**
