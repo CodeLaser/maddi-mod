@@ -887,4 +887,89 @@ public class TestCallResults extends NullabilityFixtures {
         assertEquals("Callable<T!>", s.get("a.b.LR.call(java.util.concurrent.Callable):0:action"), s.toString());
         assertEquals("String", s.get("a.b.LR.named()"), s.toString());
     }
+
+    @DisplayName("a for loop's init clause and updaters seed as assignments do (guava TypeResolver.resolveInternal)")
+    @Test
+    public void forClauses() {
+        Report report = run("a.b.FC", """
+                package a.b;
+                import java.util.*;
+                class FC {
+                    static final class Key { }
+                    static final class Var { final Key key = new Key(); }
+                    private final Map<Key, Var> mappings = new HashMap<>();
+                    static Key forLookup(Var v) { return v.key; }
+                    static Key forAny(Var v) { return v == null ? null : v.key; }
+                    Var resolve(Var var) {
+                        Var x = var;
+                        for (Var t = x; t != null; t = mappings.remove(forLookup(t))) {
+                            x = t;
+                        }
+                        return x;
+                    }
+                    Var unguarded(Var var, int n) {
+                        Var x = var;
+                        for (Var t = x; n > 0; t = mappings.remove(forAny(t))) {
+                            x = t;
+                            n--;
+                        }
+                        return x;
+                    }
+                }
+                """);
+        String locals = locals(report);
+        // the updater assigns t the library null of Map.remove (gate NOFORCLAUSES)
+        assertTrue(locals.contains("resolve.t: Var?"), locals);
+        assertTrue(locals.contains("unguarded.t: Var?"), locals);
+        String v = verdicts(report);
+        // the updater runs after a body that ran under 't != null': forLookup takes no null from t
+        // (gate NOFORUPDATERFACTS)
+        assertTrue(v.contains("forLookup(0:v): Var\n"), v);
+        // the control: the condition tests nothing, the null reaches forAny
+        assertTrue(v.contains("forAny(0:v): Var?"), v);
+    }
+
+    @DisplayName("two alternative sources of one call result are not aliases (guava TypeResolver.resolveParameterizedType)")
+    @Test
+    public void alternativeSources() {
+        Report report = run("a.b.AS", """
+                package a.b;
+                import java.lang.reflect.ParameterizedType;
+                import java.lang.reflect.Type;
+                import java.util.Objects;
+                class AS {
+                    static Type newType(Type ownerType, Class<?> rawType) {
+                        return ownerType == null ? rawType : ownerType;
+                    }
+                    Type resolveType(Type type) {
+                        Objects.requireNonNull(type);
+                        return type;
+                    }
+                    Type viaConditional(ParameterizedType type) {
+                        Type owner = type.getOwnerType();
+                        Type resolvedOwner = (owner == null) ? null : resolveType(owner);
+                        Type resolvedRawType = resolveType(type.getRawType());
+                        return newType(resolvedOwner, (Class<?>) resolvedRawType);
+                    }
+                    Type viaIf(ParameterizedType type) {
+                        Type owner = type.getOwnerType();
+                        Type resolvedOwner;
+                        if (owner == null) resolvedOwner = null;
+                        else resolvedOwner = resolveType(owner);
+                        Type resolvedRawType = resolveType(type.getRawType());
+                        return newType(resolvedOwner, (Class<?>) resolvedRawType);
+                    }
+                }
+                """);
+        String locals = locals(report);
+        assertTrue(locals.contains("viaConditional.resolvedOwner: Type?"), locals);
+        assertTrue(locals.contains("viaIf.resolvedOwner: Type?"), locals);
+        // 'newType ← 0:ownerType, newType ← 1:rawType': the result may be either argument, but the arguments are
+        // not each other. resolvedRawType took resolvedOwner's null through the call result's shared group, and
+        // guava's TypeResolver.kt printed '(owner?.let { resolveType(it) })!!' (CodeLaser/maddi-mod#72)
+        assertTrue(locals.contains("viaConditional.resolvedRawType: Type"), locals);
+        assertFalse(locals.contains("viaConditional.resolvedRawType: Type?"), locals);
+        assertTrue(locals.contains("viaIf.resolvedRawType: Type"), locals);
+        assertFalse(locals.contains("viaIf.resolvedRawType: Type?"), locals);
+    }
 }

@@ -22,6 +22,7 @@ import io.codelaser.maddi.cst.api.variable.Variable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -98,15 +99,18 @@ public class LinkGraph {
             graph.clear(r.clear, statementIndex);
         }
         Map<Variable, Links> newLinks2 = r == null ? respellSelfReassignment(newLinks) : r.newLinks;
+        List<Link> statementLinks = new ArrayList<>();
         newLinks2.entrySet()
                 .stream()
                 .filter(e -> !(e.getKey() instanceof This))
                 .filter(e -> e.getValue().primary() != null)
                 .sorted(Map.Entry.comparingByKey(Variable::compareTo))
-                .forEach(e -> e.getValue().translate(replaceConstants).forEach(link -> {
-                    graph.addStatementLink(link.from(), link.linkNature(), link.to(), statementIndex,
-                            link.mediated());
-                }));
+                .forEach(e -> e.getValue().translate(replaceConstants).forEach(statementLinks::add));
+        // a recipient of several values in this statement forms no group with them (Graph.markMultiValuedRecipients)
+        graph.markMultiValuedRecipients(statementLinks);
+        for (Link link : statementLinks) {
+            graph.addStatementLink(link.from(), link.linkNature(), link.to(), statementIndex, link.mediated());
+        }
 
         boolean change = true;
         int cycleProtection = 0;
