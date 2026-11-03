@@ -33,6 +33,8 @@ import java.util.List;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * The rewire driver on fernflower, with its measurement and its oracle: the corpus run of
@@ -59,12 +61,18 @@ public class TestRewireFernflower {
     public void test(@TempDir Path tmp) throws Exception {
         Corpora.Corpus fernflower = Corpora.oss("fernflower");
         fernflower.requireConfig();
-        Path original = fernflower.dir().toAbsolutePath().normalize();
+        // ⛔ THE REAL PATH. The locator may answer through a symbolic link (a workspace links test-oss in), while the
+        // configuration holds the real one: a replace on the linked path matched nothing, and the driver then edited
+        // the shared corpus itself (2026-11-03; restored, but every touched file was newer than its class file).
+        Path original = fernflower.dir().toRealPath();
         Path copy = tmp.resolve("fernflower");
         for (String part : List.of("src", "test", "build/classes/java/main", "build/classes/java/test")) {
             copyTree(original.resolve(part), copy.resolve(part));
         }
         String configuration = Files.readString(fernflower.config()).replace(original.toString(), copy.toString());
+        // the driver writes to the files it parses: not one path of the original may survive in the copy's configuration
+        assertFalse(configuration.contains(original.toString()), "the copied configuration still names " + original);
+        assertTrue(configuration.contains(copy.toString()), "the copied configuration does not name the copy");
         Path copiedConfiguration = copy.resolve("inputConfiguration.json");
         Files.writeString(copiedConfiguration, configuration);
 
