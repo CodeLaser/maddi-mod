@@ -468,10 +468,12 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
         // the freeze is JVM-wide static state from a previous analyze() under modificationViaReachability
         // (tests run several analyses per JVM): always start unfrozen
         TolerantWrite.unfreezeModificationProperties();
-        // clear-before-recompute: elements already analysed (never to be re-cleared). Seeded with the seed itself,
-        // which is fresh (INVALID) source, never carried — so the hook fires only for elements the worklist later
-        // pulls in, i.e. carried types entering the dirty frontier, exactly once each, before their first analysis.
-        java.util.Set<Info> everAnalyzed = incremental ? new java.util.HashSet<>(initialDirty) : java.util.Set.of();
+        // clear-before-recompute: the elements this run analysed, each cleared once, before its first analysis. NOT
+        // pre-seeded with the seed: on the engine's INCREMENTAL path the seed carries values restored from the
+        // checkpoint (the changed types' OLD values), which must be cleared like any carried element's; on fresh
+        // source the clear is a no-op (docs/design/incremental-and-overlay.md §1, "stale values on the seed"). Also
+        // the scope of the incremental verification pass and cycle breaking: see scopePass.
+        java.util.Set<Info> everAnalyzed = incremental ? new java.util.HashSet<>() : java.util.Set.of();
         int iterations = 0;
         int maxIterations = configuration.maxIterations(); // extended per MODREACH re-derivation round
         int modReachRounds = 0; // P2.5: pass <-> re-derivation to joint fixpoint, bounded
@@ -581,12 +583,12 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                 int size = subset.size();
                 feed(f -> f.passStarted(it, max, kind, size, analysisOrder.size()));
             }
-            if (incremental && beforeFirstRecompute != null) {
+            if (incremental) {
                 // clear-before-recompute: newly-dirtied elements (never analysed before in this run) may be carried
                 // types whose stale cross-type-derived values must be cleared before the fresh, possibly-lowering
                 // re-analysis. Fire the hook once per element, before it enters go().
                 for (Info info : subset) {
-                    if (everAnalyzed.add(info)) beforeFirstRecompute.accept(info);
+                    if (everAnalyzed.add(info) && beforeFirstRecompute != null) beforeFirstRecompute.accept(info);
                 }
             }
             Instant start = Instant.now();
@@ -661,8 +663,9 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
             // that will never arrive (external supers without values, call cycles): activate cycle breaking
             // for the remaining rounds and run one more full pass, so the fixpoint we certify includes the
             // broken-cycle conclusions. Opt-out NOCYCLEBREAKING=1.
-            if (done && !cycleBreakingActive && !incremental && System.getenv("NOCYCLEBREAKING") == null) {
-                long undecided = analysisOrder.stream()
+            if (done && !cycleBreakingActive && System.getenv("NOCYCLEBREAKING") == null) {
+                // incremental: the scope this run touched, see scopePass
+                long undecided = (incremental ? scopePass(everAnalyzed, analysisOrder) : analysisOrder).stream()
                         .filter(i -> i instanceof io.codelaser.maddi.cst.api.info.TypeInfo t
                                      && t.analysis().getOrNull(
                                 io.codelaser.maddi.cst.impl.analysis.PropertyImpl.IMMUTABLE_TYPE,
@@ -678,7 +681,8 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                         feed(f -> f.phase(io.codelaser.maddi.analysis.api.AnalysisValueFeed.Phase
                                 .CYCLE_BREAKING_ACTIVATED, it));
                     }
-                    dirty = null; // one more FULL pass, now with cycle breaking
+                    // one more FULL pass, now with cycle breaking; incremental: over the scope
+                    dirty = incremental ? new java.util.HashSet<>(scopePass(everAnalyzed, analysisOrder)) : null;
                     if (dependersOf != null) verifying = true;
                     previousPropertiesChanged = propertiesChanged;
                     continue;
@@ -699,7 +703,10 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                 certifiedWithoutFrozenValues = done && refusedSum == 0;
                 LOGGER.info("Stop iterating after {} iterations, done? {}{}", iterations, done,
                         plateau ? " (plateau: " + propertiesChanged + " vs " + previousPropertiesChanged + ")" : "");
-                if (configuration.modificationViaReachability() && modReachRounds < MODREACH_MAX_ROUNDS) {
+                // incremental: not yet. Its rounds clear and re-derive the derived family over the whole order, which
+                // is the cold run; scoping it is the next step (docs/design/incremental-and-overlay.md §3 item 3)
+                if (configuration.modificationViaReachability() && modReachRounds < MODREACH_MAX_ROUNDS
+                    && !incremental) {
                     // PLAN §14 P2.3: post-convergence single-writer cutover. One-shot reachability
                     // over the converged link artifacts becomes the authority for the three
                     // modification properties: frozen optimistic TRUEs downgrade, undecided nodes
@@ -945,18 +952,19 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                     verifying = false;
                 } else if (dirty.isEmpty() || propertiesChanged == 0) {
                     if (incremental) {
-                        // incremental early-cutoff: the seeded worklist is dry. STOP here, trusting the elements it
-                        // never reached to keep their carried values — a full verification pass would re-analyze
-                        // them (and hit the carried-value monotonic guards), defeating the skip. Correctness rests
-                        // on the carried elements being fingerprint-stable, established before this call.
-                        LOGGER.info("Incremental worklist dry after {} iterations; stopping (carried elements spared)",
-                                iterations);
-                        logVerdictFingerprint(analysisOrder);
-                        if (configuration.guardContracts() || configuration.warnNearMisses()) {
-                            feed(f -> f.stage("contract checks"));
-                            new GuardAnalyzerImpl(javaInspector.runtime(), configuration, guardMessages).go(analysisOrder);
-                        }
-                        return;
+                        // incremental: the seeded worklist is dry. What a cold run does next over the whole order --
+                        // a verification pass, then cycle breaking at the certification point -- runs over the
+                        // SCOPE: the elements this run analysed, the seed and what the worklist pulled in. Those
+                        // the worklist never reached keep their values and are not re-touched. Without this, part
+                        // of the cold result was never reached (TestWarmAnalysisAfterPartialReparse).
+                        java.util.List<Info> scope = scopePass(everAnalyzed, analysisOrder);
+                        LOGGER.info("Incremental worklist dry after {} iterations; verification pass over the {} "
+                                    + "element(s) of this run's scope", iterations, scope.size());
+                        dirty = new java.util.HashSet<>(scope);
+                        verifying = true;
+                        nextPassKind = "incremental verification";
+                        LOGGER.info("Run again, properties changed {}", propertiesChanged);
+                        continue;
                     }
                     // worklist dry (or a zero-change subset round): do NOT stop yet — run one full pass to
                     // certify (or catch missed dependencies)
@@ -968,6 +976,15 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
             LOGGER.info("Run again, properties changed {}", propertiesChanged);
             // TODO any strategy, e.g. after 3 iterations, activate cycle breaking
         }
+    }
+
+    /*
+     The scope of an incremental run, in analysis order: every element it analysed (the seed, and every element the
+     worklist pulled in, which everAnalyzed collects as the clear-before-recompute fires). A cold run's full passes run
+     over this instead.
+     */
+    private static List<Info> scopePass(java.util.Set<Info> everAnalyzed, List<Info> analysisOrder) {
+        return analysisOrder.stream().filter(everAnalyzed::contains).toList();
     }
 
     /**

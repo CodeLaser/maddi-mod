@@ -65,9 +65,9 @@ public class TestClearBeforeRecomputeHook extends CommonTest {
                 new IteratingAnalyzerImpl.ConfigurationBuilder().setMaxIterations(10).build());
     }
 
-    @DisplayName("the hook fires for propagated (carried) elements, once each, never for the seed")
+    @DisplayName("the hook fires for the seed and the propagated (carried) elements, once each")
     @Test
-    public void testHookFiresForPropagatedNotSeed() {
+    public void testHookFiresForSeedAndPropagated() {
         TypeInfo X = javaInspector.parse("a.b.X", INPUT);
         List<Info> analysisOrder = prepWork(X);
         G<Info> graph = new ComputeCallGraph(runtime, X).go().graph();
@@ -81,13 +81,15 @@ public class TestClearBeforeRecomputeHook extends CommonTest {
         List<Info> fired = new ArrayList<>();
         newAnalyzer().analyze(analysisOrder, graph, Set.of(seed), fired::add);
 
-        assertFalse(fired.isEmpty(), "propagation past the seed occurred, so the hook fired");
-        assertFalse(fired.contains(seed), "the seed is fresh, never carried: the hook must not fire for it");
+        assertTrue(fired.size() > 1, "propagation past the seed occurred, so the hook fired beyond it");
+        // the seed too: on the engine's INCREMENTAL path it holds values restored from the checkpoint, the changed
+        // types' old ones, which must go like a carried element's (the stale seed); on fresh source it is a no-op
+        assertEquals(seed, fired.getFirst(), "the seed is cleared first, before its first analysis");
         assertEquals(fired.size(), Set.copyOf(fired).size(), "the hook fires at most once per element");
         assertTrue(analysisOrder.containsAll(fired), "every fired element is an analysis-order element");
     }
 
-    @DisplayName("nothing propagates from a converged seed: the hook stays silent")
+    @DisplayName("nothing propagates from a converged seed: the hook fires for the seed only")
     @Test
     public void testHookSilentWhenNothingPropagates() {
         TypeInfo X = javaInspector.parse("a.b.X", INPUT);
@@ -96,8 +98,10 @@ public class TestClearBeforeRecomputeHook extends CommonTest {
         newAnalyzer().analyze(analysisOrder, graph); // to fixpoint; nothing is stale
 
         List<Info> fired = new ArrayList<>();
-        newAnalyzer().analyze(analysisOrder, graph, Set.of(analysisOrder.getFirst()), fired::add);
+        Info seed = analysisOrder.getFirst();
+        newAnalyzer().analyze(analysisOrder, graph, Set.of(seed), fired::add);
 
-        assertTrue(fired.isEmpty(), "a converged seed changes no summary, so nothing is pulled in and the hook is silent");
+        assertEquals(List.of(seed), fired,
+                "a converged seed changes no summary, so nothing is pulled in: the hook fires for the seed alone");
     }
 }

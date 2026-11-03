@@ -48,6 +48,13 @@ public class VariableInfoContainerImpl implements VariableInfoContainer {
                || previousOrInitial.isRight() && previousOrInitial.getRight().variable() == variable;
     }
 
+    /** {@link VariableInfoImpl#clearDerived} on the infos this container owns: the initial, the evaluation, the merge. */
+    public void clearDerived(java.util.function.Predicate<io.codelaser.maddi.cst.api.analysis.Property> derived) {
+        if (previousOrInitial.isRight()) previousOrInitial.getRight().clearDerived(derived);
+        if (evaluation != null) evaluation.clearDerived(derived);
+        if (merge != null && merge.isSet()) merge.get().clearDerived(derived);
+    }
+
     public void setMerge(VariableInfoImpl merge) {
         this.merge.set(merge);
     }

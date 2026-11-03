@@ -67,6 +67,17 @@ public class VariableInfoImpl implements VariableInfo, AnalysisAccessRecorder.Ow
         this.isVariableInClosure = isVariableInClosure;
     }
 
+    /**
+     * Drop what the link computer and the analyzer wrote here: the linked variables, and the analysis values that
+     * {@code derived} selects. Before a kept method is analysed again ({@link io.codelaser.maddi.modification.prepwork.ClearDerived}):
+     * {@code setLinkedVariables} and the analysis map only move a value up, so a re-analysis on new inputs would keep
+     * the old, stronger value.
+     */
+    public void clearDerived(java.util.function.Predicate<io.codelaser.maddi.cst.api.analysis.Property> derived) {
+        linkedVariables = null;
+        analysis.removeIf(derived);
+    }
+
     public void setLinkedVariables(Links linkedVariables) {
         assert linkedVariables != null;
         if (AnalysisAccessRecorder.active()) AnalysisAccessRecorder.write(this, LINKED_VARIABLES);

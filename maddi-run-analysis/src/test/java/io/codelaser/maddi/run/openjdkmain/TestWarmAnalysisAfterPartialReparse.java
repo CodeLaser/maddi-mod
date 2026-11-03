@@ -148,10 +148,7 @@ public class TestWarmAnalysisAfterPartialReparse {
         Set<String> recomputed = new java.util.TreeSet<>();
         Consumer<Info> clearBeforeRecompute = info -> {
             recomputed.add(info.fullyQualifiedName());
-            info.analysis().removeIf(AnalysisFingerprint.CROSS_TYPE_DERIVED_ONLY);
-            if (info instanceof MethodInfo mi) {
-                mi.parameters().forEach(p -> p.analysis().removeIf(AnalysisFingerprint.CROSS_TYPE_DERIVED_ONLY));
-            }
+            io.codelaser.maddi.modification.prepwork.ClearDerived.element(info);
         };
         new IteratingAnalyzerImpl(inspector, configuration()).analyze(order, ccg.graph(), seed, clearBeforeRecompute);
         return new Warm(inspector, set, pr, recomputed, before);
@@ -179,7 +176,6 @@ public class TestWarmAnalysisAfterPartialReparse {
      does not conclude that: shape.area() now modifies. The warm Shape and User also miss the cold immutableType.
      docs/design/incremental-and-overlay.md §3 item 3.
      */
-    @org.junit.jupiter.api.Disabled("the terminal passes of an incremental analysis: §3 item 3")
     @DisplayName("an implementation becomes modifying: the warm analysis equals a cold one")
     @Test
     public void testWarmEqualsCold() throws IOException {
