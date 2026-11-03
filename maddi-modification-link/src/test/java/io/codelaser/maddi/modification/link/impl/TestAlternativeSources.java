@@ -18,6 +18,9 @@
 package io.codelaser.maddi.modification.link.impl;
 
 import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.modification.prepwork.variable.impl.ObjectCreationVariableImpl;
+import io.codelaser.maddi.cst.api.variable.Variable;
+import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
@@ -32,9 +35,11 @@ import org.junit.jupiter.api.TestInstance;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Alternatives are not aliases: a recipient assigned one of several values in one statement may hold either, but
@@ -76,6 +81,12 @@ public class TestAlternativeSources extends CommonTest {
                 static List<String> first(List<String> x, List<String> y) { return x; }
                 static List<String> twoCalls(List<String> a, List<String> b, boolean c) {
                     return first(either(a, b, c), either(a, b, !c));
+                }
+                static final int KIND_A = 1, KIND_B = 2, KIND_X = 3;
+                static int kindOf(char c) { return switch (c) { case 'a' -> KIND_A; case 'b' -> KIND_B; default -> KIND_X; }; }
+                static int kind(String s) {
+                    int k = kindOf(s.charAt(0));
+                    return k;
                 }
                 private Object[] elements;
                 private Object[] requireElements() { return java.util.Objects.requireNonNull(elements); }
@@ -173,5 +184,50 @@ public class TestAlternativeSources extends CommonTest {
         } finally {
             Graph.DEGRADE_ON_ALT_SOURCES_FOR_TESTING = false;
         }
+    }
+
+    private long marksComputing(String name) {
+        TypeInfo c = javaInspector.parse("a.b.C", INPUT);
+        new PrepAnalyzer(runtime, new PrepAnalyzer.Options.Builder().build()).doPrimaryType(c);
+        LinkComputerImpl lc = new LinkComputerImpl(javaInspector);
+        // the callees first, so that the method's own computation is the only one counted
+        c.recursiveSubTypeStream().flatMap(TypeInfo::constructorAndMethodStream)
+                .filter(m -> !m.name().equals(name)).forEach(lc::recurseMethod);
+        MethodInfo method = c.recursiveSubTypeStream().flatMap(TypeInfo::constructorAndMethodStream)
+                .filter(m -> m.name().equals(name)).findFirst().orElseThrow();
+        long before = Graph.ALT_MARKS.get();
+        lc.doMethod(method);
+        return Graph.ALT_MARKS.get() - before;
+    }
+
+    @DisplayName("#89: a value without identity is no recipient of alternatives")
+    @Test
+    public void primitiveRecipient() {
+        // 'int k = kindOf(..)', one of three int constants (fernflower's 'type = getType(c)'): gate NOALTPRIMITIVE
+        assertEquals(0, marksComputing("kind"));
+    }
+
+    @DisplayName("#89: the control, guava's shape: the arguments are alternatives")
+    @Test
+    public void callArgumentsAreAlternatives() {
+        assertEquals(1, marksComputing("call"));
+    }
+
+    @DisplayName("#89: a recipient of objects a callee created only is no recipient of alternatives")
+    @Test
+    public void freshObjectsRecipient() {
+        // 'descriptor.superclass = GenericType.parse(superCl)', which returns one of four 'new GenericType(..)':
+        // the call result's sources are the callee's object creations, none of them a variable of the caller.
+        // A fixture whose callee summary keeps two creations apart is elusive (the join and the element links
+        // absorb them), so the rule is tested directly. Gate NOALTFRESH.
+        TypeInfo c = javaInspector.parse("a.b.C", INPUT);
+        MethodInfo either = c.findUniqueMethod("either", 3);
+        ParameterInfo a = either.parameters().get(0);
+        ParameterInfo b = either.parameters().get(1);
+        Variable oc1 = new ObjectCreationVariableImpl(either, "10-1", a.parameterizedType());
+        Variable oc2 = new ObjectCreationVariableImpl(either, "11-1", a.parameterizedType());
+        assertTrue(Graph.aliasingIsMoot(a, Set.of(oc1, oc2)));
+        // a variable of the method among the sources: the group would alias it
+        assertFalse(Graph.aliasingIsMoot(a, Set.of(oc1, b)));
     }
 }

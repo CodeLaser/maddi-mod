@@ -5,6 +5,7 @@ import io.codelaser.maddi.modification.link.impl.LinkNatureImpl;
 import io.codelaser.maddi.modification.link.impl.graph.Fact;
 import io.codelaser.maddi.modification.link.impl.graph.IncrementalFixpointEngine;
 import io.codelaser.maddi.modification.link.impl.graph.LabeledGraph;
+import io.codelaser.maddi.modification.prepwork.variable.ObjectCreationVariable;
 import io.codelaser.maddi.modification.prepwork.variable.ReturnVariable;
 import io.codelaser.maddi.modification.link.impl.graph.DegradedAnalysisException;
 import io.codelaser.maddi.modification.link.impl.localvar.IntermediateVariable;
@@ -852,6 +853,8 @@ public class Graph {
     private static final ThreadLocal<Boolean> ALT_SOURCES_USED = ThreadLocal.withInitial(() -> false);
     // the work ceiling, as soon as a statement marks alternatives: TestAlternativeSources' retry test
     public static volatile boolean DEGRADE_ON_ALT_SOURCES_FOR_TESTING;
+    // recipients marked as alternatives, over the whole run: what the tests read (TestAlternativeSources)
+    public static final java.util.concurrent.atomic.AtomicLong ALT_MARKS = new java.util.concurrent.atomic.AtomicLong();
 
     public static boolean altSourcesOff() {
         return ALT_SOURCES_OFF.get();
@@ -908,7 +911,7 @@ public class Graph {
         Map<Variable, Set<Variable>> candidates = new LinkedHashMap<>();
         sources.forEach((recipient, set) -> {
             Set<Variable> values = set.stream().map(find).collect(Collectors.toCollection(LinkedHashSet::new));
-            if (values.size() > 1) candidates.put(recipient, values);
+            if (values.size() > 1 && !aliasingIsMoot(recipient, set)) candidates.put(recipient, values);
         });
         // recipients sharing an alternative keep their group: the values a callee's summary composes are the same
         // variables at every call ('$rv3 ← RegularImmutableMap.EMPTY, ← oc:170, ← oc:87' for each of the 28 maps of
@@ -920,12 +923,36 @@ public class Graph {
             if (values.stream().allMatch(v -> uses.get(v) == 1)) multiValued.add(recipient);
         });
         if (!multiValued.isEmpty()) {
+            ALT_MARKS.addAndGet(multiValued.size());
             ALT_SOURCES_USED.set(true);
             if (DEGRADE_ON_ALT_SOURCES_FOR_TESTING) {
                 throw new DegradedAnalysisException(DegradedAnalysisException.Reason.WORK_CEILING);
             }
         }
     }
+
+    /*
+     Alternatives whose grouping claims nothing the method can observe keep their group (CodeLaser/maddi-mod#89):
+     - a value without identity: 'type = getType(c)', one of CodeConstants' ints; 'wildcard = switch (..) { case '*' ->
+       WILDCARD_UNBOUND; .. }'. As plain edges each constant became a source of its own, and the summaries of
+       fernflower's VarType.getType and getMinTypeInFamily changed for nothing. Gate NOALTPRIMITIVE.
+     - sources that are all objects created by a callee: 'descriptor.superclass = GenericType.parse(superCl)', whose
+       summary returns one of four 'new GenericType(..)' (oc:122, oc:126, oc:129, oc:133). No variable of this method is
+       among them, so the group aliases nothing here; as plain edges the result's fields went from '≺ oc' (field of)
+       to '≈ oc' (shares fields with), both ways, and StructClass.create, two calls up, grew past the work ceiling.
+       Gate NOALTFRESH.
+     Public for TestAlternativeSources.
+     */
+    public static boolean aliasingIsMoot(Variable recipient, Set<Variable> sources) {
+        if (!NO_ALT_PRIMITIVE && recipient.parameterizedType() != null
+            && recipient.parameterizedType().isPrimitiveStringClass()) {
+            return true;
+        }
+        return !NO_ALT_FRESH && sources.stream().allMatch(v -> v instanceof ObjectCreationVariable);
+    }
+
+    private static final boolean NO_ALT_PRIMITIVE = Gate.isSet("NOALTPRIMITIVE");
+    private static final boolean NO_ALT_FRESH = Gate.isSet("NOALTFRESH");
 
     boolean mergeEdgeBi(Variable from, LinkNature linkNature, Variable to, String statementIndex) {
         if (Gate.isSet("TRACEVAR")
