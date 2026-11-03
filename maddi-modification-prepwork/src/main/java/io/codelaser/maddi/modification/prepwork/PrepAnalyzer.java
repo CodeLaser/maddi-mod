@@ -17,6 +17,8 @@
 
 package io.codelaser.maddi.modification.prepwork;
 
+import io.codelaser.maddi.cst.api.analysis.Value;
+import io.codelaser.maddi.modification.common.getset.ApplyGetSetTranslation;
 import io.codelaser.maddi.modification.common.AnalyzerException;
 import io.codelaser.maddi.modification.common.getset.GetSetHelper;
 import io.codelaser.maddi.inspection.api.parser.ParseResult;
@@ -81,12 +83,69 @@ public class PrepAnalyzer {
      * ({@code PART_OF_CONSTRUCTION}, {@code FINAL_FIELD}, {@code RECURSIVE_METHOD}) are not carried; the global
      * passes recompute them. {@code AnalysisFingerprint} only fingerprints {@code CROSS_TYPE_DERIVED} properties.
      * <p>
-     * ⚠ The one cross-type input of a type's own prep is its callees' getter/setter status ({@code GET_SET_FIELD}):
-     * a call to a getter becomes a field read. A re-parsed callee whose status changed makes its rewired callers'
-     * carried data stale; see {@code docs/design/incremental-and-overlay.md} §7 item 4.
+     * The one cross-type input of a type's own prep is its callees' getter/setter status ({@code GET_SET_FIELD}):
+     * a call to a getter becomes a field read. Each type records the status it read ({@link #GET_SET_ASSUMPTIONS},
+     * carried too); a skipped type whose callee's status changed is cleared and prepped again after the main pass.
      */
     public static final Property PREPPED = new PropertyImpl("typePrepped", ValueImpl.BoolImpl.FALSE,
             Property.AnalysisTier.INTRINSIC, true);
+
+    /**
+     * The getter/setter status, as this type's prep read it, of every source method its bodies call: the one
+     * cross-type input of a type's own prep (a call to a getter is recorded as a read of the field). Carried with the
+     * rest of the prep data; a type that prep skipped because it arrived prepped is checked against it once every type
+     * has been prepped, and prepped again when a callee's status changed ({@link #doPrimaryTypesReturnComputeCallGraph}).
+     */
+    public static final Property GET_SET_ASSUMPTIONS = new PropertyImpl("getSetAssumptions", GetSetAssumptions.EMPTY,
+            Property.AnalysisTier.INTRINSIC, true);
+
+    /**
+     * See {@link #GET_SET_ASSUMPTIONS}. {@code unresolved}: a callee the rewire could not map onto a method of the new
+     * generation (it was removed or changed its signature), which is a change by itself.
+     */
+    public record GetSetAssumptions(Map<MethodInfo, String> statusByCallee, boolean unresolved) implements Value {
+        public static final GetSetAssumptions EMPTY = new GetSetAssumptions(Map.of(), false);
+
+        @Override
+        public boolean isDefault() {
+            return statusByCallee.isEmpty() && !unresolved;
+        }
+
+        @Override
+        public io.codelaser.maddi.cst.api.analysis.Codec.EncodedValue encode(
+                io.codelaser.maddi.cst.api.analysis.Codec codec, io.codelaser.maddi.cst.api.analysis.Codec.Context context) {
+            return null; // not streamed
+        }
+
+        @Override
+        public Value rewire(io.codelaser.maddi.cst.api.info.InfoMapView infoMap) {
+            Map<MethodInfo, String> map = new java.util.HashMap<>();
+            boolean lost = unresolved;
+            for (Map.Entry<MethodInfo, String> e : statusByCallee.entrySet()) {
+                MethodInfo rewired;
+                try {
+                    rewired = infoMap.methodInfo(e.getKey());
+                } catch (RuntimeException re) {
+                    rewired = null;
+                }
+                if (rewired == null) lost = true;
+                else map.put(rewired, e.getValue());
+            }
+            return new GetSetAssumptions(Map.copyOf(map), lost);
+        }
+
+        @Override
+        public String toString() {
+            return statusByCallee.entrySet().stream().map(e -> e.getKey().fullyQualifiedName() + "=" + e.getValue())
+                           .sorted().collect(Collectors.joining(", ", "[", "]")) + (unresolved ? " unresolved" : "");
+        }
+    }
+
+    private static final Predicate<Property> CARRIED_PREP = p -> p.carryOnRewire()
+                                                                  && p.analysisTier() == Property.AnalysisTier.INTRINSIC;
+
+    // the primary types doType skipped because they arrived prepped, in this run; see doPrimaryTypesReturnComputeCallGraph
+    private final Set<TypeInfo> skipped = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     private final MethodAnalyzer methodAnalyzer;
     private final Runtime runtime;
@@ -200,6 +259,7 @@ public class PrepAnalyzer {
             TIMED_LOGGER.info("Done {} of {} primary types", count, total);
             count.incrementAndGet();
         });
+        reprepWhereGetSetChanged(primaryTypes);
 
         LOGGER.info("Start compute call graph");
         ComputeCallGraph ccg = new ComputeCallGraph(runtime, primaryTypes, moduleInfos, externalsToAccept)
@@ -244,6 +304,69 @@ public class PrepAnalyzer {
         return ccg;
     }
 
+    /*
+     A type that arrived prepped (kept, or rewired with its prep data carried) holds data computed against its callees'
+     getter/setter status at the time. Now that every type of this run has been prepped, a re-parsed callee has its
+     current status; where one differs from what the type recorded, its carried data is dropped and it is prepped again
+     (TestPrepAfterPartialReparse.testGetterStatusChange).
+     */
+    private void reprepWhereGetSetChanged(Set<TypeInfo> primaryTypes) {
+        for (TypeInfo primaryType : primaryTypes) {
+            if (!skipped.remove(primaryType) || getSetAssumptionsHold(primaryType)) continue;
+            LOGGER.debug("Re-prepping {}: a callee's getter/setter status changed", primaryType);
+            clearCarriedPrep(primaryType);
+            doType(primaryType);
+        }
+        skipped.clear();
+    }
+
+    private static boolean getSetAssumptionsHold(TypeInfo primaryType) {
+        GetSetAssumptions assumptions = primaryType.analysis().getOrNull(GET_SET_ASSUMPTIONS, GetSetAssumptions.class);
+        if (assumptions == null) return true; // prepped before the assumptions were recorded
+        if (assumptions.unresolved()) return false;
+        for (Map.Entry<MethodInfo, String> e : assumptions.statusByCallee().entrySet()) {
+            String now = ApplyGetSetTranslation.describe(ApplyGetSetTranslation.currentGetSet(e.getKey()));
+            if (!now.equals(e.getValue())) return false;
+        }
+        return true;
+    }
+
+    // what the carry brought: every intrinsic, carried property, on everything the type's prep writes to
+    private static void clearCarriedPrep(TypeInfo primaryType) {
+        primaryType.recursiveSubTypeStream().forEach(PrepAnalyzer::clearType);
+    }
+
+    private static void clearType(TypeInfo typeInfo) {
+        typeInfo.analysis().removeIf(CARRIED_PREP);
+        typeInfo.constructorAndMethodStream().forEach(mi -> {
+            mi.analysis().removeIf(CARRIED_PREP);
+            mi.parameters().forEach(pi -> pi.analysis().removeIf(CARRIED_PREP));
+            if (mi.methodBody() != null) clearElements(mi.methodBody());
+        });
+        typeInfo.fields().forEach(fi -> {
+            fi.analysis().removeIf(CARRIED_PREP);
+            fi.analysisOfInitializer().removeIf(CARRIED_PREP);
+            if (fi.initializer() != null) clearElements(fi.initializer());
+        });
+    }
+
+    private static void clearElements(io.codelaser.maddi.cst.api.element.Element root) {
+        root.visit(e -> {
+            if (e instanceof io.codelaser.maddi.cst.api.statement.Statement
+                || e instanceof io.codelaser.maddi.cst.api.expression.InstanceOf) {
+                e.analysis().removeIf(CARRIED_PREP);
+            }
+            if (e instanceof io.codelaser.maddi.cst.api.expression.ConstructorCall cc && cc.anonymousClass() != null) {
+                cc.anonymousClass().recursiveSubTypeStream().forEach(PrepAnalyzer::clearType);
+            } else if (e instanceof io.codelaser.maddi.cst.api.expression.Lambda lambda) {
+                clearType(lambda.methodInfo().typeInfo());
+            } else if (e instanceof io.codelaser.maddi.cst.api.statement.LocalTypeDeclaration ltd) {
+                ltd.typeInfo().recursiveSubTypeStream().forEach(PrepAnalyzer::clearType);
+            }
+            return true;
+        });
+    }
+
     public List<Info> doPrimaryType(TypeInfo typeInfo) {
         return doPrimaryTypes(Set.of(typeInfo));
     }
@@ -270,11 +393,13 @@ public class PrepAnalyzer {
         // method-less types were never stamped and a KEEP carry re-prepped them — throwing on their field
         // initializers. Setting the marker here covers those too.
         if (typeInfo.analysis().haveAnalyzedValueFor(PREPPED)) {
+            if (typeInfo.isPrimaryType()) skipped.add(typeInfo);
             // kept, or rewired with its prep data carried: only the side effect on other types is repeated
             typeInfo.recursiveSubTypeStream().flatMap(TypeInfo::constructorAndMethodStream)
                     .forEach(MethodAnalyzer::registerImplementation);
             return;
         }
+        boolean collecting = methodAnalyzer.startGetSetAssumptions();
         try {
             List<MethodInfo> gettersAndSetters = new LinkedList<>();
             List<MethodInfo> otherConstructorsAndMethods = new LinkedList<>();
@@ -321,6 +446,13 @@ public class PrepAnalyzer {
             // (lambdas, local classes).
             if (!typeInfo.analysis().haveAnalyzedValueFor(PREPPED)) {
                 typeInfo.analysis().set(PREPPED, ValueImpl.BoolImpl.TRUE);
+            }
+            if (collecting) {
+                Map<MethodInfo, String> assumptions = methodAnalyzer.endGetSetAssumptions();
+                if (!typeInfo.analysis().haveAnalyzedValueFor(GET_SET_ASSUMPTIONS)) {
+                    typeInfo.analysis().set(GET_SET_ASSUMPTIONS,
+                            new GetSetAssumptions(Map.copyOf(assumptions), false));
+                }
             }
         }
     }

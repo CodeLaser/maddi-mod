@@ -126,6 +126,59 @@ public class TestPrepAfterPartialReparse {
         }
     }
 
+    @Language("java")
+    private static final String HOLDER = """
+            package g;
+            public class Holder {
+                private int x;
+                public int getX() { return x; }
+            }
+            """;
+
+    @Language("java")
+    private static final String HOLDER_NOT_A_GETTER = """
+            package g;
+            public class Holder {
+                private int x;
+                public int getX() { return x + 1; }
+            }
+            """;
+
+    @Language("java")
+    private static final String CALLER = """
+            package g;
+            public class Caller {
+                public int m(Holder h) { return h.getX(); }
+            }
+            """;
+
+    /*
+     The one cross-type input of a type's own prep: a call to a getter is recorded as a read of the field. Holder is
+     edited so that getX() stops being a getter; Caller, rewired, must not keep the prep data that says otherwise.
+     */
+    @DisplayName("a callee that stops being a getter: its rewired caller's prep data follows")
+    @Test
+    public void testGetterStatusChange() throws IOException {
+        Path src = root.resolve("g-src");
+        write(src, "g/Holder.java", HOLDER);
+        write(src, "g/Caller.java", CALLER);
+        SourceSet set = new SourceSetImpl.Builder().setName("main").setSourceDirectories(List.of(src))
+                .setUri(src.toUri()).build();
+        JavaInspector inspector = inspector(set);
+        ParseResult pr = inspector.parse(Map.of(), JavaInspectorImpl.DETAILED_SOURCES).parseResult();
+        new PrepAnalyzer(inspector.runtime()).doPrimaryTypes(Set.copyOf(pr.primaryTypes()));
+
+        write(src, "g/Holder.java", HOLDER_NOT_A_GETTER);
+        JavaInspector.ParseOptions options = new JavaInspector.ParseOptions.Builder()
+                .setDetailedSources(true).setFailFast(true)
+                .setInvalidated(ti -> ti.fullyQualifiedName().equals("g.Holder") ? INVALID
+                        : ti.fullyQualifiedName().equals("g.Caller") ? REWIRE : UNCHANGED)
+                .build();
+        pr = inspector.parse(Map.of(), options).parseResult();
+        new PrepAnalyzer(inspector.runtime()).doPrimaryTypes(Set.copyOf(pr.primaryTypes()));
+        assertEquals(prepDump(coldPrep(set)), prepDump(pr), "warm prep as a cold one");
+    }
+
     private static ParseResult coldPrep(SourceSet set) {
         JavaInspector cold = inspector(set);
         ParseResult pr = cold.parse(Map.of(), JavaInspectorImpl.DETAILED_SOURCES).parseResult();

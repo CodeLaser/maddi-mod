@@ -30,7 +30,32 @@ import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 
 import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.GET_SET_FIELD;
 
-public record ApplyGetSetTranslation(Runtime runtime) implements TranslationMap {
+public record ApplyGetSetTranslation(Runtime runtime,
+                                     java.util.function.BiConsumer<MethodInfo, Value.FieldValue> observer)
+        implements TranslationMap {
+
+    public ApplyGetSetTranslation(Runtime runtime) {
+        this(runtime, (_, _) -> {
+        });
+    }
+
+    /**
+     * A callee's getter/setter status as this translation reads it, for a caller that must know what its result
+     * depended on: prep records it per type, so that a rewired type can tell whether its carried prep data still holds
+     * ({@code PrepAnalyzer.GET_SET_ASSUMPTIONS}).
+     */
+    public static String describe(Value.FieldValue getSet) {
+        if (getSet == null || getSet.field() == null) return "-";
+        return (getSet.setter() ? "set " : "get ") + getSet.field().fullyQualifiedName() + "/"
+               + getSet.parameterIndexOfIndex() + (getSet.list() ? " list" : "");
+    }
+
+    /** The status {@link #translateExpression} would read, computed on demand as it does. */
+    public static Value.FieldValue currentGetSet(MethodInfo methodInfo) {
+        ensureGetSet(methodInfo);
+        return methodInfo.analysis().getOrDefault(GET_SET_FIELD, ValueImpl.GetSetValueImpl.EMPTY);
+    }
+
     @Override
     public Variable translateVariableRecursively(Variable variable) {
         return runtime.translateVariableRecursively(this, variable);
@@ -69,6 +94,7 @@ public record ApplyGetSetTranslation(Runtime runtime) implements TranslationMap 
 
             Value.FieldValue getSet = mc.methodInfo().analysis().getOrDefault(GET_SET_FIELD,
                     ValueImpl.GetSetValueImpl.EMPTY);
+            observer.accept(mc.methodInfo(), getSet);
             if (getSet.field() != null) {
                 ParameterizedType type = mc.concreteReturnType();
                 Source objectSourceIn = mc.object().source();

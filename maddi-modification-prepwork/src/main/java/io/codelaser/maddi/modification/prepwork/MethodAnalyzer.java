@@ -113,7 +113,36 @@ public class MethodAnalyzer {
     public MethodAnalyzer(Runtime runtime, PrepAnalyzer prepAnalyzer) {
         this.runtime = runtime;
         this.prepAnalyzer = prepAnalyzer;
-        this.applyGetSetTranslation = new ApplyGetSetTranslation(runtime);
+        this.applyGetSetTranslation = new ApplyGetSetTranslation(runtime, this::observeGetSet);
+    }
+
+    /*
+    The getter/setter status of every SOURCE callee this prep read while translating a body: the one cross-type input
+    of a type's own prep. Collected per primary type (PrepAnalyzer.doType opens and closes the collection, on the
+    thread that preps the type; the nested doType of a lambda or local class adds to its primary type's) and kept on
+    the type as GET_SET_ASSUMPTIONS, so a rewired type that carried its prep data can check it still holds.
+     */
+    private final ThreadLocal<Map<MethodInfo, String>> getSetAssumptions = new ThreadLocal<>();
+
+    private void observeGetSet(MethodInfo callee, Value.FieldValue getSet) {
+        Map<MethodInfo, String> map = getSetAssumptions.get();
+        if (map != null && callee.typeInfo().compilationUnit() != null
+            && !callee.typeInfo().compilationUnit().externalLibrary()) {
+            map.put(callee, ApplyGetSetTranslation.describe(getSet));
+        }
+    }
+
+    /** Start collecting for a primary type; false when a collection is already open (a nested doType). */
+    boolean startGetSetAssumptions() {
+        if (getSetAssumptions.get() != null) return false;
+        getSetAssumptions.set(new java.util.HashMap<>());
+        return true;
+    }
+
+    Map<MethodInfo, String> endGetSetAssumptions() {
+        Map<MethodInfo, String> map = getSetAssumptions.get();
+        getSetAssumptions.remove();
+        return map == null ? Map.of() : map;
     }
 
     private static class InternalVariables {
