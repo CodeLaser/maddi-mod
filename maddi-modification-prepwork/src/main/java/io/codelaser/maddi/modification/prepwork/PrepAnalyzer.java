@@ -73,13 +73,19 @@ public class PrepAnalyzer {
      * Per-type "this type has been through {@link #doType(TypeInfo)}" marker, and the idempotency guard for the
      * Tier-2 incremental reparse; see the comment in {@code doType}.
      * <p>
-     * INTRINSIC: prepwork sets it on every type it preps, on every run. It must never be carried onto a rewired
-     * type (which is a freshly built object whose statements hold no {@code VariableData} and therefore does need
-     * prepping), which the tier guarantees: {@code PropertyValueMapImpl} carries only {@code carryOnRewire}
-     * properties, and {@code AnalysisFingerprint} only fingerprints {@code CROSS_TYPE_DERIVED} ones.
+     * INTRINSIC, and CARRIED on a rewire, together with everything this marker vouches for: a rewired type keeps
+     * its methods', statements' and field initializers' {@code VariableData} ({@code VariableDataImpl.rewire}), its
+     * {@code ALWAYS_ESCAPES}, {@code INSTANCEOF_SCOPE}, {@code FLUENT_METHOD} and the anonymous types'
+     * {@code VARIABLES_OF_ENCLOSING_METHOD}, so prep skips it exactly as it skips a kept type. The graph-wide values
+     * ({@code PART_OF_CONSTRUCTION}, {@code FINAL_FIELD}, {@code RECURSIVE_METHOD}) are not carried; the global
+     * passes recompute them. {@code AnalysisFingerprint} only fingerprints {@code CROSS_TYPE_DERIVED} properties.
+     * <p>
+     * ⚠ The one cross-type input of a type's own prep is its callees' getter/setter status ({@code GET_SET_FIELD}):
+     * a call to a getter becomes a field read. A re-parsed callee whose status changed makes its rewired callers'
+     * carried data stale; see {@code docs/design/incremental-and-overlay.md} §7 item 4.
      */
     public static final Property PREPPED = new PropertyImpl("typePrepped", ValueImpl.BoolImpl.FALSE,
-            Property.AnalysisTier.INTRINSIC);
+            Property.AnalysisTier.INTRINSIC, true);
 
     private final MethodAnalyzer methodAnalyzer;
     private final Runtime runtime;

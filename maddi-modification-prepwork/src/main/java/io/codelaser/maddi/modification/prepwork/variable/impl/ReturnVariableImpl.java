@@ -159,6 +159,7 @@ public class ReturnVariableImpl implements ReturnVariable {
 
     @Override
     public Variable rewire(InfoMapView infoMap) {
-        return new ReturnVariableImpl(infoMap.methodInfo(methodInfo));
+        // once per rewire: a VariableData's containers assert identity on their variable (InfoMapView#rewired)
+        return infoMap.rewired(this, () -> new ReturnVariableImpl(infoMap.methodInfo(methodInfo)));
     }
 }

@@ -37,8 +37,9 @@ import java.util.stream.Stream;
 
 public class VariableDataImpl implements VariableData {
     // INTRINSIC: prepwork rebuilds the per-variable/per-statement data from the method body on every run.
+    // carried on a rewire: see rewire() below
     public static final PropertyImpl VARIABLE_DATA = new PropertyImpl("variableData",
-            new VariableDataImpl(new LinkedHashMap<>()), Property.AnalysisTier.INTRINSIC);
+            new VariableDataImpl(new LinkedHashMap<>()), Property.AnalysisTier.INTRINSIC, true);
 
     public static class Builder implements VariableData {
         // we employ a linkedHashMap to keep the order of creation, with this first, then fields, then parameters,
@@ -81,9 +82,19 @@ public class VariableDataImpl implements VariableData {
             throw new UnsupportedOperationException("Builder cannot be encoded, must be built first");
         }
 
+        /*
+         A builder is kept as a value in one place: VARIABLES_OF_ENCLOSING_METHOD, the enclosing method's variables
+         as an anonymous type saw them. Rewired, it becomes a built copy, its containers the same rewired objects the
+         statements' VariableData hold (InfoMapView#rewired).
+         */
         @Override
         public Value rewire(InfoMapView infoMap) {
-            throw new UnsupportedOperationException("Builder cannot be rewired, must be built first");
+            return infoMap.rewired(this, () -> build().rewire(infoMap));
+        }
+
+        @Override
+        public String toString() {
+            return build().toString();
         }
 
         @Override
@@ -109,14 +120,31 @@ public class VariableDataImpl implements VariableData {
     }
 
     /*
-    The map keys are fully qualified names and survive, but every VariableInfoContainer underneath holds Variable
-    objects (and its own analysis), so a rewire has to descend into all of them. This is the one value worth
-    carrying across a rewire -- it is computed from the type's own body, which a REWIRE type by definition did not
-    change -- so this is the place to start when that is taken on. See docs/design/rewiring.md.
+    The intrinsic carry (docs/design/rewiring.md): computed from the type's own body, which a REWIRE type by
+    definition did not change, so the rewired type keeps it and prep skips the type. The keys are fully qualified
+    names and survive; every container underneath is rewired once per rewire (InfoMapView#rewired), which is what
+    the containers' identity assertions and their links to a previous statement's container need: a method's
+    VariableData is its last statement's, and every statement's container chain points back through the earlier ones.
      */
     @Override
     public Value rewire(InfoMapView infoMap) {
-        throw new UnsupportedOperationException("NYI");
+        return infoMap.rewired(this, () -> {
+            LinkedHashMap<String, VariableInfoContainer> map = new LinkedHashMap<>();
+            vicByFqn.forEach((fqn, vic) -> map.put(fqn, ((VariableInfoContainerImpl) vic).rewire(infoMap)));
+            return new VariableDataImpl(map);
+        });
+    }
+
+    /**
+     * A canonical description: per variable, in order, its nature and the assignments and reads of its best
+     * information, with no identities. What the rewire driver's oracle compares between a warm and a cold prep.
+     */
+    @Override
+    public String toString() {
+        StringBuilder sb = new StringBuilder("VD{");
+        vicByFqn.forEach((fqn, vic) -> sb.append(fqn).append('=').append(((VariableInfoContainerImpl) vic).describe())
+                .append("; "));
+        return sb.append('}').toString();
     }
 
     @Override

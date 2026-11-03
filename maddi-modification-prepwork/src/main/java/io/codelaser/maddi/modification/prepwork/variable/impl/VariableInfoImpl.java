@@ -17,6 +17,7 @@
 
 package io.codelaser.maddi.modification.prepwork.variable.impl;
 
+import io.codelaser.maddi.cst.api.info.InfoMapView;
 import io.codelaser.maddi.modification.prepwork.variable.Link;
 import io.codelaser.maddi.modification.prepwork.variable.Links;
 import io.codelaser.maddi.modification.prepwork.variable.ReturnVariable;
@@ -175,5 +176,16 @@ public class VariableInfoImpl implements VariableInfo, AnalysisAccessRecorder.Ow
     @Override
     public String toString() {
         return "VI[" + variable + "]";
+    }
+
+    /**
+     * Prep's part, once per rewire: the variable re-pointed, assignments and reads verbatim (index strings). The link
+     * module's fills -- {@code linkedVariables}, and this object's analysis ({@code UNMODIFIED_VARIABLE},
+     * {@code DOWNCAST_VARIABLE}) -- are dropped: they are cross-type, and {@code setLinkedVariables} would fight a
+     * carried value rather than replace it.
+     */
+    public VariableInfoImpl rewire(InfoMapView infoMap) {
+        return infoMap.rewired(this, () -> new VariableInfoImpl(variable.rewire(infoMap), assignments, reads,
+                isVariableInClosure));
     }
 }

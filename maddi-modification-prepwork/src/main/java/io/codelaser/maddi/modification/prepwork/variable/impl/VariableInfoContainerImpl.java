@@ -17,6 +17,7 @@
 
 package io.codelaser.maddi.modification.prepwork.variable.impl;
 
+import io.codelaser.maddi.cst.api.info.InfoMapView;
 import io.codelaser.maddi.modification.prepwork.variable.Stage;
 import io.codelaser.maddi.modification.prepwork.variable.VariableInfo;
 import io.codelaser.maddi.modification.prepwork.variable.VariableInfoContainer;
@@ -145,6 +146,30 @@ public class VariableInfoContainerImpl implements VariableInfoContainer {
         if (merge != null && merge.isSet()) return merge.get().assignments().indexOfDefinition();
         if (previousOrInitial.isRight()) return previousOrInitial.getRight().assignments().indexOfDefinition();
         return previousOrInitial.getLeft().indexOfDefinition();
+    }
+
+    /** See {@link VariableDataImpl#rewire}: once per rewire, the variable, previous and stages rewired with it. */
+    public VariableInfoContainer rewire(InfoMapView infoMap) {
+        return infoMap.rewired(this, () -> {
+            // ⚠ one Variable for all of them: the constructor asserts identity with the evaluation's and the
+            // previous container's variable, which holds because Variable.rewire is itself once per rewire
+            Variable rewiredVariable = variable.rewire(infoMap);
+            Either<VariableInfoContainer, VariableInfoImpl> rewiredPrevious = previousOrInitial.isLeft()
+                    ? Either.left(((VariableInfoContainerImpl) previousOrInitial.getLeft()).rewire(infoMap))
+                    : Either.right(previousOrInitial.getRight().rewire(infoMap));
+            VariableInfoContainerImpl copy = new VariableInfoContainerImpl(rewiredVariable, variableNature,
+                    rewiredPrevious, evaluation == null ? null : evaluation.rewire(infoMap), merge != null);
+            if (merge != null && merge.isSet()) copy.setMerge(merge.get().rewire(infoMap));
+            return copy;
+        });
+    }
+
+    /** For {@link VariableDataImpl#toString}: no identities, only what prep computed. */
+    String describe() {
+        VariableInfo best = best();
+        return "[" + variableNature + (isInitial() ? " initial" : "") + (hasEvaluation() ? " E" : "")
+               + (hasMerge() ? " M" : "") + " a=" + best.assignments() + " r=" + best.reads()
+               + (best.isVariableInClosure() ? " closure" : "") + "]";
     }
 
     @Override

@@ -112,10 +112,44 @@ public class TestPrepAfterPartialReparse {
                     .setInvalidated(ti -> ti.fullyQualifiedName().equals(fqn) ? INVALID
                             : ti.fullyQualifiedName().equals("c.Uses") ? REWIRE : UNCHANGED)
                     .build();
+            ParseResult before = pr;
             pr = inspector.parse(Map.of(), options).parseResult();
+            TypeInfo uses = pr.findType("c.Uses");
+            assertNotSame(before.findType("c.Uses"), uses, "Uses is rewired");
+            // carried, not recomputed: the rewired type arrives prepped, its methods holding VariableData
+            assertTrue(uses.analysis().haveAnalyzedValueFor(PrepAnalyzer.PREPPED), "the prep marker is carried");
+            assertNotNull(uses.findUniqueMethod("m", 1).analysis()
+                    .getOrNull(VariableDataImpl.VARIABLE_DATA, VariableDataImpl.class), "VariableData is carried");
             new PrepAnalyzer(inspector.runtime()).doPrimaryTypes(Set.copyOf(pr.primaryTypes()));
             assertLive(pr, "round " + round + " (" + fqn + " edited)");
+            assertEquals(prepDump(coldPrep(set)), prepDump(pr), "round " + round + ": warm prep as a cold one");
         }
+    }
+
+    private static ParseResult coldPrep(SourceSet set) {
+        JavaInspector cold = inspector(set);
+        ParseResult pr = cold.parse(Map.of(), JavaInspectorImpl.DETAILED_SOURCES).parseResult();
+        new PrepAnalyzer(cold.runtime()).doPrimaryTypes(Set.copyOf(pr.primaryTypes()));
+        return pr;
+    }
+
+    /* Every method's and every statement's VariableData, described (VariableDataImpl.toString), by name and index. */
+    private static Map<String, String> prepDump(ParseResult pr) {
+        Map<String, String> map = new java.util.TreeMap<>();
+        for (TypeInfo type : pr.primaryTypes()) {
+            for (MethodInfo mi : type.constructorsAndMethods()) {
+                map.put(mi.fullyQualifiedName(), String.valueOf(mi.analysis()
+                        .getOrNull(VariableDataImpl.VARIABLE_DATA, VariableDataImpl.class)));
+                mi.methodBody().visit(e -> {
+                    if (e instanceof io.codelaser.maddi.cst.api.statement.Statement st) {
+                        map.put(mi.fullyQualifiedName() + "@" + st.source().index(), String.valueOf(st.analysis()
+                                .getOrNull(VariableDataImpl.VARIABLE_DATA, VariableDataImpl.class)));
+                    }
+                    return true;
+                });
+            }
+        }
+        return map;
     }
 
     /* Every field reference in every method's VariableData belongs to the type the parse result holds. */

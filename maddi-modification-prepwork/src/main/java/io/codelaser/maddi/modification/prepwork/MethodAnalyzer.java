@@ -70,10 +70,11 @@ public class MethodAnalyzer {
             throw new UnsupportedOperationException();
         }
 
-        // wraps a VariableData, so it inherits its problem; see VariableDataImpl.rewire
+        // wraps a VariableData: rewired with it (VariableDataImpl.rewire)
         @Override
         public Value rewire(InfoMapView infoMap) {
-            throw new UnsupportedOperationException("NYI");
+            return variableData == null ? this
+                    : new VariableInfoMap(variableNames, (VariableData) variableData.rewire(infoMap));
         }
 
         @Override
@@ -92,12 +93,18 @@ public class MethodAnalyzer {
         public String sortedByFqn() {
             return variableNames.stream().sorted().collect(Collectors.joining(", "));
         }
+
+        // sorted: the set's own order is salted per JVM, and the rewire driver's oracle compares two JVM-local worlds
+        @Override
+        public String toString() {
+            return "VariableInfoMap[" + sortedByFqn() + "; " + variableData + "]";
+        }
     }
 
     public static final VariableInfoMap EMPTY_VARIABLE_INFO_MAP = new VariableInfoMap(Set.of(), null);
     // INTRINSIC: prepwork rebuilds the enclosing-method local-variable map from the body on every run.
     public static final Property VARIABLES_OF_ENCLOSING_METHOD = new PropertyImpl("localVariablesOfEnclosingMethod",
-            EMPTY_VARIABLE_INFO_MAP, Property.AnalysisTier.INTRINSIC);
+            EMPTY_VARIABLE_INFO_MAP, Property.AnalysisTier.INTRINSIC, true);
 
     private final Runtime runtime;
     private final PrepAnalyzer prepAnalyzer;
