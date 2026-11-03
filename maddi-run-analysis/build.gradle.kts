@@ -97,6 +97,7 @@ tasks.test {
     // TestRewireFernflower's size and oracle frequency, passed through from the command line
     System.getProperty("maddi.rewire.iterations")?.let { systemProperty("maddi.rewire.iterations", it) }
     System.getProperty("maddi.rewire.oracleEvery")?.let { systemProperty("maddi.rewire.oracleEvery", it) }
+    System.getProperty("maddi.rewire.histogram")?.let { systemProperty("maddi.rewire.histogram", it) }
     // 12G: the elasticsearch-server closure under PARALLEL=8; TESTXMX overrides (see maddi-run-openjdk)
     jvmArgs("-Xmx" + (System.getenv("TESTXMX") ?: "12G"))
     jvmArgs(javacAddExports)
