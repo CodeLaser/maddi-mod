@@ -107,7 +107,8 @@ public class AnalysisEngineImpl implements AnalysisEngine {
                 : new PrepAnalyzer(request.runtime(),
                 new PrepAnalyzer.Options.Builder().setFaultTolerant(request.faultTolerant()).build());
         ComputeCallGraph ccg = prepAnalyzer.doPrimaryTypesReturnComputeCallGraph(request.primaryTypes(),
-                request.moduleInfos(), request.externalsToAccept(), request.parallel());
+                request.moduleInfos(), request.externalsToAccept(), request.parallel(), List.of(), null,
+                request.callGraphContributions());
         return new PrepOutcome(ccg, problems(prepAnalyzer.exceptions()));
     }
 

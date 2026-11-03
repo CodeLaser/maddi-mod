@@ -17,6 +17,7 @@
 
 package io.codelaser.maddi.modification.prepwork;
 
+import io.codelaser.maddi.callgraph.CallGraphContributions;
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.modification.common.getset.ApplyGetSetTranslation;
 import io.codelaser.maddi.modification.common.AnalyzerException;
@@ -233,7 +234,17 @@ public class PrepAnalyzer {
                                                                  Predicate<TypeInfo> externalsToAccept,
                                                                  boolean parallel) {
         return doPrimaryTypesReturnComputeCallGraph(primaryTypes, moduleInfos, externalsToAccept, parallel,
-                List.of(), null);
+                List.of(), null, null);
+    }
+
+    public ComputeCallGraph doPrimaryTypesReturnComputeCallGraph(Set<TypeInfo> primaryTypes,
+                                                                 Collection<ModuleInfo> moduleInfos,
+                                                                 Predicate<TypeInfo> externalsToAccept,
+                                                                 boolean parallel,
+                                                                 List<ByNameSink> byNameSinks,
+                                                                 ParseResult parseResult) {
+        return doPrimaryTypesReturnComputeCallGraph(primaryTypes, moduleInfos, externalsToAccept, parallel,
+                byNameSinks, parseResult, null);
     }
 
     /**
@@ -243,13 +254,16 @@ public class PrepAnalyzer {
      *                    {@link io.codelaser.maddi.modification.prepwork.callgraph.ByNameSink} for why the sinks
      *                    are declared rather than inferred.
      * @param parseResult resolves a binary name to a type; the feature stays off without one
+     * @param callGraphContributions null, or the per-type call graph of an earlier prep, reused where it holds
+     *                    ({@link ComputeCallGraph#go(CallGraphContributions)})
      */
     public ComputeCallGraph doPrimaryTypesReturnComputeCallGraph(Set<TypeInfo> primaryTypes,
                                                                  Collection<ModuleInfo> moduleInfos,
                                                                  Predicate<TypeInfo> externalsToAccept,
                                                                  boolean parallel,
                                                                  List<ByNameSink> byNameSinks,
-                                                                 ParseResult parseResult) {
+                                                                 ParseResult parseResult,
+                                                                 CallGraphContributions callGraphContributions) {
         AtomicInteger count = new AtomicInteger();
         int total = primaryTypes.size();
         Stream<TypeInfo> stream = parallel ? primaryTypes.parallelStream() : primaryTypes.stream();
@@ -264,7 +278,11 @@ public class PrepAnalyzer {
         LOGGER.info("Start compute call graph");
         ComputeCallGraph ccg = new ComputeCallGraph(runtime, primaryTypes, moduleInfos, externalsToAccept)
                 .withByNameSinks(byNameSinks, parseResult);
-        G<Info> cg = ccg.go().graph();
+        G<Info> cg = ccg.go(callGraphContributions).graph();
+        if (callGraphContributions != null) {
+            LOGGER.info("Call graph: {} primary type(s) reused, {} walked, of which {} kept but stale",
+                    callGraphContributions.reused(), callGraphContributions.computed(), callGraphContributions.stale());
+        }
         if (!ccg.byNameReferences().isEmpty() || ccg.unresolvedSinkCalls() > 0
             || !ccg.byNameDanglings().isEmpty()) {
             // ⚠ the unresolved count is half the message: a recogniser that cannot say how much it missed is
