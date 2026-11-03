@@ -57,6 +57,10 @@ public record ExpressionVisitor(Runtime runtime,
     private static final Logger LOGGER = LoggerFactory.getLogger(ExpressionVisitor.class);
     // gate NOEXPRSCOPEFIELD: a field of an expression's result is not linked to that result (variableExpression)
     static final boolean NO_EXPRESSION_SCOPE_FIELD = Gate.isSet("NOEXPRSCOPEFIELD");
+    // gate NOCALLRESULTFIELD: a call result its callee calls a field of the receiver is no genuine containment
+    private static final boolean NO_CALL_RESULT_FIELD = Gate.isSet("NOCALLRESULTFIELD");
+    // gate NOGETTERRECEIVER: an inlined getter drops its receiver expression's links and modifications
+    private static final boolean NO_GETTER_RECEIVER = Gate.isSet("NOGETTERRECEIVER");
 
     static final Result EMPTY = new Result(LinksImpl.EMPTY, LinkedVariablesImpl.EMPTY, Map.of(), Set.of(), List.of(),
             Map.of(), Set.of(), Set.of());
@@ -841,7 +845,12 @@ public record ExpressionVisitor(Runtime runtime,
                 VariableExpression ve = runtime.newVariableExpression(
                         runtime.newFieldReference(fv.field(),
                                 runtime.newVariableExpression(objectPrimary), mc.concreteReturnType()));
-                return variableExpression(ve, variableData, stage);
+                Result getter = variableExpression(ve, variableData, stage);
+                // a getter on a call result ('parent.getWrapper().getH()', inlined as '$__rv0.h'): keep what the
+                // receiver evaluation knows, its links ('$__rv0 ≺ 0:parent') and its modifications. Dropped, a
+                // modification through the field stopped at the result (CodeLaser/maddi-mod#80). Gate NOGETTERRECEIVER
+                if (!NO_GETTER_RECEIVER && !(mc.object() instanceof VariableExpression)) return getter.merge(object);
+                return getter;
             }
         }
 
@@ -909,6 +918,18 @@ public record ExpressionVisitor(Runtime runtime,
         Result r = new LinkMethodCall(javaInspector, runtime, linkComputerOptions, virtualFieldComputer, variableCounter,
                 currentMethod, variableData, stage)
                 .methodCall(mc.methodInfo(), mc.concreteReturnType(), object, params, mlvTranslated2);
+        // the callee's summary says its result is a field of its receiver, or of an object reachable from it
+        // ('getWrapper ≺ this.parent' when it walks a parent chain): genuine containment, which the containment
+        // filter must keep for the local holding the result, as it does for a pattern binding. Unlike an accessor
+        // copy ('o ← 0:r.object', TestCast), the callee itself asserted it. Dropped, 'parent.getWrapper().x = 1'
+        // did not reach 'parent' (fernflower ClassNode.getWrapper, CodeLaser/maddi-mod#80)
+        if (!NO_CALL_RESULT_FIELD && r.links().primary() != null) {
+            for (Link link : r.links().linkSet()) {
+                if (link.linkNature() == LinkNatureImpl.IS_FIELD_OF && link.from().equals(r.links().primary())) {
+                    sourceMethodComputer.followGraph.graph().markPatternBinding(link.to(), link.from());
+                }
+            }
+        }
         MethodModification.Modified modified = new MethodModification(runtime, variableData, stage, mc, currentMethod,
                 sourceMethodComputer::recordModifiedThroughPassedFunction,
                 implementation -> linkComputer.recordSummaryConsumption(currentMethod, implementation))

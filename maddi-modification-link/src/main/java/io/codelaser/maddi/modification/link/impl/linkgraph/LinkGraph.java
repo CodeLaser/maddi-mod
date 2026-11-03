@@ -223,6 +223,9 @@ public class LinkGraph {
             }
         }
         if (source == null) return null;
+        // the intermediate's links become target's: so does a containment the call site marked genuine on it
+        // ('w = parent.getWrapper()', ExpressionVisitor, CodeLaser/maddi-mod#80)
+        graph.markPatternBindingAlias(source, target);
         // 'node = node.next': until the reduction below, every spelling of 'target' (and of its faces) in this
         // statement's links is the OLD value, the new one is still the intermediate. compute() clears 'target'
         // before the links go in, so those spellings would land on fresh vertices, unrelated to anything: the
