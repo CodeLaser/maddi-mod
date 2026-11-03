@@ -66,6 +66,8 @@ public class TypeIndependentAnalyzerImpl extends CommonAnalyzerImpl implements T
 
     // log-only diagnostic gate, shared name with TypeEventualAnalyzerImpl / TypeImmutableAnalyzerImpl
     private static final String EC_TYPE_DEBUG = System.getenv("EC_TYPE_DEBUG");
+    // #82: NOSUPERWAIT restores the concrete-methods shortcut for an undecided abstract SOURCE supertype
+    private static final boolean NO_SUPER_WAIT = io.codelaser.maddi.modification.link.impl.Gate.isSet("NOSUPERWAIT");
     // INDEPENDENCEWALK=0 restores the min over supertype verdicts (A/B switch, as INTERFACEWALK on the immutability side)
     private static final boolean INDEPENDENCE_WALK = !"0".equals(System.getenv("INDEPENDENCEWALK"));
 
@@ -321,6 +323,12 @@ public class TypeIndependentAnalyzerImpl extends CommonAnalyzerImpl implements T
         }
         Independent ofType = superTypeInfo.analysis().getOrNull(INDEPENDENT_TYPE, ValueImpl.IndependentImpl.class);
         if (ofType != null || !superTypeInfo.isAbstract()) return ofType;
+        // a source supertype gets a verdict of its own in this run: wait for it. The shortcut below sees only the
+        // concrete methods, not the fields, abstract methods or supertypes, so it can say @Independent where the
+        // type's own verdict says @Dependent; and type independence is never revisited once @Independent. Which
+        // of the two a subtype read depended on thread timing in the pass after a MODREACH reset (guava's
+        // FluentFuture.TrustedFuture, and below it TimeoutFuture and four more futures; #82).
+        if (!NO_SUPER_WAIT && !superTypeInfo.compilationUnit().externalLibrary()) return null;
         Independent ofMethods = INDEPENDENT;
         for (MethodInfo methodInfo : superTypeInfo.constructorsAndMethods()) {
             if (!methodInfo.isAbstract()) {
