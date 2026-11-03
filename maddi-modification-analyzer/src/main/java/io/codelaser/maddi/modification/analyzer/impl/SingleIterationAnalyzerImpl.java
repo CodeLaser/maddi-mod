@@ -303,6 +303,12 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
             LOGGER.info("Parallel iteration: {} threads over {} elements", PARALLEL_THREADS, analysisOrder.size());
             List<java.util.concurrent.Future<?>> futures = new ArrayList<>(analysisOrder.size());
             java.util.Map<Info, Long> elementMillis = new java.util.concurrent.ConcurrentHashMap<>();
+            // A seeded (incremental) analysis clears the links of its seed (ClearDerived) and then runs this
+            // pass with callees still unlinked: computing a callee's links under its analysis monitor
+            // (getOrCreate) nests monitors in call order, and two workers entering a call cycle from different
+            // ends deadlock. Same lock-free recursion as the first-iteration waves; a no-op when every callee
+            // already has its links (the cold case).
+            linkComputer.setLockComputeDisabled(true);
             try (java.util.concurrent.ExecutorService pool =
                          java.util.concurrent.Executors.newFixedThreadPool(PARALLEL_THREADS)) {
                 for (Info info : analysisOrder) {
@@ -315,7 +321,9 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
                         }
                     }));
                 }
-            } // close() awaits completion of all submitted tasks
+            } finally { // close() awaits completion of all submitted tasks
+                linkComputer.setLockComputeDisabled(false);
+            }
             joinAll(futures);
             String slowest = elementMillis.entrySet().stream()
                     .sorted(java.util.Map.Entry.<Info, Long>comparingByValue().reversed())
