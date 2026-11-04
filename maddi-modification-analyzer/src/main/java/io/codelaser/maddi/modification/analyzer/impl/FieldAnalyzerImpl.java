@@ -1,16 +1,19 @@
 package io.codelaser.maddi.modification.analyzer.impl;
 
-import io.codelaser.maddi.modification.common.util.TolerantWrite;
-import io.codelaser.maddi.modification.analyzer.FieldAnalyzer;
-import io.codelaser.maddi.modification.analyzer.IteratingAnalyzer;
-import io.codelaser.maddi.modification.common.AnalysisHelper;
-import io.codelaser.maddi.modification.link.impl.LinkNatureImpl;
-import io.codelaser.maddi.modification.link.impl.LinkVariable;
-import io.codelaser.maddi.modification.prepwork.Util;
-import io.codelaser.maddi.modification.prepwork.variable.*;
-import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
-import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
-import io.codelaser.maddi.modification.prepwork.variable.impl.VariableInfoImpl;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.FALSE;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.TRUE;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.INDEPENDENT;
+import static io.codelaser.maddi.modification.prepwork.callgraph.ComputePartOfConstructionFinalField.EMPTY_PART_OF_CONSTRUCTION;
+import static io.codelaser.maddi.modification.prepwork.callgraph.ComputePartOfConstructionFinalField.PART_OF_CONSTRUCTION;
+
+import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import io.codelaser.maddi.cst.api.analysis.Message;
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.expression.MethodReference;
@@ -20,22 +23,24 @@ import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.runtime.Runtime;
 import io.codelaser.maddi.cst.api.statement.Statement;
+import io.codelaser.maddi.cst.api.type.ParameterizedType;
+import io.codelaser.maddi.cst.api.variable.DependentVariable;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
+import io.codelaser.maddi.cst.api.variable.This;
 import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.util.List;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
-
-import static io.codelaser.maddi.modification.prepwork.callgraph.ComputePartOfConstructionFinalField.EMPTY_PART_OF_CONSTRUCTION;
-import static io.codelaser.maddi.modification.prepwork.callgraph.ComputePartOfConstructionFinalField.PART_OF_CONSTRUCTION;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.FALSE;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.TRUE;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.INDEPENDENT;
+import io.codelaser.maddi.modification.analyzer.FieldAnalyzer;
+import io.codelaser.maddi.modification.analyzer.IteratingAnalyzer;
+import io.codelaser.maddi.modification.common.AnalysisHelper;
+import io.codelaser.maddi.modification.common.util.TolerantWrite;
+import io.codelaser.maddi.modification.link.impl.LinkNatureImpl;
+import io.codelaser.maddi.modification.link.impl.LinkVariable;
+import io.codelaser.maddi.modification.prepwork.Util;
+import io.codelaser.maddi.modification.prepwork.variable.*;
+import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
+import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
+import io.codelaser.maddi.modification.prepwork.variable.impl.VariableInfoImpl;
 
 public class FieldAnalyzerImpl extends CommonAnalyzerImpl implements FieldAnalyzer {
 
@@ -258,7 +263,7 @@ public class FieldAnalyzerImpl extends CommonAnalyzerImpl implements FieldAnalyz
         private Value.Bool computeUnmodified(FieldInfo fieldInfo, List<MethodInfo> methodsReferringToField,
                                              boolean structural) {
             // hidden content: the field is never modified, whatever is done to the object in it
-            if (io.codelaser.maddi.modification.prepwork.Util.isHiddenContentFieldDeclaration(fieldInfo)) return TRUE;
+            if (Util.isHiddenContentFieldDeclaration(fieldInfo)) return TRUE;
             Value.SetOfInfo poc = fieldInfo.owner().analysis().getOrDefault(PART_OF_CONSTRUCTION,
                     EMPTY_PART_OF_CONSTRUCTION);
             boolean undecided = false;
@@ -395,8 +400,8 @@ public class FieldAnalyzerImpl extends CommonAnalyzerImpl implements FieldAnalyz
                         // (SliceFactory): what one link transports is the component. Read as the array, every
                         // link into a map's keys or values was mutable content, and a Map<String, Item> of
                         // immutable records made its field, and its type, @Dependent (2026-10-31)
-                        io.codelaser.maddi.cst.api.type.ParameterizedType transported =
-                                link.from() instanceof io.codelaser.maddi.cst.api.variable.DependentVariable dv
+                        ParameterizedType transported =
+                                link.from() instanceof DependentVariable dv
                                         ? Util.isSlice(dv) && dv.parameterizedType().arrays() > 0
                                           ? dv.parameterizedType().copyWithOneFewerArrays()
                                           : dv.parameterizedType()
@@ -434,11 +439,11 @@ public class FieldAnalyzerImpl extends CommonAnalyzerImpl implements FieldAnalyz
         private static Variable realFieldPathRoot(Variable variable) {
             Variable current = variable;
             while (current instanceof FieldReference fr && fr.scopeVariable() != null
-                   && !(fr.scopeVariable() instanceof io.codelaser.maddi.cst.api.variable.This)) {
+                   && !(fr.scopeVariable() instanceof This)) {
                 if (Util.virtual(fr.fieldInfo())) return null;
                 current = fr.scopeVariable();
             }
-            return current instanceof io.codelaser.maddi.cst.api.variable.DependentVariable ? null : current;
+            return current instanceof DependentVariable ? null : current;
         }
 
         /**
@@ -469,6 +474,6 @@ public class FieldAnalyzerImpl extends CommonAnalyzerImpl implements FieldAnalyz
     }
 
     // CST is stable for the analyzer run; safe to cache across iterations and fields
-    private final java.util.concurrent.ConcurrentHashMap<MethodInfo, Boolean> fiEscapeCache =
-            new java.util.concurrent.ConcurrentHashMap<>();
+    private final ConcurrentHashMap<MethodInfo, Boolean> fiEscapeCache =
+            new ConcurrentHashMap<>();
 }

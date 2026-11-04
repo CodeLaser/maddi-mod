@@ -17,6 +17,15 @@
 
 package io.codelaser.maddi.modification.analyzer.method;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import java.util.List;
+
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
 import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
@@ -24,13 +33,6 @@ import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 import io.codelaser.maddi.modification.analyzer.CommonTest;
 import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-
-import java.util.List;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * Option C of the O4 work (2026-09-26): a union over implementations that is only held down by implementations
@@ -124,7 +126,7 @@ public class TestDelegatingUnion extends CommonTest {
      while the union is correctly @Dependent -- the implementation is decided before the union and cannot come down.
      An optimistic (unsound) independence, pre-existing; kept as the reproducer.
      */
-    @org.junit.jupiter.api.Disabled("pre-existing: a delegating implementation decided @Independent before its @Dependent union")
+    @Disabled("pre-existing: a delegating implementation decided @Independent before its @Dependent union")
     @DisplayName("veto: one implementation exposing its own mutable field keeps the union and the delegator dependent")
     @Test
     public void veto() {

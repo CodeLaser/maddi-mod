@@ -17,9 +17,22 @@
 
 package io.codelaser.maddi.modification.prepwork.callgraph;
 
+import static io.codelaser.maddi.inspection.integration.JavaInspectorImpl.JAR_WITH_PATH_PREFIX;
+import static io.codelaser.maddi.inspection.integration.JavaInspectorImpl.TEST_PROTOCOL_PREFIX;
+import static org.junit.jupiter.api.Assertions.*;
+
+import java.io.IOException;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
 import io.codelaser.maddi.callgraph.ComputeCallGraph;
 import io.codelaser.maddi.callgraph.PrimaryTypeUseGraph;
-
 import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
@@ -33,19 +46,6 @@ import io.codelaser.maddi.inspection.integration.JavaInspectorImpl;
 import io.codelaser.maddi.inspection.resource.InputConfigurationImpl;
 import io.codelaser.maddi.modification.prepwork.CommonTest;
 import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-
-import java.io.IOException;
-import java.util.Map;
-import java.util.Set;
-import java.util.stream.Collectors;
-
-import static io.codelaser.maddi.inspection.integration.JavaInspectorImpl.JAR_WITH_PATH_PREFIX;
-import static io.codelaser.maddi.inspection.integration.JavaInspectorImpl.TEST_PROTOCOL_PREFIX;
-import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * <b>A LOCAL CLASS IS A TYPE DECLARED INSIDE A BODY, like an anonymous class and a lambda, and the call graph

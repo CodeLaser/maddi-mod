@@ -17,10 +17,10 @@
 
 package io.codelaser.maddi.modification.common.defaults;
 
+import java.util.List;
+
 import io.codelaser.maddi.cst.api.element.Element;
 import io.codelaser.maddi.cst.api.expression.AnnotationExpression;
-
-import java.util.List;
 
 public interface AnnotationProvider {
 

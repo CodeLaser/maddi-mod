@@ -1,17 +1,17 @@
 package io.codelaser.maddi.modification.link.io;
 
-import io.codelaser.maddi.modification.link.impl.LinkedVariablesImpl;
-import io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl;
-import io.codelaser.maddi.modification.link.impl.Result;
-import io.codelaser.maddi.modification.link.impl.localvar.AppliedFunctionalInterfaceVariable;
-import io.codelaser.maddi.modification.link.impl.localvar.FunctionalInterfaceVariable;
-import io.codelaser.maddi.modification.link.impl.localvar.MarkerVariable;
-import io.codelaser.maddi.modification.link.vf.VirtualFieldComputer;
-import io.codelaser.maddi.modification.prepwork.Util;
-import io.codelaser.maddi.modification.prepwork.variable.Links;
-import io.codelaser.maddi.modification.prepwork.variable.ReturnVariable;
-import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
-import io.codelaser.maddi.modification.prepwork.variable.impl.ReturnVariableImpl;
+import static io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl.METHOD_LINKS;
+import static io.codelaser.maddi.modification.prepwork.callgraph.ComputePartOfConstructionFinalField.PART_OF_CONSTRUCTION;
+
+import java.util.*;
+import java.util.function.BiFunction;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import org.jetbrains.annotations.NotNull;
+import org.parsers.json.Node;
+import org.parsers.json.ast.StringLiteral;
+
 import io.codelaser.maddi.cst.api.analysis.Codec;
 import io.codelaser.maddi.cst.api.analysis.Property;
 import io.codelaser.maddi.cst.api.analysis.Value;
@@ -27,17 +27,20 @@ import io.codelaser.maddi.cst.impl.analysis.PropertyProviderImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 import io.codelaser.maddi.cst.io.CodecImpl;
 import io.codelaser.maddi.inspection.api.integration.JavaInspector;
-import org.jetbrains.annotations.NotNull;
-import org.parsers.json.Node;
-import org.parsers.json.ast.StringLiteral;
-
-import java.util.*;
-import java.util.function.BiFunction;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
-
-import static io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl.METHOD_LINKS;
-import static io.codelaser.maddi.modification.prepwork.callgraph.ComputePartOfConstructionFinalField.PART_OF_CONSTRUCTION;
+import io.codelaser.maddi.modification.link.impl.LinkedVariablesImpl;
+import io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl;
+import io.codelaser.maddi.modification.link.impl.Result;
+import io.codelaser.maddi.modification.link.impl.localvar.AppliedFunctionalInterfaceVariable;
+import io.codelaser.maddi.modification.link.impl.localvar.FunctionalInterfaceVariable;
+import io.codelaser.maddi.modification.link.impl.localvar.IntermediateVariable;
+import io.codelaser.maddi.modification.link.impl.localvar.MarkerVariable;
+import io.codelaser.maddi.modification.link.impl.localvar.SharedVariable;
+import io.codelaser.maddi.modification.link.vf.VirtualFieldComputer;
+import io.codelaser.maddi.modification.prepwork.Util;
+import io.codelaser.maddi.modification.prepwork.variable.Links;
+import io.codelaser.maddi.modification.prepwork.variable.ReturnVariable;
+import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
+import io.codelaser.maddi.modification.prepwork.variable.impl.ReturnVariableImpl;
 
 public class LinkCodec {
 
@@ -213,8 +216,8 @@ public class LinkCodec {
             // SharedVariable/IntermediateVariable have no codec branch by design: they are kept out of
             // summaries by acceptForLinkedVariables filtering. If one leaks here, the fallback would
             // silently encode it as an ordinary local — fail at the cause instead.
-            assert !(variable instanceof io.codelaser.maddi.modification.link.impl.localvar.SharedVariable)
-                   && !(variable instanceof io.codelaser.maddi.modification.link.impl.localvar.IntermediateVariable)
+            assert !(variable instanceof SharedVariable)
+                   && !(variable instanceof IntermediateVariable)
                     : "engine-internal variable leaked into persistence: " + variable;
             return super.encodeVariable(context, variable);
         }
@@ -237,9 +240,9 @@ public class LinkCodec {
                             .map(ev -> (MethodInfo) decodeInfoOutOfContext(context, ev))
                             .collect(Collectors.toUnmodifiableSet())));
             // optional 4th element (#25): the deep-only subset of the modified variables; absent in older files
-            Set<Variable> deepOnly = list.size() <= 3 ? new java.util.HashSet<>()
+            Set<Variable> deepOnly = list.size() <= 3 ? new HashSet<>()
                     : decodeList(context, list.get(3)).stream().map(ev -> decodeVariable(context, ev))
-                    .filter(modified::containsKey).collect(Collectors.toCollection(java.util.HashSet::new));
+                    .filter(modified::containsKey).collect(Collectors.toCollection(HashSet::new));
             return new Result(links, new LinkedVariablesImpl(extra), modified, deepOnly, List.of(), Map.of(), Set.of(),
                     Set.of());
         }

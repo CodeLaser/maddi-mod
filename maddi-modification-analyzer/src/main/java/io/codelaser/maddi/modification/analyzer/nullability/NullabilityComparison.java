@@ -17,12 +17,13 @@
 
 package io.codelaser.maddi.modification.analyzer.nullability;
 
-import io.codelaser.maddi.cst.api.type.NullableState;
-import io.codelaser.maddi.cst.api.type.ParameterizedType;
-
+import java.util.Arrays;
 import java.util.EnumMap;
 import java.util.Map;
 import java.util.stream.Collectors;
+
+import io.codelaser.maddi.cst.api.type.NullableState;
+import io.codelaser.maddi.cst.api.type.ParameterizedType;
 
 /**
  * Scores a nullability verdict against a reference, position by position: the type itself and, recursively, each
@@ -104,13 +105,13 @@ public final class NullabilityComparison {
                 Map<Outcome, Integer> m = counts.getOrDefault(kind, Map.of()).getOrDefault(depth, Map.of());
                 if (m.isEmpty()) continue;
                 sb.append(kind).append('/').append(depth).append(' ')
-                        .append(java.util.Arrays.stream(Outcome.values())
+                        .append(Arrays.stream(Outcome.values())
                                 .map(o -> o.name().toLowerCase() + "=" + m.getOrDefault(o, 0))
                                 .collect(Collectors.joining(" ")))
                         .append('\n');
             }
         }
-        return sb.append("TOTAL ").append(java.util.Arrays.stream(Outcome.values())
+        return sb.append("TOTAL ").append(Arrays.stream(Outcome.values())
                 .map(o -> o.name().toLowerCase() + "=" + count(o)).collect(Collectors.joining(" "))).toString();
     }
 }

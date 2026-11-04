@@ -17,43 +17,61 @@
 
 package io.codelaser.maddi.modification.analyzer.impl;
 
-import io.codelaser.maddi.modification.common.util.TolerantWrite;
+import static io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl.METHOD_LINKS;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Random;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
+import java.util.function.ObjIntConsumer;
+import java.util.stream.Stream;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import io.codelaser.maddi.cst.api.analysis.Message;
+import io.codelaser.maddi.cst.api.analysis.PropertyValueMap;
+import io.codelaser.maddi.cst.api.element.Element;
+import io.codelaser.maddi.cst.api.info.FieldInfo;
+import io.codelaser.maddi.cst.api.info.Info;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.ParameterInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.runtime.Runtime;
+import io.codelaser.maddi.cst.api.statement.Statement;
+import io.codelaser.maddi.cst.impl.analysis.AnalysisAccessRecorder;
+import io.codelaser.maddi.cst.impl.analysis.ConsumptionEdgeRecorder;
+import io.codelaser.maddi.cst.impl.analysis.MessageImpl;
+import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
+import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
+import io.codelaser.maddi.inspection.api.integration.JavaInspector;
 import io.codelaser.maddi.modification.analyzer.*;
 import io.codelaser.maddi.modification.common.defaults.ShallowTypeAnalyzer;
+import io.codelaser.maddi.modification.common.util.TolerantWrite;
 import io.codelaser.maddi.modification.link.LinkComputer;
 import io.codelaser.maddi.modification.link.impl.Gate;
 import io.codelaser.maddi.modification.link.impl.LinkComputerImpl;
 import io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl;
 import io.codelaser.maddi.modification.link.impl.ReceiverLevel;
 import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
+import io.codelaser.maddi.modification.prepwork.Util;
 import io.codelaser.maddi.modification.prepwork.variable.MethodLinkedVariables;
 import io.codelaser.maddi.modification.prepwork.variable.VariableData;
 import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
-import io.codelaser.maddi.cst.api.analysis.Message;
-import io.codelaser.maddi.cst.api.analysis.PropertyValueMap;
-import io.codelaser.maddi.cst.api.element.Element;
-import io.codelaser.maddi.cst.api.statement.Statement;
-import io.codelaser.maddi.cst.api.info.FieldInfo;
-import io.codelaser.maddi.cst.api.info.Info;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.api.runtime.Runtime;
-import io.codelaser.maddi.cst.impl.analysis.AnalysisAccessRecorder;
-import io.codelaser.maddi.cst.impl.analysis.MessageImpl;
-import io.codelaser.maddi.inspection.api.integration.JavaInspector;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Stream;
-
-import static io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl.METHOD_LINKS;
 
 public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, ModAnalyzerForTesting {
     private static final Logger LOGGER = LoggerFactory.getLogger(SingleIterationAnalyzerImpl.class);
@@ -77,13 +95,13 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
     private final AtomicInteger propertiesChanged;
     private final List<Message> messages;
     private final boolean faultTolerant;
-    private final Set<Info> failed = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private final Set<Info> failed = ConcurrentHashMap.newKeySet();
     // VariableData flatten-snapshot (Configuration.flattenVariableData; DESIGN-vardata-flatten.md):
     // runtime rebuilds a method's VD via prepwork on regeneration; the set tracks methods whose
     // intermediate-statement VD has been dropped, so a re-link regenerates it first.
     private final Runtime runtime;
     private final boolean flattenVariableData;
-    private final Set<MethodInfo> flattenedMethods = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private final Set<MethodInfo> flattenedMethods = ConcurrentHashMap.newKeySet();
 
     // Parallel per-element loop: iterations 2+ on a fixed pool, iteration 1 via call-graph strata waves.
     // DEFAULT ON since the 3-corpus proof (2026-07-17: certified + verdict-exact at 8 threads): min(8,
@@ -174,7 +192,7 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
     private <T> List<T> submissionOrder(List<T> list) {
         if (PARALLEL_SHUFFLE_SEED == null) return list;
         List<T> copy = new ArrayList<>(list);
-        java.util.Collections.shuffle(copy, new java.util.Random(PARALLEL_SHUFFLE_SEED * 31 + shufflePass++));
+        Collections.shuffle(copy, new Random(PARALLEL_SHUFFLE_SEED * 31 + shufflePass++));
         return copy;
     }
 
@@ -197,9 +215,9 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
 
     // wave-barrier hook (AnalysisValueFeed.waveCompleted): fired on the coordinator thread after each
     // strata wave's join, with that wave's element set. Set by IteratingAnalyzerImpl when a feed exists.
-    private java.util.function.ObjIntConsumer<java.util.Collection<Info>> waveCompletedCallback;
+    private ObjIntConsumer<Collection<Info>> waveCompletedCallback;
 
-    public void setWaveCompletedCallback(java.util.function.ObjIntConsumer<java.util.Collection<Info>> callback) {
+    public void setWaveCompletedCallback(ObjIntConsumer<Collection<Info>> callback) {
         this.waveCompletedCallback = callback;
     }
 
@@ -226,13 +244,13 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
      */
     private static final boolean LINK_CACHE = !Gate.isSet("NOLINKCACHE");
     private static final boolean LINK_CACHE_CHECK = Gate.isSet("LINKCACHECHECK");
-    private final java.util.Map<MethodInfo, AnalysisAccessRecorder.Recording> linkRecordings =
-            new java.util.concurrent.ConcurrentHashMap<>();
+    private final Map<MethodInfo, AnalysisAccessRecorder.Recording> linkRecordings =
+            new ConcurrentHashMap<>();
     private final AtomicInteger linkCacheHits = new AtomicInteger();
-    private final java.util.Map<String, AtomicInteger> linkCacheMisses = new java.util.concurrent.ConcurrentHashMap<>();
+    private final Map<String, AtomicInteger> linkCacheMisses = new ConcurrentHashMap<>();
     private final AtomicInteger linkCacheCheckFailures = new AtomicInteger();
     // LINKCACHECHECK: hits that are recomputed, to compare with the recording they would have replaced
-    private final Set<MethodInfo> linkCheckPending = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private final Set<MethodInfo> linkCheckPending = ConcurrentHashMap.newKeySet();
 
     void setBudget(AnalysisBudget budget) {
         this.budget = budget;
@@ -298,7 +316,7 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
     }
 
     @Override
-    public java.util.Map<MethodInfo, Set<MethodInfo>> consumedSummaries() {
+    public Map<MethodInfo, Set<MethodInfo>> consumedSummaries() {
         return linkComputer.consumedSummaries();
     }
 
@@ -364,7 +382,7 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
         // regenerate its full per-statement VD from the body (quiescent: before the parallel loop).
         if (flattenVariableData && !flattenedMethods.isEmpty()) regenerateFlattened(analysisOrder);
         // first iteration only; concurrent for the strata-parallel path
-        Set<TypeInfo> abstractTypes = java.util.concurrent.ConcurrentHashMap.newKeySet();
+        Set<TypeInfo> abstractTypes = ConcurrentHashMap.newKeySet();
 
         // CBSWEEP (#82): under cycle breaking, the per-element loop runs WITHOUT it, and the defaults are applied
         // afterwards in a sequential sweep over the fields and types, in analysis order, and only on a full pass
@@ -393,12 +411,12 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
                 LOGGER.info("Strata-parallel FIRST iteration: {} threads, {} waves, {} units, {} elements",
                         PARALLEL_THREADS, firstIterationWaves.size(), units, elements);
                 linkComputer.setLockComputeDisabled(true);
-                try (java.util.concurrent.ExecutorService pool =
-                             java.util.concurrent.Executors.newFixedThreadPool(PARALLEL_THREADS)) {
+                try (ExecutorService pool =
+                             Executors.newFixedThreadPool(PARALLEL_THREADS)) {
                     int waveIndex = 0;
                     for (List<List<Info>> wave : firstIterationWaves) {
                         waveIndex++;
-                        List<java.util.concurrent.Future<?>> futures = new ArrayList<>(wave.size());
+                        List<Future<?>> futures = new ArrayList<>(wave.size());
                         for (List<Info> unit : submissionOrder(wave)) {
                             futures.add(pool.submit(() -> {
                                 for (Info info : unit) {
@@ -424,16 +442,16 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
                    && analysisOrder.size() >= MIN_ELEMENTS_FOR_PARALLEL
                    && !(activateCycleBreaking && SEQUENTIAL_CYCLE_BREAKING)) {
             LOGGER.info("Parallel iteration: {} threads over {} elements", PARALLEL_THREADS, analysisOrder.size());
-            List<java.util.concurrent.Future<?>> futures = new ArrayList<>(analysisOrder.size());
-            java.util.Map<Info, Long> elementMillis = new java.util.concurrent.ConcurrentHashMap<>();
+            List<Future<?>> futures = new ArrayList<>(analysisOrder.size());
+            Map<Info, Long> elementMillis = new ConcurrentHashMap<>();
             // A seeded (incremental) analysis clears the links of its seed (ClearDerived) and then runs this
             // pass with callees still unlinked: computing a callee's links under its analysis monitor
             // (getOrCreate) nests monitors in call order, and two workers entering a call cycle from different
             // ends deadlock. Same lock-free recursion as the first-iteration waves; a no-op when every callee
             // already has its links (the cold case).
             linkComputer.setLockComputeDisabled(true);
-            try (java.util.concurrent.ExecutorService pool =
-                         java.util.concurrent.Executors.newFixedThreadPool(PARALLEL_THREADS)) {
+            try (ExecutorService pool =
+                         Executors.newFixedThreadPool(PARALLEL_THREADS)) {
                 for (Info info : submissionOrder(analysisOrder)) {
                     futures.add(pool.submit(() -> {
                         long t0 = System.nanoTime();
@@ -449,7 +467,7 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
             }
             joinAll(futures);
             String slowest = elementMillis.entrySet().stream()
-                    .sorted(java.util.Map.Entry.<Info, Long>comparingByValue().reversed())
+                    .sorted(Map.Entry.<Info, Long>comparingByValue().reversed())
                     .limit(10)
                     .map(e -> e.getKey().fullyQualifiedName() + "=" + e.getValue() + "ms")
                     .reduce((a, b) -> a + ", " + b).orElse("-");
@@ -457,7 +475,7 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
         } else {
             // the same "slowest elements" line the parallel branch prints: the sequential first iteration is
             // the one every corpus probe runs, and it had no per-element figure at all
-            java.util.Map<Info, Long> elementMillis = LOGGER.isInfoEnabled() ? new java.util.HashMap<>() : null;
+            Map<Info, Long> elementMillis = LOGGER.isInfoEnabled() ? new HashMap<>() : null;
             for (Info info : analysisOrder) {
                 long t0 = System.nanoTime();
                 processElement(info, loopCycleBreaking, firstIteration, abstractTypes);
@@ -465,7 +483,7 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
             }
             if (elementMillis != null) {
                 String slowest = elementMillis.entrySet().stream()
-                        .sorted(java.util.Map.Entry.<Info, Long>comparingByValue().reversed())
+                        .sorted(Map.Entry.<Info, Long>comparingByValue().reversed())
                         .limit(10)
                         .map(e -> e.getKey().fullyQualifiedName() + "=" + e.getValue() + "ms")
                         .reduce((a, b) -> a + ", " + b).orElse("-");
@@ -477,7 +495,7 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
         // analysisOrder order, independent of parallel completion order
         List<MethodInfo> abstractMethods = analysisOrder.stream()
                 .filter(info -> info instanceof MethodInfo mi && !failed.contains(info)
-                                && io.codelaser.maddi.modification.prepwork.Util.unionOverImplementations(mi))
+                                && Util.unionOverImplementations(mi))
                 .map(info -> (MethodInfo) info)
                 .toList();
         List<TypeInfo> typesInOrder = analysisOrder.stream()
@@ -558,7 +576,7 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
         LOGGER.info("Phase timing: main loop {} ms, abstract batch {} ms, 2nd type pass {} ms",
                 endLoop - startLoop, startSecondPass - startAbstract, end - startSecondPass);
         if (linkCacheEnabled()) {
-            java.util.Map<String, Integer> misses = new java.util.TreeMap<>();
+            Map<String, Integer> misses = new TreeMap<>();
             linkCacheMisses.forEach((k, v) -> misses.put(k, v.get()));
             LOGGER.info("Link cache: {} hit(s), {} check failure(s), misses by first changed property {}",
                     linkCacheHits.getAndSet(0), linkCacheCheckFailures.getAndSet(0), misses);
@@ -621,7 +639,7 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
         }
     }
 
-    private static void walkStatements(List<Statement> statements, java.util.function.Consumer<Statement> action) {
+    private static void walkStatements(List<Statement> statements, Consumer<Statement> action) {
         for (Statement s : statements) {
             action.accept(s);
             s.subBlockStream().forEach(b -> walkStatements(b.statements(), action));
@@ -639,11 +657,11 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
         analysis.removeIf(p -> p == VariableDataImpl.VARIABLE_DATA);
     }
 
-    private static void joinAll(List<java.util.concurrent.Future<?>> futures) {
-        for (java.util.concurrent.Future<?> future : futures) {
+    private static void joinAll(List<Future<?>> futures) {
+        for (Future<?> future : futures) {
             try {
                 future.get();
-            } catch (java.util.concurrent.ExecutionException e) {
+            } catch (ExecutionException e) {
                 // only reachable when !faultTolerant (processElement rethrows); preserve that contract
                 if (e.getCause() instanceof RuntimeException re) throw re;
                 if (e.getCause() instanceof Error error) throw error;
@@ -729,7 +747,7 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
         if (faultTolerant && failed.contains(info)) return; // an earlier iteration already crashed on this one
         int changesBefore = propertiesChanged.get();
         // task #35 Phase A: attribute all analysis() touches during this element to it (CONSEDGES gate)
-        io.codelaser.maddi.cst.impl.analysis.ConsumptionEdgeRecorder.setCurrent(info);
+        ConsumptionEdgeRecorder.setCurrent(info);
         try {
             if (info instanceof MethodInfo methodInfo) {
                 sourceContractMaterializer.materialize(methodInfo);
@@ -793,14 +811,14 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
             if (!faultTolerant) throw e;
             failed.add(info);
             // degradation marker (task #36): consumers relying on per-call data must go pessimistic here
-            if (info instanceof io.codelaser.maddi.cst.api.info.MethodInfo mi) {
+            if (info instanceof MethodInfo mi) {
                 // atomically: a linker thread may be marking it at the same time
-                mi.analysis().getOrCreate(io.codelaser.maddi.cst.impl.analysis.PropertyImpl.DEGRADED_ANALYSIS_METHOD,
-                        () -> io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.TRUE);
+                mi.analysis().getOrCreate(PropertyImpl.DEGRADED_ANALYSIS_METHOD,
+                        () -> ValueImpl.BoolImpl.TRUE);
             }
             messages.add(crashFinding(info, e));
         } finally {
-            io.codelaser.maddi.cst.impl.analysis.ConsumptionEdgeRecorder.clearCurrent();
+            ConsumptionEdgeRecorder.clearCurrent();
             // under PARALLEL the delta can over-attribute (another thread's change lands in the window);
             // a superset of changed elements is safe for the worklist
             if (propertiesChanged.get() > changesBefore) changedInfos.add(info);
@@ -816,7 +834,7 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
         // processed (the link computer's on-demand recursion writing a callee's METHOD_LINKS)
         for (Object target : TolerantWrite.changedTargets()) {
             // ParameterInfo extends Info but is not an analysis-order element: attribute to its method
-            Info info = target instanceof io.codelaser.maddi.cst.api.info.ParameterInfo pi ? pi.methodInfo()
+            Info info = target instanceof ParameterInfo pi ? pi.methodInfo()
                     : target instanceof Info i ? i : null;
             if (info != null) {
                 changedInfos.add(info);

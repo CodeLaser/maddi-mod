@@ -17,30 +17,32 @@
 
 package io.codelaser.maddi.modification.analyzer.nullability;
 
-import io.codelaser.maddi.cst.api.expression.BinaryOperator;
-import io.codelaser.maddi.cst.api.expression.Expression;
-import io.codelaser.maddi.cst.api.expression.MethodCall;
-import io.codelaser.maddi.cst.api.expression.NullConstant;
-import io.codelaser.maddi.cst.api.expression.VariableExpression;
-import io.codelaser.maddi.cst.api.info.FieldInfo;
-import io.codelaser.maddi.cst.impl.analysis.NullAnnotations;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.ParameterInfo;
-import io.codelaser.maddi.cst.api.type.NullableState;
-import io.codelaser.maddi.cst.api.type.ParameterizedType;
-import io.codelaser.maddi.cst.api.variable.LocalVariable;
-import io.codelaser.maddi.cst.api.variable.Variable;
+import static io.codelaser.maddi.modification.analyzer.nullability.Types.*;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Predicate;
 import java.util.stream.IntStream;
 
-import static io.codelaser.maddi.modification.analyzer.nullability.Types.*;
+import io.codelaser.maddi.cst.api.expression.BinaryOperator;
+import io.codelaser.maddi.cst.api.expression.Expression;
+import io.codelaser.maddi.cst.api.expression.MethodCall;
+import io.codelaser.maddi.cst.api.expression.NullConstant;
+import io.codelaser.maddi.cst.api.expression.VariableExpression;
+import io.codelaser.maddi.cst.api.info.FieldInfo;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.ParameterInfo;
+import io.codelaser.maddi.cst.api.type.NullableState;
+import io.codelaser.maddi.cst.api.type.ParameterizedType;
+import io.codelaser.maddi.cst.api.variable.LocalVariable;
+import io.codelaser.maddi.cst.api.variable.Variable;
+import io.codelaser.maddi.cst.impl.analysis.NullAnnotations;
 
 /**
  * CodeLaser/maddi-mod#68: a parameter callable from outside whose body tolerates null on every path is nullable,
@@ -295,7 +297,7 @@ final class Tolerance {
      */
     private List<ParameterInfo> toleratingOverrides(MethodInfo m, ParameterInfo pi, Set<Object> before) {
         if (OVERRIDE_TOLERATES_OFF.get()) return List.of();
-        List<ParameterInfo> out = new java.util.ArrayList<>();
+        List<ParameterInfo> out = new ArrayList<>();
         for (MethodInfo o : index.implementations.getOrDefault(m, List.of())) {
             if (!hasBody(o) || o.parameters().size() <= pi.index()) continue;
             ParameterInfo op = o.parameters().get(pi.index());
@@ -375,7 +377,7 @@ final class Tolerance {
         Set<Object> seen = new HashSet<>();
         List<Object> frontier = List.of(slot);
         for (int depth = 0; depth < MAX_READER_DEPTH && !frontier.isEmpty(); depth++) {
-            List<Object> next = new java.util.ArrayList<>();
+            List<Object> next = new ArrayList<>();
             for (Object n : frontier) {
                 for (Object s : graph.successors.getOrDefault(n, Set.of())) {
                     if (!seen.add(s)) continue;
@@ -474,7 +476,7 @@ final class Tolerance {
      (#68: 5 C# warnings, test-manager 2026-10-30). A lambda's body is m's own (NonNullFacts.demands). Gate
      NOENCLOSEDDEMANDS.
      */
-    private boolean demanded(MethodInfo m, java.util.function.Predicate<Variable> variable) {
+    private boolean demanded(MethodInfo m, Predicate<Variable> variable) {
         for (MethodInfo mi = m; mi != null; mi = mi.typeInfo().enclosingMethod()) {
             if (facts.demands(mi).stream().anyMatch(variable)) return true;
         }

@@ -17,15 +17,15 @@
 
 package io.codelaser.maddi.modification.prepwork.callgraph;
 
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
 
-import static org.junit.jupiter.api.Assertions.*;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
 
 /**
  * The early-cutoff worklist, on a use-graph chain {@code A <- B <- C <- D} (B uses A, C uses B, D uses C), edit at A.

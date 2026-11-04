@@ -1,11 +1,14 @@
 package io.codelaser.maddi.modification.analyzer.nullability;
 
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.function.Function;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
 
 /**
  * {@link Switches}: a gate switched off in-process.
@@ -15,8 +18,8 @@ public class TestSwitches extends NullabilityFixtures {
     @DisplayName("Switches: a gate switched off in-process changes the next pass, as its environment variable does")
     @Test
     public void gateSwitchedOffInProcess() {
-        java.util.function.Function<String, String> local = name -> {
-            Map<String, String> l = new java.util.TreeMap<>();
+        Function<String, String> local = name -> {
+            Map<String, String> l = new TreeMap<>();
             run("a.b." + name, """
                     package a.b;
                     import java.util.ArrayList;
@@ -38,11 +41,11 @@ public class TestSwitches extends NullabilityFixtures {
             return l.get("nonNullAdditions");
         };
         assertEquals("Set<String>", local.apply("GS1"));
-        Switches.offForNextPasses(java.util.Set.of("NONULLFILTERS"));
+        Switches.offForNextPasses(Set.of("NONULLFILTERS"));
         try {
             assertEquals("Set<String?>", local.apply("GS2"));
         } finally {
-            Switches.offForNextPasses(java.util.Set.of());
+            Switches.offForNextPasses(Set.of());
         }
         assertEquals("Set<String>", local.apply("GS3"));
     }

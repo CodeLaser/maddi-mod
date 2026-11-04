@@ -17,9 +17,12 @@
 
 package io.codelaser.maddi.modification.prepwork.variable;
 
-import io.codelaser.maddi.modification.common.getset.ApplyGetSetTranslation;
-import io.codelaser.maddi.modification.prepwork.CommonTest;
-import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
+import static org.junit.jupiter.api.Assertions.*;
+
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.expression.BinaryOperator;
 import io.codelaser.maddi.cst.api.expression.Expression;
@@ -31,11 +34,9 @@ import io.codelaser.maddi.cst.api.statement.LocalVariableCreation;
 import io.codelaser.maddi.cst.api.variable.DependentVariable;
 import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-
-import static org.junit.jupiter.api.Assertions.*;
+import io.codelaser.maddi.modification.common.getset.ApplyGetSetTranslation;
+import io.codelaser.maddi.modification.prepwork.CommonTest;
+import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
 
 public class TestGetSet2 extends CommonTest {
     @Language("java")

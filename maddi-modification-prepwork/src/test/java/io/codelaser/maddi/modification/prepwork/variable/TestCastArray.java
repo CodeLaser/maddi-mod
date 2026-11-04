@@ -17,9 +17,12 @@
 
 package io.codelaser.maddi.modification.prepwork.variable;
 
-import io.codelaser.maddi.modification.prepwork.CommonTest;
-import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
-import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
+import static org.junit.jupiter.api.Assertions.*;
+
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
 import io.codelaser.maddi.cst.api.expression.Assignment;
 import io.codelaser.maddi.cst.api.expression.Cast;
 import io.codelaser.maddi.cst.api.expression.EnclosedExpression;
@@ -29,11 +32,9 @@ import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.statement.ExpressionAsStatement;
 import io.codelaser.maddi.cst.api.statement.Statement;
 import io.codelaser.maddi.cst.api.variable.DependentVariable;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-
-import static org.junit.jupiter.api.Assertions.*;
+import io.codelaser.maddi.modification.prepwork.CommonTest;
+import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
+import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
 
 public class TestCastArray extends CommonTest {
 

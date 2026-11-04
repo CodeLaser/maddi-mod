@@ -1,9 +1,5 @@
 package io.codelaser.maddi.modification.link.impl.graph;
 
-import io.codelaser.maddi.modification.link.impl.Gate;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.util.*;
 import java.util.function.BiPredicate;
 import java.util.function.BinaryOperator;
@@ -12,6 +8,11 @@ import java.util.function.Predicate;
 import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import io.codelaser.maddi.modification.link.impl.Gate;
 
 /*
 Features:

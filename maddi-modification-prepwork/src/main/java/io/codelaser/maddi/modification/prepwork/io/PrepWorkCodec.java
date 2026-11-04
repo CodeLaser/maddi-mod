@@ -17,9 +17,10 @@
 
 package io.codelaser.maddi.modification.prepwork.io;
 
-import io.codelaser.maddi.modification.prepwork.callgraph.ComputePartOfConstructionFinalField;
-import io.codelaser.maddi.modification.prepwork.variable.ReturnVariable;
-import io.codelaser.maddi.modification.prepwork.variable.impl.ReturnVariableImpl;
+import java.util.List;
+import java.util.Map;
+import java.util.function.BiFunction;
+
 import io.codelaser.maddi.cst.api.analysis.Codec;
 import io.codelaser.maddi.cst.api.analysis.Property;
 import io.codelaser.maddi.cst.api.analysis.Value;
@@ -30,10 +31,9 @@ import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.cst.impl.analysis.PropertyProviderImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 import io.codelaser.maddi.cst.io.CodecImpl;
-
-import java.util.List;
-import java.util.Map;
-import java.util.function.BiFunction;
+import io.codelaser.maddi.modification.prepwork.callgraph.ComputePartOfConstructionFinalField;
+import io.codelaser.maddi.modification.prepwork.variable.ReturnVariable;
+import io.codelaser.maddi.modification.prepwork.variable.impl.ReturnVariableImpl;
 
 public class PrepWorkCodec {
 

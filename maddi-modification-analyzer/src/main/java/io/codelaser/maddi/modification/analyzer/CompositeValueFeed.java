@@ -17,14 +17,14 @@
 
 package io.codelaser.maddi.modification.analyzer;
 
-import io.codelaser.maddi.analysis.api.AnalysisValueFeed;
+import java.util.Collection;
+import java.util.List;
 
-import io.codelaser.maddi.cst.api.info.Info;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Collection;
-import java.util.List;
+import io.codelaser.maddi.analysis.api.AnalysisValueFeed;
+import io.codelaser.maddi.cst.api.info.Info;
 
 /**
  * The analyzer takes a single {@link AnalysisValueFeed} ({@code setValueFeed}); a long run wants two at

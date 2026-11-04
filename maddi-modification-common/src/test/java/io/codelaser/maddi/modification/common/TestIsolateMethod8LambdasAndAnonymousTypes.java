@@ -1,12 +1,13 @@
 package io.codelaser.maddi.modification.common;
 
-import io.codelaser.maddi.cst.api.info.TypeInfo;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+
 import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
 
 // the visitor must descend into lambda bodies and anonymous class bodies: a reference reachable only there
 // (here 'Helper.process') must still be stubbed, otherwise the printed frame would not reparse

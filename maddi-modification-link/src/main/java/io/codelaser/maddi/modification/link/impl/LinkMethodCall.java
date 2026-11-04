@@ -1,7 +1,33 @@
 package io.codelaser.maddi.modification.link.impl;
 
-import io.codelaser.maddi.modification.common.FunctionTypes;
+import static io.codelaser.maddi.modification.link.vf.VirtualFieldComputer.collectTypeParametersFromVirtualField;
 
+import java.util.*;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
+import java.util.stream.Stream;
+
+import org.jetbrains.annotations.NotNull;
+
+import io.codelaser.maddi.cst.api.analysis.Value;
+import io.codelaser.maddi.cst.api.expression.ConstructorCall;
+import io.codelaser.maddi.cst.api.expression.VariableExpression;
+import io.codelaser.maddi.cst.api.info.FieldInfo;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.ParameterInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.info.TypeParameter;
+import io.codelaser.maddi.cst.api.runtime.Runtime;
+import io.codelaser.maddi.cst.api.translate.TranslationMap;
+import io.codelaser.maddi.cst.api.type.ParameterizedType;
+import io.codelaser.maddi.cst.api.variable.FieldReference;
+import io.codelaser.maddi.cst.api.variable.LocalVariable;
+import io.codelaser.maddi.cst.api.variable.This;
+import io.codelaser.maddi.cst.api.variable.Variable;
+import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
+import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
+import io.codelaser.maddi.inspection.api.integration.JavaInspector;
+import io.codelaser.maddi.modification.common.FunctionTypes;
 import io.codelaser.maddi.modification.link.LinkComputer;
 import io.codelaser.maddi.modification.link.impl.localvar.AppliedFunctionalInterfaceVariable;
 import io.codelaser.maddi.modification.link.impl.localvar.FunctionalInterfaceVariable;
@@ -10,35 +36,9 @@ import io.codelaser.maddi.modification.link.impl.translate.VariableTranslationMa
 import io.codelaser.maddi.modification.link.vf.VirtualFieldComputer;
 import io.codelaser.maddi.modification.link.vf.VirtualFields;
 import io.codelaser.maddi.modification.prepwork.Util;
-import io.codelaser.maddi.cst.api.analysis.Value;
-import io.codelaser.maddi.cst.api.info.TypeParameter;
-import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
-import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 import io.codelaser.maddi.modification.prepwork.variable.*;
 import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
 import io.codelaser.maddi.modification.prepwork.variable.impl.ObjectCreationVariableImpl;
-import io.codelaser.maddi.cst.api.expression.ConstructorCall;
-import io.codelaser.maddi.cst.api.expression.VariableExpression;
-import io.codelaser.maddi.cst.api.info.FieldInfo;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.ParameterInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.api.runtime.Runtime;
-import io.codelaser.maddi.cst.api.translate.TranslationMap;
-import io.codelaser.maddi.cst.api.type.ParameterizedType;
-import io.codelaser.maddi.cst.api.variable.FieldReference;
-import io.codelaser.maddi.cst.api.variable.LocalVariable;
-import io.codelaser.maddi.cst.api.variable.This;
-import io.codelaser.maddi.cst.api.variable.Variable;
-import io.codelaser.maddi.inspection.api.integration.JavaInspector;
-import org.jetbrains.annotations.NotNull;
-
-import java.util.*;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Function;
-import java.util.stream.Stream;
-
-import static io.codelaser.maddi.modification.link.vf.VirtualFieldComputer.collectTypeParametersFromVirtualField;
 
 public record LinkMethodCall(JavaInspector javaInspector,
                              Runtime runtime,

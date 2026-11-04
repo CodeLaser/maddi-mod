@@ -1,13 +1,14 @@
 package io.codelaser.maddi.modification.link.impl;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.Test;
+
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.modification.link.CommonTest;
 import io.codelaser.maddi.modification.link.LinkComputer;
 import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.Test;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /*
  A pattern variable bound in the condition of a conditional EXPRESSION links to the value it was bound from, as it

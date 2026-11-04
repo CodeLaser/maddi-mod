@@ -17,18 +17,6 @@
 
 package io.codelaser.maddi.modification.prepwork.io;
 
-import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
-import io.codelaser.maddi.cst.api.analysis.Codec;
-import io.codelaser.maddi.cst.api.analysis.Property;
-import io.codelaser.maddi.cst.api.analysis.Value;
-import io.codelaser.maddi.cst.api.element.SourceSet;
-import io.codelaser.maddi.cst.api.info.*;
-import io.codelaser.maddi.cst.api.runtime.Runtime;
-import io.codelaser.maddi.cst.io.CodecImpl;
-import io.codelaser.maddi.util.Trie;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.File;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
@@ -43,6 +31,20 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import io.codelaser.maddi.cst.api.analysis.Codec;
+import io.codelaser.maddi.cst.api.analysis.Property;
+import io.codelaser.maddi.cst.api.analysis.PropertyValueMap;
+import io.codelaser.maddi.cst.api.analysis.Value;
+import io.codelaser.maddi.cst.api.element.SourceSet;
+import io.codelaser.maddi.cst.api.info.*;
+import io.codelaser.maddi.cst.api.runtime.Runtime;
+import io.codelaser.maddi.cst.io.CodecImpl;
+import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
+import io.codelaser.maddi.util.Trie;
 
 public class WriteAnalysisResults {
     private static final Logger LOGGER = LoggerFactory.getLogger(WriteAnalysisResults.class);
@@ -105,7 +107,7 @@ public class WriteAnalysisResults {
         return this;
     }
 
-    private boolean writeFalseExplicitly(Info info, io.codelaser.maddi.cst.api.analysis.PropertyValueMap.PropertyValue pv) {
+    private boolean writeFalseExplicitly(Info info, PropertyValueMap.PropertyValue pv) {
         return !explicitFalse.isEmpty()
                && explicitFalse.contains(pv.property())
                && pv.value() instanceof Value.Bool b && b.isFalse();
@@ -236,7 +238,7 @@ public class WriteAnalysisResults {
     private int skippedValues;
 
     private Codec.EncodedPropertyValue encodeOrSkip(Codec codec, Codec.Context context,
-                                                    io.codelaser.maddi.cst.api.analysis.PropertyValueMap.PropertyValue pv) {
+                                                    PropertyValueMap.PropertyValue pv) {
         try {
             return codec.encode(context, pv.property(), pv.value());
         } catch (RuntimeException | AssertionError | StackOverflowError e) {

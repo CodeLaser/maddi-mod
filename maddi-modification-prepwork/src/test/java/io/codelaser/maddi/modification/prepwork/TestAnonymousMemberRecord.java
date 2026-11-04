@@ -1,11 +1,14 @@
 package io.codelaser.maddi.modification.prepwork;
 
-import io.codelaser.maddi.cst.api.info.TypeInfo;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+
 import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.assertNotNull;
+import io.codelaser.maddi.cst.api.expression.ConstructorCall;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.statement.ReturnStatement;
 
 /**
  * elasticsearch first contact: a member record of an anonymous class, forward-referenced from a sibling
@@ -43,8 +46,8 @@ public class TestAnonymousMemberRecord extends CommonTest {
         // the member record must be fully source-built: body present on make(), Cmp under the anonymous type
         var make = X.findUniqueMethod("make", 0);
         assertNotNull(make.methodBody(), "make()'s body must survive the member-record parse");
-        var rs = (io.codelaser.maddi.cst.api.statement.ReturnStatement) make.methodBody().statements().getFirst();
-        var cc = (io.codelaser.maddi.cst.api.expression.ConstructorCall) rs.expression();
+        var rs = (ReturnStatement) make.methodBody().statements().getFirst();
+        var cc = (ConstructorCall) rs.expression();
         TypeInfo anon = cc.anonymousClass();
         assertNotNull(anon);
         TypeInfo cmp = anon.findSubType("Cmp");

@@ -180,10 +180,15 @@
 # DummyMemberAccessor.getGetterFunction() returns null, which reaches Joiners.lessThan's mapping and the joiners'
 # mapping arrays, and every parameter flowing into those arrays tolerates null. The rule works as designed; a
 # sharper one (a nullable slot dereferenced on read is no tolerance) is post-release work.
+# 2026-11-04, maddi-mod 0c2f5ebe (#68: a parameter in a @NullMarked scope, or passed on to a @NullMarked parameter,
+# is not tolerant: b5e50fd0, 26091455) with maddi f6f4387a3 (a lambda adapter takes its interface method's verdicts on
+# types other than type parameters; an IComparable<T> bridge for a non-null compareTo), on the Mac: nullableWarnings
+# 229 -> 182, the Joiners' 25 CS8602 and about 20 CS8767 of the program's functional interfaces gone. Compiling files
+# and errors (633) unchanged.
 types	1583
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	1565
 compilingFiles	1319
 unmappedJdkUses	106
-nullableWarnings	229
+nullableWarnings	182

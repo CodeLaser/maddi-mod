@@ -1,12 +1,14 @@
 package io.codelaser.maddi.modification.link;
 
-import io.codelaser.maddi.modification.prepwork.variable.Links;
-import io.codelaser.maddi.modification.prepwork.variable.MethodLinkedVariables;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
-
-import java.util.List;
+import io.codelaser.maddi.modification.prepwork.variable.Links;
+import io.codelaser.maddi.modification.prepwork.variable.MethodLinkedVariables;
 
 public interface LinkComputer {
     // tests only!
@@ -36,8 +38,8 @@ public interface LinkComputer {
         // no-op by default
     }
 
-    default java.util.Map<MethodInfo, java.util.Set<MethodInfo>> consumedSummaries() {
-        return java.util.Map.of();
+    default Map<MethodInfo, Set<MethodInfo>> consumedSummaries() {
+        return Map.of();
     }
 
     int propertiesChanged();

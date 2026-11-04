@@ -17,13 +17,28 @@
 
 package io.codelaser.maddi.run.kotlinmain;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import io.codelaser.maddi.callgraph.ComputeAnalysisOrder;
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.element.SourceSet;
-import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.expression.MethodCall;
 import io.codelaser.maddi.cst.api.expression.MethodReference;
+import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.runtime.Runtime;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
@@ -31,27 +46,12 @@ import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 import io.codelaser.maddi.graph.G;
 import io.codelaser.maddi.inspection.api.resource.InputConfiguration;
 import io.codelaser.maddi.inspection.mixed.MixedProjectInspector;
-import io.codelaser.maddi.kotlin.api.PlaceholderCensus;
 import io.codelaser.maddi.inspection.resource.InputConfigurationImpl;
 import io.codelaser.maddi.inspection.resource.SourceSetImpl;
-import io.codelaser.maddi.modification.analyzer.IteratingAnalyzer;
+import io.codelaser.maddi.kotlin.api.PlaceholderCensus;
 import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
 import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
-import io.codelaser.maddi.callgraph.ComputeAnalysisOrder;
 import io.codelaser.maddi.modification.prepwork.io.LoadAnalysisResults;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.List;
-import java.util.Set;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * ⭐ <b>Does the modification analysis reach the same conclusion about a lowered Kotlin shape as about the
@@ -438,7 +438,7 @@ public class TestLoweredShapesVsJava {
 
     /** The fully qualified names of the methods this method's tree holds a method reference to. */
     private static List<String> referencedMethods(MethodInfo method) {
-        List<String> found = new java.util.ArrayList<>();
+        List<String> found = new ArrayList<>();
         method.methodBody().visit(e -> {
             if (e instanceof MethodReference mr) found.add(mr.methodInfo().fullyQualifiedName());
             return true;

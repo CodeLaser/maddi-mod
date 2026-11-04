@@ -17,23 +17,25 @@
 
 package io.codelaser.maddi.modification.analyzer.modification;
 
-import io.codelaser.maddi.modification.analyzer.CommonTest;
-import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
-import io.codelaser.maddi.cst.api.info.Info;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
-import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.IOException;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import static org.junit.jupiter.api.Assertions.*;
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+import io.codelaser.maddi.cst.api.info.Info;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
+import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
+import io.codelaser.maddi.modification.analyzer.CommonTest;
+import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
+import io.codelaser.maddi.modification.common.util.Culprits;
 
 /**
  * {@code @StaticSideEffects}: a method modifies static/global state of another type (road-to-immutability §050).
@@ -314,8 +316,8 @@ public class TestStaticSideEffects extends CommonTest {
     @DisplayName("culprits: the first responsible statement, followed into the callee to the assignment")
     @Test
     public void testCulprit() throws IOException {
-        boolean before = io.codelaser.maddi.modification.common.util.Culprits.ENABLED;
-        io.codelaser.maddi.modification.common.util.Culprits.ENABLED = true;
+        boolean before = Culprits.ENABLED;
+        Culprits.ENABLED = true;
         try {
             TypeInfo X = javaInspector.parse("a.b.Big", CULPRIT);
             List<Info> ao = prepWork(X);
@@ -328,15 +330,15 @@ public class TestStaticSideEffects extends CommonTest {
             assertFalse(sse(register), "its own static state");
             assertNull(culprit(register), "no static side effect, no culprit");
         } finally {
-            io.codelaser.maddi.modification.common.util.Culprits.ENABLED = before;
+            Culprits.ENABLED = before;
         }
     }
 
     @DisplayName("culprits: a call of a contracted @StaticSideEffects method ends the chain")
     @Test
     public void testCulpritContract() throws IOException {
-        boolean before = io.codelaser.maddi.modification.common.util.Culprits.ENABLED;
-        io.codelaser.maddi.modification.common.util.Culprits.ENABLED = true;
+        boolean before = Culprits.ENABLED;
+        Culprits.ENABLED = true;
         try {
             TypeInfo X = javaInspector.parse("a.b.X", PROPAGATION);
             List<Info> ao = prepWork(X);
@@ -345,7 +347,7 @@ public class TestStaticSideEffects extends CommonTest {
             assertEquals("6 calls direct(..) <- 5 calls reconfigure(..), contracted @StaticSideEffects",
                     culprit(X.findUniqueMethod("indirect", 0)));
         } finally {
-            io.codelaser.maddi.modification.common.util.Culprits.ENABLED = before;
+            Culprits.ENABLED = before;
         }
     }
 
@@ -368,8 +370,8 @@ public class TestStaticSideEffects extends CommonTest {
     @DisplayName("culprits: a recursive call is no culprit; the walk goes on to the statement that is")
     @Test
     public void testCulpritRecursive() throws IOException {
-        boolean before = io.codelaser.maddi.modification.common.util.Culprits.ENABLED;
-        io.codelaser.maddi.modification.common.util.Culprits.ENABLED = true;
+        boolean before = Culprits.ENABLED;
+        Culprits.ENABLED = true;
         try {
             TypeInfo rec = javaInspector.parse("a.b.Rec", RECURSIVE);
             List<Info> ao = prepWork(rec);
@@ -377,7 +379,7 @@ public class TestStaticSideEffects extends CommonTest {
 
             assertEquals("6 assigns Registry2.count", culprit(rec.findUniqueMethod("process", 1)));
         } finally {
-            io.codelaser.maddi.modification.common.util.Culprits.ENABLED = before;
+            Culprits.ENABLED = before;
         }
     }
 

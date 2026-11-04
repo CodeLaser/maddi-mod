@@ -1,10 +1,10 @@
 package io.codelaser.maddi.modification.prepwork.kotlin;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
 import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /*
  Loops: for-in over a collection and over a range, while, do-while, break and continue, and labeled jumps out of a

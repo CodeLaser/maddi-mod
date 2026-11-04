@@ -17,21 +17,23 @@
 
 package io.codelaser.maddi.modification.analyzer.integration;
 
+import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.IMMUTABLE_TYPE;
+import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.INDEPENDENT_TYPE;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import java.io.IOException;
+import java.util.List;
+
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 import io.codelaser.maddi.modification.analyzer.CommonTest;
 import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-
-import java.util.List;
-
-import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.IMMUTABLE_TYPE;
-import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.INDEPENDENT_TYPE;
-import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * CodeLaser/maddi-mod#81: a parameterized type's hidden content is replaced by its type arguments' immutability only
@@ -104,7 +106,7 @@ public class TestExtensibleHiddenContent extends CommonTest {
 
     @DisplayName("#81: substitution of type arguments only when the hidden content is the type parameters'")
     @Test
-    public void test() throws java.io.IOException {
+    public void test() throws IOException {
         AnalyzerBundle bundle = buildAnalyzerBundle();
         TypeInfo X = bundle.javaInspector().parse("a.b.X", INPUT);
         List<Info> ao = bundle.prepAnalyzer().doPrimaryType(X);

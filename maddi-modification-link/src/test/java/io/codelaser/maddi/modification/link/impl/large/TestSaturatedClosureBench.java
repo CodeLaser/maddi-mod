@@ -1,13 +1,14 @@
 package io.codelaser.maddi.modification.link.impl.large;
 
-import io.codelaser.maddi.modification.link.CommonTest;
-import io.codelaser.maddi.modification.link.impl.LinkComputerImpl;
-import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.modification.link.CommonTest;
+import io.codelaser.maddi.modification.link.impl.LinkComputerImpl;
+import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
 
 /**
  * Toolkit task #31: what the link engine's per-method work ceiling is actually spent on.

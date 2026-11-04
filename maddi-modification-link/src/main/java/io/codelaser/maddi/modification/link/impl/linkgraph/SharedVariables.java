@@ -1,25 +1,38 @@
 package io.codelaser.maddi.modification.link.impl.linkgraph;
 
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Deque;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.BiConsumer;
+import java.util.function.BiPredicate;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import io.codelaser.maddi.cst.api.info.ParameterInfo;
+import io.codelaser.maddi.cst.api.runtime.Runtime;
+import io.codelaser.maddi.cst.api.variable.DependentVariable;
+import io.codelaser.maddi.cst.api.variable.FieldReference;
+import io.codelaser.maddi.cst.api.variable.LocalVariable;
+import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.modification.link.impl.Gate;
 import io.codelaser.maddi.modification.link.impl.LinkNatureImpl;
+import io.codelaser.maddi.modification.link.impl.LinkVariable;
 import io.codelaser.maddi.modification.link.impl.localvar.IntermediateVariable;
 import io.codelaser.maddi.modification.link.impl.localvar.SharedVariable;
 import io.codelaser.maddi.modification.link.impl.translate.VariableTranslationMap;
 import io.codelaser.maddi.modification.prepwork.Util;
 import io.codelaser.maddi.modification.prepwork.variable.Link;
+import io.codelaser.maddi.modification.prepwork.variable.ReturnVariable;
 import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
-import io.codelaser.maddi.cst.api.runtime.Runtime;
-import io.codelaser.maddi.cst.api.variable.FieldReference;
-import io.codelaser.maddi.cst.api.variable.Variable;
-
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.List;
-import java.util.LinkedHashMap;
-import java.util.Map;
-import java.util.function.Function;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 // variant on EquivalenceGroup, to be used for equivalent SharedVariable objects
 public class SharedVariables {
@@ -44,17 +57,17 @@ public class SharedVariables {
     public record State(Map<String, SharedVariable> sharedVariablesByName,
                         Map<Variable, SharedVariable> memberToGroup,
                         VariableTranslationMap variableTranslationMap,
-                        Map<Variable, java.util.Set<Variable>> membersByPrefix,
+                        Map<Variable, Set<Variable>> membersByPrefix,
                         Map<SharedVariable, SharedVariable.Data> data,
-                        Map<Variable, java.util.Set<SharedVariable>> detachedIn,
-                        Map<Variable, java.util.Set<SharedVariable>> evictedFrom) {
+                        Map<Variable, Set<SharedVariable>> detachedIn,
+                        Map<Variable, Set<SharedVariable>> evictedFrom) {
         public State copy() {
-            Map<Variable, java.util.Set<SharedVariable>> detached = new HashMap<>();
-            detachedIn.forEach((k, v) -> detached.put(k, new java.util.LinkedHashSet<>(v)));
-            Map<Variable, java.util.Set<SharedVariable>> evicted = new HashMap<>();
-            evictedFrom.forEach((k, v) -> evicted.put(k, new java.util.LinkedHashSet<>(v)));
-            Map<Variable, java.util.Set<Variable>> prefixes = new HashMap<>();
-            membersByPrefix.forEach((k, v) -> prefixes.put(k, new java.util.LinkedHashSet<>(v)));
+            Map<Variable, Set<SharedVariable>> detached = new HashMap<>();
+            detachedIn.forEach((k, v) -> detached.put(k, new LinkedHashSet<>(v)));
+            Map<Variable, Set<SharedVariable>> evicted = new HashMap<>();
+            evictedFrom.forEach((k, v) -> evicted.put(k, new LinkedHashSet<>(v)));
+            Map<Variable, Set<Variable>> prefixes = new HashMap<>();
+            membersByPrefix.forEach((k, v) -> prefixes.put(k, new LinkedHashSet<>(v)));
             Map<SharedVariable, SharedVariable.Data> dataCopy = new LinkedHashMap<>();
             data.forEach((sv, d) -> dataCopy.put(sv, d.copy()));
             return new State(new LinkedHashMap<>(sharedVariablesByName), new LinkedHashMap<>(memberToGroup),
@@ -96,14 +109,14 @@ public class SharedVariables {
      so that its own extraction still reconstructs them ('0:p ← 0:p.impliedBy' after 'p = p.impliedBy' in a loop
      body; assignmentEdgeStream). Indexed per variable: its next reassignment (remove) drops them.
      */
-    private Map<Variable, java.util.Set<SharedVariable>> detachedIn = new HashMap<>();
+    private Map<Variable, Set<SharedVariable>> detachedIn = new HashMap<>();
 
     /*
      EVICTED members, recipients and sources alike, with the groups they were members of in some alternative of a
      join: they may still hold that group's object, so a modification of one reaches the others
      (detachedAliases). Unlike detachedIn, nothing is extracted from it. Dropped at the variable's next assignment.
      */
-    private Map<Variable, java.util.Set<SharedVariable>> evictedFrom = new HashMap<>();
+    private Map<Variable, Set<SharedVariable>> evictedFrom = new HashMap<>();
 
     // CodeLaser/maddi-mod#77, see evictSource and Graph.mergeEdgeBi
     private static final boolean NO_SRC_EVICT = Gate.isSet("NOSRCEVICT");
@@ -225,35 +238,35 @@ public class SharedVariables {
      Mirrors Graph.virtualModificationEdgeStream for the ≡ groups.
      */
     public Stream<Link> assignmentEdgeStream(Variable primary,
-                                             java.util.function.BiPredicate<Variable, Variable> mediatedHop) {
+                                             BiPredicate<Variable, Variable> mediatedHop) {
         Stream.Builder<Link> builder = Stream.builder();
         // The primary's faces: the primary plus its whole-object shared-group siblings. A collapsed 'return p'
         // groups the return with 'p', so a field assignment keyed on the sibling ('p.f ← 0:x') belongs to the
         // return, rehomed onto the return's face ('create2.f ← 0:x').
-        java.util.Collection<Variable> primaryFaces = allShared(primary);
-        for (SharedVariable sv : new java.util.LinkedHashSet<>(memberToGroup.values())) {
+        Collection<Variable> primaryFaces = allShared(primary);
+        for (SharedVariable sv : new LinkedHashSet<>(memberToGroup.values())) {
             // The group's recorded 'a ← b' assignments form a directed chain; an intermediate ($__rv) merged in
             // the middle (makeFromGet.t ← $__rv ← box.t) breaks a direct pair once it is filtered out downstream.
             // So follow the chain transitively: emit 'm ← t' for every t reachable from m along ←, and its reverse.
-            java.util.Map<Variable, java.util.List<Variable>> fwd = new java.util.HashMap<>();
-            java.util.Map<Variable, java.util.List<Variable>> bwd = new java.util.HashMap<>();
+            Map<Variable, List<Variable>> fwd = new HashMap<>();
+            Map<Variable, List<Variable>> bwd = new HashMap<>();
             // unmediated-only adjacency for the chain-taint rule (task #39): a chain target is emitted
             // MEDIATED only when NO unmediated path reaches it — an unmediated path is genuine declared-type
             // coupling, and coupling (the consumer's conservative side) must win over provenance
-            java.util.Map<Variable, java.util.List<Variable>> fwdU = new java.util.HashMap<>();
-            java.util.Map<Variable, java.util.List<Variable>> bwdU = new java.util.HashMap<>();
+            Map<Variable, List<Variable>> fwdU = new HashMap<>();
+            Map<Variable, List<Variable>> bwdU = new HashMap<>();
             for (SharedVariable.Assignment a : sv.assignments()) {
-                fwd.computeIfAbsent(a.from(), k -> new java.util.ArrayList<>()).add(a.to());
-                bwd.computeIfAbsent(a.to(), k -> new java.util.ArrayList<>()).add(a.from());
+                fwd.computeIfAbsent(a.from(), k -> new ArrayList<>()).add(a.to());
+                bwd.computeIfAbsent(a.to(), k -> new ArrayList<>()).add(a.from());
                 if (!mediatedHop.test(a.from(), a.to())) {
-                    fwdU.computeIfAbsent(a.from(), k -> new java.util.ArrayList<>()).add(a.to());
-                    bwdU.computeIfAbsent(a.to(), k -> new java.util.ArrayList<>()).add(a.from());
+                    fwdU.computeIfAbsent(a.from(), k -> new ArrayList<>()).add(a.to());
+                    bwdU.computeIfAbsent(a.to(), k -> new ArrayList<>()).add(a.from());
                 }
             }
-            java.util.Collection<Variable> emitters = sv.variables();
-            java.util.Set<Variable> detachedHere = detachedFroms(sv, primary);
+            Collection<Variable> emitters = sv.variables();
+            Set<Variable> detachedHere = detachedFroms(sv, primary);
             if (!detachedHere.isEmpty()) {
-                emitters = new java.util.LinkedHashSet<>(sv.variables());
+                emitters = new LinkedHashSet<>(sv.variables());
                 emitters.addAll(detachedHere);
             }
             for (Variable m : emitters) {
@@ -275,12 +288,12 @@ public class SharedVariables {
                 // (per-statement view) we also stay shallow, preserving the collapse's dedup ('ttt ← tt', not
                 // the transitive 'ttt ← 0:t').
                 boolean deep = Util.primary(emitM)
-                        instanceof io.codelaser.maddi.modification.prepwork.variable.ReturnVariable
+                        instanceof ReturnVariable
                         // parameters are summary endpoints too: '0:in → v → this.f' must reach the
                         // field for the parameter's summary (var-transparency). Gate NOPDEEP.
                         || !Gate.isSet("NOPDEEP")
-                           && Util.primary(emitM) instanceof io.codelaser.maddi.cst.api.info.ParameterInfo;
-                java.util.Set<Variable> fwdReachU = reachable(m, fwdU, deep);
+                           && Util.primary(emitM) instanceof ParameterInfo;
+                Set<Variable> fwdReachU = reachable(m, fwdU, deep);
                 for (Variable t : reachable(m, fwd, deep)) {
                     if (!emitM.equals(t)) {
                         boolean mediatedT = !fwdReachU.contains(t);
@@ -289,7 +302,7 @@ public class SharedVariables {
                         // for-each row 'r ← g[0]' equally holds as 'm ← 0:g[0][0]' — the local face (r) dies at
                         // summary time, the parameter face survives. Sources only: a recipient sibling of the
                         // base may be reassigned later and must not be aliased.
-                        if (t instanceof io.codelaser.maddi.cst.api.variable.DependentVariable dvT
+                        if (t instanceof DependentVariable dvT
                             && dvT.arrayVariable() != null) {
                             for (Variable src : assignmentSources(dvT.arrayVariable())) {
                                 VariableTranslationMap aliasTm = new VariableTranslationMap(runtime);
@@ -306,14 +319,14 @@ public class SharedVariables {
                         // a derived face — td.variables[0] ← someSet, rehomed across the collapsed builder
                         // chain — bypasses both): td.variables[0] ∈ td.variables, td.variables ∋ someSet.
                         if (derivedFace
-                            && emitM instanceof io.codelaser.maddi.cst.api.variable.DependentVariable dv
+                            && emitM instanceof DependentVariable dv
                             && dv.arrayVariable() != null && !Util.virtual(t)) {
                             builder.add(new LinksImpl.LinkImpl(dv, LinkNatureImpl.IS_ELEMENT_OF, dv.arrayVariable()));
                             builder.add(new LinksImpl.LinkImpl(dv.arrayVariable(), LinkNatureImpl.CONTAINS_AS_MEMBER, t));
                         }
                     }
                 }
-                java.util.Set<Variable> bwdReachU = reachable(m, bwdU, deep);
+                Set<Variable> bwdReachU = reachable(m, bwdU, deep);
                 for (Variable t : reachable(m, bwd, deep)) {
                     if (!emitM.equals(t)) {
                         boolean mediatedT = !bwdReachU.contains(t);
@@ -327,10 +340,10 @@ public class SharedVariables {
                         // aliases (switch arms yielding list1/list2/list3: no flow between co-sources).
                         if (!Gate.isSet("NORVSP")
                             && t instanceof FieldReference
-                            && Util.primary(t) instanceof io.codelaser.maddi.modification.prepwork.variable.ReturnVariable) {
+                            && Util.primary(t) instanceof ReturnVariable) {
                             for (Variable sib : allShared(t)) {
                                 if (!sib.equals(t) && !sib.equals(m) && !emitM.equals(sib)
-                                    && !(Util.primary(sib) instanceof io.codelaser.maddi.modification.prepwork.variable.ReturnVariable)
+                                    && !(Util.primary(sib) instanceof ReturnVariable)
                                     && !(Util.firstRealVariable(sib) instanceof IntermediateVariable)
                                     && sib instanceof FieldReference) {
                                     builder.add(new LinksImpl.LinkImpl(emitM, LinkNatureImpl.IS_ASSIGNED_TO, sib,
@@ -346,15 +359,15 @@ public class SharedVariables {
                     // 'method → this.ys[1]': the returned value was also stored in the slot). Dying faces
                     // among the siblings are filtered downstream as usual.
                     if (!Gate.isSet("NOSIBR")) {
-                        java.util.Set<Variable> sources = reachable(m, fwd, deep);
+                        Set<Variable> sources = reachable(m, fwd, deep);
                         for (Variable src : sources) {
-                            for (Variable sib : bwd.getOrDefault(src, java.util.List.of())) {
+                            for (Variable sib : bwd.getOrDefault(src, List.of())) {
                                 if (!sib.equals(m) && !emitM.equals(sib) && !sources.contains(sib)
                                     // two index-SPELLINGS of the same slot (0:b[off++] / 0:b[1:off]) are not
                                     // sibling recipients — the pair carries no information and its direction
                                     // is arbitrary (flipped between class-run and full-suite contexts)
-                                    && !(sib instanceof io.codelaser.maddi.cst.api.variable.DependentVariable dvS
-                                         && m instanceof io.codelaser.maddi.cst.api.variable.DependentVariable dvM
+                                    && !(sib instanceof DependentVariable dvS
+                                         && m instanceof DependentVariable dvM
                                          && dvS.arrayVariable() != null
                                          && dvS.arrayVariable().equals(dvM.arrayVariable()))) {
                                     builder.add(new LinksImpl.LinkImpl(emitM, LinkNatureImpl.IS_ASSIGNED_TO, sib));
@@ -369,11 +382,11 @@ public class SharedVariables {
                     // source does not guarantee identity); reassignment of the source evicts it from the group,
                     // so both records still see the same value. Same-base DependentVariable pairs excluded
                     // (spelling aliases, cf. the sibling-recipient rule above).
-                    for (Variable src : fwd.getOrDefault(m, java.util.List.of())) {
-                        for (Variable sib : bwd.getOrDefault(src, java.util.List.of())) {
+                    for (Variable src : fwd.getOrDefault(m, List.of())) {
+                        for (Variable sib : bwd.getOrDefault(src, List.of())) {
                             if (!sib.equals(m) && !emitM.equals(sib)
-                                && !(sib instanceof io.codelaser.maddi.cst.api.variable.DependentVariable dvS
-                                     && m instanceof io.codelaser.maddi.cst.api.variable.DependentVariable dvM
+                                && !(sib instanceof DependentVariable dvS
+                                     && m instanceof DependentVariable dvM
                                      && dvS.arrayVariable() != null
                                      && dvS.arrayVariable().equals(dvM.arrayVariable()))) {
                                 builder.add(new LinksImpl.LinkImpl(emitM,
@@ -388,8 +401,8 @@ public class SharedVariables {
     }
 
     // the detached recipients of 'sv' (see detachedIn) that are part of 'primary'
-    private java.util.Set<Variable> detachedFroms(SharedVariable sv, Variable primary) {
-        java.util.Set<Variable> result = new java.util.LinkedHashSet<>();
+    private Set<Variable> detachedFroms(SharedVariable sv, Variable primary) {
+        Set<Variable> result = new LinkedHashSet<>();
         detachedIn.forEach((v, reps) -> {
             if (reps.contains(sv) && Util.isPartOf(primary, v)) result.add(v);
         });
@@ -403,15 +416,15 @@ public class SharedVariables {
     // downstream). The dimension guard is 'canChainThrough': never recurse through an array element
     // (DependentVariable) or any field/parameter/this face, which would link mismatched dimensions
     // (crashes on grid[0][0]/varargs).
-    private static java.util.Set<Variable> reachable(Variable start,
-                                                     java.util.Map<Variable, java.util.List<Variable>> adj,
+    private static Set<Variable> reachable(Variable start,
+                                                     Map<Variable, List<Variable>> adj,
                                                      boolean deep) {
-        java.util.Set<Variable> seen = new java.util.LinkedHashSet<>();
-        java.util.Deque<Variable> stack = new java.util.ArrayDeque<>(adj.getOrDefault(start, java.util.List.of()));
+        Set<Variable> seen = new LinkedHashSet<>();
+        Deque<Variable> stack = new ArrayDeque<>(adj.getOrDefault(start, List.of()));
         while (!stack.isEmpty()) {
             Variable v = stack.pop();
             if (seen.add(v) && canChainThrough(v, deep)) {
-                stack.addAll(adj.getOrDefault(v, java.util.List.of()));
+                stack.addAll(adj.getOrDefault(v, List.of()));
             }
         }
         return seen;
@@ -421,7 +434,7 @@ public class SharedVariables {
     // proper field/element of a shared-group sibling of the primary (create2 ≡ p ⇒ 'p.f' -> 'create2.f'); null when
     // 'm' belongs to neither. The whole sibling ('p' itself, m.equals(face)) is skipped: its whole-object edge is
     // already emitted from the primary's own member, and rehoming it would produce a self-link.
-    private Variable faceKeyed(Variable m, Variable primary, java.util.Collection<Variable> faces) {
+    private Variable faceKeyed(Variable m, Variable primary, Collection<Variable> faces) {
         if (Util.isPartOf(primary, m)) return m;
         for (Variable face : faces) {
             if (!face.equals(primary) && !m.equals(face) && Util.isPartOf(face, m)) {
@@ -459,15 +472,15 @@ public class SharedVariables {
                 // an array access on an EXPRESSION base has no primary variable (clone-bench shapes) — nothing
                 // to rehome the slot onto
                 if (root == null) continue;
-                java.util.List<Variable> sourceFaces;
+                List<Variable> sourceFaces;
                 if (root.equals(s)) {
                     // whole-object source ('withException.exit ← $__c_a'): its own faces
                     // ($__c_a.exception ← 0:e) rehome directly onto pf (withException.exit.exception).
                     // (faceKeyed's sibling faces only cover this when the PRIMARY itself is in the
                     // whole-object group; here only its field pf is.)
-                    sourceFaces = java.util.List.of(s);
+                    sourceFaces = List.of(s);
                 } else {
-                    sourceFaces = new java.util.ArrayList<>();
+                    sourceFaces = new ArrayList<>();
                     for (Variable sibling : allShared(root)) {
                         VariableTranslationMap toSibling = new VariableTranslationMap(runtime);
                         toSibling.put(root, sibling);
@@ -494,10 +507,10 @@ public class SharedVariables {
     // vertex. Its base pf (ldIn.variables) IS a member; rehome the key onto the source-chain sibling faces
     // ($__rv124.variables[1]) and return THEIR groups' members ({matrix, 0:ld.variables[1], ...}): they denote the
     // same runtime slot, so a modification of the key is a modification of each of them.
-    public java.util.Set<Variable> derivedShared(Variable key) {
-        if (Gate.isSet("NODF")) return java.util.Set.of();
-        if (memberToGroup.containsKey(key)) return java.util.Set.of(); // allShared covers group members
-        java.util.Set<Variable> result = new java.util.LinkedHashSet<>();
+    public Set<Variable> derivedShared(Variable key) {
+        if (Gate.isSet("NODF")) return Set.of();
+        if (memberToGroup.containsKey(key)) return Set.of(); // allShared covers group members
+        Set<Variable> result = new LinkedHashSet<>();
         for (Variable pf : memberToGroup.keySet()) {
             if (pf.equals(key) || !Util.isPartOf(pf, key)) continue;
             for (Variable s : assignmentSources(pf)) {
@@ -526,18 +539,18 @@ public class SharedVariables {
     private static boolean canChainThrough(Variable v, boolean deep) {
         if (Util.lvPrimaryOrNull(v) instanceof IntermediateVariable) return true;
         if (!deep) return false;
-        if (v instanceof io.codelaser.maddi.cst.api.variable.LocalVariable) return true;
+        if (v instanceof LocalVariable) return true;
         // a FOREIGN method's return face in the group (the SAM's 'get' rv when an anonymous class
         // captures a variable: m ← get ← 0:x) is a value pass-through, like a dying local; the
         // primary's own rv is never a chain node in its own extraction (it is the emitM)
-        if (v instanceof io.codelaser.maddi.modification.prepwork.variable.ReturnVariable) return true;
+        if (v instanceof ReturnVariable) return true;
         // the field face of a DYING LOCAL ('b.j' of builder 'b') does not survive into the summary either:
         // bridge it (justJ.j ← b.j ← 0:jp → justJ.j ← 0:jp). Plain FieldReference only (never a
         // DependentVariable — dimensions), and only on a real local (not a synthetic LinkVariable).
-        if (v instanceof io.codelaser.maddi.cst.api.variable.FieldReference fr) {
+        if (v instanceof FieldReference fr) {
             Variable pr = Util.primary(fr);
-            return pr instanceof io.codelaser.maddi.cst.api.variable.LocalVariable
-                   && !(pr instanceof io.codelaser.maddi.modification.link.impl.LinkVariable);
+            return pr instanceof LocalVariable
+                   && !(pr instanceof LinkVariable);
         }
         return false;
     }
@@ -552,22 +565,22 @@ public class SharedVariables {
     (asprof 2026-08-05); membership mutations are rare, per-statement drains are not. Maintained in
     add() (first-time membership only — a member's prefixes never change) and remove().
      */
-    private Map<Variable, java.util.Set<Variable>> membersByPrefix = new HashMap<>();
+    private Map<Variable, Set<Variable>> membersByPrefix = new HashMap<>();
 
-    public java.util.Set<Variable> membersRootedAt(Variable prefix) {
-        return membersByPrefix.getOrDefault(prefix, java.util.Set.of());
+    public Set<Variable> membersRootedAt(Variable prefix) {
+        return membersByPrefix.getOrDefault(prefix, Set.of());
     }
 
     private void indexMember(Variable member) {
-        membersByPrefix.computeIfAbsent(member, _ -> new java.util.LinkedHashSet<>()).add(member);
+        membersByPrefix.computeIfAbsent(member, _ -> new LinkedHashSet<>()).add(member);
         for (Variable p : Util.scopeVariables(member)) {
-            membersByPrefix.computeIfAbsent(p, _ -> new java.util.LinkedHashSet<>()).add(member);
+            membersByPrefix.computeIfAbsent(p, _ -> new LinkedHashSet<>()).add(member);
         }
     }
 
     private void unindexMember(Variable member) {
-        java.util.function.BiConsumer<Variable, Variable> rm = (p, m) -> {
-            java.util.Set<Variable> set = membersByPrefix.get(p);
+        BiConsumer<Variable, Variable> rm = (p, m) -> {
+            Set<Variable> set = membersByPrefix.get(p);
             if (set != null) {
                 set.remove(m);
                 if (set.isEmpty()) membersByPrefix.remove(p);
@@ -593,16 +606,16 @@ public class SharedVariables {
     // {return, zs}, assignmentSources(return) = {zs}. Knowledge attached to a source (its §m equivalences, its
     // field-precise links) legitimately transfers to the recipient; the reverse direction does not (a pure source
     // must not inherit the recipient's links, see isPureAssignmentSource).
-    public java.util.Set<Variable> assignmentSources(Variable variable) {
+    public Set<Variable> assignmentSources(Variable variable) {
         SharedVariable sv = memberToGroup.get(variable);
-        if (sv == null) return java.util.Set.of();
+        if (sv == null) return Set.of();
         // memoized on the group: FollowGraph asks this once per sibling, per rep expansion, per graph vertex, and
         // that walk runs per method call in a statement -- so recomputing it is cubic in the length of a
         // straight-line method (task #22). The memo is dropped by every mutator of SharedVariable.
         return sv.assignmentSources(variable, v -> {
-            boolean deep = v instanceof io.codelaser.maddi.modification.prepwork.variable.ReturnVariable;
-            java.util.Set<Variable> result =
-                    new java.util.LinkedHashSet<>(reachable(v, sv.forwardAssignments(), deep));
+            boolean deep = v instanceof ReturnVariable;
+            Set<Variable> result =
+                    new LinkedHashSet<>(reachable(v, sv.forwardAssignments(), deep));
             result.retainAll(sv.variables());
             return result;
         });
@@ -635,8 +648,8 @@ public class SharedVariables {
     }
 
     // the reps of the groups 'variable' was evicted from by a join (empty when none): see detachedIn
-    public java.util.Set<SharedVariable> detachedReps(Variable variable) {
-        return detachedIn.getOrDefault(variable, java.util.Set.of());
+    public Set<SharedVariable> detachedReps(Variable variable) {
+        return detachedIn.getOrDefault(variable, Set.of());
     }
 
     /*
@@ -646,14 +659,14 @@ public class SharedVariables {
      may be a modification of each of them: 'if (pred == null) first = succ; ... succ.pred = pred;' modifies the
      object 'first' holds on the path through the then-block (guava's LinkedHashMultimap.MultimapIterationChain).
      */
-    public java.util.Set<Variable> detachedAliases(Variable variable) {
-        if (evictedFrom.isEmpty()) return java.util.Set.of();
+    public Set<Variable> detachedAliases(Variable variable) {
+        if (evictedFrom.isEmpty()) return Set.of();
         // the groups 'variable' belongs to, now or in some alternative
-        java.util.Set<SharedVariable> groups = new java.util.HashSet<>(evictedFrom.getOrDefault(variable, java.util.Set.of()));
+        Set<SharedVariable> groups = new HashSet<>(evictedFrom.getOrDefault(variable, Set.of()));
         SharedVariable sv = memberToGroup.get(variable);
         if (sv != null) groups.add(sv);
-        if (groups.isEmpty()) return java.util.Set.of();
-        java.util.Set<Variable> result = new java.util.LinkedHashSet<>();
+        if (groups.isEmpty()) return Set.of();
+        Set<Variable> result = new LinkedHashSet<>();
         for (SharedVariable group : groups) {
             if (group != sv) result.addAll(group.variables());
         }
@@ -674,7 +687,7 @@ public class SharedVariables {
     // 'variable' is (re)assigned: the assignments it received in earlier alternatives no longer describe it
     public void dropDetached(Variable variable) {
         if (!evictedFrom.isEmpty()) {
-            java.util.Set<SharedVariable> reps = evictedFrom.get(variable);
+            Set<SharedVariable> reps = evictedFrom.get(variable);
             // a group the variable is still the recorded source of holds its OLD object, which a further
             // reassignment does not change (evictSource): only the others go
             if (reps != null && (NO_SRC_EVICT || reps.removeIf(rep -> rep.assignments().stream()
@@ -683,7 +696,7 @@ public class SharedVariables {
             }
         }
         if (detachedIn.isEmpty()) return;
-        java.util.Set<SharedVariable> detached = detachedIn.remove(variable);
+        Set<SharedVariable> detached = detachedIn.remove(variable);
         if (detached != null) {
             for (SharedVariable sv : detached) {
                 if (sv.assignments().removeIf(a -> variable.equals(a.from()))) sv.invalidateMemos();
@@ -707,7 +720,7 @@ public class SharedVariables {
             assert removed;
             // the group still holds the object the variable held: 'x = p; p = y; x.next = null' modifies the
             // caller's p (detachedAliases, WriteLinksAndModification.expand)
-            evictedFrom.computeIfAbsent(variable, _ -> new java.util.LinkedHashSet<>()).add(sv);
+            evictedFrom.computeIfAbsent(variable, _ -> new LinkedHashSet<>()).add(sv);
         }
     }
 
@@ -715,7 +728,7 @@ public class SharedVariables {
     public boolean groupHoldsReturnValue(Variable variable) {
         SharedVariable sv = memberToGroup.get(variable);
         return sv != null && sv.variables().stream().anyMatch(v ->
-                Util.primary(v) instanceof io.codelaser.maddi.modification.prepwork.variable.ReturnVariable);
+                Util.primary(v) instanceof ReturnVariable);
     }
 
     public void remove(Variable variable) {
@@ -756,12 +769,12 @@ public class SharedVariables {
             alternatives.get(i).memberToGroup().forEach((member, rep) ->
                     repsOf.computeIfAbsent(member, _ -> new SharedVariable[n])[ii] = rep);
         }
-        List<List<JoinEdge>> edges = new java.util.ArrayList<>();
-        for (int i = 0; i < n; i++) edges.add(new java.util.ArrayList<>());
+        List<List<JoinEdge>> edges = new ArrayList<>();
+        for (int i = 0; i < n; i++) edges.add(new ArrayList<>());
         Map<Variable, SharedVariable> kept = new LinkedHashMap<>();
-        java.util.Set<Variable> evicted = new java.util.HashSet<>();
+        Set<Variable> evicted = new HashSet<>();
         repsOf.forEach((member, reps) -> {
-            java.util.Set<SharedVariable> distinct = new java.util.LinkedHashSet<>();
+            Set<SharedVariable> distinct = new LinkedHashSet<>();
             boolean everywhere = true;
             boolean pureSource = true;
             for (int i = 0; i < n; i++) {
@@ -792,20 +805,20 @@ public class SharedVariables {
         // what its members established), the kept members, and the records that mention no evicted member
         Map<String, SharedVariable> byName = new LinkedHashMap<>();
         Map<SharedVariable, SharedVariable.Data> data = new LinkedHashMap<>();
-        Map<Variable, java.util.Set<SharedVariable>> detached = new HashMap<>();
+        Map<Variable, Set<SharedVariable>> detached = new HashMap<>();
         // detached records the alternatives already carried stay detached (their variable is no member)
-        Map<Variable, java.util.Set<SharedVariable>> evictedFrom = new HashMap<>();
+        Map<Variable, Set<SharedVariable>> evictedFrom = new HashMap<>();
         for (State alternative : alternatives) {
             alternative.detachedIn().forEach((v, reps) -> {
-                if (!kept.containsKey(v)) detached.computeIfAbsent(v, _ -> new java.util.LinkedHashSet<>()).addAll(reps);
+                if (!kept.containsKey(v)) detached.computeIfAbsent(v, _ -> new LinkedHashSet<>()).addAll(reps);
             });
             alternative.evictedFrom().forEach((v, reps) ->
-                    evictedFrom.computeIfAbsent(v, _ -> new java.util.LinkedHashSet<>()).addAll(reps));
+                    evictedFrom.computeIfAbsent(v, _ -> new LinkedHashSet<>()).addAll(reps));
         }
         repsOf.forEach((member, reps) -> {
             if (!evicted.contains(member)) return;
             for (SharedVariable rep : reps) {
-                if (rep != null) evictedFrom.computeIfAbsent(member, _ -> new java.util.LinkedHashSet<>()).add(rep);
+                if (rep != null) evictedFrom.computeIfAbsent(member, _ -> new LinkedHashSet<>()).add(rep);
             }
         });
         for (State alternative : alternatives) {
@@ -820,18 +833,18 @@ public class SharedVariables {
                 for (SharedVariable.Assignment a : d.assignments()) {
                     if (!joined.assignments().contains(a)) joined.assignments().add(a);
                     if (evicted.contains(a.from())) {
-                        detached.computeIfAbsent(a.from(), _ -> new java.util.LinkedHashSet<>()).add(rep);
+                        detached.computeIfAbsent(a.from(), _ -> new LinkedHashSet<>()).add(rep);
                     }
                 }
             });
         }
         VariableTranslationMap vtm = new VariableTranslationMap(runtime);
-        Map<Variable, java.util.Set<Variable>> prefixes = new HashMap<>();
+        Map<Variable, Set<Variable>> prefixes = new HashMap<>();
         kept.forEach((member, rep) -> {
             vtm.put(member, rep);
-            prefixes.computeIfAbsent(member, _ -> new java.util.LinkedHashSet<>()).add(member);
+            prefixes.computeIfAbsent(member, _ -> new LinkedHashSet<>()).add(member);
             for (Variable pv : Util.scopeVariables(member)) {
-                prefixes.computeIfAbsent(pv, _ -> new java.util.LinkedHashSet<>()).add(member);
+                prefixes.computeIfAbsent(pv, _ -> new LinkedHashSet<>()).add(member);
             }
         });
         return new JoinPlan(edges, new State(byName, new LinkedHashMap<>(kept), vtm, prefixes, data, detached,
@@ -848,7 +861,7 @@ public class SharedVariables {
      same state and would otherwise pick the same fresh name for two different groups, which a join (whose graph
      vertices are keyed by name) would then confuse.
      */
-    private final java.util.Set<String> reservedNames = new java.util.HashSet<>();
+    private final Set<String> reservedNames = new HashSet<>();
     private int alternativeDepth;
 
     public void enterAlternatives() {

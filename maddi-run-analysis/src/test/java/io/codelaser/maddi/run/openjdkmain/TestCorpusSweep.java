@@ -1,19 +1,20 @@
 package io.codelaser.maddi.run.openjdkmain;
 
-import io.codelaser.maddi.util.corpus.Corpora;
-import ch.qos.logback.classic.Level;
-import org.junit.jupiter.api.Assumptions;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Test;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+
+import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import ch.qos.logback.classic.Level;
+import io.codelaser.maddi.util.corpus.Corpora;
 
 /**
  * Batch first-contact sweep over every corpus under the test-oss root (see {@link io.codelaser.maddi.util.corpus.Corpora}) that

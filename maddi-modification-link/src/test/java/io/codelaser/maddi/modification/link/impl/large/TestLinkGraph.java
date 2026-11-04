@@ -1,14 +1,15 @@
 package io.codelaser.maddi.modification.link.impl.large;
 
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.modification.link.CommonTest;
 import io.codelaser.maddi.modification.link.LinkComputer;
 import io.codelaser.maddi.modification.link.impl.LinkComputerImpl;
 import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Disabled;
-import org.junit.jupiter.api.Test;
 
 @Disabled("sv-integration: elaborate synthetic mock does not type-check under openjdk javac, and stresses WIP engine stability; re-enable after mock rewrite + engine completion")
 public class TestLinkGraph extends CommonTest {

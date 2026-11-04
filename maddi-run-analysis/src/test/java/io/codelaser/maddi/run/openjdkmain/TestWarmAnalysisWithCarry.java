@@ -17,10 +17,30 @@
 
 package io.codelaser.maddi.run.openjdkmain;
 
+import static io.codelaser.maddi.inspection.api.integration.JavaInspector.InvalidationState.*;
+import static org.junit.jupiter.api.Assertions.*;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
+import java.util.function.Predicate;
+
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
 import io.codelaser.maddi.callgraph.CallGraphContributions;
 import io.codelaser.maddi.callgraph.ComputeAnalysisOrder;
 import io.codelaser.maddi.callgraph.ComputeCallGraph;
 import io.codelaser.maddi.callgraph.PrimaryTypeUseGraph;
+import io.codelaser.maddi.cst.api.analysis.Property;
 import io.codelaser.maddi.cst.api.element.SourceSet;
 import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.InfoMapView;
@@ -37,24 +57,6 @@ import io.codelaser.maddi.modification.prepwork.CarryDerived;
 import io.codelaser.maddi.modification.prepwork.ClearDerived;
 import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
 import io.codelaser.maddi.modification.prepwork.io.AnalysisFingerprint;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
-
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.TreeMap;
-import java.util.TreeSet;
-import java.util.function.Predicate;
-
-import static io.codelaser.maddi.inspection.api.integration.JavaInspector.InvalidationState.*;
-import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * A seeded analysis whose seed is the re-parsed type alone: the {@code REWIRE} cone's analyzer output is carried onto
@@ -104,7 +106,7 @@ public class TestWarmAnalysisWithCarry {
             }
             """;
 
-    private static final Predicate<io.codelaser.maddi.cst.api.analysis.Property> OUTPUT =
+    private static final Predicate<Property> OUTPUT =
             AnalysisFingerprint.ANALYZER_OUTPUT_ONLY;
 
     private record Warm(JavaInspector inspector, SourceSet set, ParseResult pr, Set<String> recomputed,

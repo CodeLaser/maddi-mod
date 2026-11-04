@@ -17,12 +17,6 @@
 
 package io.codelaser.maddi.modification.analyzer;
 
-import io.codelaser.maddi.analysis.api.AnalysisValueFeed;
-
-import io.codelaser.maddi.cst.api.info.Info;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.File;
 import java.io.IOException;
 import java.lang.management.GarbageCollectorMXBean;
@@ -33,6 +27,13 @@ import java.nio.file.Files;
 import java.nio.file.StandardOpenOption;
 import java.util.Collection;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import io.codelaser.maddi.analysis.api.AnalysisValueFeed;
+import io.codelaser.maddi.cst.api.info.Info;
 
 /**
  * Observability for the multi-hour analysis run: an {@link AnalysisValueFeed} that answers, on a
@@ -84,7 +85,7 @@ public class AnalysisProgressFeed implements AnalysisValueFeed {
     // completed elements since the last wave barrier — ticked per element on parallel workers, so it must be
     // atomic. Added to elementsDone for display, giving smooth progress INSIDE a giant single-SCC wave (where
     // elementsDone would otherwise pin for the whole wave). Reset to 0 at each barrier, once folded in.
-    private final java.util.concurrent.atomic.AtomicInteger elementsInFlight = new java.util.concurrent.atomic.AtomicInteger();
+    private final AtomicInteger elementsInFlight = new AtomicInteger();
     private volatile boolean firstPassOngoing = true;
     private volatile boolean running = true;
     private long peakUsedBytes;

@@ -1,12 +1,14 @@
 package io.codelaser.maddi.modification.link.vf;
 
-import io.codelaser.maddi.modification.link.impl.LinkNatureImpl;
-import io.codelaser.maddi.modification.link.impl.translate.VariableTranslationMap;
-import io.codelaser.maddi.modification.prepwork.Util;
-import io.codelaser.maddi.modification.prepwork.variable.Link;
-import io.codelaser.maddi.modification.prepwork.variable.ReturnVariable;
-import io.codelaser.maddi.modification.prepwork.variable.VirtualFieldTranslationMap;
-import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
+import static io.codelaser.maddi.modification.link.vf.VirtualFieldComputer.VF_CHAR;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
 import io.codelaser.maddi.cst.api.expression.Expression;
 import io.codelaser.maddi.cst.api.info.FieldInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
@@ -17,15 +19,13 @@ import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.api.type.Wildcard;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.cst.api.variable.Variable;
-
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
-
-import static io.codelaser.maddi.modification.link.vf.VirtualFieldComputer.VF_CHAR;
+import io.codelaser.maddi.modification.link.impl.LinkNatureImpl;
+import io.codelaser.maddi.modification.link.impl.translate.VariableTranslationMap;
+import io.codelaser.maddi.modification.prepwork.Util;
+import io.codelaser.maddi.modification.prepwork.variable.Link;
+import io.codelaser.maddi.modification.prepwork.variable.ReturnVariable;
+import io.codelaser.maddi.modification.prepwork.variable.VirtualFieldTranslationMap;
+import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
 
 // uses VariableTranslationMap.translateVariableRecursively()
 public class VirtualFieldTranslationMapImpl implements VirtualFieldTranslationMap {

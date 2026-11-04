@@ -1,12 +1,14 @@
 package io.codelaser.maddi.modification.common;
 
-import ch.qos.logback.classic.Level;
-import ch.qos.logback.classic.Logger;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.inspection.api.integration.JavaInspector;
-import io.codelaser.maddi.inspection.resource.SourceSetImpl;
-import io.codelaser.maddi.modification.common.util.IsolateClass;
+import static io.codelaser.maddi.modification.common.CommonTest.javaInspectorFactory;
+import static org.junit.jupiter.api.Assertions.*;
+
+import java.io.IOException;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
 import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -14,13 +16,13 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-
-import static io.codelaser.maddi.modification.common.CommonTest.javaInspectorFactory;
-import static org.junit.jupiter.api.Assertions.*;
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.inspection.api.integration.JavaInspector;
+import io.codelaser.maddi.inspection.resource.SourceSetImpl;
+import io.codelaser.maddi.modification.common.util.IsolateClass;
 
 /**
  * CodeLaser/maddi#180, found isolating fernflower's {@code DomHelper} with the 33 types it reaches: four shapes a
@@ -143,7 +145,7 @@ public class TestIsolateClass8Natures {
     private Map<String, String> isolate(String... fqns) {
         var parsed = javaInspector.parse(SOURCES,
                 new JavaInspector.ParseOptions.Builder().setDetailedSources(true).setFailFast(true).build());
-        List<TypeInfo> types = java.util.Arrays.stream(fqns).map(parsed.parseResult()::findType).toList();
+        List<TypeInfo> types = Arrays.stream(fqns).map(parsed.parseResult()::findType).toList();
         IsolateClass.Result r = isolateClass.isolate(types);
         Map<MethodInfo, String> memberSources = new LinkedHashMap<>();
         for (MethodInfo original : r.markers().values()) {

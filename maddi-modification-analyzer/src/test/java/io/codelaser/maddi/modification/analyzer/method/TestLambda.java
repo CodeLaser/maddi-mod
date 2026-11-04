@@ -1,10 +1,14 @@
 package io.codelaser.maddi.modification.analyzer.method;
 
-import io.codelaser.maddi.modification.analyzer.CommonTest;
-import io.codelaser.maddi.modification.link.impl.LinkComputerImpl;
-import io.codelaser.maddi.modification.prepwork.variable.VariableData;
-import io.codelaser.maddi.modification.prepwork.variable.VariableInfo;
-import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
+import static io.codelaser.maddi.modification.link.impl.LinkComputerImpl.VARIABLES_LINKED_TO_OBJECT;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import java.util.List;
+
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
 import io.codelaser.maddi.cst.api.expression.Lambda;
 import io.codelaser.maddi.cst.api.expression.MethodCall;
 import io.codelaser.maddi.cst.api.info.Info;
@@ -14,14 +18,10 @@ import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.statement.LocalVariableCreation;
 import io.codelaser.maddi.cst.api.statement.Statement;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-
-import java.util.List;
-
-import static io.codelaser.maddi.modification.link.impl.LinkComputerImpl.VARIABLES_LINKED_TO_OBJECT;
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import io.codelaser.maddi.modification.analyzer.CommonTest;
+import io.codelaser.maddi.modification.prepwork.variable.VariableData;
+import io.codelaser.maddi.modification.prepwork.variable.VariableInfo;
+import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
 
 public class TestLambda extends CommonTest {
     @Language("java")

@@ -17,10 +17,9 @@
 
 package io.codelaser.maddi.modification.analyzer.impl;
 
-import io.codelaser.maddi.modification.common.AnalyzerException;
-import io.codelaser.maddi.cst.api.info.Info;
-
 import java.util.List;
+
+import io.codelaser.maddi.cst.api.info.Info;
 
 public interface ModAnalyzerForTesting {
     void go(List<Info> analysisOrder);

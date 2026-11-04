@@ -1,13 +1,14 @@
 package io.codelaser.maddi.modification.link.impl;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.Test;
+
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.modification.link.CommonTest;
 import io.codelaser.maddi.modification.link.LinkComputer;
 import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.Test;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /*
  A lambda that writes THROUGH a captured holder -- an array element, a field of a captured object -- has an effect

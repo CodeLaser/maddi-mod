@@ -1,9 +1,7 @@
 package io.codelaser.maddi.modification.link.impl.graph;
 
-import io.codelaser.maddi.modification.link.impl.LinkNatureImpl;
-import io.codelaser.maddi.modification.prepwork.variable.LinkNature;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
+import static io.codelaser.maddi.modification.link.impl.LinkNatureImpl.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -11,8 +9,12 @@ import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
 
-import static io.codelaser.maddi.modification.link.impl.LinkNatureImpl.*;
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+import io.codelaser.maddi.modification.link.impl.LinkNatureImpl;
+import io.codelaser.maddi.modification.prepwork.variable.LinkNature;
 
 /*
  Determinism regression. The engine guarantees two properties, at different strengths:
@@ -109,7 +111,7 @@ public class TestEngineDeterminism {
             String facts = factsOf(build(perm).printClosure());
             if (reference == null) {
                 reference = facts;
-                org.junit.jupiter.api.Assertions.assertTrue(facts.contains("m ∩ copy"),
+                Assertions.assertTrue(facts.contains("m ∩ copy"),
                         "the two-level composite must derive:\n" + facts);
             } else {
                 assertEquals(reference, facts, "insertion order changed the fact set: " + perm);

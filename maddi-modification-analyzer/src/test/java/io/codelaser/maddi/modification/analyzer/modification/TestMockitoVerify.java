@@ -1,16 +1,19 @@
 package io.codelaser.maddi.modification.analyzer.modification;
 
-import io.codelaser.maddi.cst.api.info.Info;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.api.element.SourceSet;
-import io.codelaser.maddi.inspection.resource.SourceSetImpl;
-import io.codelaser.maddi.modification.analyzer.CommonTest;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.*;
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
+
+import io.codelaser.maddi.cst.api.element.SourceSet;
+import io.codelaser.maddi.cst.api.info.Info;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.inspection.resource.SourceSetImpl;
+import io.codelaser.maddi.modification.analyzer.CommonTest;
+import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
 
 /**
  * What Mockito's verification calls do to the mock, as the analysis reads them (libs/mockito). Verifying an
@@ -23,7 +26,7 @@ public class TestMockitoVerify extends CommonTest {
 
     @Override
     protected List<SourceSet> extraClassPathParts() {
-        return List.of(SourceSetImpl.sourceSetOf(org.mockito.Mockito.class));
+        return List.of(SourceSetImpl.sourceSetOf(Mockito.class));
     }
 
     @Language("java")
@@ -44,8 +47,8 @@ public class TestMockitoVerify extends CommonTest {
     public void test() {
         TypeInfo X = javaInspector.parse("a.b.X", INPUT);
         List<Info> ao = prepWork(X);
-        var iterating = new io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl(javaInspector,
-                new io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl.ConfigurationBuilder()
+        var iterating = new IteratingAnalyzerImpl(javaInspector,
+                new IteratingAnalyzerImpl.ConfigurationBuilder()
                         .setMaxIterations(10)
                         .setModificationViaReachability(true)
                         .build());
@@ -82,8 +85,8 @@ public class TestMockitoVerify extends CommonTest {
     public void testStubbing() {
         TypeInfo Y = javaInspector.parse("a.b.Y", STUBBING);
         List<Info> ao = prepWork(Y);
-        var iterating = new io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl(javaInspector,
-                new io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl.ConfigurationBuilder()
+        var iterating = new IteratingAnalyzerImpl(javaInspector,
+                new IteratingAnalyzerImpl.ConfigurationBuilder()
                         .setMaxIterations(10)
                         .setModificationViaReachability(true)
                         .build());

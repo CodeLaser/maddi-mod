@@ -17,6 +17,13 @@
 
 package io.codelaser.maddi.modification.common.defaults;
 
+import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.DEFAULTS_ANALYZER;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.TRUE;
+
+import java.util.*;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
 import io.codelaser.maddi.cst.api.analysis.Message;
 import io.codelaser.maddi.cst.api.analysis.Property;
 import io.codelaser.maddi.cst.api.element.Element;
@@ -27,13 +34,6 @@ import io.codelaser.maddi.cst.api.runtime.Runtime;
 import io.codelaser.maddi.graph.G;
 import io.codelaser.maddi.graph.ImmutableGraph;
 import io.codelaser.maddi.graph.op.Linearize;
-
-import java.util.*;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
-
-import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.DEFAULTS_ANALYZER;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.TRUE;
 
 public class ShallowAnalyzer {
     private final Runtime runtime;

@@ -17,9 +17,21 @@
 
 package io.codelaser.maddi.modification.prepwork.variable;
 
-import io.codelaser.maddi.modification.prepwork.CommonTest;
-import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
-import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertSame;
+
+import java.io.IOException;
+import java.net.URISyntaxException;
+import java.util.List;
+
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
 import io.codelaser.maddi.cst.api.expression.ConstructorCall;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
@@ -29,19 +41,9 @@ import io.codelaser.maddi.cst.api.statement.LocalVariableCreation;
 import io.codelaser.maddi.cst.api.statement.ReturnStatement;
 import io.codelaser.maddi.cst.api.statement.Statement;
 import io.codelaser.maddi.cst.api.variable.LocalVariable;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-
-import java.io.IOException;
-import java.net.URISyntaxException;
-
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotSame;
-import static org.junit.jupiter.api.Assertions.assertSame;
+import io.codelaser.maddi.modification.prepwork.CommonTest;
+import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
+import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
 
 /**
  * Regression (originally surfaced by Jenkins' {@code hudson.Launcher.decorateByEnv}): an anonymous class captures
@@ -105,7 +107,7 @@ public class TestShadowedCapturedVariable extends CommonTest {
         ConstructorCall cc = (ConstructorCall) ((ReturnStatement) make.methodBody().lastStatement()).expression();
         MethodInfo run = cc.anonymousClass().findUniqueMethod("run", 1);
 
-        java.util.List<Statement> runStmts = run.methodBody().statements();
+        List<Statement> runStmts = run.methodBody().statements();
         Statement builderStmt = runStmts.get(0);          // StringBuilder e = new StringBuilder(env);  -- reads outer
         IfElseStatement ifStmt = (IfElseStatement) runStmts.get(1);
         ForEachStatement forEach = (ForEachStatement) ifStmt.block().statements().get(0);

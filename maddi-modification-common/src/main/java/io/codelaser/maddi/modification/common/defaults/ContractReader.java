@@ -17,13 +17,13 @@
 
 package io.codelaser.maddi.modification.common.defaults;
 
+import java.util.Map;
+
 import io.codelaser.maddi.cst.api.analysis.Property;
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.element.Element;
 import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.runtime.Runtime;
-
-import java.util.Map;
 
 /**
  * Reads the contracts a user wrote in source code: the annotations on an element, translated to property

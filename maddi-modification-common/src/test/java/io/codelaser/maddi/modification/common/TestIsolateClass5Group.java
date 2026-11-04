@@ -1,12 +1,15 @@
 package io.codelaser.maddi.modification.common;
 
-import ch.qos.logback.classic.Level;
-import ch.qos.logback.classic.Logger;
-import io.codelaser.maddi.modification.common.util.IsolateClass;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.inspection.api.integration.JavaInspector;
-import io.codelaser.maddi.inspection.resource.SourceSetImpl;
+import static io.codelaser.maddi.modification.common.CommonTest.javaInspectorFactory;
+import static org.junit.jupiter.api.Assertions.*;
+
+import java.io.IOException;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
 import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -14,13 +17,13 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-
-import static io.codelaser.maddi.modification.common.CommonTest.javaInspectorFactory;
-import static org.junit.jupiter.api.Assertions.*;
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.inspection.api.integration.JavaInspector;
+import io.codelaser.maddi.inspection.resource.SourceSetImpl;
+import io.codelaser.maddi.modification.common.util.IsolateClass;
 
 /**
  * Isolating a <b>set</b> of types together, rather than one.
@@ -109,7 +112,7 @@ public class TestIsolateClass5Group {
     private Map<String, String> isolate(String... fqns) {
         var parsed = javaInspector.parse(SOURCES,
                 new JavaInspector.ParseOptions.Builder().setDetailedSources(true).setFailFast(true).build());
-        List<TypeInfo> types = java.util.Arrays.stream(fqns).map(parsed.parseResult()::findType).toList();
+        List<TypeInfo> types = Arrays.stream(fqns).map(parsed.parseResult()::findType).toList();
         IsolateClass.Result r = isolateClass.isolate(types);
         Map<MethodInfo, String> memberSources = new LinkedHashMap<>();
         for (MethodInfo original : r.markers().values()) {
@@ -149,7 +152,7 @@ public class TestIsolateClass5Group {
     @Test
     public void projectLayout() throws IOException {
         Map<String, String> tree = isolate("a.b.Client", "p.q.Sub", "p.q.Base");
-        assertEquals(java.util.Set.of("a/b/Client.java", "p/q/Base.java", "p/q/Sub.java", "r/s/Helper.java"),
+        assertEquals(Set.of("a/b/Client.java", "p/q/Base.java", "p/q/Sub.java", "r/s/Helper.java"),
                 tree.keySet(), tree.keySet().toString());
 
         // every isolate keeps its own body; Helper is the only thing reduced to a stub

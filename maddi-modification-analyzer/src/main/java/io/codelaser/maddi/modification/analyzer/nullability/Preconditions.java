@@ -17,6 +17,17 @@
 
 package io.codelaser.maddi.modification.analyzer.nullability;
 
+import static io.codelaser.maddi.modification.analyzer.nullability.Types.*;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.IdentityHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
 import io.codelaser.maddi.cst.api.element.Element;
 import io.codelaser.maddi.cst.api.expression.Assignment;
 import io.codelaser.maddi.cst.api.expression.BinaryOperator;
@@ -31,16 +42,7 @@ import io.codelaser.maddi.cst.api.statement.ExplicitConstructorInvocation;
 import io.codelaser.maddi.cst.api.statement.ExpressionAsStatement;
 import io.codelaser.maddi.cst.api.statement.Statement;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
-
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.IdentityHashMap;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-
-import static io.codelaser.maddi.modification.analyzer.nullability.Types.*;
+import io.codelaser.maddi.cst.api.variable.This;
 
 /**
  * Parameters a null argument makes throw before their method completes (CodeLaser/maddi-mod#41), with the calls
@@ -82,7 +84,7 @@ final class Preconditions {
                 if (facts.nonNullAtExit(mi, pi)) set.add(pi);
             }
         }
-        Set<Set<MethodInfo>> distinct = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+        Set<Set<MethodInfo>> distinct = Collections.newSetFromMap(new IdentityHashMap<>());
         distinct.addAll(families.values());
         for (Set<MethodInfo> family : distinct) familyPreconditions(family, set);
         return Set.copyOf(set);
@@ -278,7 +280,7 @@ final class Preconditions {
             if (statement instanceof ExpressionAsStatement eas && eas.expression() instanceof MethodCall mc
                 && to.contains(mc.methodInfo()) && index < mc.parameterExpressions().size()
                 && mc.object() instanceof VariableExpression receiver
-                && receiver.variable() instanceof io.codelaser.maddi.cst.api.variable.This t && t.writeSuper()
+                && receiver.variable() instanceof This t && t.writeSuper()
                 && NonNullFacts.unwrap(mc.parameterExpressions().get(index)) instanceof VariableExpression ve
                 && pi.equals(ve.variable())) {
                 return true;

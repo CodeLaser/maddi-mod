@@ -17,9 +17,9 @@
 
 package io.codelaser.maddi.modification.analyzer;
 
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-
 import java.util.List;
+
+import io.codelaser.maddi.cst.api.info.MethodInfo;
 
 public interface AbstractMethodAnalyzer  {
 

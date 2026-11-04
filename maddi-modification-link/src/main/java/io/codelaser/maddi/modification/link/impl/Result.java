@@ -1,18 +1,19 @@
 package io.codelaser.maddi.modification.link.impl;
 
-import io.codelaser.maddi.modification.link.impl.localvar.FunctionalInterfaceVariable;
-import io.codelaser.maddi.modification.prepwork.variable.Link;
-import io.codelaser.maddi.modification.prepwork.variable.LinkedVariables;
-import io.codelaser.maddi.modification.prepwork.variable.Links;
-import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
+import java.util.*;
+
+import org.jetbrains.annotations.NotNull;
+
 import io.codelaser.maddi.cst.api.expression.Expression;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.variable.LocalVariable;
 import io.codelaser.maddi.cst.api.variable.Variable;
-import org.jetbrains.annotations.NotNull;
-
-import java.util.*;
+import io.codelaser.maddi.modification.link.impl.localvar.FunctionalInterfaceVariable;
+import io.codelaser.maddi.modification.prepwork.variable.Link;
+import io.codelaser.maddi.modification.prepwork.variable.LinkedVariables;
+import io.codelaser.maddi.modification.prepwork.variable.Links;
+import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
 
 /*
 primary = end result

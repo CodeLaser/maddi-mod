@@ -17,26 +17,8 @@
 
 package io.codelaser.maddi.run.openjdkmain;
 
-import io.codelaser.maddi.callgraph.CallGraphContributions;
-import io.codelaser.maddi.callgraph.ComputeAnalysisOrder;
-import io.codelaser.maddi.callgraph.ComputeCallGraph;
-import io.codelaser.maddi.cst.api.element.SourceSet;
-import io.codelaser.maddi.cst.api.info.Info;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.inspection.api.integration.JavaInspector;
-import io.codelaser.maddi.inspection.api.parser.ParseResult;
-import io.codelaser.maddi.inspection.api.resource.InputConfiguration;
-import io.codelaser.maddi.inspection.openjdk.JavaInspectorImpl;
-import io.codelaser.maddi.inspection.resource.InputConfigurationImpl;
-import io.codelaser.maddi.inspection.resource.SourceSetImpl;
-import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
-import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
-import io.codelaser.maddi.modification.prepwork.io.AnalysisFingerprint;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
+import static io.codelaser.maddi.inspection.api.integration.JavaInspector.InvalidationState.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -46,11 +28,36 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
-import static io.codelaser.maddi.inspection.api.integration.JavaInspector.InvalidationState.*;
-import static org.junit.jupiter.api.Assertions.*;
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import io.codelaser.maddi.callgraph.CallGraphContributions;
+import io.codelaser.maddi.callgraph.ComputeAnalysisOrder;
+import io.codelaser.maddi.callgraph.ComputeCallGraph;
+import io.codelaser.maddi.cst.api.analysis.Property;
+import io.codelaser.maddi.cst.api.element.SourceSet;
+import io.codelaser.maddi.cst.api.info.Info;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
+import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
+import io.codelaser.maddi.inspection.api.integration.JavaInspector;
+import io.codelaser.maddi.inspection.api.parser.ParseResult;
+import io.codelaser.maddi.inspection.api.resource.InputConfiguration;
+import io.codelaser.maddi.inspection.openjdk.JavaInspectorImpl;
+import io.codelaser.maddi.inspection.resource.InputConfigurationImpl;
+import io.codelaser.maddi.inspection.resource.SourceSetImpl;
+import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
+import io.codelaser.maddi.modification.prepwork.ClearDerived;
+import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
+import io.codelaser.maddi.modification.prepwork.io.AnalysisFingerprint;
 
 /**
  * The analysis on the objects a partial re-parse leaves, in one warm inspector: prep over the whole universe (the
@@ -103,7 +110,7 @@ public class TestWarmAnalysisAfterPartialReparse {
             }
             """;
 
-    private static final Predicate<io.codelaser.maddi.cst.api.analysis.Property> OUTPUT =
+    private static final Predicate<Property> OUTPUT =
             AnalysisFingerprint.ANALYZER_OUTPUT_ONLY;
 
     private record Warm(JavaInspector inspector, SourceSet set, ParseResult pr, Set<String> recomputed,
@@ -145,16 +152,16 @@ public class TestWarmAnalysisAfterPartialReparse {
             TypeInfo type = info instanceof TypeInfo ti ? ti : info.typeInfo();
             if (type != null && type.primaryType() == circle) seed.add(info);
         }
-        Set<String> recomputed = new java.util.TreeSet<>();
+        Set<String> recomputed = new TreeSet<>();
         Consumer<Info> clearBeforeRecompute = info -> {
             recomputed.add(info.fullyQualifiedName());
-            io.codelaser.maddi.modification.prepwork.ClearDerived.element(info);
+            ClearDerived.element(info);
         };
         IteratingAnalyzerImpl analyzer = new IteratingAnalyzerImpl(inspector, configuration());
         analyzer.analyze(order, ccg.graph(), seed, clearBeforeRecompute);
         // the scope it reports, which its messages are about, is what it cleared and analysed
         assertEquals(recomputed, analyzer.lastScope().stream().map(Info::fullyQualifiedName)
-                .collect(java.util.stream.Collectors.toCollection(java.util.TreeSet::new)));
+                .collect(Collectors.toCollection(TreeSet::new)));
         return new Warm(inspector, set, pr, recomputed, before);
     }
 
@@ -166,8 +173,8 @@ public class TestWarmAnalysisAfterPartialReparse {
                 "the upward flow pulls in the kept Shape.area(), and from there its user: " + warm.recomputed());
         // prep's registry of implementations survives the clear-before-recompute, and names the live Circle.area()
         MethodInfo area = warm.pr().findType("s.Shape").findUniqueMethod("area", 0);
-        var implementations = area.analysis().getOrNull(io.codelaser.maddi.cst.impl.analysis.PropertyImpl.IMPLEMENTATIONS,
-                io.codelaser.maddi.cst.impl.analysis.ValueImpl.SetOfMethodInfoImpl.class);
+        var implementations = area.analysis().getOrNull(PropertyImpl.IMPLEMENTATIONS,
+                ValueImpl.SetOfMethodInfoImpl.class);
         assertNotNull(implementations, "IMPLEMENTATIONS is prep's, the analyzer's clear must leave it");
         MethodInfo liveArea = warm.pr().findType("s.Circle").findUniqueMethod("area", 0);
         assertSame(liveArea, implementations.methodInfoSet().iterator().next());
@@ -191,7 +198,7 @@ public class TestWarmAnalysisAfterPartialReparse {
     /* per type, the element lines that differ: "-" cold only, "+" warm only */
     private static void assertSameAnalysis(Map<String, String> cold, Map<String, String> warm, String what) {
         StringBuilder sb = new StringBuilder();
-        for (String type : new java.util.TreeSet<>(cold.keySet())) {
+        for (String type : new TreeSet<>(cold.keySet())) {
             List<String> c = List.of(cold.get(type).split("\n"));
             List<String> w = List.of(String.valueOf(warm.get(type)).split("\n"));
             if (c.equals(w)) continue;

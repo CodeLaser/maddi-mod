@@ -17,15 +17,7 @@
 
 package io.codelaser.maddi.run.kotlinmain;
 
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.inspection.mixed.MixedProjectInspector;
-import io.codelaser.maddi.inspection.resource.InputConfigurationImpl;
-import io.codelaser.maddi.run.config.util.JsonStreaming;
-import io.codelaser.maddi.util.corpus.Corpora;
-import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.api.Test;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -33,7 +25,16 @@ import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.inspection.mixed.MixedProjectInspector;
+import io.codelaser.maddi.inspection.resource.InputConfigurationImpl;
+import io.codelaser.maddi.run.config.util.JsonStreaming;
+import io.codelaser.maddi.util.corpus.Corpora;
 
 /**
  * The MIXED corpus: Java and Kotlin inside the same source sets, which neither {@link TestDetektCorpus} nor

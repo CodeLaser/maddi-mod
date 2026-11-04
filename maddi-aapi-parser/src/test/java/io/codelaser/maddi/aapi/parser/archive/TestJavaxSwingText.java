@@ -17,15 +17,16 @@
 
 package io.codelaser.maddi.aapi.parser.archive;
 
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import javax.swing.text.JTextComponent;
+
+import org.junit.jupiter.api.Test;
+
 import io.codelaser.maddi.aapi.parser.CommonTest;
 import io.codelaser.maddi.cst.api.element.SourceSet;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
-import org.junit.jupiter.api.Test;
-
-import javax.swing.text.JTextComponent;
-
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class TestJavaxSwingText extends CommonTest {
 

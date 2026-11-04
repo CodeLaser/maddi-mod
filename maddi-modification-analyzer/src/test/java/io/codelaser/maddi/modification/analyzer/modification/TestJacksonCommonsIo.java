@@ -1,16 +1,23 @@
 package io.codelaser.maddi.modification.analyzer.modification;
 
-import io.codelaser.maddi.cst.api.info.Info;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.api.element.SourceSet;
-import io.codelaser.maddi.inspection.resource.SourceSetImpl;
-import io.codelaser.maddi.modification.analyzer.CommonTest;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.*;
+import org.apache.commons.io.IOUtils;
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.Test;
+
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import io.codelaser.maddi.cst.api.element.SourceSet;
+import io.codelaser.maddi.cst.api.info.Info;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.inspection.resource.SourceSetImpl;
+import io.codelaser.maddi.modification.analyzer.CommonTest;
+import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
 
 /**
  * The commons-io and Jackson 2 hints (libs/commonsio, libs/jackson). A mapper that reads or writes is not modified;
@@ -20,10 +27,10 @@ public class TestJacksonCommonsIo extends CommonTest {
 
     @Override
     protected List<SourceSet> extraClassPathParts() {
-        return List.of(SourceSetImpl.sourceSetOf(org.apache.commons.io.IOUtils.class),
-                SourceSetImpl.sourceSetOf(com.fasterxml.jackson.databind.ObjectMapper.class),
-                SourceSetImpl.sourceSetOf(com.fasterxml.jackson.core.JsonParser.class),
-                SourceSetImpl.sourceSetOf(com.fasterxml.jackson.annotation.JsonInclude.class));
+        return List.of(SourceSetImpl.sourceSetOf(IOUtils.class),
+                SourceSetImpl.sourceSetOf(ObjectMapper.class),
+                SourceSetImpl.sourceSetOf(JsonParser.class),
+                SourceSetImpl.sourceSetOf(JsonInclude.class));
     }
 
     @Language("java")
@@ -52,8 +59,8 @@ public class TestJacksonCommonsIo extends CommonTest {
     public void test() {
         TypeInfo X = javaInspector.parse("a.b.X", INPUT);
         List<Info> ao = prepWork(X);
-        var iterating = new io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl(javaInspector,
-                new io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl.ConfigurationBuilder()
+        var iterating = new IteratingAnalyzerImpl(javaInspector,
+                new IteratingAnalyzerImpl.ConfigurationBuilder()
                         .setMaxIterations(10)
                         .setModificationViaReachability(true)
                         .build());

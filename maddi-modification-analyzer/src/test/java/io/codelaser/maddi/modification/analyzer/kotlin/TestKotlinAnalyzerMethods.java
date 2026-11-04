@@ -1,13 +1,14 @@
 package io.codelaser.maddi.modification.analyzer.kotlin;
 
-import io.codelaser.maddi.cst.api.analysis.Value;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
 import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import io.codelaser.maddi.cst.api.analysis.Value;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 
 /*
  Method-level verdicts: a fluent builder (with and without a scope function), an identity method, modification of a

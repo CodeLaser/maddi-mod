@@ -1,16 +1,9 @@
 package io.codelaser.maddi.modification.link.impl;
 
-import io.codelaser.maddi.modification.common.FunctionTypes;
+import java.util.*;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
-import io.codelaser.maddi.modification.link.LinkComputer;
-import io.codelaser.maddi.modification.link.impl.linkgraph.FollowGraph;
-import io.codelaser.maddi.modification.link.impl.linkgraph.Graph;
-import io.codelaser.maddi.modification.link.impl.linkgraph.LinkGraph;
-import io.codelaser.maddi.modification.link.impl.localvar.AppliedFunctionalInterfaceVariable;
-import io.codelaser.maddi.modification.link.impl.localvar.FunctionalInterfaceVariable;
-import io.codelaser.maddi.modification.link.vf.VirtualFieldComputer;
-import io.codelaser.maddi.modification.prepwork.variable.*;
-import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.runtime.Runtime;
@@ -20,10 +13,13 @@ import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.cst.api.variable.LocalVariable;
 import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.inspection.api.integration.JavaInspector;
-
-import java.util.*;
-import java.util.function.Function;
-import java.util.stream.Collectors;
+import io.codelaser.maddi.modification.common.FunctionTypes;
+import io.codelaser.maddi.modification.link.LinkComputer;
+import io.codelaser.maddi.modification.link.impl.localvar.AppliedFunctionalInterfaceVariable;
+import io.codelaser.maddi.modification.link.impl.localvar.FunctionalInterfaceVariable;
+import io.codelaser.maddi.modification.link.vf.VirtualFieldComputer;
+import io.codelaser.maddi.modification.prepwork.variable.*;
+import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
 
 /*
 Part of the LinkMethodCall code, objectToReturnValue.

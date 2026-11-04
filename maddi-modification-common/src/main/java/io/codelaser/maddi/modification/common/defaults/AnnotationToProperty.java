@@ -17,7 +17,17 @@
 
 package io.codelaser.maddi.modification.common.defaults;
 
-import io.codelaser.maddi.modification.common.getset.GetSetHelper;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.FALSE;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.TRUE;
+import static io.codelaser.maddi.modification.common.defaults.ShallowAnalyzer.AnnotationOrigin.*;
+
+import java.util.*;
+import java.util.function.Function;
+import java.util.stream.Stream;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import io.codelaser.maddi.annotation.*;
 import io.codelaser.maddi.annotation.eventual.Mark;
 import io.codelaser.maddi.annotation.eventual.Only;
@@ -31,21 +41,17 @@ import io.codelaser.maddi.annotation.type.UtilityClass;
 import io.codelaser.maddi.cst.api.analysis.Property;
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.expression.AnnotationExpression;
+import io.codelaser.maddi.cst.api.expression.ArrayInitializer;
+import io.codelaser.maddi.cst.api.expression.Expression;
+import io.codelaser.maddi.cst.api.expression.IntConstant;
 import io.codelaser.maddi.cst.api.info.*;
 import io.codelaser.maddi.cst.api.runtime.Runtime;
+import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 import io.codelaser.maddi.inspection.api.util.CreateSyntheticFieldsForGetSet;
+import io.codelaser.maddi.modification.common.getset.GetSetHelper;
 import io.codelaser.maddi.util.GetSetNames;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.util.*;
-import java.util.stream.Stream;
-
-import static io.codelaser.maddi.modification.common.defaults.ShallowAnalyzer.AnnotationOrigin.*;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.FALSE;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.TRUE;
 
 class AnnotationToProperty {
     private static final Logger LOGGER = LoggerFactory.getLogger(AnnotationToProperty.class);
@@ -80,7 +86,7 @@ class AnnotationToProperty {
                 .reduce(bestValue, (t1, t2) -> (T) t1.min(t2));
     }
 
-    private static io.codelaser.maddi.cst.api.type.ParameterizedType declaredType(Info info) {
+    private static ParameterizedType declaredType(Info info) {
         return switch (info) {
             case MethodInfo mi -> mi.returnType();
             case FieldInfo fi -> fi.type();
@@ -95,11 +101,11 @@ class AnnotationToProperty {
      */
     private static Value.Nullability withNullableArguments(ValueImpl.NullabilityImpl top, AnnotationExpression ae,
                                                           Info info) {
-        io.codelaser.maddi.cst.api.type.ParameterizedType declared = declaredType(info);
+        ParameterizedType declared = declaredType(info);
         List<Integer> positions = nullableArguments(ae);
         if (positions.isEmpty() || declared == null) return top;
         int n = declared.arrays() > 0 ? 1 : declared.parameters().size();
-        List<ValueImpl.NullabilityImpl> arguments = new java.util.ArrayList<>();
+        List<ValueImpl.NullabilityImpl> arguments = new ArrayList<>();
         for (int i = 0; i < n; i++) {
             arguments.add(positions.contains(i) ? ValueImpl.NullabilityImpl.NULLABLE
                     : ValueImpl.NullabilityImpl.UNSPECIFIED);
@@ -111,7 +117,7 @@ class AnnotationToProperty {
     }
 
     private static List<Integer> nullableArguments(AnnotationExpression ae) {
-        List<Integer> positions = new java.util.ArrayList<>();
+        List<Integer> positions = new ArrayList<>();
         for (AnnotationExpression.KV kv : ae.keyValuePairs()) {
             if (!"nullableArguments".equals(kv.key())) continue;
             collectInts(kv.value(), positions);
@@ -119,10 +125,10 @@ class AnnotationToProperty {
         return positions;
     }
 
-    private static void collectInts(io.codelaser.maddi.cst.api.expression.Expression e, List<Integer> out) {
-        if (e instanceof io.codelaser.maddi.cst.api.expression.IntConstant ic) {
+    private static void collectInts(Expression e, List<Integer> out) {
+        if (e instanceof IntConstant ic) {
             out.add(ic.constant());
-        } else if (e instanceof io.codelaser.maddi.cst.api.expression.ArrayInitializer ai) {
+        } else if (e instanceof ArrayInitializer ai) {
             ai.expressions().forEach(x -> collectInts(x, out));
         }
     }
@@ -425,7 +431,7 @@ class AnnotationToProperty {
      * than record a value that no later stage can act on.
      */
     private Value.Eventual makeEventual(Info info, String label,
-                                        java.util.function.Function<String, Value.Eventual> maker,
+                                        Function<String, Value.Eventual> maker,
                                         String annotation) {
         if (label.isBlank()) {
             LOGGER.warn("{} without a mark label on {}", annotation, info);

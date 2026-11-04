@@ -17,6 +17,15 @@
 
 package io.codelaser.maddi.modification.analyzer.impl;
 
+import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.*;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.ImmutableImpl.*;
+
+import java.net.URI;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
+
+import io.codelaser.maddi.cst.api.analysis.Property;
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.element.Element;
 import io.codelaser.maddi.cst.api.element.Source;
@@ -28,17 +37,9 @@ import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
-import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 import io.codelaser.maddi.modification.common.AnalysisHelper;
 import io.codelaser.maddi.modification.common.util.Culprits;
-
-import java.net.URI;
-import java.util.ArrayList;
-import java.util.List;
-
-import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.*;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.ImmutableImpl.*;
 
 /**
  * Why a type stops below {@code @Immutable}: {@code IMMUTABLE_CULPRIT}, the first rule it fails at the member that
@@ -339,7 +340,7 @@ final class TypeCulprit {
     // ---- helpers ----
 
     private static boolean samePlace(Value.Culprit.Step a, Value.Culprit.Step b) {
-        return a.line() == b.line() && a.column() == b.column() && java.util.Objects.equals(a.uri(), b.uri());
+        return a.line() == b.line() && a.column() == b.column() && Objects.equals(a.uri(), b.uri());
     }
 
     private static boolean isSelf(FieldInfo field) {
@@ -347,12 +348,12 @@ final class TypeCulprit {
         return bestType != null && bestType.equals(field.owner());
     }
 
-    private static boolean isFalse(Info info, io.codelaser.maddi.cst.api.analysis.Property property) {
+    private static boolean isFalse(Info info, Property property) {
         Value.Bool b = info.analysis().getOrNull(property, ValueImpl.BoolImpl.class);
         return b != null && b.isFalse();
     }
 
-    private static List<Value.Culprit.Step> culpritOf(Info info, io.codelaser.maddi.cst.api.analysis.Property property) {
+    private static List<Value.Culprit.Step> culpritOf(Info info, Property property) {
         ValueImpl.CulpritImpl culprit = info.analysis().getOrNull(property, ValueImpl.CulpritImpl.class);
         return culprit == null ? List.of() : culprit.steps();
     }
@@ -364,7 +365,7 @@ final class TypeCulprit {
                 source == null ? 0 : source.beginPos(), culprit.what());
     }
 
-    private static void set(Info info, io.codelaser.maddi.cst.api.analysis.Property property,
+    private static void set(Info info, Property property,
                             List<Value.Culprit.Step> steps) {
         if (steps.isEmpty()) return;
         ValueImpl.CulpritImpl culprit = new ValueImpl.CulpritImpl(steps);

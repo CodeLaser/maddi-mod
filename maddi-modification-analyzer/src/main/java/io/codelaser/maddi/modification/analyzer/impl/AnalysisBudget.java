@@ -17,9 +17,9 @@
 
 package io.codelaser.maddi.modification.analyzer.impl;
 
-import io.codelaser.maddi.modification.analyzer.AnalysisBudgetExceededException;
-
 import java.time.Duration;
+
+import io.codelaser.maddi.modification.analyzer.AnalysisBudgetExceededException;
 
 /**
  * The wall-clock deadline of one {@code IteratingAnalyzer.analyze} call (gap {@code G43}). The coordinator names

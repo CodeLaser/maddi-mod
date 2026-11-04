@@ -1,14 +1,15 @@
 package io.codelaser.maddi.modification.prepwork.kotlin;
 
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.modification.prepwork.escape.ComputeAlwaysEscapes;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import java.util.stream.Collectors;
+
 import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
-import java.util.stream.Collectors;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.modification.prepwork.escape.ComputeAlwaysEscapes;
 
 /*
  Statements that always escape, and the assignments of the return variable along the escaping paths. Kotlin's

@@ -17,15 +17,6 @@
 
 package io.codelaser.maddi.aapi.parser.archive;
 
-import io.codelaser.maddi.aapi.parser.CommonTest;
-import io.codelaser.maddi.cst.api.analysis.Value;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import org.junit.jupiter.api.Test;
-
-import java.net.InetAddress;
-import java.net.URI;
-import java.net.URL;
-
 import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.CONTAINER_TYPE;
 import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.IMMUTABLE_TYPE;
 import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.FALSE;
@@ -34,6 +25,16 @@ import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.ImmutableImpl.IMMUT
 import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.ImmutableImpl.MUTABLE;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.net.InetAddress;
+import java.net.URI;
+import java.net.URL;
+
+import org.junit.jupiter.api.Test;
+
+import io.codelaser.maddi.aapi.parser.CommonTest;
+import io.codelaser.maddi.cst.api.analysis.Value;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
 
 public class TestJavaNet extends CommonTest {
 

@@ -1,10 +1,10 @@
 package io.codelaser.maddi.modification.link.kotlin;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
 import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /*
  Class delegation: kotlinc stores the delegate in `$$delegate_0` and synthesizes one forwarder per interface method.

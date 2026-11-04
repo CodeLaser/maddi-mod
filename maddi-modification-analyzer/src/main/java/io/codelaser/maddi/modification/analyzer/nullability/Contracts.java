@@ -17,7 +17,25 @@
 
 package io.codelaser.maddi.modification.analyzer.nullability;
 
+import static io.codelaser.maddi.modification.analyzer.nullability.Types.*;
+
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.IdentityHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
 import io.codelaser.maddi.cst.api.analysis.Value;
+import io.codelaser.maddi.cst.api.expression.AnnotationExpression;
 import io.codelaser.maddi.cst.api.expression.Assignment;
 import io.codelaser.maddi.cst.api.expression.BinaryOperator;
 import io.codelaser.maddi.cst.api.expression.Cast;
@@ -41,18 +59,6 @@ import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.cst.api.variable.This;
 import io.codelaser.maddi.cst.impl.analysis.NullAnnotations;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
-
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.IdentityHashMap;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-
-import static io.codelaser.maddi.modification.analyzer.nullability.Types.*;
 
 /**
  * Declared and inferred non-null contracts: null stops at a node that has one. A source declaration's null
@@ -86,7 +92,7 @@ final class Contracts {
         this.presentLookups = presentLookups;
     }
 
-    final Set<MethodCall> lookups = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+    final Set<MethodCall> lookups = Collections.newSetFromMap(new IdentityHashMap<>());
     final Set<MethodInfo> degraded = new LinkedHashSet<>();
     // source declarations annotated non-null (Policy.contracts): null stops there
     final Set<Object> nonNullContracts = new HashSet<>();
@@ -136,7 +142,7 @@ final class Contracts {
      above) are non-null too, a null value asserted: an override may not widen its overridden member's return.
      */
     void nonNullOverrides(List<MethodInfo> methods) {
-        java.util.ArrayDeque<MethodInfo> work = new java.util.ArrayDeque<>();
+        ArrayDeque<MethodInfo> work = new ArrayDeque<>();
         for (MethodInfo mi : methods) if (nonNullContracts.contains(mi)) work.add(mi);
         while (!work.isEmpty()) {
             MethodInfo m = work.poll();
@@ -303,7 +309,7 @@ final class Contracts {
         // the array type's own annotations ('X @Nullable []', guava's RegularImmutableMap.table) are about the array;
         // the declaration's list holds a parameter's type-use annotation, which the front end also moved to the
         // element, and a field's, which it did not: there the annotation type's @Target decides
-        List<io.codelaser.maddi.cst.api.expression.AnnotationExpression> own = new ArrayList<>(type.annotations());
+        List<AnnotationExpression> own = new ArrayList<>(type.annotations());
         for (var ae : info.annotations()) {
             if (ae.typeInfo() != null && !onElement.contains(ae.typeInfo().fullyQualifiedName())
                 && !typeUseOnly(ae.typeInfo())) {
@@ -339,7 +345,7 @@ final class Contracts {
             if (target.typeInfo() == null
                 || !"java.lang.annotation.Target".equals(target.typeInfo().fullyQualifiedName())) continue;
             String targets = target.keyValuePairs().stream().map(kv -> String.valueOf(kv.value()))
-                    .collect(java.util.stream.Collectors.joining(","));
+                    .collect(Collectors.joining(","));
             return targets.contains("TYPE_USE") && !targets.contains("FIELD") && !targets.contains("PARAMETER")
                    && !targets.contains("METHOD");
         }
@@ -505,7 +511,7 @@ final class Contracts {
      AuthenticationProcessingFilter2.kt:36, 2026-10-20). Gate NONEARESTLIBRARYRETURN: any one that says nullable.
      */
     private List<MethodInfo> nearestLibraryDeclarations(MethodInfo mi) {
-        List<MethodInfo> declared = java.util.stream.Stream.concat(java.util.stream.Stream.of(mi), overrides(mi).stream())
+        List<MethodInfo> declared = Stream.concat(Stream.of(mi), overrides(mi).stream())
                 .filter(m -> !index.analysed.contains(m))
                 .filter(m -> libraryReturnState(m) != NullableState.UNSPECIFIED)
                 .toList();
@@ -558,8 +564,8 @@ final class Contracts {
      override declares the same shape (the same class or array of it), so that the positions correspond.
      */
     void libraryNullableContent(Object node, ParameterizedType declared,
-                                java.util.function.Function<MethodInfo, Value.Nullability> nullabilityOf,
-                                java.util.function.Function<MethodInfo, ParameterizedType> typeOf) {
+                                Function<MethodInfo, Value.Nullability> nullabilityOf,
+                                Function<MethodInfo, ParameterizedType> typeOf) {
         MethodInfo mi = node instanceof ParameterInfo pi ? pi.methodInfo() : (MethodInfo) node;
         if (declared == null || declared.isVoid() || declared.isPrimitiveExcludingVoid() && declared.arrays() == 0) return;
         for (MethodInfo m : overrides(mi)) {
@@ -579,7 +585,7 @@ final class Contracts {
 
     /** A library method, {@code mi} or one it overrides, whose parameter {@code index} accepts null. */
     String libraryNullableParameter(MethodInfo mi, int index) {
-        return java.util.stream.Stream.concat(java.util.stream.Stream.of(mi), overrides(mi).stream())
+        return Stream.concat(Stream.of(mi), overrides(mi).stream())
                 .filter(m -> !this.index.analysed.contains(m) && index < m.parameters().size())
                 .filter(m -> libraryParameterState(m.parameters().get(index)) == NullableState.NULLABLE)
                 .map(MethodInfo::fullyQualifiedName).findFirst().orElse(null);
@@ -854,7 +860,7 @@ final class Contracts {
                     && !mc.methodInfo().isStatic() && !mc.methodInfo().returnType().isPrimitiveExcludingVoid()
                     && (mc.object() == null || mc.object().isEmpty()
                         || NonNullFacts.unwrap(mc.object()) instanceof VariableExpression ve
-                           && ve.variable() instanceof io.codelaser.maddi.cst.api.variable.This)) {
+                           && ve.variable() instanceof This)) {
                     calls.add(mc.methodInfo());
                 }
                 return true;

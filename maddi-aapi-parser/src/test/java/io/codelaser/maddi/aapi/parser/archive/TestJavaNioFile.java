@@ -17,15 +17,16 @@
 
 package io.codelaser.maddi.aapi.parser.archive;
 
+import static org.junit.jupiter.api.Assertions.*;
+
+import java.nio.file.Files;
+
+import org.junit.jupiter.api.Test;
+
 import io.codelaser.maddi.aapi.parser.CommonTest;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
-import org.junit.jupiter.api.Test;
-
-import java.nio.file.Files;
-
-import static org.junit.jupiter.api.Assertions.*;
 
 /*
 RULES FOR THE FILES OBJECT

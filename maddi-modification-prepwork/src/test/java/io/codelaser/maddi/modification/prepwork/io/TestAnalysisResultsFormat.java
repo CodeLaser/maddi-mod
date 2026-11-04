@@ -1,20 +1,23 @@
 package io.codelaser.maddi.modification.prepwork.io;
 
-import io.codelaser.maddi.cst.api.analysis.Codec;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
-import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
-import io.codelaser.maddi.modification.prepwork.CommonTest;
-import io.codelaser.maddi.util.Trie;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Set;
 
-import static org.junit.jupiter.api.Assertions.*;
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.Test;
+
+import io.codelaser.maddi.cst.api.analysis.Codec;
+import io.codelaser.maddi.cst.api.element.SourceSet;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
+import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
+import io.codelaser.maddi.modification.prepwork.CommonTest;
+import io.codelaser.maddi.util.Trie;
 
 /*
  The analysis-results format carries a marker (CodeLaser/maddi-mod#3): a file written by another release is refused
@@ -34,7 +37,7 @@ public class TestAnalysisResultsFormat extends CommonTest {
     private static final String MARKER = "{\"format\": \"maddi-analysis-results\", \"version\": 1}";
 
     private Codec codec;
-    private io.codelaser.maddi.cst.api.element.SourceSet sourceSet;
+    private SourceSet sourceSet;
 
     private String write() throws IOException {
         TypeInfo X = javaInspector.parse(ABX, INPUT);
@@ -128,7 +131,7 @@ public class TestAnalysisResultsFormat extends CommonTest {
         trie.add(new String[]{"a", "b"}, X);
         File dir = new File("build/analysis-results-format-false");
         WriteAnalysisResults wa = new WriteAnalysisResults(runtime);
-        if (explicitFalse) wa.setExplicitFalse(java.util.Set.of(PropertyImpl.UNMODIFIED_PARAMETER));
+        if (explicitFalse) wa.setExplicitFalse(Set.of(PropertyImpl.UNMODIFIED_PARAMETER));
         wa.write(dir, trie, codec);
         return Files.readString(new File(dir, "AB.json").toPath());
     }

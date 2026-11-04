@@ -1,7 +1,32 @@
 package io.codelaser.maddi.modification.link.impl;
 
-import io.codelaser.maddi.modification.common.util.TolerantWrite;
+import static io.codelaser.maddi.modification.link.impl.LinkNatureImpl.*;
+import static io.codelaser.maddi.modification.prepwork.variable.impl.VariableInfoImpl.STRUCTURALLY_UNMODIFIED_VARIABLE;
+import static io.codelaser.maddi.modification.prepwork.variable.impl.VariableInfoImpl.UNMODIFIED_VARIABLE;
+
+import java.util.*;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import org.jetbrains.annotations.NotNull;
+
+import io.codelaser.maddi.cst.api.analysis.Value;
+import io.codelaser.maddi.cst.api.expression.VariableExpression;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.ParameterInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.runtime.Runtime;
+import io.codelaser.maddi.cst.api.statement.Statement;
+import io.codelaser.maddi.cst.api.type.ParameterizedType;
+import io.codelaser.maddi.cst.api.variable.DependentVariable;
+import io.codelaser.maddi.cst.api.variable.FieldReference;
+import io.codelaser.maddi.cst.api.variable.This;
+import io.codelaser.maddi.cst.api.variable.Variable;
+import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
+import io.codelaser.maddi.inspection.api.integration.JavaInspector;
 import io.codelaser.maddi.modification.common.AnalysisHelper;
+import io.codelaser.maddi.modification.common.util.TolerantWrite;
 import io.codelaser.maddi.modification.link.impl.graph.Fact;
 import io.codelaser.maddi.modification.link.impl.linkgraph.FollowGraph;
 import io.codelaser.maddi.modification.link.impl.linkgraph.RedundantLinks;
@@ -13,27 +38,6 @@ import io.codelaser.maddi.modification.link.vf.VirtualFieldComputer;
 import io.codelaser.maddi.modification.prepwork.Util;
 import io.codelaser.maddi.modification.prepwork.variable.*;
 import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
-import io.codelaser.maddi.cst.api.analysis.Value;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.api.runtime.Runtime;
-import io.codelaser.maddi.cst.api.statement.Statement;
-import io.codelaser.maddi.cst.api.type.ParameterizedType;
-import io.codelaser.maddi.cst.api.variable.DependentVariable;
-import io.codelaser.maddi.cst.api.expression.VariableExpression;
-import io.codelaser.maddi.cst.api.variable.FieldReference;
-import io.codelaser.maddi.cst.api.variable.This;
-import io.codelaser.maddi.cst.api.variable.Variable;
-import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
-import io.codelaser.maddi.inspection.api.integration.JavaInspector;
-import org.jetbrains.annotations.NotNull;
-
-import java.util.*;
-import java.util.stream.Stream;
-
-import static io.codelaser.maddi.modification.link.impl.LinkNatureImpl.*;
-import static io.codelaser.maddi.modification.prepwork.variable.impl.VariableInfoImpl.STRUCTURALLY_UNMODIFIED_VARIABLE;
-import static io.codelaser.maddi.modification.prepwork.variable.impl.VariableInfoImpl.UNMODIFIED_VARIABLE;
 
 class WriteLinksAndModification {
     private final Runtime runtime;
@@ -165,7 +169,7 @@ class WriteLinksAndModification {
                 // iterator's modification (next()) flipped the raw 'entries.§kvs ⊆ this.map.§kvs' (both
                 // unmodified) because the iterator's derived ⊆ descended to it (TestMap test2Reverse0).
                 Variable owner = flipOwner.get(link);
-                java.util.function.Predicate<Fact<Variable, LinkNature>> acceptRaw =
+                Predicate<Fact<Variable, LinkNature>> acceptRaw =
                         owner == null || Gate.isSet("NOFLIPOWN")
                                 ? _ -> true
                                 : fact -> ownsFact(owner, fact);
@@ -195,7 +199,7 @@ class WriteLinksAndModification {
         }).sum();
         Set<Variable> unmarkedDeepOnly = deepOnlyDuringEvaluation.isEmpty() ? Set.of()
                 : unmarkedModifications.stream().filter(deepOnlyDuringEvaluation::contains)
-                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+                .collect(Collectors.toUnmodifiableSet());
         return new WriteResult(builtNewLinkedVariables, unmarkedModifications, unmarkedDeepOnly, sum);
     }
 
@@ -234,7 +238,7 @@ class WriteLinksAndModification {
      */
     private void closeOverModificationGroups(Map<Variable, Set<MethodInfo>> modified) {
         if (modified.isEmpty() || Gate.isSet("NOVIEWCHAIN")) return;
-        java.util.ArrayDeque<Variable> work = new java.util.ArrayDeque<>(modified.keySet());
+        ArrayDeque<Variable> work = new ArrayDeque<>(modified.keySet());
         while (!work.isEmpty()) {
             Variable v = work.removeFirst();
             Set<MethodInfo> causes = modified.get(v);
@@ -312,12 +316,12 @@ class WriteLinksAndModification {
         // recompute (handleReturnVariable's marker prepend is not idempotent; return dirt is global
         // anyway); parameters recompute at the LAST statement, where the summary needs them complete
         // while cached links carry the redundancy suppression (see the NORL guard below).
-        java.util.Set<io.codelaser.maddi.modification.link.impl.localvar.SharedVariable> detachedReps =
+        Set<SharedVariable> detachedReps =
                 followGraph.graph().detachedReps(variable);
         if (reuse != null
             && detachedReps.isEmpty() // what they carry changes without touching the variable
             && !(variable instanceof ReturnVariable)
-            && !(lastStatement && variable instanceof io.codelaser.maddi.cst.api.info.ParameterInfo)
+            && !(lastStatement && variable instanceof ParameterInfo)
             && !reuse.dirty.contains(variable)) {
             Links prev = lastExtracted.get(variable);
             if (prev != null) {
@@ -362,7 +366,7 @@ class WriteLinksAndModification {
          it, without the identity with the other members. The plain join edge 'x ← rep' does not carry them: the
          engine derives no composite TARGETING a return value (a return evicted by a loop join lost 'm ∈ 0:g[0]').
          */
-        for (io.codelaser.maddi.modification.link.impl.localvar.SharedVariable rep : detachedReps) {
+        for (SharedVariable rep : detachedReps) {
             Links.Builder repLinks = followGraph.followGraph(virtualFieldComputer, rep);
             VariableTranslationMap repToVariable = new VariableTranslationMap(runtime);
             repToVariable.put(rep, variable);
@@ -477,7 +481,7 @@ class WriteLinksAndModification {
             // Returns stay complete (handled above); in the last statement, parameters stay complete too — the
             // method summary reads them there.
             if (!Gate.isSet("NORL")
-                && (!lastStatement || !(variable instanceof io.codelaser.maddi.cst.api.info.ParameterInfo))) {
+                && (!lastStatement || !(variable instanceof ParameterInfo))) {
                 redundantLinks.redundantLinks(builder);
             }
             verdictAndFlips(statement, vi, variable, builder, previouslyModified, previouslyStructurallyModified,
@@ -685,7 +689,7 @@ class WriteLinksAndModification {
     // structural depth of a variable's access chain: b=0, b.variables=1, b.variables[0]=2
     private static int depth(Variable v) {
         if (v instanceof FieldReference fr && fr.scopeVariable() != null) return 1 + depth(fr.scopeVariable());
-        if (v instanceof io.codelaser.maddi.cst.api.variable.DependentVariable dv && dv.arrayVariable() != null) {
+        if (v instanceof DependentVariable dv && dv.arrayVariable() != null) {
             return 1 + depth(dv.arrayVariable());
         }
         return 0;
@@ -703,9 +707,9 @@ class WriteLinksAndModification {
          */
         record VPair(Variable from, Variable to) {
         }
-        Map<VPair, Set<io.codelaser.maddi.modification.prepwork.variable.LinkNature>> fromUp = new HashMap<>();
-        Map<VPair, Set<io.codelaser.maddi.modification.prepwork.variable.LinkNature>> toUp = new HashMap<>();
-        Map<VPair, Set<io.codelaser.maddi.modification.prepwork.variable.LinkNature>> bothUp = new HashMap<>();
+        Map<VPair, Set<LinkNature>> fromUp = new HashMap<>();
+        Map<VPair, Set<LinkNature>> toUp = new HashMap<>();
+        Map<VPair, Set<LinkNature>> bothUp = new HashMap<>();
         for (Link fine : links) {
             Set<Variable> svFrom = Util.scopeVariables(fine.from());
             Set<Variable> svTo = Util.scopeVariables(fine.to());

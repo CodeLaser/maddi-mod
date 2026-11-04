@@ -1,11 +1,15 @@
 package io.codelaser.maddi.modification.link.vf;
 
-import io.codelaser.maddi.modification.common.FunctionTypes;
+import static io.codelaser.maddi.modification.link.vf.VirtualFields.NONE;
 
-import io.codelaser.maddi.modification.common.AnalysisHelper;
-import io.codelaser.maddi.modification.link.impl.translate.VariableTranslationMap;
-import io.codelaser.maddi.modification.prepwork.Util;
-import io.codelaser.maddi.modification.prepwork.variable.VirtualFieldTranslationMap;
+import java.util.*;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.info.FieldInfo;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
@@ -22,15 +26,11 @@ import io.codelaser.maddi.cst.impl.info.TypeNatureEnum;
 import io.codelaser.maddi.inspection.api.integration.JavaInspector;
 import io.codelaser.maddi.inspection.api.parser.GenericsHelper;
 import io.codelaser.maddi.inspection.impl.parser.GenericsHelperImpl;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
-
-import java.util.*;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
-
-import static io.codelaser.maddi.modification.link.vf.VirtualFields.NONE;
+import io.codelaser.maddi.modification.common.AnalysisHelper;
+import io.codelaser.maddi.modification.common.FunctionTypes;
+import io.codelaser.maddi.modification.link.impl.translate.VariableTranslationMap;
+import io.codelaser.maddi.modification.prepwork.Util;
+import io.codelaser.maddi.modification.prepwork.variable.VirtualFieldTranslationMap;
 
 /*
 Given an interface, or a class in the JDK for which we do not want to parse the sources (shallow analysis),

@@ -17,13 +17,6 @@
 
 package io.codelaser.maddi.aapi.parser.archive;
 
-import io.codelaser.maddi.aapi.parser.CommonTest;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import org.junit.jupiter.api.Test;
-
-import java.math.MathContext;
-import java.math.RoundingMode;
-
 import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.CONTAINER_TYPE;
 import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.IMMUTABLE_TYPE;
 import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.FALSE;
@@ -31,6 +24,14 @@ import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.TRUE;
 import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.ImmutableImpl.IMMUTABLE;
 import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.ImmutableImpl.MUTABLE;
 import static org.junit.jupiter.api.Assertions.assertSame;
+
+import java.math.MathContext;
+import java.math.RoundingMode;
+
+import org.junit.jupiter.api.Test;
+
+import io.codelaser.maddi.aapi.parser.CommonTest;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
 
 public class TestJavaMath extends CommonTest {
 

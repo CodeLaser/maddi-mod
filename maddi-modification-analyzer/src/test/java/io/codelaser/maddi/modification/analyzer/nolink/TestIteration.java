@@ -17,19 +17,21 @@
 
 package io.codelaser.maddi.modification.analyzer.nolink;
 
-import io.codelaser.maddi.modification.analyzer.CommonTest;
-import io.codelaser.maddi.modification.analyzer.SingleIterationAnalyzer;
-import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
-import io.codelaser.maddi.cst.api.info.Info;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
+import static org.junit.jupiter.api.Assertions.*;
+
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+
 import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import java.io.IOException;
-import java.util.List;
-
-import static org.junit.jupiter.api.Assertions.*;
+import io.codelaser.maddi.cst.api.info.Info;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.modification.analyzer.CommonTest;
+import io.codelaser.maddi.modification.analyzer.SingleIterationAnalyzer;
+import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
 
 /**
  * Tests the iterative fixed-point of the analyzer. Each pass of {@link SingleIterationAnalyzer} reports how many
@@ -115,7 +117,7 @@ public class TestIteration extends CommonTest {
         TypeInfo X = bundle.javaInspector().parse("a.b.X", input);
         List<Info> ao = bundle.prepAnalyzer().doPrimaryType(X);
         SingleIterationAnalyzer single = (SingleIterationAnalyzer) bundle.analyzer();
-        List<Integer> seq = new java.util.ArrayList<>();
+        List<Integer> seq = new ArrayList<>();
         for (int pass = 1; pass <= cap; pass++) {
             single.go(ao, false, pass == 1);
             int changed = single.propertiesChanged();

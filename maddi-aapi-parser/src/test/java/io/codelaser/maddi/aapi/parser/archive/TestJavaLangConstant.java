@@ -17,13 +17,6 @@
 
 package io.codelaser.maddi.aapi.parser.archive;
 
-import io.codelaser.maddi.aapi.parser.CommonTest;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import org.junit.jupiter.api.Test;
-
-import java.lang.constant.Constable;
-
 import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.*;
 import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.FALSE;
 import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.TRUE;
@@ -33,6 +26,14 @@ import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.DEP
 import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.INDEPENDENT;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
+
+import java.lang.constant.Constable;
+
+import org.junit.jupiter.api.Test;
+
+import io.codelaser.maddi.aapi.parser.CommonTest;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
 
 public class TestJavaLangConstant extends CommonTest {
 

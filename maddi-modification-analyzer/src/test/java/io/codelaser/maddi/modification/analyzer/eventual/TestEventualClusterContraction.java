@@ -17,14 +17,15 @@
 
 package io.codelaser.maddi.modification.analyzer.eventual;
 
-import io.codelaser.maddi.modification.analyzer.impl.EventualClusterContraction;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.util.Map;
 import java.util.Set;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+import io.codelaser.maddi.modification.analyzer.impl.EventualClusterContraction;
 
 /**
  * Greatest-fixpoint, step 2: the contraction as pure set logic. {@link EventualClusterContraction#membersToRetract}

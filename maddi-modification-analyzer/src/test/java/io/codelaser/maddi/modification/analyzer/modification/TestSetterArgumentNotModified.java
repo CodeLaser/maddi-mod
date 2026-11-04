@@ -1,22 +1,24 @@
 package io.codelaser.maddi.modification.analyzer.modification;
 
+import static io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl.METHOD_LINKS;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.util.List;
+
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
 import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.modification.analyzer.CommonTest;
+import io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl;
 import io.codelaser.maddi.modification.prepwork.variable.VariableData;
 import io.codelaser.maddi.modification.prepwork.variable.VariableInfo;
 import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-
-import java.util.List;
-
-import static io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl.METHOD_LINKS;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * {@code instance.setKind(command.getKind())}: the setter keeps its argument, it does not modify it, so neither the
@@ -66,7 +68,7 @@ public class TestSetterArgumentNotModified extends CommonTest {
         VariableInfo vi = vd.variableInfo(command);
         return m.name() + ": command modified=" + command.isModified() + " vd=" + vi.isModified() + " links="
                + vi.linkedVariables() + " mlv=" + m.analysis().getOrNull(METHOD_LINKS,
-                io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl.class);
+                MethodLinkedVariablesImpl.class);
     }
 
     @DisplayName("a setter's argument, and the object it was read from, are not modified")

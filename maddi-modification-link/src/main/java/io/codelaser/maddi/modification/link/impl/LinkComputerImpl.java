@@ -1,5 +1,42 @@
 package io.codelaser.maddi.modification.link.impl;
 
+import static io.codelaser.maddi.modification.link.impl.ExpressionVisitor.EMPTY;
+import static io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl.METHOD_LINKS;
+import static io.codelaser.maddi.modification.prepwork.variable.impl.VariableInfoImpl.DOWNCAST_VARIABLE;
+import static io.codelaser.maddi.modification.prepwork.variable.impl.VariableInfoImpl.UNMODIFIED_VARIABLE;
+
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.LongAdder;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import org.jetbrains.annotations.NotNull;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import io.codelaser.maddi.cst.api.analysis.Codec;
+import io.codelaser.maddi.cst.api.analysis.Value;
+import io.codelaser.maddi.cst.api.element.Element;
+import io.codelaser.maddi.cst.api.expression.Assignment;
+import io.codelaser.maddi.cst.api.expression.Expression;
+import io.codelaser.maddi.cst.api.expression.MethodCall;
+import io.codelaser.maddi.cst.api.expression.NullConstant;
+import io.codelaser.maddi.cst.api.expression.VariableExpression;
+import io.codelaser.maddi.cst.api.info.InfoMapView;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.ParameterInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.statement.*;
+import io.codelaser.maddi.cst.api.translate.TranslationMap;
+import io.codelaser.maddi.cst.api.variable.*;
+import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
+import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
+import io.codelaser.maddi.graph.util.TimedLogger;
+import io.codelaser.maddi.inspection.api.integration.JavaInspector;
 import io.codelaser.maddi.modification.common.defaults.ShallowMethodAnalyzer;
 import io.codelaser.maddi.modification.common.util.OwnStaticState;
 import io.codelaser.maddi.modification.common.util.TolerantWrite;
@@ -21,40 +58,6 @@ import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
 import io.codelaser.maddi.modification.prepwork.variable.impl.ReturnVariableImpl;
 import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
 import io.codelaser.maddi.modification.prepwork.variable.impl.VariableInfoImpl;
-import io.codelaser.maddi.cst.api.analysis.Codec;
-import io.codelaser.maddi.cst.api.analysis.Value;
-import io.codelaser.maddi.cst.api.element.Element;
-import io.codelaser.maddi.cst.api.expression.Assignment;
-import io.codelaser.maddi.cst.api.expression.Expression;
-import io.codelaser.maddi.cst.api.expression.MethodCall;
-import io.codelaser.maddi.cst.api.expression.NullConstant;
-import io.codelaser.maddi.cst.api.expression.VariableExpression;
-import io.codelaser.maddi.cst.api.info.InfoMap;
-import io.codelaser.maddi.cst.api.info.InfoMapView;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.ParameterInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.api.statement.*;
-import io.codelaser.maddi.cst.api.translate.TranslationMap;
-import io.codelaser.maddi.cst.api.variable.*;
-import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
-import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
-import io.codelaser.maddi.inspection.api.integration.JavaInspector;
-import io.codelaser.maddi.graph.util.TimedLogger;
-import org.jetbrains.annotations.NotNull;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.util.*;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
-
-import static io.codelaser.maddi.modification.link.impl.ExpressionVisitor.EMPTY;
-import static io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl.METHOD_LINKS;
-import static io.codelaser.maddi.modification.prepwork.variable.impl.VariableInfoImpl.DOWNCAST_VARIABLE;
-import static io.codelaser.maddi.modification.prepwork.variable.impl.VariableInfoImpl.UNMODIFIED_VARIABLE;
 
 /*
 convention:
@@ -78,8 +81,8 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
     // inclusion inherits modification semantics into a type-aliasing question (over-rejection
     // in extract-interface); measure before filtering.
     static final boolean VL2O_TIER = Gate.isSet("VL2OTIER");
-    static final java.util.concurrent.atomic.LongAdder VL2O_ASSIGNMENT_TIER = new java.util.concurrent.atomic.LongAdder();
-    static final java.util.concurrent.atomic.LongAdder VL2O_CONTENT_TIER = new java.util.concurrent.atomic.LongAdder();
+    static final LongAdder VL2O_ASSIGNMENT_TIER = new LongAdder();
+    static final LongAdder VL2O_CONTENT_TIER = new LongAdder();
 
     public static String vl2oTierStats() {
         return "VL2O tier stats: assignment=" + VL2O_ASSIGNMENT_TIER.sum()
@@ -172,17 +175,17 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
 
     // worklist support (see LinkComputer.recordSummaryConsumption): NOT cleared by reset() — dependencies
     // persist across iterations, and a subset iteration only re-records what it actually re-computes
-    private final java.util.Map<MethodInfo, java.util.Set<MethodInfo>> consumedSummaries =
-            new java.util.concurrent.ConcurrentHashMap<>();
+    private final Map<MethodInfo, Set<MethodInfo>> consumedSummaries =
+            new ConcurrentHashMap<>();
 
     @Override
     public void recordSummaryConsumption(MethodInfo consumer, MethodInfo consumed) {
-        consumedSummaries.computeIfAbsent(consumer, _ -> java.util.concurrent.ConcurrentHashMap.newKeySet())
+        consumedSummaries.computeIfAbsent(consumer, _ -> ConcurrentHashMap.newKeySet())
                 .add(consumed);
     }
 
     @Override
-    public java.util.Map<MethodInfo, java.util.Set<MethodInfo>> consumedSummaries() {
+    public Map<MethodInfo, Set<MethodInfo>> consumedSummaries() {
         return consumedSummaries;
     }
 
@@ -302,7 +305,7 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
             String linkTrace = System.getenv("LINKTRACE");
             boolean trace = linkTrace != null && methodInfo.fullyQualifiedName().contains(linkTrace);
             if (trace) {
-                io.codelaser.maddi.modification.link.impl.graph.IncrementalFixpointEngine.TRACE = true;
+                IncrementalFixpointEngine.TRACE = true;
                 System.out.println("LT >>> " + methodInfo.fullyQualifiedName());
             }
             SourceMethodComputer computer = new SourceMethodComputer(methodInfo);
@@ -362,7 +365,7 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                 Graph.setAltSources(altSourcesOff, altSourcesUsed);
                 recursionPrevention.doneSource(methodInfo);
                 if (trace) {
-                    io.codelaser.maddi.modification.link.impl.graph.IncrementalFixpointEngine.TRACE = false;
+                    IncrementalFixpointEngine.TRACE = false;
                     System.out.println("LT <<< " + methodInfo.fullyQualifiedName());
                 }
             }
@@ -394,7 +397,7 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
      consumes a degraded method (a shallow summary, variable data without links) can be tested without building
      a method that is expensive enough to trip it. Null outside such a test.
      */
-    public static volatile java.util.function.Predicate<MethodInfo> DEGRADE_FOR_TESTING;
+    public static volatile Predicate<MethodInfo> DEGRADE_FOR_TESTING;
 
     // atomically: another thread linking the same callee may mark it too, and 'set' refuses any overwrite
     static void markDegraded(MethodInfo methodInfo) {
@@ -459,7 +462,7 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
     // bare marker 'oc:N' is not a face
     static boolean isFaceOfObjectCreation(Variable v) {
         Variable primary = Util.primary(v);
-        return primary instanceof io.codelaser.maddi.modification.prepwork.variable.ObjectCreationVariable
+        return primary instanceof ObjectCreationVariable
                && !primary.equals(v);
     }
 
@@ -471,17 +474,17 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
     private static final String TRIP_DIAG_FULL = System.getenv("TRIPDIAG_FULL");
     // LINKINPUTS=<fqn substring>: the same input fingerprint at EVERY linking of a matching method, tripped or not
     private static final String LINK_INPUTS = System.getenv("LINKINPUTS");
-    private final java.util.concurrent.atomic.AtomicInteger tripDiagCount = new java.util.concurrent.atomic.AtomicInteger();
-    // the analyzer's pass number as seen by the diagnostics: reset() is called once at the start of every pass
-    private final java.util.concurrent.atomic.AtomicInteger diagPass = new java.util.concurrent.atomic.AtomicInteger();
+    private final AtomicInteger tripDiagCount = new AtomicInteger();
+    // the analyzer\'s pass number as seen by the diagnostics: reset() is called once at the start of every pass
+    private final AtomicInteger diagPass = new AtomicInteger();
 
     private void tripDiag(MethodInfo methodInfo, Graph graph) {
         int n = tripDiagCount.incrementAndGet();
         StringBuilder sb = new StringBuilder();
         sb.append("TRIPDIAG#").append(n).append(" pass=").append(diagPass.get()).append(" graph=").append(graph.size()).append(" closure=")
                 .append(graph.sizeOfClosure()).append(" method=").append(methodInfo.fullyQualifiedName()).append('\n');
-        java.util.Set<MethodInfo> inputs = new java.util.TreeSet<>(java.util.Comparator.comparing(MethodInfo::fullyQualifiedName));
-        inputs.addAll(consumedSummaries.getOrDefault(methodInfo, java.util.Set.of()));
+        Set<MethodInfo> inputs = new TreeSet<>(Comparator.comparing(MethodInfo::fullyQualifiedName));
+        inputs.addAll(consumedSummaries.getOrDefault(methodInfo, Set.of()));
         inputs.add(methodInfo);
         for (MethodInfo callee : inputs) {
             MethodLinkedVariables mlv = callee.analysis().getOrNull(METHOD_LINKS, MethodLinkedVariablesImpl.class);
@@ -554,7 +557,7 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
             // see Options.objectGraphLinks: the coarse ∩/≤/≥ web is not consumed by linking's applications and
             // is quadratic on deep structures; PRODUCTION excludes those labels from the closure entirely
             boolean nullTerminal = options.nullConstantReturns() && !Gate.isSet("NULLCOMPOSE");
-            java.util.function.Predicate<LinkNature> valid = options.objectGraphLinks()
+            Predicate<LinkNature> valid = options.objectGraphLinks()
                     ? LinkNature::valid
                     : ln -> ln.valid() && ln != LinkNatureImpl.OBJECT_GRAPH_OVERLAPS
                             && ln != LinkNatureImpl.IS_IN_OBJECT_GRAPH && ln != LinkNatureImpl.OBJECT_GRAPH_CONTAINS;
@@ -703,7 +706,7 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                     .filter(vi -> modified.contains(vi.variable()) && vi.isStructurallyUnmodified())
                     .map(VariableInfo::variable)
                     .collect(Collectors.toUnmodifiableSet());
-            java.util.function.Predicate<Variable> deepOnly = v ->
+            Predicate<Variable> deepOnly = v ->
                     (!modified.contains(v) || deepOnlyInVd.contains(v))
                     && (!modifiedOutside.contains(v) || !modificationsOutsideStructural.contains(v));
             Set<Variable> allDeepOnly = allModified.stream().filter(deepOnly).collect(Collectors.toUnmodifiableSet());
@@ -799,7 +802,7 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                                                  MethodLinkedVariables mlv) {
             // a throw-only placeholder with implementations: its modification is their union, written by the
             // abstract-method analyzer; the throwing body would claim @NotModified for every call (work list O2)
-            if (!methodInfo.isAbstract() && io.codelaser.maddi.modification.prepwork.Util.unionOverImplementations(methodInfo)) {
+            if (!methodInfo.isAbstract() && Util.unionOverImplementations(methodInfo)) {
                 return;
             }
             boolean methodModified = false;
@@ -1624,7 +1627,7 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
 
         private List<Block> casesWithoutFallThrough(SwitchStatementOldStyle ss) {
             List<Statement> statements = ss.block().statements();
-            java.util.TreeSet<Integer> starts = new java.util.TreeSet<>();
+            TreeSet<Integer> starts = new TreeSet<>();
             ss.switchLabels().forEach(l -> starts.add(l.startFromPosition()));
             starts.add(statements.size());
             List<Block> cases = new ArrayList<>();
