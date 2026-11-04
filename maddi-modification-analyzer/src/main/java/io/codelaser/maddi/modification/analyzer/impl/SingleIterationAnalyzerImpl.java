@@ -95,6 +95,8 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
     // pass that moment depends on thread timing, and so does the verdict (guava, 8 threads: 6-10 FPDUMP lines
     // differ between runs, 0 sequentially). Opt-in while measuring.
     static final boolean SEQUENTIAL_CYCLE_BREAKING = Gate.isSet("SEQCYCLEBREAKING");
+    // EXPERIMENT (#82): the deterministic alternative to SEQCYCLEBREAKING that keeps the loop parallel; see goInternal
+    static final boolean CYCLE_BREAKING_SWEEP = Gate.isSet("CBSWEEP");
 
     private static int parallelThreads() {
         String s = System.getenv("PARALLEL");
@@ -256,6 +258,13 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
         }
     }
 
+    // whether the next pass covers the whole order (or, incremental, the whole scope): only such a pass may sweep
+    private boolean fullPass = true;
+
+    public void setFullPass(boolean fullPass) {
+        this.fullPass = fullPass;
+    }
+
     // see SingleIterationAnalyzer.setFirstVisits; read by processElement, possibly from worker threads
     private volatile Set<Info> firstVisits = Set.of();
 
@@ -277,6 +286,12 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
         // first iteration only; concurrent for the strata-parallel path
         Set<TypeInfo> abstractTypes = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
+        // CBSWEEP (#82): under cycle breaking, the per-element loop runs WITHOUT it, and the defaults are applied
+        // afterwards in a sequential sweep over the fields and types, in analysis order, and only on a full pass
+        // whose loop changed nothing. That state is the fixpoint without cycle breaking, the same whatever the
+        // thread timing, and a sequential sweep over it decides the same defaults in every run.
+        boolean sweepMode = activateCycleBreaking && CYCLE_BREAKING_SWEEP;
+        boolean loopCycleBreaking = activateCycleBreaking && !sweepMode;
         long startLoop = System.currentTimeMillis();
         if (PARALLEL_THREADS > 1 && firstIteration && firstIterationWaves != null
             && analysisOrder.size() >= MIN_ELEMENTS_FOR_PARALLEL) {
@@ -287,7 +302,7 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
                 LOGGER.warn("Wave element count {} != analysis order size {}; falling back to sequential",
                         elements, analysisOrder.size());
                 for (Info info : analysisOrder) {
-                    processElement(info, activateCycleBreaking, true, abstractTypes);
+                    processElement(info, loopCycleBreaking, true, abstractTypes);
                 }
             } else {
                 LOGGER.info("Strata-parallel FIRST iteration: {} threads, {} waves, {} units, {} elements",
@@ -302,7 +317,7 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
                         for (List<Info> unit : wave) {
                             futures.add(pool.submit(() -> {
                                 for (Info info : unit) {
-                                    processElement(info, activateCycleBreaking, true, abstractTypes);
+                                    processElement(info, loopCycleBreaking, true, abstractTypes);
                                 }
                             }));
                         }
@@ -338,7 +353,7 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
                     futures.add(pool.submit(() -> {
                         long t0 = System.nanoTime();
                         try {
-                            processElement(info, activateCycleBreaking, false, abstractTypes);
+                            processElement(info, loopCycleBreaking, false, abstractTypes);
                         } finally {
                             elementMillis.put(info, (System.nanoTime() - t0) / 1_000_000);
                         }
@@ -360,7 +375,7 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
             java.util.Map<Info, Long> elementMillis = LOGGER.isInfoEnabled() ? new java.util.HashMap<>() : null;
             for (Info info : analysisOrder) {
                 long t0 = System.nanoTime();
-                processElement(info, activateCycleBreaking, firstIteration, abstractTypes);
+                processElement(info, loopCycleBreaking, firstIteration, abstractTypes);
                 if (elementMillis != null) elementMillis.put(info, (System.nanoTime() - t0) / 1_000_000);
             }
             if (elementMillis != null) {
@@ -407,6 +422,25 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
         }
 
         long startSecondPass = System.currentTimeMillis();
+        boolean sweep = sweepMode && fullPass && propertiesChanged.get() == 0;
+        if (sweep) {
+            LOGGER.info("Cycle-breaking sweep over {} elements", analysisOrder.size());
+            for (Info info : analysisOrder) {
+                if (!(info instanceof FieldInfo fieldInfo) || faultTolerant && failed.contains(info)) continue;
+                int changesBefore = propertiesChanged.get();
+                try {
+                    fieldAnalyzer.go(fieldInfo, true);
+                } catch (RuntimeException | AssertionError | StackOverflowError e) {
+                    LOGGER.error("Caught exception (cycle-breaking sweep) on {}", fieldInfo, e);
+                    if (!faultTolerant) throw e;
+                    failed.add(fieldInfo);
+                    messages.add(crashFinding(fieldInfo, e));
+                } finally {
+                    if (propertiesChanged.get() > changesBefore) changedInfos.add(fieldInfo);
+                }
+            }
+        }
+        boolean typeCycleBreaking = sweepMode ? sweep : activateCycleBreaking;
         /*
         run once more, because the abstract method analyzer may have resolved independence and modification values
         for abstract methods.
@@ -415,7 +449,7 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
             if (faultTolerant && failed.contains(typeInfo)) continue;
             int changesBefore2 = propertiesChanged.get();
             try {
-                runTypeAnalyzers(activateCycleBreaking, typeInfo);
+                runTypeAnalyzers(typeCycleBreaking, typeInfo);
             } catch (RuntimeException | AssertionError | StackOverflowError e) {
                 LOGGER.error("Caught exception (2nd type pass) on {}", typeInfo, e);
                 if (!faultTolerant) throw e;

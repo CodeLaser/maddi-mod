@@ -602,6 +602,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                 // what a cold run does in its first iteration only, for the elements cleared just now
                 if (iterations > 1) singleIterationAnalyzer.setFirstVisits(firstVisits);
             }
+            if (singleIterationAnalyzer instanceof SingleIterationAnalyzerImpl s) s.setFullPass(dirty == null || verifying);
             Instant start = Instant.now();
             singleIterationAnalyzer.go(subset, cycleBreakingActive, iterations == 1,
                     iterations == 1 ? firstIterationWaves : null);
