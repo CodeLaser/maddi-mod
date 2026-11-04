@@ -524,4 +524,88 @@ public class TestTolerance extends NullabilityFixtures {
             Switches.offForNextPasses(Set.of());
         }
     }
+    /*
+     CodeLaser/maddi-mod#85, guava's Joiner.join(first, second, rest) under the Kotlin policy: first and second reach the
+     anonymous list's get(), whose return is the list's element (its superclass's type argument), read by appendTo's
+     iterator and handed to toString(part). The base toString demands part; the useForNull override reads it and
+     demands nothing, so a dispatch target accepts null. Before, get's return was a non-null contract (an override of
+     List.get) and the walk ended there.
+     */
+    @DisplayName("#85: a demand overruled by a null-tolerant override, through an anonymous list's element")
+    @Test
+    public void toleranceThroughOverrideAndAnonymousElement() {
+        String input = """
+                package a.b;
+                import java.util.AbstractList;
+                import java.util.Iterator;
+                import java.util.Objects;
+                public class UN {
+                    public static class Joiner {
+                        public StringBuilder appendTo(StringBuilder builder, Iterator<?> parts) {
+                            while (parts.hasNext()) builder.append(toString(parts.next()));
+                            return builder;
+                        }
+                        public final String join(Iterable<?> parts) {
+                            return appendTo(new StringBuilder(), parts.iterator()).toString();
+                        }
+                        public final String join(Object first, Object second, Object... rest) {
+                            return join(iterable(first, second, rest));
+                        }
+                        CharSequence toString(Object part) {
+                            Objects.requireNonNull(part);
+                            return (part instanceof CharSequence) ? (CharSequence) part : part.toString();
+                        }
+                        public Joiner useForNull(String nullText) {
+                            return new Joiner() {
+                                @Override CharSequence toString(Object part) {
+                                    return (part == null) ? nullText : Joiner.this.toString(part);
+                                }
+                            };
+                        }
+                        private static Iterable<Object> iterable(Object first, Object second, Object[] rest) {
+                            Objects.requireNonNull(rest);
+                            return new AbstractList<Object>() {
+                                @Override public int size() { return rest.length + 2; }
+                                @Override public Object get(int index) {
+                                    if (index == 0) return first;
+                                    if (index == 1) return second;
+                                    return rest[index - 2];
+                                }
+                            };
+                        }
+                    }
+                }
+                """;
+        Map<String, String> v = byName(run("a.b.UN", input, Policy.KOTLIN));
+        assertEquals("Object?", v.get("a.b.UN.Joiner.join(Object,Object,Object[]):0:first"), v.toString());
+        assertEquals("Object?", v.get("a.b.UN.Joiner.join(Object,Object,Object[]):1:second"));
+        assertEquals("Object[]", v.get("a.b.UN.Joiner.join(Object,Object,Object[]):2:rest"));
+        // the anonymous list's element type follows: get() overrides AbstractList<Object?>.get()
+        assertEquals("Object?", v.get("a.b.UN.Joiner.$1.get(int)"));
+        assertEquals("Iterable<Object?>", v.get("a.b.UN.Joiner.iterable(Object,Object,Object[])"));
+
+        for (String gate : List.of("NOOVERRIDETOLERATES", "NOOVERRIDERETURNSLOTS")) {
+            Switches.offForNextPasses(Set.of(gate));
+            try {
+                Map<String, String> off = byName(new NullabilityPass(Policy.KOTLIN).go(analysisOrder));
+                assertEquals("Object", off.get("a.b.UN.Joiner.join(Object,Object,Object[]):0:first"), gate);
+            } finally {
+                Switches.offForNextPasses(Set.of());
+            }
+        }
+
+        // the control: without the override, the demand in toString stands
+        String withoutOverride = input.replace("""
+                        public Joiner useForNull(String nullText) {
+                            return new Joiner() {
+                                @Override CharSequence toString(Object part) {
+                                    return (part == null) ? nullText : Joiner.this.toString(part);
+                                }
+                            };
+                        }
+                """, "").replace("public class UN", "public class UC");
+        Map<String, String> control = byName(run("a.b.UC", withoutOverride, Policy.KOTLIN));
+        assertEquals("Object", control.get("a.b.UC.Joiner.join(Object,Object,Object[]):0:first"), control.toString());
+        assertEquals("Iterable<Object>", control.get("a.b.UC.Joiner.iterable(Object,Object,Object[])"));
+    }
 }

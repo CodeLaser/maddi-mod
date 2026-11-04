@@ -817,6 +817,9 @@ final class Contracts {
     void overrideContracts(List<MethodInfo> methods) {
         if (policy.callResults()) {
             for (MethodInfo mi : methods) {
+                // #85: an anonymous class's override handing out an element returns its superclass's type
+                // argument, whose slot the null reaches instead ('new AbstractList<Object?>() { get(i) … }')
+                if (GraphCompletion.anonymousSlotOfReturn(policy, index, mi) >= 0) continue;
                 if (boundedTypeVariableOverride(mi) || overridesKotlinNonNullReturn(mi)
                     || overridesLibraryNonNullReturn(mi) || testOverrideOfInstantiatedReturn(mi)) add(mi);
             }

@@ -408,6 +408,16 @@ final class NullGraph {
     // gate NOTYPEVARSLOTS: a slot holding a type variable takes null as any other (A/B)
     private static final Switches.Gate TYPE_VARIABLE_SLOTS_OFF = Switches.gate("NOTYPEVARSLOTS");
 
+    /*
+     #85: an anonymous class's override handing out its object's element (GraphCompletion.overrideReturnsIntoSlots)
+     returns the superclass's type argument, so what it returns is the slot, not a write into it: asserting there would
+     leave 'get(): Any?' overriding 'AbstractList<Any>.get(): Any'.
+     */
+    private static boolean elementHandedOut(Object n, Object s) {
+        return n instanceof MethodInfo m && s instanceof Arg a && a.of() instanceof AnonymousThis at
+               && at.type().isAnonymous() && m.typeInfo() == at.type();
+    }
+
     // strict: when not null, an edge from a value into a slot is followed only from a node in it
     Set<Object> closure(Map<Object, Object> cause, Set<Object> seeds, Set<Object> strict) {
         // a seed on a non-null contract is the caller's error (an M5 finding), not a source of null
@@ -420,7 +430,8 @@ final class NullGraph {
             while (!queue.isEmpty()) {
                 Object n = queue.removeFirst();
                 for (Object s : successors.getOrDefault(n, Set.of())) {
-                    if (strict != null && isSlot(s) && !isSlot(n) && !strict.contains(n) && !isVarargElements(s)) continue;
+                    if (strict != null && isSlot(s) && !isSlot(n) && !strict.contains(n) && !isVarargElements(s)
+                        && !elementHandedOut(n, s)) continue;
                     if (optionalValue(s) || boundedSlot(s)) continue;
                     if (!contracts.nonNullContracts.contains(s) && reached.add(s)) {
                         cause.put(s, n);
