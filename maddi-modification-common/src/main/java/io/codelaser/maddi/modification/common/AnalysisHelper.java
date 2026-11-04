@@ -98,10 +98,13 @@ public class AnalysisHelper {
         if (dynamicBaseValue.isAtLeastImmutableHC() && !parameterizedType.parameters().isEmpty()) {
             Value.Bool ignoreTypeParameters = bestType.analysis().getOrDefault(PropertyImpl.IMMUTABLE_TYPE_INDEPENDENT_OF_TYPE_PARAMETERS,
                     FALSE);
-            if (ignoreTypeParameters.isFalse() && hiddenContentOnlyFromTypeParameters(bestType)) {
-                return parameterizedType.parameters().stream()
+            if (ignoreTypeParameters.isFalse()) {
+                Value.Immutable ofArguments = parameterizedType.parameters().stream()
                         .map(pt -> typeImmutable(pt, dynamicValues))
                         .reduce(ValueImpl.ImmutableImpl.IMMUTABLE, Value.Immutable::min);
+                // #81: hidden content beyond the type parameters stays, but a mutable type argument still lowers
+                // the value (Lazy<StringBuilder>: the StringBuilder is reachable, and not hidden from the holder)
+                return hiddenContentOnlyFromTypeParameters(bestType) ? ofArguments : ofArguments.min(dynamicBaseValue);
             }
         }
         return dynamicBaseValue;
@@ -206,12 +209,19 @@ public class AnalysisHelper {
         if (immutable.isImmutableHC() && !parameterizedType.parameters().isEmpty()) {
             Value.Bool tpBool = bestType.analysis().getOrDefault(PropertyImpl.IMMUTABLE_TYPE_INDEPENDENT_OF_TYPE_PARAMETERS,
                     FALSE);
-            if (tpBool.isFalse() && hiddenContentOnlyFromTypeParameters(bestType)) {
-                return parameterizedType.parameters().stream()
+            if (tpBool.isFalse()) {
+                Value.Independent ofArguments = parameterizedType.parameters().stream()
                         .map(this::typeIndependent)
                         .reduce(ValueImpl.IndependentImpl.INDEPENDENT, Value.Independent::min);
+                // #81: as typeImmutable, the arguments can lower the value, never raise it past the hidden content
+                if (hiddenContentOnlyFromTypeParameters(bestType)) return ofArguments;
+                return ofArguments.min(independentOfType(bestType));
             }
         }
+        return independentOfType(bestType);
+    }
+
+    private static Value.Independent independentOfType(TypeInfo bestType) {
         Value.Independent independent = bestType.analysis().getOrNull(PropertyImpl.INDEPENDENT_TYPE,
                 ValueImpl.IndependentImpl.class);
         if (independent != null) return independent;
