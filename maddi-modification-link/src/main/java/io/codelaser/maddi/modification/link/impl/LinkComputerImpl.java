@@ -457,6 +457,8 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
     // sizes and a fingerprint of every input summary it read (its own previous METHOD_LINKS included), one line per
     // callee, so two linkings that cut at different places can be diffed for the input that changed.
     private static final String TRIP_DIAG = System.getenv("TRIPDIAG");
+    // TRIPDIAG_FULL=<fqn substring>: also print the whole summary of the matching inputs
+    private static final String TRIP_DIAG_FULL = System.getenv("TRIPDIAG_FULL");
     private final java.util.concurrent.atomic.AtomicInteger tripDiagCount = new java.util.concurrent.atomic.AtomicInteger();
 
     private void tripDiag(MethodInfo methodInfo, Graph graph) {
@@ -472,6 +474,9 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
             String text = String.valueOf(mlv);
             sb.append("TRIPDIAG#").append(n).append("   ").append(Integer.toHexString(text.hashCode()))
                     .append(" len=").append(text.length()).append(' ').append(callee.fullyQualifiedName()).append('\n');
+            if (TRIP_DIAG_FULL != null && callee.fullyQualifiedName().contains(TRIP_DIAG_FULL)) {
+                sb.append("TRIPDIAG#").append(n).append("   FULL ").append(text.replace('\n', ' ')).append('\n');
+            }
         }
         System.out.print(sb);
     }
