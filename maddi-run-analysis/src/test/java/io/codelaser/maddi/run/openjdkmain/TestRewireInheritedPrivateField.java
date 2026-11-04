@@ -71,7 +71,9 @@ import static org.junit.jupiter.api.Assertions.*;
  * A rewired subclass whose linked variables name an inherited private field: the field is declared in {@code Base}
  * (main), the subclass {@code Sub} (another source set) reaches it only through {@code Base}'s methods, and its
  * {@code METHOD_LINKS} carry it. Carrying {@code Sub}'s analysis onto its rewired copy must re-point the field, not
- * fail on it (zuul: BaseServerStartup.addrsToChannelInitializers, through ServerStartup).
+ * fail on it (zuul: BaseServerStartup.addrsToChannelInitializers, through ServerStartup). The same for the link
+ * engine's virtual fields of a type that declares none, {@code Bag}'s hidden content as an {@code ArrayList<String>}
+ * (zuul: PushRegistrationHandler.§$, a netty handler).
  */
 public class TestRewireInheritedPrivateField {
 
@@ -94,6 +96,19 @@ public class TestRewireInheritedPrivateField {
             public class Sub extends Base {
                 public void add(String k) { put(k, k); }
                 public Map<String, String> get() { return map(); }
+            }
+            """;
+
+    // extends a library container: its own hidden content is a virtual field of Bag (§$s), which Bag does not declare
+    @Language("java")
+    private static final String BAG = """
+            package c.d;
+            import a.b.Base;
+            import java.util.ArrayList;
+            public class Bag extends ArrayList<String> {
+                public String first() { return get(0); }
+                public void addName(Base base) { add(base.toString()); }
+                public Bag self() { return this; }
             }
             """;
 
@@ -134,13 +149,29 @@ public class TestRewireInheritedPrivateField {
         return ccg;
     }
 
-    @DisplayName("an inherited private field in a rewired subclass' linked variables is re-pointed")
+    /* every field the carried METHOD_LINKS of a type's methods name */
+    private static List<FieldInfo> fieldsIn(TypeInfo type) {
+        return type.constructorAndMethodStream()
+                .map(m -> m.analysis().getOrNull(MethodLinkedVariablesImpl.METHOD_LINKS,
+                        MethodLinkedVariablesImpl.class))
+                .filter(java.util.Objects::nonNull)
+                .flatMap(mlv -> Stream.concat(Stream.of(mlv.ofReturnValue()), mlv.ofParameters().stream()))
+                .flatMap(Links::stream)
+                .flatMap(l -> Stream.of(l.from(), l.to()))
+                .flatMap(Variable::variableStreamDescendIntoScope)
+                .filter(v -> v instanceof FieldReference)
+                .map(v -> ((FieldReference) v).fieldInfo())
+                .toList();
+    }
+
+    @DisplayName("an inherited private field, and a virtual field, in a rewired type's linked variables are re-pointed")
     @Test
     public void test() throws IOException {
         Path mainSrc = Files.createDirectories(root.resolve("main-src/a/b"));
         Path baseFile = Files.writeString(mainSrc.resolve("Base.java"), BASE);
         Path depSrc = Files.createDirectories(root.resolve("dep-src/c/d"));
         Files.writeString(depSrc.resolve("Sub.java"), SUB);
+        Files.writeString(depSrc.resolve("Bag.java"), BAG);
         compile(List.of(baseFile), Files.createDirectories(root.resolve("main-classes")));
 
         JavaInspector javaInspector = new JavaInspectorImpl(true, false);
@@ -169,28 +200,32 @@ public class TestRewireInheritedPrivateField {
         oldSub.constructorAndMethodStream().forEach(oldMethod -> view.methodInfo(oldMethod).analysis()
                 .setAll(oldMethod.analysis().rewire(view, AnalysisFingerprint.CROSS_TYPE_DERIVED_ONLY)));
 
+        TypeInfo oldBag = pr0.findType("c.d.Bag");
+        TypeInfo newBag = pr1.findType("c.d.Bag");
+        assertNotSame(oldBag, newBag, "Bag was rewired");
+        Map<String, String> bagBefore = new java.util.TreeMap<>();
+        oldBag.constructorAndMethodStream().forEach(m -> bagBefore.put(m.name(), String.valueOf(m.analysis()
+                .getOrNull(MethodLinkedVariablesImpl.METHOD_LINKS, MethodLinkedVariablesImpl.class))));
+        oldBag.constructorAndMethodStream().forEach(oldMethod -> view.methodInfo(oldMethod).analysis()
+                .setAll(oldMethod.analysis().rewire(view, AnalysisFingerprint.CROSS_TYPE_DERIVED_ONLY)));
+        Map<String, String> bagAfter = new java.util.TreeMap<>();
+        newBag.constructorAndMethodStream().forEach(m -> bagAfter.put(m.name(), String.valueOf(m.analysis()
+                .getOrNull(MethodLinkedVariablesImpl.METHOD_LINKS, MethodLinkedVariablesImpl.class))));
+        assertEquals(bagBefore, bagAfter, "Bag's links are carried as they were");
+        List<FieldInfo> virtual = fieldsIn(newBag).stream().filter(f -> f.name().startsWith("§")).toList();
+        assertTrue(virtual.stream().anyMatch(f -> f.owner() == newBag),
+                "a virtual field of Bag, owned by the rewired Bag: " + virtual);
+        virtual.forEach(f -> assertNotSame(oldBag, f.owner(), () -> f + " is owned by the old Bag"));
+
         Map<String, String> linksAfter = new java.util.TreeMap<>();
         newSub.constructorAndMethodStream().forEach(m -> linksAfter.put(m.name(), String.valueOf(m.analysis()
                 .getOrNull(MethodLinkedVariablesImpl.METHOD_LINKS, MethodLinkedVariablesImpl.class))));
         assertEquals(linksBefore, linksAfter, "the links are carried as they were");
         // and every field they name belongs to the new generation: Base.map itself, or Base.map seen through Sub
         TypeInfo newBase = pr1.findType("a.b.Base");
-        List<FieldInfo> fields = newSub.constructorAndMethodStream()
-                .map(m -> m.analysis().getOrNull(MethodLinkedVariablesImpl.METHOD_LINKS,
-                        MethodLinkedVariablesImpl.class))
-                .filter(java.util.Objects::nonNull)
-                .flatMap(mlv -> java.util.stream.Stream.concat(Stream.of(mlv.ofReturnValue()),
-                        mlv.ofParameters().stream()))
-                .flatMap(Links::stream)
-                .flatMap(l -> Stream.of(l.from(), l.to()))
-                .flatMap(Variable::variableStreamDescendIntoScope)
-                .filter(v -> v instanceof FieldReference)
-                .map(v -> ((FieldReference) v).fieldInfo())
-                .filter(f -> "map".equals(f.name()))
-                .toList();
+        List<FieldInfo> fields = fieldsIn(newSub).stream().filter(f -> "map".equals(f.name())).toList();
         assertFalse(fields.isEmpty());
-        fields.forEach(f -> System.out.println("FIELD " + f + " owner " + f.owner()));
-        assertTrue(fields.stream().anyMatch(f -> f.owner() == newSub), "Base.map seen through Sub: " + fields);
+                assertTrue(fields.stream().anyMatch(f -> f.owner() == newSub), "Base.map seen through Sub: " + fields);
         fields.forEach(f -> assertTrue(f.owner() == newSub || f.owner() == newBase,
                 () -> f + " is owned by an old generation's " + f.owner()));
         }
