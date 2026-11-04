@@ -90,6 +90,11 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
     // sequential via MIN_ELEMENTS_FOR_PARALLEL — no pool overhead, no order sensitivity in pinned counts.
     static final int PARALLEL_THREADS = parallelThreads(); // package: IteratingAnalyzerImpl gates wave computation
     static final int MIN_ELEMENTS_FOR_PARALLEL = 256;
+    // EXPERIMENT (#82, #91): once cycle breaking is active, run every pass sequentially. Cycle breaking decides
+    // the still-undecided (an independence, an immutability) at the moment an element is reached; in a parallel
+    // pass that moment depends on thread timing, and so does the verdict (guava, 8 threads: 6-10 FPDUMP lines
+    // differ between runs, 0 sequentially). Opt-in while measuring.
+    static final boolean SEQUENTIAL_CYCLE_BREAKING = Gate.isSet("SEQCYCLEBREAKING");
 
     private static int parallelThreads() {
         String s = System.getenv("PARALLEL");
@@ -299,7 +304,8 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
                 }
             }
         } else if (PARALLEL_THREADS > 1 && !firstIteration
-                   && analysisOrder.size() >= MIN_ELEMENTS_FOR_PARALLEL) {
+                   && analysisOrder.size() >= MIN_ELEMENTS_FOR_PARALLEL
+                   && !(activateCycleBreaking && SEQUENTIAL_CYCLE_BREAKING)) {
             LOGGER.info("Parallel iteration: {} threads over {} elements", PARALLEL_THREADS, analysisOrder.size());
             List<java.util.concurrent.Future<?>> futures = new ArrayList<>(analysisOrder.size());
             java.util.Map<Info, Long> elementMillis = new java.util.concurrent.ConcurrentHashMap<>();
