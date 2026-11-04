@@ -97,6 +97,7 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
     static final boolean SEQUENTIAL_CYCLE_BREAKING = Gate.isSet("SEQCYCLEBREAKING");
     // EXPERIMENT (#82): the deterministic alternative to SEQCYCLEBREAKING that keeps the loop parallel; see goInternal
     static final boolean CYCLE_BREAKING_SWEEP = Gate.isSet("CBSWEEP");
+    private static final int MAX_SWEEP_ROUNDS = 25;
 
     // DIAGNOSTIC (#91): PARSHUFFLE=<seed> submits each parallel pass's elements (and each first-iteration wave's
     // units) in a seeded random order. The order is arbitrary under PARALLEL anyway; this moves the thread timing
@@ -452,42 +453,52 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
 
         long startSecondPass = System.currentTimeMillis();
         boolean sweep = sweepMode && fullPass && propertiesChanged.get() == 0;
-        if (sweep) {
-            LOGGER.info("Cycle-breaking sweep over {} elements", analysisOrder.size());
-            for (Info info : analysisOrder) {
-                if (!(info instanceof FieldInfo fieldInfo) || faultTolerant && failed.contains(info)) continue;
-                int changesBefore = propertiesChanged.get();
-                try {
-                    fieldAnalyzer.go(fieldInfo, true);
-                } catch (RuntimeException | AssertionError | StackOverflowError e) {
-                    LOGGER.error("Caught exception (cycle-breaking sweep) on {}", fieldInfo, e);
-                    if (!faultTolerant) throw e;
-                    failed.add(fieldInfo);
-                    messages.add(crashFinding(fieldInfo, e));
-                } finally {
-                    if (propertiesChanged.get() > changesBefore) changedInfos.add(fieldInfo);
+        boolean typeCycleBreaking = sweepMode ? sweep : activateCycleBreaking;
+        // CBSWEEP: a sweep repeats in place until it changes nothing. Type-level conclusions feed each other (an
+        // implementor's verdict gives its interface the mark labels); one round per pass made every link of such a
+        // chain cost a worklist drain plus a full pass, and the dogfood ran out of iterations (120) mid-epoch.
+        int sweepRound = 0;
+        boolean again;
+        do {
+            int changesBeforeRound = propertiesChanged.get();
+            if (sweep) {
+                if (sweepRound == 0) LOGGER.info("Cycle-breaking sweep over {} elements", analysisOrder.size());
+                for (Info info : analysisOrder) {
+                    if (!(info instanceof FieldInfo fieldInfo) || faultTolerant && failed.contains(info)) continue;
+                    int changesBefore = propertiesChanged.get();
+                    try {
+                        fieldAnalyzer.go(fieldInfo, true);
+                    } catch (RuntimeException | AssertionError | StackOverflowError e) {
+                        LOGGER.error("Caught exception (cycle-breaking sweep) on {}", fieldInfo, e);
+                        if (!faultTolerant) throw e;
+                        failed.add(fieldInfo);
+                        messages.add(crashFinding(fieldInfo, e));
+                    } finally {
+                        if (propertiesChanged.get() > changesBefore) changedInfos.add(fieldInfo);
+                    }
                 }
             }
-        }
-        boolean typeCycleBreaking = sweepMode ? sweep : activateCycleBreaking;
-        /*
-        run once more, because the abstract method analyzer may have resolved independence and modification values
-        for abstract methods.
-         */
-        for (TypeInfo typeInfo : typesInOrder) {
-            if (faultTolerant && failed.contains(typeInfo)) continue;
-            int changesBefore2 = propertiesChanged.get();
-            try {
-                runTypeAnalyzers(typeCycleBreaking, typeInfo);
-            } catch (RuntimeException | AssertionError | StackOverflowError e) {
-                LOGGER.error("Caught exception (2nd type pass) on {}", typeInfo, e);
-                if (!faultTolerant) throw e;
-                failed.add(typeInfo);
-                messages.add(crashFinding(typeInfo, e));
-            } finally {
-                if (propertiesChanged.get() > changesBefore2) changedInfos.add(typeInfo);
+            /*
+            run once more, because the abstract method analyzer may have resolved independence and modification values
+            for abstract methods.
+             */
+            for (TypeInfo typeInfo : typesInOrder) {
+                if (faultTolerant && failed.contains(typeInfo)) continue;
+                int changesBefore2 = propertiesChanged.get();
+                try {
+                    runTypeAnalyzers(typeCycleBreaking, typeInfo);
+                } catch (RuntimeException | AssertionError | StackOverflowError e) {
+                    LOGGER.error("Caught exception (2nd type pass) on {}", typeInfo, e);
+                    if (!faultTolerant) throw e;
+                    failed.add(typeInfo);
+                    messages.add(crashFinding(typeInfo, e));
+                } finally {
+                    if (propertiesChanged.get() > changesBefore2) changedInfos.add(typeInfo);
+                }
             }
-        }
+            again = sweep && propertiesChanged.get() > changesBeforeRound && ++sweepRound < MAX_SWEEP_ROUNDS;
+        } while (again);
+        if (sweepRound > 0) LOGGER.info("Cycle-breaking sweep: {} extra round(s)", sweepRound);
         long end = System.currentTimeMillis();
         LOGGER.info("Phase timing: main loop {} ms, abstract batch {} ms, 2nd type pass {} ms",
                 endLoop - startLoop, startSecondPass - startAbstract, end - startSecondPass);
