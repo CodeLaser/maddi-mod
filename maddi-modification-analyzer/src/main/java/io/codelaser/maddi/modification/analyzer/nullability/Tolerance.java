@@ -204,6 +204,12 @@ final class Tolerance {
                 case ParameterInfo pi -> {
                     MethodInfo m = pi.methodInfo();
                     if (!hasBody(m) || demanded(m, v -> pi.equals(v))) return trace.tolerance(from, n, "demanded");
+                    // passed on to a parameter its @NullMarked scope declares non-null: a demand, as a contract is
+                    // (timefold's Joiners.equal(l, r) hands both to DefaultBiJoiner's @NullMarked constructor)
+                    if (pi != start && !isTypeVariable(pi.parameterizedType()) && nullMarked(m)
+                        && contracts.explicitState(pi) != NullableState.NULLABLE) {
+                        return trace.tolerance(from, n, "@NullMarked");
+                    }
                 }
                 case Local local -> {
                     // by name, as NonNullFacts compares locals; a reassigned parameter's shadow is the parameter

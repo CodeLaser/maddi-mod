@@ -494,8 +494,17 @@ public class TestTolerance extends NullabilityFixtures {
                         @NullUnmarked
                         public static String unmarked(Object o) { return o == null ? "-" : o.toString(); }
                     }
+                    // the parameter goes into a field that is nullable anyway: the walk continues past it
+                    @NullMarked
+                    public static class Sink {
+                        private Object mapping;
+                        public Sink(Object mapping) { this.mapping = mapping; }
+                        public void clear() { mapping = null; }
+                    }
                     public static class Plain {
                         public static String describe(Object o) { return o == null ? "-" : o.toString(); }
+                        // passed on to a @NullMarked constructor's parameter: a demand (timefold's Joiners.equal)
+                        public static Sink wrap(Object mapping) { return new Sink(mapping); }
                     }
                 }
                 """;
@@ -504,11 +513,13 @@ public class TestTolerance extends NullabilityFixtures {
         assertEquals("Object", v.get("a.b.NM.Marked.describe(Object):0:o"));
         assertEquals("Object?", v.get("a.b.NM.Marked.unmarked(Object):0:o"));
         assertEquals("Object?", v.get("a.b.NM.Plain.describe(Object):0:o"));
+        assertEquals("Object", v.get("a.b.NM.Plain.wrap(Object):0:mapping"));
 
         Switches.offForNextPasses(Set.of("NOTOLERANTNULLMARKED"));
         try {
             Map<String, String> off = byName(new NullabilityPass(Policy.NULL_MARKED_FLOW_ONLY).go(analysisOrder));
             assertEquals("Object?", off.get("a.b.NM.Marked.describe(Object):0:o"));
+            assertEquals("Object?", off.get("a.b.NM.Plain.wrap(Object):0:mapping"));
         } finally {
             Switches.offForNextPasses(Set.of());
         }
