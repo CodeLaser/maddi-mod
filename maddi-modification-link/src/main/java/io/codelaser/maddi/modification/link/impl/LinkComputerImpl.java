@@ -203,6 +203,7 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
 
     @Override
     public void reset() {
+        this.diagPass.incrementAndGet();
         this.countSourceMethods.set(0);
         this.propertiesChanged.set(0);
     }
@@ -326,10 +327,19 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                         tlv = computer.go();
                     }
                     reportWork(methodInfo, computer, false);
+                    boolean changed = false;
                     if (write) {
                         if (TolerantWrite.setAllowControlledOverwrite(methodInfo.analysis(), METHOD_LINKS, tlv, methodInfo)) {
                             propertiesChanged.incrementAndGet();
+                            changed = true;
                         }
+                    }
+                    if (LINK_INPUTS != null && methodInfo.fullyQualifiedName().contains(LINK_INPUTS)) {
+                        String text = String.valueOf(tlv);
+                        System.out.println("LINKOUT pass=" + diagPass.get() + " via=" + (write ? "demand" : "slot")
+                                           + (write ? " changed=" + changed : "") + ' '
+                                           + Integer.toHexString(text.hashCode()) + " len=" + text.length()
+                                           + ' ' + methodInfo.fullyQualifiedName());
                     }
                 } catch (UnsupportedOperationException uoe) {
                     if (!(uoe instanceof DegradedAnalysisException dae)) throw uoe;
@@ -462,11 +472,13 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
     // LINKINPUTS=<fqn substring>: the same input fingerprint at EVERY linking of a matching method, tripped or not
     private static final String LINK_INPUTS = System.getenv("LINKINPUTS");
     private final java.util.concurrent.atomic.AtomicInteger tripDiagCount = new java.util.concurrent.atomic.AtomicInteger();
+    // the analyzer's pass number as seen by the diagnostics: reset() is called once at the start of every pass
+    private final java.util.concurrent.atomic.AtomicInteger diagPass = new java.util.concurrent.atomic.AtomicInteger();
 
     private void tripDiag(MethodInfo methodInfo, Graph graph) {
         int n = tripDiagCount.incrementAndGet();
         StringBuilder sb = new StringBuilder();
-        sb.append("TRIPDIAG#").append(n).append(" graph=").append(graph.size()).append(" closure=")
+        sb.append("TRIPDIAG#").append(n).append(" pass=").append(diagPass.get()).append(" graph=").append(graph.size()).append(" closure=")
                 .append(graph.sizeOfClosure()).append(" method=").append(methodInfo.fullyQualifiedName()).append('\n');
         java.util.Set<MethodInfo> inputs = new java.util.TreeSet<>(java.util.Comparator.comparing(MethodInfo::fullyQualifiedName));
         inputs.addAll(consumedSummaries.getOrDefault(methodInfo, java.util.Set.of()));
