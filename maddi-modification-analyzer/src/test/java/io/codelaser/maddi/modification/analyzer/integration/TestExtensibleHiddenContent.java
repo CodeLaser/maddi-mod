@@ -60,6 +60,20 @@ public class TestExtensibleHiddenContent extends CommonTest {
                     String value() { return w.get(); }
                 }
 
+                // the concrete-object recovery: w only ever holds a Constant, a final class whose hc is its T
+                static final class ConcreteHolder {
+                    private final Wrap<String> w;
+                    ConcreteHolder(String s) { this.w = new Constant<>(s); }
+                    String value() { return w.get(); }
+                }
+
+                // ... but not an anonymous subclass of anything
+                static final class AnonymousHolder {
+                    private final Wrap<String> w;
+                    AnonymousHolder(String s) { this.w = new Wrap<>() { public String get() { return s; } }; }
+                    String value() { return w.get(); }
+                }
+
                 static final class Box<T> {
                     private final T t;
                     Box(T t) { this.t = t; }
@@ -96,12 +110,14 @@ public class TestExtensibleHiddenContent extends CommonTest {
         List<Info> ao = bundle.prepAnalyzer().doPrimaryType(X);
         new IteratingAnalyzerImpl(bundle.javaInspector(),
                 new IteratingAnalyzerImpl.ConfigurationBuilder().setMaxIterations(10).build()).analyze(ao);
-        for (String name : List.of("Wrap", "Holder", "Box", "UsesBox", "Mixed", "UsesMixed")) {
+        for (String name : List.of("Wrap", "Holder", "ConcreteHolder", "AnonymousHolder", "Box", "UsesBox", "Mixed", "UsesMixed")) {
             TypeInfo t = X.findSubType(name);
             System.out.println("### " + name + " " + immutable(t) + " " + independent(t));
         }
         assertEquals("@Immutable(hc=true)", immutable(X.findSubType("Wrap")).toString(), "precondition");
         assertEquals("@Immutable(hc=true)", immutable(X.findSubType("Holder")).toString());
+        assertEquals("@Immutable", immutable(X.findSubType("ConcreteHolder")).toString());
+        assertEquals("@Immutable(hc=true)", immutable(X.findSubType("AnonymousHolder")).toString());
         assertEquals("@Immutable(hc=true)", immutable(X.findSubType("Box")).toString(), "precondition");
         assertEquals("@Immutable", immutable(X.findSubType("UsesBox")).toString());
         assertEquals("@Immutable(hc=true)", immutable(X.findSubType("UsesMixed")).toString());
