@@ -5,6 +5,10 @@
  */
 package io.codelaser.maddi.modification.common.util;
 
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.Set;
+
 import io.codelaser.maddi.cst.api.element.Element;
 import io.codelaser.maddi.cst.api.expression.ConstructorCall;
 import io.codelaser.maddi.cst.api.expression.Lambda;
@@ -13,10 +17,6 @@ import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.statement.Block;
 import io.codelaser.maddi.cst.api.statement.LocalTypeDeclaration;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
-
-import java.util.Collection;
-import java.util.HashSet;
-import java.util.Set;
 
 /**
  * What a WHOLE PROGRAM knows about its class hierarchy, for a consumer that will only ever see a sliver of it.

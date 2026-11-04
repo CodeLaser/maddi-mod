@@ -1,12 +1,13 @@
 package io.codelaser.maddi.modification.prepwork.variable;
 
+import java.util.Set;
+import java.util.stream.Stream;
+
+import org.jetbrains.annotations.NotNull;
+
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.translate.TranslationMap;
 import io.codelaser.maddi.cst.api.variable.Variable;
-import org.jetbrains.annotations.NotNull;
-
-import java.util.Set;
-import java.util.stream.Stream;
 
 
 public interface Link extends Comparable<Link> {

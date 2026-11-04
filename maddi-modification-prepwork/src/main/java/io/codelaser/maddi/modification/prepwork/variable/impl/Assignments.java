@@ -18,17 +18,17 @@
 package io.codelaser.maddi.modification.prepwork.variable.impl;
 
 
+import java.util.*;
+import java.util.stream.Stream;
+
+import io.codelaser.maddi.cst.api.expression.Expression;
+import io.codelaser.maddi.cst.api.statement.*;
 import io.codelaser.maddi.modification.prepwork.StatementIndex;
 import io.codelaser.maddi.modification.prepwork.Util;
 import io.codelaser.maddi.modification.prepwork.variable.ReturnVariable;
 import io.codelaser.maddi.modification.prepwork.variable.VariableData;
 import io.codelaser.maddi.modification.prepwork.variable.VariableInfo;
 import io.codelaser.maddi.modification.prepwork.variable.VariableInfoContainer;
-import io.codelaser.maddi.cst.api.expression.Expression;
-import io.codelaser.maddi.cst.api.statement.*;
-
-import java.util.*;
-import java.util.stream.Stream;
 
 public class Assignments {
 

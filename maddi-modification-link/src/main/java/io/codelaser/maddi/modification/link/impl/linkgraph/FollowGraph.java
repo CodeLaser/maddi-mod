@@ -1,5 +1,15 @@
 package io.codelaser.maddi.modification.link.impl.linkgraph;
 
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Stream;
+
+import io.codelaser.maddi.cst.api.variable.This;
+import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.modification.link.impl.Gate;
 import io.codelaser.maddi.modification.link.impl.LinkNatureImpl;
 import io.codelaser.maddi.modification.link.impl.localvar.MarkerVariable;
@@ -10,15 +20,6 @@ import io.codelaser.maddi.modification.prepwork.variable.LinkNature;
 import io.codelaser.maddi.modification.prepwork.variable.Links;
 import io.codelaser.maddi.modification.prepwork.variable.ReturnVariable;
 import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
-import io.codelaser.maddi.cst.api.variable.This;
-import io.codelaser.maddi.cst.api.variable.Variable;
-
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.stream.Stream;
 
 public record FollowGraph(Graph graph) {
     // sorting is needed to consistently take the same direction for tests
@@ -103,7 +104,7 @@ public record FollowGraph(Graph graph) {
         // across its branches), so TimSort's result depends on the input order — which comes from unordered
         // graph.variables() and flickered run-to-run (the m∩copy determinism flake: emission order feeds the
         // block-set redundancy suppression). A stable sort on top of a canonical order is deterministic.
-        fromList.sort(java.util.Comparator
+        fromList.sort(Comparator
                 .comparing((FromPair p) -> p.emitFrom().fullyQualifiedName())
                 .thenComparing(p -> p.queryFrom().fullyQualifiedName()));
         // parts-first refinement: the comparator is a PARTIAL, intransitive order, and TimSort THROWS
@@ -230,7 +231,7 @@ public record FollowGraph(Graph graph) {
         // append the reversed return-targeted facts in canonical order (they were collected iterating
         // unordered graph.variables()); the main loop registered both directions of every emitted link
         // in 'block', so a plain add-check dedups against it
-        reverseReturnFacts.sort(java.util.Comparator
+        reverseReturnFacts.sort(Comparator
                 .comparing((LinksImpl.LinkImpl l) -> l.from().fullyQualifiedName())
                 .thenComparing(l -> l.linkNature().rank())
                 .thenComparing(l -> l.to().fullyQualifiedName()));
@@ -243,7 +244,7 @@ public record FollowGraph(Graph graph) {
         return builder;
     }
 
-    private static void insertionSortPartsFirst(java.util.List<FromPair> fromList) {
+    private static void insertionSortPartsFirst(List<FromPair> fromList) {
         for (int i = 1; i < fromList.size(); i++) {
             FromPair p = fromList.get(i);
             int j = i - 1;

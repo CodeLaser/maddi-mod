@@ -1,14 +1,16 @@
 package io.codelaser.maddi.modification.analyzer.clonebench;
 
-import io.codelaser.maddi.modification.common.CloneBenchCorpus;
-import io.codelaser.maddi.modification.analyzer.CommonTest;
-import io.codelaser.maddi.cst.api.info.Info;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import org.junit.jupiter.api.Test;
-
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+
+import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.Test;
+
+import io.codelaser.maddi.cst.api.info.Info;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.modification.analyzer.CommonTest;
+import io.codelaser.maddi.modification.common.CloneBenchCorpus;
 
 /*
 Performance regression guard for the Function18752956_file2311713 grind-to-halt (a ~100-arm switch in a loop:
@@ -24,7 +26,7 @@ public class TestGiantSwitchRepro extends CommonTest {
     public void test() throws Exception {
         Path file = CloneBenchCorpus.sourceDirectory("switch_fors_compiles")
                 .resolve("Function18752956_file2311713.java");
-        org.junit.jupiter.api.Assumptions.assumeTrue(Files.exists(file),
+        Assumptions.assumeTrue(Files.exists(file),
                 "requires the clone-bench corpus at " + CloneBenchCorpus.ROOT.toAbsolutePath().normalize()
                 + "; override with -Dtestarchive.root=... or TESTARCHIVE_ROOT");
         String source = Files.readString(file);

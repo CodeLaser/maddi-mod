@@ -17,9 +17,9 @@
 
 package io.codelaser.maddi.modification.common;
 
-import io.codelaser.maddi.util.corpus.Corpora;
-
 import java.nio.file.Path;
+
+import io.codelaser.maddi.util.corpus.Corpora;
 
 /**
  * Where a clone-bench project's sources are inside the {@code testarchive} corpus.

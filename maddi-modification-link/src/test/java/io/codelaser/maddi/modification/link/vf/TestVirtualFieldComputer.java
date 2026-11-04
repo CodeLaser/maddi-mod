@@ -1,7 +1,15 @@
 package io.codelaser.maddi.modification.link.vf;
 
-import io.codelaser.maddi.modification.link.CommonTest;
-import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+
+import java.util.*;
+import java.util.stream.Stream;
+
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
 import io.codelaser.maddi.cst.api.info.FieldInfo;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
@@ -9,15 +17,8 @@ import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.cst.api.variable.Variable;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-
-import java.util.*;
-import java.util.stream.Stream;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
+import io.codelaser.maddi.modification.link.CommonTest;
+import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
 
 public class TestVirtualFieldComputer extends CommonTest {
 
@@ -82,10 +83,10 @@ public class TestVirtualFieldComputer extends CommonTest {
     public void listIterator() {
         VirtualFieldComputer vfc = new VirtualFieldComputer(javaInspector);
 
-        TypeInfo iterator = javaInspector.compiledTypesManager().type(java.util.Iterator.class);
+        TypeInfo iterator = javaInspector.compiledTypesManager().type(Iterator.class);
         assertEquals("§m - E[] §es", vfc.compute(iterator).toString());
         // next() and previous() return one E; computed from the methods alone, that read multiplicity 1, a single §e
-        TypeInfo listIterator = javaInspector.compiledTypesManager().type(java.util.ListIterator.class);
+        TypeInfo listIterator = javaInspector.compiledTypesManager().type(ListIterator.class);
         assertEquals(2, vfc.maxMultiplicityFromMethods(listIterator));
         assertEquals("§m - E[] §es", vfc.compute(listIterator).toString());
     }

@@ -1,9 +1,9 @@
 package io.codelaser.maddi.modification.prepwork.variable;
 
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-
 import java.util.List;
 import java.util.Set;
+
+import io.codelaser.maddi.cst.api.info.MethodInfo;
 
 public interface LinkNature extends Comparable<LinkNature> {
 

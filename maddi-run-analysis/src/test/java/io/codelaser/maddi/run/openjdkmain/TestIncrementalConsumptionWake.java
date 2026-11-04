@@ -17,18 +17,32 @@
 
 package io.codelaser.maddi.run.openjdkmain;
 
-import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
-import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
+import static io.codelaser.maddi.inspection.api.integration.JavaInspector.InvalidationState.*;
+import static org.junit.jupiter.api.Assertions.*;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
 import io.codelaser.maddi.callgraph.ComputeAnalysisOrder;
 import io.codelaser.maddi.callgraph.ComputeCallGraph;
-import io.codelaser.maddi.modification.prepwork.callgraph.EarlyCutoffWorklist;
 import io.codelaser.maddi.callgraph.PrimaryTypeUseGraph;
-import io.codelaser.maddi.modification.prepwork.io.AnalysisFingerprint;
-import io.codelaser.maddi.modification.prepwork.io.IncrementalState;
 import io.codelaser.maddi.cst.api.element.FingerPrint;
 import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.impl.analysis.ConsumptionEdgeRecorder;
+import io.codelaser.maddi.graph.G;
 import io.codelaser.maddi.inspection.api.integration.JavaInspector;
 import io.codelaser.maddi.inspection.api.parser.ParseResult;
 import io.codelaser.maddi.inspection.api.resource.InputConfiguration;
@@ -36,22 +50,11 @@ import io.codelaser.maddi.inspection.api.resource.MD5FingerPrint;
 import io.codelaser.maddi.inspection.openjdk.JavaInspectorImpl;
 import io.codelaser.maddi.inspection.resource.InputConfigurationImpl;
 import io.codelaser.maddi.inspection.resource.SourceSetImpl;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
-
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.TreeSet;
-import java.util.function.Function;
-import java.util.stream.Collectors;
-
-import static io.codelaser.maddi.inspection.api.integration.JavaInspector.InvalidationState.*;
-import static org.junit.jupiter.api.Assertions.*;
+import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
+import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
+import io.codelaser.maddi.modification.prepwork.callgraph.EarlyCutoffWorklist;
+import io.codelaser.maddi.modification.prepwork.io.AnalysisFingerprint;
+import io.codelaser.maddi.modification.prepwork.io.IncrementalState;
 
 /**
  * Task #35 phase C: the early-cutoff worklist woken by RECORDED consumption edges instead of the
@@ -127,7 +130,7 @@ public class TestIncrementalConsumptionWake {
         return new PrepAnalyzer(javaInspector.runtime(), new PrepAnalyzer.Options.Builder().setFaultTolerant(true).build());
     }
 
-    private void analyze(List<Info> order, io.codelaser.maddi.graph.G<Info> graph) {
+    private void analyze(List<Info> order, G<Info> graph) {
         var analyzer = new IteratingAnalyzerImpl(javaInspector, new IteratingAnalyzerImpl.ConfigurationBuilder()
                 .setMaxIterations(20).setStopWhenCycleDetectedAndNoImprovements(true).build());
         if (graph == null) analyzer.analyze(order);
@@ -176,7 +179,7 @@ public class TestIncrementalConsumptionWake {
         Function<TypeInfo, Set<TypeInfo>> consumersOf = t -> state.consumers()
                 .getOrDefault(t.fullyQualifiedName(), Set.of()).stream()
                 .map(fqn -> pr1.findType(fqn))
-                .filter(java.util.Objects::nonNull)
+                .filter(Objects::nonNull)
                 .collect(Collectors.toSet());
 
         Set<TypeInfo> seed = changed.stream().map(t -> pr1.findType(t.fullyQualifiedName()))

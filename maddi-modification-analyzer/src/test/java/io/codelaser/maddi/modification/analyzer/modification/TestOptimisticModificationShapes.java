@@ -17,19 +17,25 @@
 
 package io.codelaser.maddi.modification.analyzer.modification;
 
-import io.codelaser.maddi.cst.api.info.Info;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.modification.analyzer.CommonTest;
-import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
 import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import java.util.List;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import io.codelaser.maddi.cst.api.info.Info;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
+import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
+import io.codelaser.maddi.modification.analyzer.CommonTest;
+import io.codelaser.maddi.modification.analyzer.impl.GuardAnalyzerImpl;
+import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
 
 /**
  * The OPTIMISTIC shapes of the Eclipse Collections engine work list (maddi-aapi-archive
@@ -127,7 +133,7 @@ public class TestOptimisticModificationShapes extends CommonTest {
         MethodInfo close = method(X.findSubType("Closeable2"), "close");
         assertTrue(close.isNonModifying(), "the default's own body decides its verdict");
         assertTrue(iterating.messages().stream().anyMatch(m -> m.message().contains("O2d.Counter.close")
-                        && io.codelaser.maddi.modification.analyzer.impl.GuardAnalyzerImpl.OVERRIDE_WEAKENS_COMPUTED
+                        && GuardAnalyzerImpl.OVERRIDE_WEAKENS_COMPUTED
                         .equals(m.category())),
                 "the override that modifies is reported: " + iterating.messages());
     }
@@ -211,8 +217,8 @@ public class TestOptimisticModificationShapes extends CommonTest {
     public void o1c() {
         TypeInfo X = javaInspector.parse("a.b.O1c", O1_JDK);
         analyze(X);
-        String verdicts = java.util.stream.Stream.of("add", "addAll", "addAllRef", "addAllThis", "addAllField")
-                .map(m -> m + "=" + method(X, m).isModifying()).collect(java.util.stream.Collectors.joining(" "));
+        String verdicts = Stream.of("add", "addAll", "addAllRef", "addAllThis", "addAllField")
+                .map(m -> m + "=" + method(X, m).isModifying()).collect(Collectors.joining(" "));
         System.out.println("### O1c " + verdicts);
         assertTrue(method(X, "addAllField").isModifying(), "lambda modifying a field: " + verdicts);
         assertTrue(method(X, "addAllThis").isModifying(), "lambda calling this.add: " + verdicts);
@@ -348,8 +354,8 @@ public class TestOptimisticModificationShapes extends CommonTest {
             assertTrue(method(coll, "removeIf").isModifying(), "removeIf, " + where);
             assertTrue(method(coll, "sum").isNonModifying(), "sum only calls next(), " + where);
             assertEquals("@Independent(except={\"remove\"})", method(coll, "intIterator").analysis()
-                    .getOrNull(io.codelaser.maddi.cst.impl.analysis.PropertyImpl.INDEPENDENT_METHOD,
-                            io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.class).toString(), where);
+                    .getOrNull(PropertyImpl.INDEPENDENT_METHOD,
+                            ValueImpl.IndependentImpl.class).toString(), where);
         }
     }
 

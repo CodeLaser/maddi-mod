@@ -17,16 +17,22 @@
 
 package io.codelaser.maddi.modification.analyzer.impl;
 
-import io.codelaser.maddi.modification.common.util.Culprits;
-import io.codelaser.maddi.modification.common.util.OwnStaticState;
-import io.codelaser.maddi.modification.common.util.TolerantWrite;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Predicate;
+
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.element.Element;
 import io.codelaser.maddi.cst.api.expression.Assignment;
 import io.codelaser.maddi.cst.api.expression.ConstructorCall;
 import io.codelaser.maddi.cst.api.expression.Expression;
-import io.codelaser.maddi.cst.api.expression.MethodReference;
 import io.codelaser.maddi.cst.api.expression.MethodCall;
+import io.codelaser.maddi.cst.api.expression.MethodReference;
 import io.codelaser.maddi.cst.api.expression.VariableExpression;
 import io.codelaser.maddi.cst.api.info.FieldInfo;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
@@ -35,13 +41,9 @@ import io.codelaser.maddi.cst.api.statement.ExplicitConstructorInvocation;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
-
-import java.util.HashSet;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.atomic.AtomicInteger;
+import io.codelaser.maddi.modification.common.util.Culprits;
+import io.codelaser.maddi.modification.common.util.OwnStaticState;
+import io.codelaser.maddi.modification.common.util.TolerantWrite;
 
 /**
  * Computes {@link PropertyImpl#STATIC_STATE_MODIFIED_METHOD}, the types whose static state a method modifies, and
@@ -139,11 +141,11 @@ public class StaticSideEffectAnalyzerImpl {
      assignment or modifying call itself, or at a callee without a body (a contract); a call whose callee yields no
      chain is passed over. Empty when nothing is found.
      */
-    private List<Value.Culprit.Step> culprit(MethodInfo mi, java.util.function.Predicate<TypeInfo> wanted,
+    private List<Value.Culprit.Step> culprit(MethodInfo mi, Predicate<TypeInfo> wanted,
                                             Map<MethodInfo, Set<TypeInfo>> group, int depth, Set<MethodInfo> visited) {
         if (!visited.add(mi) || depth > CULPRIT_DEPTH) return List.of();
-        List<Value.Culprit.Step> found = new java.util.ArrayList<>();
-        java.util.function.Predicate<Element> visitor = e -> {
+        List<Value.Culprit.Step> found = new ArrayList<>();
+        Predicate<Element> visitor = e -> {
             if (!found.isEmpty()) return false;
             FieldReference direct = directStaticModification(e);
             if (direct != null && wanted.test(direct.fieldInfo().owner())) {
@@ -218,7 +220,7 @@ public class StaticSideEffectAnalyzerImpl {
                             boolean activateCycleBreaking) {
         Set<TypeInfo> set = sets.get(mi);
         boolean[] waits = {false};
-        java.util.function.Predicate<Element> visitor = e -> {
+        Predicate<Element> visitor = e -> {
             // assignment to a static field or a field of one: 'Other.STATIC = ...', 'count++', 'Other.STATIC.count
             // = 5'; not to an @IgnoreModifications one
             if (e instanceof Assignment a && OwnStaticState.staticRoot(a.variableTarget()) instanceof FieldReference fr) {

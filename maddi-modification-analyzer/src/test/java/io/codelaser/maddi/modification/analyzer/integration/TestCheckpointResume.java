@@ -17,29 +17,33 @@
 
 package io.codelaser.maddi.modification.analyzer.integration;
 
+import static org.junit.jupiter.api.Assertions.*;
+
+import java.io.File;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
 import io.codelaser.maddi.analysis.api.AnalysisValueFeed;
+import io.codelaser.maddi.cst.api.analysis.Value;
+import io.codelaser.maddi.cst.api.info.Info;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
+import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 import io.codelaser.maddi.modification.analyzer.CheckpointWriter;
 import io.codelaser.maddi.modification.analyzer.CommonTest;
 import io.codelaser.maddi.modification.analyzer.IteratingAnalyzer;
 import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
 import io.codelaser.maddi.modification.link.io.LinkCodec;
 import io.codelaser.maddi.modification.prepwork.io.LoadAnalysisResults;
-import io.codelaser.maddi.cst.api.info.Info;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-
-import java.io.File;
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-
-import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Task #34 (checkpoint/resume v1): the {@link CheckpointWriter} persists analyzed values at pass
@@ -74,7 +78,7 @@ public class TestCheckpointResume extends CommonTest {
         List<AnalysisValueFeed.Phase> phases = new ArrayList<>();
         AnalysisValueFeed feed = new AnalysisValueFeed() {
             @Override
-            public void passCompleted(int iteration, boolean fullPass, java.util.Collection<Info> analyzed) {
+            public void passCompleted(int iteration, boolean fullPass, Collection<Info> analyzed) {
                 writer.passCompleted(iteration, fullPass, analyzed);
             }
 
@@ -152,7 +156,7 @@ public class TestCheckpointResume extends CommonTest {
         Map<String, String> map = new LinkedHashMap<>();
         typeInfo.recursiveSubTypeStream().forEach(ti -> {
             var imm = ti.analysis().getOrNull(PropertyImpl.IMMUTABLE_TYPE,
-                    io.codelaser.maddi.cst.api.analysis.Value.Immutable.class);
+                    Value.Immutable.class);
             map.put(ti.fullyQualifiedName(), "immutable=" + imm);
             ti.constructorAndMethodStream().forEach(mi -> map.put(mi.fullyQualifiedName(),
                     "nonModifying=" + nonModifying(mi)));
@@ -162,7 +166,7 @@ public class TestCheckpointResume extends CommonTest {
 
     private String nonModifying(MethodInfo mi) {
         var v = mi.analysis().getOrNull(PropertyImpl.NON_MODIFYING_METHOD,
-                io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.class);
+                ValueImpl.BoolImpl.class);
         return v == null ? "null" : String.valueOf(v.isTrue());
     }
 }

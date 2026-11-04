@@ -17,16 +17,17 @@
 
 package io.codelaser.maddi.aapi.parser.archive;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.lang.reflect.Array;
+
+import org.junit.jupiter.api.Test;
+
 import io.codelaser.maddi.aapi.parser.CommonTest;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
-import org.junit.jupiter.api.Test;
-
-import java.lang.reflect.Array;
-
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class TestJavaLangReflect extends CommonTest {
 

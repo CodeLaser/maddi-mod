@@ -17,42 +17,54 @@
 
 package io.codelaser.maddi.modification.prepwork;
 
-import io.codelaser.maddi.callgraph.CallGraphContributions;
-import io.codelaser.maddi.cst.api.analysis.Value;
-import io.codelaser.maddi.modification.common.getset.ApplyGetSetTranslation;
-import io.codelaser.maddi.modification.common.AnalyzerException;
-import io.codelaser.maddi.modification.common.getset.GetSetHelper;
-import io.codelaser.maddi.inspection.api.parser.ParseResult;
-import io.codelaser.maddi.inspection.api.byname.ByNameReference;
-import io.codelaser.maddi.inspection.api.byname.ByNameSink;
-import io.codelaser.maddi.callgraph.ComputeAnalysisOrder;
-import io.codelaser.maddi.callgraph.ComputeCallGraph;
-import io.codelaser.maddi.modification.prepwork.callgraph.ComputePartOfConstructionFinalField;
-import io.codelaser.maddi.cst.api.analysis.Property;
-import io.codelaser.maddi.cst.api.element.ModuleInfo;
-import io.codelaser.maddi.cst.api.info.Info;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.api.runtime.Runtime;
-import io.codelaser.maddi.cst.api.statement.Block;
-import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
-import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
-import io.codelaser.maddi.graph.G;
-import io.codelaser.maddi.graph.util.TimedLogger;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import io.codelaser.maddi.callgraph.CallGraphContributions;
+import io.codelaser.maddi.callgraph.ComputeAnalysisOrder;
+import io.codelaser.maddi.callgraph.ComputeCallGraph;
+import io.codelaser.maddi.cst.api.analysis.Codec;
+import io.codelaser.maddi.cst.api.analysis.Property;
+import io.codelaser.maddi.cst.api.analysis.Value;
+import io.codelaser.maddi.cst.api.element.Element;
+import io.codelaser.maddi.cst.api.element.ModuleInfo;
+import io.codelaser.maddi.cst.api.expression.ConstructorCall;
+import io.codelaser.maddi.cst.api.expression.InstanceOf;
+import io.codelaser.maddi.cst.api.expression.Lambda;
+import io.codelaser.maddi.cst.api.info.Info;
+import io.codelaser.maddi.cst.api.info.InfoMapView;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.runtime.Runtime;
+import io.codelaser.maddi.cst.api.statement.Block;
+import io.codelaser.maddi.cst.api.statement.LocalTypeDeclaration;
+import io.codelaser.maddi.cst.api.statement.Statement;
+import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
+import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
+import io.codelaser.maddi.graph.G;
+import io.codelaser.maddi.graph.util.TimedLogger;
+import io.codelaser.maddi.inspection.api.byname.ByNameReference;
+import io.codelaser.maddi.inspection.api.byname.ByNameSink;
+import io.codelaser.maddi.inspection.api.parser.ParseResult;
+import io.codelaser.maddi.modification.common.AnalyzerException;
+import io.codelaser.maddi.modification.common.getset.ApplyGetSetTranslation;
+import io.codelaser.maddi.modification.common.getset.GetSetHelper;
+import io.codelaser.maddi.modification.prepwork.callgraph.ComputePartOfConstructionFinalField;
 
 /*
 do all the analysis of this phase
@@ -113,14 +125,14 @@ public class PrepAnalyzer {
         }
 
         @Override
-        public io.codelaser.maddi.cst.api.analysis.Codec.EncodedValue encode(
-                io.codelaser.maddi.cst.api.analysis.Codec codec, io.codelaser.maddi.cst.api.analysis.Codec.Context context) {
+        public Codec.EncodedValue encode(
+                Codec codec, Codec.Context context) {
             return null; // not streamed
         }
 
         @Override
-        public Value rewire(io.codelaser.maddi.cst.api.info.InfoMapView infoMap) {
-            Map<MethodInfo, String> map = new java.util.HashMap<>();
+        public Value rewire(InfoMapView infoMap) {
+            Map<MethodInfo, String> map = new HashMap<>();
             boolean lost = unresolved;
             for (Map.Entry<MethodInfo, String> e : statusByCallee.entrySet()) {
                 MethodInfo rewired;
@@ -146,7 +158,7 @@ public class PrepAnalyzer {
                                                                   && p.analysisTier() == Property.AnalysisTier.INTRINSIC;
 
     // the primary types doType skipped because they arrived prepped, in this run; see doPrimaryTypesReturnComputeCallGraph
-    private final Set<TypeInfo> skipped = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private final Set<TypeInfo> skipped = ConcurrentHashMap.newKeySet();
     // of the last doPrimaryTypesReturnComputeCallGraph; see typesPrepped()
     private int typesPrepped;
     private int typesCarried;
@@ -399,7 +411,7 @@ public class PrepAnalyzer {
 
     // every constructor and method of the type, its nested types, and the anonymous, lambda and local types
     // declared in their bodies and field initializers, recursively
-    private static void forEachMethod(TypeInfo typeInfo, java.util.function.Consumer<MethodInfo> consumer) {
+    private static void forEachMethod(TypeInfo typeInfo, Consumer<MethodInfo> consumer) {
         typeInfo.recursiveSubTypeStream().forEach(type -> {
             type.constructorAndMethodStream().forEach(mi -> {
                 consumer.accept(mi);
@@ -411,18 +423,18 @@ public class PrepAnalyzer {
         });
     }
 
-    private static void forEachMethodInBody(io.codelaser.maddi.cst.api.element.Element root,
-                                            java.util.function.Consumer<MethodInfo> consumer) {
+    private static void forEachMethodInBody(Element root,
+                                            Consumer<MethodInfo> consumer) {
         root.visit(e -> {
-            if (e instanceof io.codelaser.maddi.cst.api.expression.ConstructorCall cc && cc.anonymousClass() != null) {
+            if (e instanceof ConstructorCall cc && cc.anonymousClass() != null) {
                 forEachMethod(cc.anonymousClass(), consumer);
                 return false;
             }
-            if (e instanceof io.codelaser.maddi.cst.api.expression.Lambda lambda) {
+            if (e instanceof Lambda lambda) {
                 forEachMethod(lambda.methodInfo().typeInfo(), consumer);
                 return false;
             }
-            if (e instanceof io.codelaser.maddi.cst.api.statement.LocalTypeDeclaration ltd) {
+            if (e instanceof LocalTypeDeclaration ltd) {
                 forEachMethod(ltd.typeInfo(), consumer);
                 return false;
             }
@@ -430,17 +442,17 @@ public class PrepAnalyzer {
         });
     }
 
-    private static void clearElements(io.codelaser.maddi.cst.api.element.Element root) {
+    private static void clearElements(Element root) {
         root.visit(e -> {
-            if (e instanceof io.codelaser.maddi.cst.api.statement.Statement
-                || e instanceof io.codelaser.maddi.cst.api.expression.InstanceOf) {
+            if (e instanceof Statement
+                || e instanceof InstanceOf) {
                 e.analysis().removeIf(CARRIED_PREP);
             }
-            if (e instanceof io.codelaser.maddi.cst.api.expression.ConstructorCall cc && cc.anonymousClass() != null) {
+            if (e instanceof ConstructorCall cc && cc.anonymousClass() != null) {
                 cc.anonymousClass().recursiveSubTypeStream().forEach(PrepAnalyzer::clearType);
-            } else if (e instanceof io.codelaser.maddi.cst.api.expression.Lambda lambda) {
+            } else if (e instanceof Lambda lambda) {
                 clearType(lambda.methodInfo().typeInfo());
-            } else if (e instanceof io.codelaser.maddi.cst.api.statement.LocalTypeDeclaration ltd) {
+            } else if (e instanceof LocalTypeDeclaration ltd) {
                 ltd.typeInfo().recursiveSubTypeStream().forEach(PrepAnalyzer::clearType);
             }
             return true;
@@ -507,11 +519,11 @@ public class PrepAnalyzer {
                 // degradation marker (task #36): the whole type's methods lack prep data; per-call
                 // consumers (VL2O) must treat them pessimistically
                 typeInfo.recursiveSubTypeStream()
-                        .flatMap(io.codelaser.maddi.cst.api.info.TypeInfo::constructorAndMethodStream)
+                        .flatMap(TypeInfo::constructorAndMethodStream)
                         .forEach(mi -> {
                     mi.analysis().getOrCreate(
-                            io.codelaser.maddi.cst.impl.analysis.PropertyImpl.DEGRADED_ANALYSIS_METHOD,
-                            () -> io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.TRUE);
+                            PropertyImpl.DEGRADED_ANALYSIS_METHOD,
+                            () -> ValueImpl.BoolImpl.TRUE);
                         });
                 exceptions.add(new AnalyzerException(typeInfo, t));
             } else {

@@ -17,26 +17,26 @@
 
 package io.codelaser.maddi.aapi.parser;
 
-import io.codelaser.maddi.analysis.api.AnalysisHintsShadows;
-
-import io.codelaser.maddi.modification.common.defaults.AnnotationProvider;
-import io.codelaser.maddi.modification.prepwork.io.LoadAnalysisResults;
-import io.codelaser.maddi.cst.api.element.*;
-import io.codelaser.maddi.cst.api.expression.AnnotationExpression;
-import io.codelaser.maddi.cst.api.expression.StringConstant;
-import io.codelaser.maddi.cst.api.info.*;
-import io.codelaser.maddi.cst.api.type.ParameterizedType;
-import io.codelaser.maddi.inspection.api.integration.JavaInspector;
-import io.codelaser.maddi.inspection.api.integration.JavaInspectorFactory;
-import io.codelaser.maddi.inspection.api.parser.ParseResult;
-import io.codelaser.maddi.inspection.api.resource.CompiledTypesManager;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.IOException;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import io.codelaser.maddi.analysis.api.AnalysisHintsShadows;
+import io.codelaser.maddi.cst.api.element.*;
+import io.codelaser.maddi.cst.api.expression.AnnotationExpression;
+import io.codelaser.maddi.cst.api.info.*;
+import io.codelaser.maddi.cst.api.type.ParameterizedType;
+import io.codelaser.maddi.cst.api.type.Wildcard;
+import io.codelaser.maddi.inspection.api.integration.JavaInspector;
+import io.codelaser.maddi.inspection.api.integration.JavaInspectorFactory;
+import io.codelaser.maddi.inspection.api.parser.ParseResult;
+import io.codelaser.maddi.inspection.api.resource.CompiledTypesManager;
+import io.codelaser.maddi.modification.common.defaults.AnnotationProvider;
+import io.codelaser.maddi.modification.prepwork.io.LoadAnalysisResults;
 
 /*
 Read the analysis hints of a library/JDK.
@@ -367,8 +367,8 @@ public class AnalysisHintsParser implements AnnotationProvider {
         return b1.equals(b2);
     }
 
-    private static boolean sameWildcard(io.codelaser.maddi.cst.api.type.Wildcard w1,
-                                        io.codelaser.maddi.cst.api.type.Wildcard w2) {
+    private static boolean sameWildcard(Wildcard w1,
+                                        Wildcard w2) {
         if (w1 == null || w2 == null) return w1 == w2;
         return w1.isUnbound() == w2.isUnbound() && w1.isExtends() == w2.isExtends() && w1.isSuper() == w2.isSuper();
     }

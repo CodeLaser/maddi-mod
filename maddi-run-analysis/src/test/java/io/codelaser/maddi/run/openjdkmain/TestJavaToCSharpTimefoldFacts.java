@@ -1,13 +1,16 @@
 package io.codelaser.maddi.run.openjdkmain;
 
-import io.codelaser.maddi.run.j2cs.JavaToCSharpRatchet;
-import io.codelaser.maddi.run.j2k.JavaToKotlinRatchet;
+import java.nio.file.Path;
+
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 
-import java.nio.file.Path;
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import io.codelaser.maddi.run.j2cs.JavaToCSharpRatchet;
+import io.codelaser.maddi.run.j2k.JavaToKotlinRatchet;
 
 /**
  * timefold-solver's core printed as C# with the analysis's facts ({@link CorpusNullability}), the third corpus beside
@@ -24,12 +27,12 @@ public class TestJavaToCSharpTimefoldFacts {
     /* INFO, as TestTimefoldSolver: at DEBUG the analyzer's log fills the test report. */
     @BeforeAll
     public static void beforeAll() {
-        ((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME))
-                .setLevel(ch.qos.logback.classic.Level.INFO);
+        ((Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME))
+                .setLevel(Level.INFO);
         // corpus-scale noise, as TestTimefoldSolver
-        ((ch.qos.logback.classic.Logger) LoggerFactory
+        ((Logger) LoggerFactory
                 .getLogger("io.codelaser.maddi.modification.link.impl.linkgraph.RedundantLinks"))
-                .setLevel(ch.qos.logback.classic.Level.ERROR);
+                .setLevel(Level.ERROR);
     }
 
     @Test

@@ -17,7 +17,12 @@
 
 package io.codelaser.maddi.modification.analyzer.nullability;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
+
 import io.codelaser.maddi.cst.api.analysis.Property;
+import io.codelaser.maddi.cst.api.expression.AnnotationExpression;
 import io.codelaser.maddi.cst.api.expression.ConstructorCall;
 import io.codelaser.maddi.cst.api.expression.Expression;
 import io.codelaser.maddi.cst.api.expression.InlineConditional;
@@ -25,7 +30,11 @@ import io.codelaser.maddi.cst.api.expression.Lambda;
 import io.codelaser.maddi.cst.api.expression.NullConstant;
 import io.codelaser.maddi.cst.api.expression.SwitchExpression;
 import io.codelaser.maddi.cst.api.expression.VariableExpression;
+import io.codelaser.maddi.cst.api.info.FieldInfo;
 import io.codelaser.maddi.cst.api.info.Info;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.ParameterInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.statement.Block;
 import io.codelaser.maddi.cst.api.statement.BreakOrContinueStatement;
 import io.codelaser.maddi.cst.api.statement.ExpressionAsStatement;
@@ -34,18 +43,11 @@ import io.codelaser.maddi.cst.api.statement.Statement;
 import io.codelaser.maddi.cst.api.statement.ThrowStatement;
 import io.codelaser.maddi.cst.api.statement.YieldStatement;
 import io.codelaser.maddi.cst.api.type.NullableState;
+import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.api.variable.DependentVariable;
 import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.cst.impl.analysis.NullAnnotations;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Set;
-import io.codelaser.maddi.cst.api.info.FieldInfo;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.ParameterInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.api.type.ParameterizedType;
 
 // static helpers the parts of the nullability pass share: about types, and about nodes regardless of the graph
 final class Types {
@@ -84,9 +86,9 @@ final class Types {
         return !m.isAbstract() && m.methodBody() != null;
     }
 
-    static NullableState explicit(List<io.codelaser.maddi.cst.api.expression.AnnotationExpression> list) {
+    static NullableState explicit(List<AnnotationExpression> list) {
         boolean nonNull = false;
-        for (io.codelaser.maddi.cst.api.expression.AnnotationExpression ae : list) {
+        for (AnnotationExpression ae : list) {
             String name = ae.typeInfo().simpleName();
             if (NullAnnotations.NULLABLE.contains(name)) return NullableState.NULLABLE;
             if (NullAnnotations.NON_NULL.contains(name)) nonNull = true;

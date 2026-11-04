@@ -17,14 +17,17 @@
 
 package io.codelaser.maddi.modification.analyzer;
 
-import io.codelaser.maddi.modification.analyzer.nullability.World;
-import io.codelaser.maddi.analysis.api.AnalysisValueFeed;
+import java.time.Duration;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.Consumer;
 
-import io.codelaser.maddi.modification.link.LinkComputer;
+import io.codelaser.maddi.analysis.api.AnalysisValueFeed;
 import io.codelaser.maddi.cst.api.analysis.Message;
 import io.codelaser.maddi.cst.api.info.Info;
-
-import java.util.List;
+import io.codelaser.maddi.graph.G;
+import io.codelaser.maddi.modification.link.LinkComputer;
 
 public interface IteratingAnalyzer {
 
@@ -128,7 +131,7 @@ public interface IteratingAnalyzer {
          * can be the whole problem: the OpenSearch {@code G43} run spent 1 h 40 min in its first pass, where
          * {@link #maxIterations()} can never fire.
          */
-        default java.time.Duration maxDuration() {
+        default Duration maxDuration() {
             return null;
         }
     }
@@ -165,7 +168,7 @@ public interface IteratingAnalyzer {
      * on Y, as built by ComputeCallGraph). Worklist narrowing (default ON; opt out with NOWORKLIST=1) then makes iterations 2+ only re-analyze elements
      * that changed in the previous iteration plus their dependents (reverse edges) — the worklist narrowing.
      */
-    default void analyze(List<Info> analysisOrder, io.codelaser.maddi.graph.G<Info> dependencyGraph) {
+    default void analyze(List<Info> analysisOrder, G<Info> dependencyGraph) {
         analyze(analysisOrder, dependencyGraph, null);
     }
 
@@ -173,7 +176,7 @@ public interface IteratingAnalyzer {
      * The early cutoff of the next seeded {@link #analyze}: the previous generation's summaries of the seed's
      * elements, by fully qualified name; see {@code IteratingAnalyzerImpl.setPriorSummaries}. Default: ignored.
      */
-    default void setPriorSummaries(java.util.Map<String, String> priorSummaries) {
+    default void setPriorSummaries(Map<String, String> priorSummaries) {
         // no-op
     }
 
@@ -185,8 +188,8 @@ public interface IteratingAnalyzer {
      * and defeat the skip). Elements the worklist never reaches keep whatever analysis they already hold (their
      * carried values). {@code null} ⇒ the normal full analysis.
      */
-    default void analyze(List<Info> analysisOrder, io.codelaser.maddi.graph.G<Info> dependencyGraph,
-                         java.util.Set<Info> initialDirty) {
+    default void analyze(List<Info> analysisOrder, G<Info> dependencyGraph,
+                         Set<Info> initialDirty) {
         analyze(analysisOrder, dependencyGraph, initialDirty, null);
     }
 
@@ -201,8 +204,8 @@ public interface IteratingAnalyzer {
      * the {@code CROSS_TYPE_DERIVED} tier of a carried element (and drops it from its carried set). {@code null} ⇒ no
      * hook. Only consulted when {@code initialDirty != null}.
      */
-    default void analyze(List<Info> analysisOrder, io.codelaser.maddi.graph.G<Info> dependencyGraph,
-                         java.util.Set<Info> initialDirty, java.util.function.Consumer<Info> beforeFirstRecompute) {
+    default void analyze(List<Info> analysisOrder, G<Info> dependencyGraph,
+                         Set<Info> initialDirty, Consumer<Info> beforeFirstRecompute) {
         analyze(analysisOrder, dependencyGraph);
     }
 
@@ -214,7 +217,7 @@ public interface IteratingAnalyzer {
      * the elements it analysed, the seed and whatever the worklist pulled in; {@link #messages()} are about these
      * only. Null after a cold analysis.
      */
-    default java.util.Set<Info> lastScope() {
+    default Set<Info> lastScope() {
         return null;
     }
 }

@@ -1,10 +1,15 @@
 package io.codelaser.maddi.modification.link.kotlin;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import java.util.ArrayList;
+import java.util.List;
+
 import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import io.codelaser.maddi.cst.api.expression.Lambda;
 
 /*
  Function types and lambdas. A Kotlin function type is kotlin.jvm.functions.FunctionN: the Java twins that take a
@@ -141,9 +146,9 @@ public class TestKotlinLinkFunctions extends CommonKotlinLinkTest {
      */
     @Test
     public void kotlinForEachIsContracted() {
-        java.util.List<String> lambdaLinks = new java.util.ArrayList<>();
+        List<String> lambdaLinks = new ArrayList<>();
         p.kotlin("captured").methodBody().visit(e -> {
-            if (e instanceof io.codelaser.maddi.cst.api.expression.Lambda l) lambdaLinks.add(p.links(l.methodInfo()));
+            if (e instanceof Lambda l) lambdaLinks.add(p.links(l.methodInfo()));
             return true;
         });
         assertEquals("[[0:it.§m≡r*.element.§m,0:it→r*.element] --> -]", lambdaLinks.toString());

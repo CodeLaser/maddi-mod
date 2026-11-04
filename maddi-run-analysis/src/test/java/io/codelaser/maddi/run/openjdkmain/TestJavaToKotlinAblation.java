@@ -1,17 +1,19 @@
 package io.codelaser.maddi.run.openjdkmain;
 
-import io.codelaser.maddi.cst.impl.analysis.ModificationFacts;
-import io.codelaser.maddi.cst.impl.analysis.NullabilityFacts;
-import io.codelaser.maddi.cst.print.kotlin.KotlinPrintOptions;
-import io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass;
-import io.codelaser.maddi.modification.analyzer.nullability.Report;
-import io.codelaser.maddi.run.j2k.JavaToKotlinRatchet;
+import java.util.Objects;
+
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 
-import java.util.Objects;
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import io.codelaser.maddi.cst.impl.analysis.ModificationFacts;
+import io.codelaser.maddi.cst.impl.analysis.NullabilityFacts;
+import io.codelaser.maddi.cst.print.kotlin.KotlinPrintOptions;
+import io.codelaser.maddi.modification.analyzer.nullability.Report;
+import io.codelaser.maddi.run.j2k.JavaToKotlinRatchet;
 
 /**
  * The ablation of the Java → Kotlin translation (KotlinConf 2027, maddi-mod#35): one corpus analysed once, as the
@@ -31,8 +33,8 @@ public class TestJavaToKotlinAblation {
 
     @BeforeAll
     public static void beforeAll() {
-        ((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME))
-                .setLevel(ch.qos.logback.classic.Level.INFO);
+        ((Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME))
+                .setLevel(Level.INFO);
     }
 
     @Test

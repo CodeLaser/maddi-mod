@@ -1,11 +1,11 @@
 package io.codelaser.maddi.modification.link.impl.graph;
 
-import org.jetbrains.annotations.NotNull;
-
 import java.util.HashSet;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+
+import org.jetbrains.annotations.NotNull;
 
 // explains how a certain fact was derived
 public sealed interface Witness<V, L>

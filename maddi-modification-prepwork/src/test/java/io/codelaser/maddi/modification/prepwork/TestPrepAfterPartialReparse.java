@@ -17,9 +17,27 @@
 
 package io.codelaser.maddi.modification.prepwork;
 
+import static io.codelaser.maddi.inspection.api.integration.JavaInspector.InvalidationState.*;
+import static org.junit.jupiter.api.Assertions.*;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
+
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
 import io.codelaser.maddi.cst.api.element.SourceSet;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.statement.Statement;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.inspection.api.integration.JavaInspector;
 import io.codelaser.maddi.inspection.api.parser.ParseResult;
@@ -29,21 +47,6 @@ import io.codelaser.maddi.inspection.resource.InputConfigurationImpl;
 import io.codelaser.maddi.inspection.resource.SourceSetImpl;
 import io.codelaser.maddi.modification.prepwork.variable.VariableData;
 import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
-
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-
-import static io.codelaser.maddi.inspection.api.integration.JavaInspector.InvalidationState.*;
-import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Prep on the objects a per-file re-parse leaves: re-parsed (INVALID) and rewired (REWIRE) types, next to kept ones.
@@ -196,13 +199,13 @@ public class TestPrepAfterPartialReparse {
 
     /* Every method's and every statement's VariableData, described (VariableDataImpl.toString), by name and index. */
     private static Map<String, String> prepDump(ParseResult pr) {
-        Map<String, String> map = new java.util.TreeMap<>();
+        Map<String, String> map = new TreeMap<>();
         for (TypeInfo type : pr.primaryTypes()) {
             for (MethodInfo mi : type.constructorsAndMethods()) {
                 map.put(mi.fullyQualifiedName(), String.valueOf(mi.analysis()
                         .getOrNull(VariableDataImpl.VARIABLE_DATA, VariableDataImpl.class)));
                 mi.methodBody().visit(e -> {
-                    if (e instanceof io.codelaser.maddi.cst.api.statement.Statement st) {
+                    if (e instanceof Statement st) {
                         map.put(mi.fullyQualifiedName() + "@" + st.source().index(), String.valueOf(st.analysis()
                                 .getOrNull(VariableDataImpl.VARIABLE_DATA, VariableDataImpl.class)));
                     }

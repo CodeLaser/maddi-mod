@@ -17,9 +17,7 @@
 
 package io.codelaser.maddi.modification.analyzer.nullability;
 
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.ParameterInfo;
-import io.codelaser.maddi.cst.api.type.ParameterizedType;
+import static io.codelaser.maddi.modification.analyzer.nullability.Types.*;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
@@ -27,7 +25,9 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
-import static io.codelaser.maddi.modification.analyzer.nullability.Types.*;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.ParameterInfo;
+import io.codelaser.maddi.cst.api.type.ParameterizedType;
 
 /**
  * {@link World#OPEN} and {@link World#OPEN_VISIBILITY}: the methods code outside the

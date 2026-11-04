@@ -17,20 +17,21 @@
 
 package io.codelaser.maddi.modification.analyzer.integration;
 
+import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import java.util.List;
+
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
 import io.codelaser.maddi.cst.api.info.FieldInfo;
 import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 import io.codelaser.maddi.modification.analyzer.CommonTest;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-
-import java.util.List;
-
-import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.*;
-import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * A getter that hands out a view of a field shares the field's mutable object with the caller, exactly as one that

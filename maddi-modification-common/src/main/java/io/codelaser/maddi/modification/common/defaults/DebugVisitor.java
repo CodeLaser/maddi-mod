@@ -17,12 +17,12 @@
 
 package io.codelaser.maddi.modification.common.defaults;
 
+import java.util.List;
+import java.util.Map;
+
 import io.codelaser.maddi.cst.api.element.Element;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.graph.G;
-
-import java.util.List;
-import java.util.Map;
 
 public interface DebugVisitor {
 

@@ -1,12 +1,12 @@
 package io.codelaser.maddi.modification.analyzer.kotlin;
 
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 
 /*
  What kotlinc synthesizes and the idioms that compile to it: class delegation (a `$$delegate_0` field and one

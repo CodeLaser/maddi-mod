@@ -17,29 +17,31 @@
 
 package io.codelaser.maddi.modification.prepwork;
 
-import io.codelaser.maddi.modification.prepwork.variable.ReturnVariable;
-import io.codelaser.maddi.cst.api.expression.IntConstant;
-import io.codelaser.maddi.cst.api.info.FieldInfo;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.statement.Block;
-import io.codelaser.maddi.cst.api.statement.ThrowStatement;
-import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
-import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
-import io.codelaser.maddi.cst.api.info.ParameterInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.api.info.TypeParameter;
-import io.codelaser.maddi.cst.api.type.ParameterizedType;
-import io.codelaser.maddi.cst.api.variable.*;
-import org.jetbrains.annotations.NotNull;
+import static io.codelaser.maddi.modification.prepwork.StatementIndex.*;
 
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Set;
 import java.util.regex.Matcher;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static io.codelaser.maddi.modification.prepwork.StatementIndex.*;
+import org.jetbrains.annotations.NotNull;
+
+import io.codelaser.maddi.cst.api.element.Element;
+import io.codelaser.maddi.cst.api.expression.IntConstant;
+import io.codelaser.maddi.cst.api.expression.Lambda;
+import io.codelaser.maddi.cst.api.info.FieldInfo;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.ParameterInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.info.TypeParameter;
+import io.codelaser.maddi.cst.api.statement.Block;
+import io.codelaser.maddi.cst.api.statement.ThrowStatement;
+import io.codelaser.maddi.cst.api.type.ParameterizedType;
+import io.codelaser.maddi.cst.api.variable.*;
+import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
+import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
+import io.codelaser.maddi.modification.prepwork.variable.ReturnVariable;
 
 public class Util {
 
@@ -260,13 +262,13 @@ public class Util {
         return found == null ? source : found;
     }
 
-    private static MethodInfo lambdaContainer(io.codelaser.maddi.cst.api.element.Element root,
+    private static MethodInfo lambdaContainer(Element root,
                                               MethodInfo lambdaMethod,
                                               MethodInfo current) {
         MethodInfo[] found = {null};
         root.visit(e -> {
             if (found[0] != null) return false;
-            if (e instanceof io.codelaser.maddi.cst.api.expression.Lambda lambda) {
+            if (e instanceof Lambda lambda) {
                 if (lambda.methodInfo() == lambdaMethod) {
                     found[0] = current;
                 } else if (lambda.methodInfo().methodBody() != null) {

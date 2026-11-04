@@ -1,9 +1,9 @@
 package io.codelaser.maddi.modification.prepwork.variable;
 
-import io.codelaser.maddi.cst.api.variable.Variable;
-
 import java.util.Map;
 import java.util.stream.Stream;
+
+import io.codelaser.maddi.cst.api.variable.Variable;
 
 // Primarily a helper type to carry around multiple Links objects. Not a "deliverable".
 public interface LinkedVariables extends Iterable<Map.Entry<Variable, Links>> {

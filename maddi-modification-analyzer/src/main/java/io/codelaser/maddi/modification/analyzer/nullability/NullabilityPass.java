@@ -17,7 +17,23 @@
 
 package io.codelaser.maddi.modification.analyzer.nullability;
 
+import static io.codelaser.maddi.modification.analyzer.nullability.Types.*;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.IdentityHashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.BiPredicate;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
+
 import io.codelaser.maddi.cst.api.analysis.Property;
+import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.element.Element;
 import io.codelaser.maddi.cst.api.expression.Expression;
 import io.codelaser.maddi.cst.api.expression.MethodCall;
@@ -27,7 +43,6 @@ import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.type.NullableState;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.api.variable.LocalVariable;
@@ -35,17 +50,7 @@ import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.cst.impl.analysis.NullAnnotations;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
-
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.IdentityHashMap;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-
-import static io.codelaser.maddi.modification.analyzer.nullability.Types.*;
+import io.codelaser.maddi.modification.common.util.Culprits;
 
 /**
  * Declaration nullability as reachability over the converged link facts (docs/design/nullability.md §4.1, M3).
@@ -182,7 +187,7 @@ public final class NullabilityPass {
             Set<Expression> nextPresent = pass.nextPresentLookups;
             if (next.equals(trusted) && nextPreconditions.equals(nonNullAtExit) && nextNarrowed.equals(narrowedReads)
                 && nextAtEntry.equals(atEntry) && nextPresent.equals(present) || round == MAX_ROUNDS) {
-                if (io.codelaser.maddi.modification.common.util.Culprits.ENABLED) pass.writeCulprits(report);
+                if (Culprits.ENABLED) pass.writeCulprits(report);
                 return report;
             }
             trusted = next;
@@ -204,7 +209,7 @@ public final class NullabilityPass {
                                                                 List<FieldInfo> fields) {
         if (ENTRY_FIELDS_OFF.get()) return Map.of();
         Set<MethodInfo> unwalked = new HashSet<>();
-        java.util.function.Predicate<Element> uses = e -> {
+        Predicate<Element> uses = e -> {
             MethodInfo callee = e instanceof MethodCall mc ? mc.methodInfo()
                     : e instanceof MethodReference mr ? mr.methodInfo() : null;
             if (callee != null && NonNullFacts.privateInstanceMethod(callee) && !walked.walked((Expression) e)) {
@@ -248,13 +253,13 @@ public final class NullabilityPass {
         for (MethodInfo mi : methods) if (mi.methodBody() != null) seeds.indexFills(mi.methodBody());
         for (MethodInfo mi : methods) {
             for (MethodInfo overridden : overrides(mi)) {
-                index.implementations.computeIfAbsent(overridden, _ -> new java.util.ArrayList<>()).add(mi);
+                index.implementations.computeIfAbsent(overridden, _ -> new ArrayList<>()).add(mi);
             }
         }
         index.indexFunctionals(methods);
         index.indexKeyedMaps(methods, fields);
         NullPredicates predicates = NullPredicates.infer(methods);
-        java.util.function.BiPredicate<Object, TypeInfo> narrowedReads = narrowed.isEmpty() ? null : narrowed::nonNull;
+        BiPredicate<Object, TypeInfo> narrowedReads = narrowed.isEmpty() ? null : narrowed::nonNull;
         // 2. the facts the walk reads, and the parts that read them
         facts = new NonNullFacts(contracts::parameterContract, contracts::returnContract)
                 .withPredicates(predicates)
@@ -295,7 +300,7 @@ public final class NullabilityPass {
             Set<Object> reachedBefore = reached;
             // the printers report only these: elsewhere the parameter is non-null without the policy
             preconditionsNonNull = declared.stream().filter(reachedBefore::contains)
-                    .collect(java.util.stream.Collectors.toUnmodifiableSet());
+                    .collect(Collectors.toUnmodifiableSet());
             if (!declared.isEmpty()) {
                 contracts.addAll(declared);
                 cause.clear();
@@ -322,7 +327,7 @@ public final class NullabilityPass {
         // 9. the use sites, as the printers ask them
         NonNullFacts smartCasts = facts.kotlinSmartCasts();
         methods.forEach(smartCasts::walk);
-        Set<Expression> nonNullCallResults = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+        Set<Expression> nonNullCallResults = Collections.newSetFromMap(new IdentityHashMap<>());
         Map<MethodInfo, Boolean> intrinsic = new HashMap<>();
         Set<Object> finalReached = reached;
         graph.callIds.forEach((call, id) -> {
@@ -342,7 +347,7 @@ public final class NullabilityPass {
         methods.forEach(useSites::walk);
         nextFieldsAtEntry = fieldsAtEntry(useSites, methods, fields);
         if (!ROUND_KEYS_OFF.get()) {
-            Set<Expression> present = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+            Set<Expression> present = Collections.newSetFromMap(new IdentityHashMap<>());
             for (MethodCall lookup : contracts.lookups) if (useSites.keyPresentWhenCalled(lookup)) present.add(lookup);
             nextPresentLookups = present;
         }
@@ -369,8 +374,8 @@ public final class NullabilityPass {
                 Object from = report.cause().get(at);
                 Site site = graph.edgeSites.getOrDefault(from, Map.of()).get(at);
                 if (site != null) {
-                    io.codelaser.maddi.modification.common.util.Culprits.add(steps,
-                            io.codelaser.maddi.modification.common.util.Culprits.step(site.in(), site.element(),
+                    Culprits.add(steps,
+                            Culprits.step(site.in(), site.element(),
                                     Trace.culpritText(site.element())));
                 }
                 at = from;
@@ -378,8 +383,8 @@ public final class NullabilityPass {
             String origin = report.seedOrigin().get(at);
             Site seed = seeds.seedSites.get(at);
             if (seed != null) {
-                io.codelaser.maddi.modification.common.util.Culprits.add(steps,
-                        io.codelaser.maddi.modification.common.util.Culprits.step(seed.in(), seed.element(),
+                Culprits.add(steps,
+                        Culprits.step(seed.in(), seed.element(),
                                 Trace.culpritText(seed.element()) + (origin == null ? "" : " (" + Trace.shorten(origin) + ")")));
             } else if (origin != null) {
                 steps.add(new Value.Culprit.Step(null, 0, 0, Trace.shorten(origin)));

@@ -1,22 +1,27 @@
 package io.codelaser.maddi.modification.analyzer.nullability;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
+import java.util.stream.Collectors;
+
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
 import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
+import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
 import io.codelaser.maddi.modification.analyzer.impl.SingleIterationAnalyzerImpl;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-
-import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * {@link Seeds}: where a null comes from, a literal, a library return, a field's default, an argument; and what is no
@@ -184,12 +189,12 @@ public class TestSeeds extends NullabilityFixtures {
                 new IteratingAnalyzerImpl.ConfigurationBuilder().setNullability(true).build()).go(ao, 3);
         MethodInfo big = t.findUniqueMethod("big", 1);
         // what LinkComputerImpl writes when it gives up on a method; its variable data then carries no links
-        big.analysis().setAllowControlledOverwrite(io.codelaser.maddi.cst.impl.analysis.PropertyImpl.DEGRADED_ANALYSIS_METHOD,
-                io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.TRUE);
+        big.analysis().setAllowControlledOverwrite(PropertyImpl.DEGRADED_ANALYSIS_METHOD,
+                ValueImpl.BoolImpl.TRUE);
         Report report = new NullabilityPass(Policy.NULL_MARKED).go(ao);
         String all = locals(report);
-        org.junit.jupiter.api.Assertions.assertTrue(all.contains("big.none: String?"), all);
-        org.junit.jupiter.api.Assertions.assertTrue(all.contains("big.known: String!"), all);
+        Assertions.assertTrue(all.contains("big.none: String?"), all);
+        Assertions.assertTrue(all.contains("big.known: String!"), all);
     }
 
     // fernflower NestedClassProcessor.insertLocalVars: 'classNode = classNode.parent!!' after 23f8bf65
@@ -281,7 +286,7 @@ public class TestSeeds extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("String", s.get("a.b.DN.Range.lowerBound"), s + "\n" + explain(report));
         assertTrue(locals(report).contains("early.v: String?"), "read before the test: " + locals(report));
@@ -311,7 +316,7 @@ public class TestSeeds extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Object?", s.get("a.b.FI.Context.<init>(Object):0:connection"), s + "\n" + explain(report));
         assertEquals("V!", s.get("a.b.FI.Holder.<init>(Object):0:value"), "a type variable's instantiation: " + s);
@@ -348,7 +353,7 @@ public class TestSeeds extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Task?", s.get("a.b.RT.Impl.removeTask(Object)"), s + "\n" + explain(report));
     }
@@ -368,7 +373,7 @@ public class TestSeeds extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("String", s.get("a.b.EV.Status.valueOf(String):0:name"), s + "\n" + explain(report));
     }
@@ -408,7 +413,7 @@ public class TestSeeds extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Slave?", s.get("a.b.RN.getSlave(String)"), s + "\n" + explain(report));
         assertEquals("Slave?", s.get("a.b.RN.getUpdateInfo()"), s + "\n" + explain(report));
@@ -441,7 +446,7 @@ public class TestSeeds extends NullabilityFixtures {
                     };
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("CF?", s.get("a.b.CF.<init>(String,a.b.CF):1:lower"), s + "\n" + explain(report));
         assertEquals("String", s.get("a.b.CF.<init>(String,a.b.CF):0:name"), s + "\n" + explain(report));
@@ -474,7 +479,7 @@ public class TestSeeds extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertFalse(s.get("a.b.RF.wrap(Class):0:type").endsWith("?"), s + "\n" + explain(report));
         assertFalse(s.get("a.b.RF.copyOf(java.util.Map):0:map").startsWith("Map<Class<?!>?"), s + "\n" + explain(report));
@@ -497,7 +502,7 @@ public class TestSeeds extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("String", s.get("a.b.RN.put(String):0:key"), s.toString());
         assertEquals("String?", s.get("a.b.RN.size(String):0:s"), "another exception: still evidence");
@@ -600,7 +605,7 @@ public class TestSeeds extends NullabilityFixtures {
                     static String trimmed(String s) { return s.trim(); }
                 }
                 """);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(label(info), k(pt)));
         assertEquals("String?", s.get("value()"), s.toString());
         assertEquals("String", s.get("trimmed()"), s.toString());
@@ -620,7 +625,7 @@ public class TestSeeds extends NullabilityFixtures {
                     static ClassLoader bootstrap() { return String.class.getClassLoader(); }
                 }
                 """);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(label(info), k(pt)));
         assertEquals("ClassLoader", s.get("own()"), s.toString());
         assertEquals("ClassLoader", s.get("literal()"), s.toString());
@@ -638,7 +643,7 @@ public class TestSeeds extends NullabilityFixtures {
                     static String custom() { return System.getProperty("my.app.home"); }
                 }
                 """);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(label(info), k(pt)));
         assertEquals("String", s.get("os()"), s.toString());
         assertEquals("String?", s.get("custom()"), s.toString());
@@ -676,7 +681,7 @@ public class TestSeeds extends NullabilityFixtures {
                     Msg successfulMsg() { return successfulMsg; }
                 }
                 """);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(label(info), k(pt)));
         assertEquals("Msg?", s.get("<init>(1:successfulMsg)"), s.toString());
         assertEquals("Msg?", s.get("successfulMsg"), s.toString());
@@ -724,7 +729,7 @@ public class TestSeeds extends NullabilityFixtures {
 
     private void overloadedThis(Policy policy) {
         Report report = run("a.b.OGR", OVERLOADED_THIS, policy);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(label(info) + (info instanceof ParameterInfo pi
                 ? pi.methodInfo().parameters().stream().map(q -> q.parameterizedType().typeInfo().simpleName())
                         .collect(Collectors.joining(",", "[", "]")) : ""), k(pt)));
@@ -759,7 +764,7 @@ public class TestSeeds extends NullabilityFixtures {
                     Msg msg() { return msg; }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(label(info) + (info instanceof ParameterInfo pi
                 ? pi.methodInfo().parameters().stream().map(q -> q.parameterizedType().typeInfo().simpleName())
                         .collect(Collectors.joining(",", "[", "]")) : ""), k(pt)));

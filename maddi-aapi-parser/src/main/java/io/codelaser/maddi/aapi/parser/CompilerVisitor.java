@@ -17,11 +17,11 @@
 
 package io.codelaser.maddi.aapi.parser;
 
-import io.codelaser.maddi.modification.common.defaults.DebugVisitor;
+import java.util.Set;
+
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.inspection.api.integration.JavaInspector;
-
-import java.util.Set;
+import io.codelaser.maddi.modification.common.defaults.DebugVisitor;
 
 public interface CompilerVisitor {
 

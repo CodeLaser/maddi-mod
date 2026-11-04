@@ -1,9 +1,9 @@
 package io.codelaser.maddi.modification.link.kotlin;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
 import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.Test;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /*
  ⛔ CodeLaser/maddi#83: state from one parse leaks into the link results of a later, independent parse in the same JVM. Linking

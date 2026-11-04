@@ -17,26 +17,30 @@
 
 package io.codelaser.maddi.modification.analyzer.nullability;
 
-import io.codelaser.maddi.cst.api.expression.*;
-import io.codelaser.maddi.cst.api.info.FieldInfo;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.ParameterInfo;
-import io.codelaser.maddi.cst.api.statement.*;
-import io.codelaser.maddi.cst.api.type.NullableState;
-import io.codelaser.maddi.cst.api.variable.DependentVariable;
-import io.codelaser.maddi.cst.api.variable.FieldReference;
-import io.codelaser.maddi.cst.api.variable.LocalVariable;
-import io.codelaser.maddi.cst.api.variable.Variable;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.api.type.ParameterizedType;
-
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BiPredicate;
 import java.util.function.Function;
+import java.util.function.Predicate;
+
+import io.codelaser.maddi.cst.api.expression.*;
+import io.codelaser.maddi.cst.api.info.FieldInfo;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.ParameterInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.statement.*;
+import io.codelaser.maddi.cst.api.type.NullableState;
+import io.codelaser.maddi.cst.api.type.ParameterizedType;
+import io.codelaser.maddi.cst.api.variable.DependentVariable;
+import io.codelaser.maddi.cst.api.variable.FieldReference;
+import io.codelaser.maddi.cst.api.variable.LocalVariable;
+import io.codelaser.maddi.cst.api.variable.This;
+import io.codelaser.maddi.cst.api.variable.Variable;
 
 /**
  * The use-site pass (docs/design/nullability.md M4), first cut: per statement, the locals and parameters KNOWN
@@ -80,7 +84,7 @@ public final class NonNullFacts {
     // CodeLaser/maddi-mod#48 A5: per private instance method, the fields of this non-null at every call of it walked
     // (a call that does not qualify adds none); the calls and method references walked (fieldsAtCalls)
     private final Map<MethodInfo, Set<Variable>> atCalls = new IdentityHashMap<>();
-    private final Set<Expression> callsWalked = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+    private final Set<Expression> callsWalked = Collections.newSetFromMap(new IdentityHashMap<>());
     // per private instance method, the fields of this non-null at its entry (withFieldsAtEntry)
     private Map<MethodInfo, Set<Variable>> fieldsAtEntry = Map.of();
     // gate NOENTRYFIELDS (with NullabilityPass's): forget at a compound statement as before #48 A5 (A/B)
@@ -109,11 +113,11 @@ public final class NonNullFacts {
     // null-check predicates ('StringUtils.isNotBlank(s)'), as conditions; never for Kotlin's smart casts
     private NullPredicates predicates;
     // is the member (a getter, a field) non-null on every instance of the type? (Narrowing, CodeLaser/maddi-mod#22 gap 3)
-    private java.util.function.BiPredicate<Object, TypeInfo> narrowedNonNull;
-    private java.util.function.BiPredicate<FieldInfo, MethodInfo> narrowedInMethod;
+    private BiPredicate<Object, TypeInfo> narrowedNonNull;
+    private BiPredicate<FieldInfo, MethodInfo> narrowedInMethod;
     // the pass's verdict on a value, once its closure is known: no null of the analysis reaches it (gap 7); null
     // while the pass builds its graph
-    private java.util.function.Predicate<Expression> notNullable;
+    private Predicate<Expression> notNullable;
 
     /**
      * @param parameterContract the contract on a callee's parameter (NONNULL: passing null throws), or null
@@ -141,7 +145,7 @@ public final class NonNullFacts {
      * A read narrowed by the receiver's type ({@link Narrowing}): {@code nonNull.test(member, type)} says that
      * {@code x.member} is not null on any instance of {@code type}. Not in {@link #kotlinSmartCasts()}.
      */
-    public NonNullFacts withNarrowedReads(java.util.function.BiPredicate<Object, TypeInfo> nonNull) {
+    public NonNullFacts withNarrowedReads(BiPredicate<Object, TypeInfo> nonNull) {
         this.narrowedNonNull = nonNull;
         return this;
     }
@@ -150,7 +154,7 @@ public final class NonNullFacts {
      * A final field of {@code this} that no instance able to run the method holds null in:
      * {@code nonNull.test(field, method)} (CodeLaser/maddi-mod#30 3). Not in {@link #kotlinSmartCasts()}.
      */
-    public NonNullFacts withNarrowedInMethod(java.util.function.BiPredicate<FieldInfo, MethodInfo> nonNull) {
+    public NonNullFacts withNarrowedInMethod(BiPredicate<FieldInfo, MethodInfo> nonNull) {
         this.narrowedInMethod = nonNull;
         return this;
     }
@@ -161,7 +165,7 @@ public final class NonNullFacts {
      * null ('Statement statement = null;', kept for the finally). Only for the facts the report hands out, after the
      * closure: the pass's own walk must not use its result. Not in {@link #kotlinSmartCasts()}.
      */
-    public NonNullFacts withNotNullable(java.util.function.Predicate<Expression> notNullable) {
+    public NonNullFacts withNotNullable(Predicate<Expression> notNullable) {
         this.notNullable = notNullable;
         return this;
     }
@@ -180,13 +184,13 @@ public final class NonNullFacts {
      * Does a call through {@code super} to this method return non-null? Such a call runs the method's own body, not
      * an override's: what null its overrides return does not reach it.
      */
-    public NonNullFacts withSuperCalls(java.util.function.Predicate<MethodInfo> superCallNonNull) {
+    public NonNullFacts withSuperCalls(Predicate<MethodInfo> superCallNonNull) {
         this.superCallNonNull = superCallNonNull;
         return this;
     }
 
     // null when not given (withSuperCalls)
-    private java.util.function.Predicate<MethodInfo> superCallNonNull;
+    private Predicate<MethodInfo> superCallNonNull;
 
     /** The same walk, restricted to what Kotlin's smart cast derives (class comment); walk it before use. */
     public NonNullFacts kotlinSmartCasts() {
@@ -401,7 +405,7 @@ public final class NonNullFacts {
                 effects(eas.expression(), facts);
                 return new Out(facts, true);
             }
-            case io.codelaser.maddi.cst.api.statement.ExplicitConstructorInvocation eci -> {
+            case ExplicitConstructorInvocation eci -> {
                 // 'super(parent.getRetrievalSemantics())' dereferences parent before the body runs (timefold
                 // BavetAbstractConstraintStream: its parameter is non-null whenever the constructor completes)
                 // Not for Kotlin's smart casts: the supertype call's arguments are in the class header, and an init
@@ -819,7 +823,7 @@ public final class NonNullFacts {
         MethodInfo callee = mc.methodInfo();
         if (kotlinSmartCasts || callee == null || callee.isStatic()
             || mc.object() != null && !(unwrap(mc.object()) instanceof VariableExpression ve
-                                        && ve.variable() instanceof io.codelaser.maddi.cst.api.variable.This)) return;
+                                        && ve.variable() instanceof This)) return;
         for (Variable v : atExit.getOrDefault(callee, Set.of())) {
             if (v instanceof KeyPresence kp && kp.map() instanceof FieldReference fr && fr.scopeIsRecursivelyThis()
                 && kp.key() instanceof ParameterInfo p && p.methodInfo() == callee
@@ -1003,7 +1007,7 @@ public final class NonNullFacts {
         if (kotlinSmartCasts || callee == null || callee.isStatic() || walking == null
             || !callee.typeInfo().equals(walking.typeInfo())) return;
         if (mc.object() != null && !(unwrap(mc.object()) instanceof VariableExpression ve
-                                     && ve.variable() instanceof io.codelaser.maddi.cst.api.variable.This)) return;
+                                     && ve.variable() instanceof This)) return;
         if (!callee.access().isPrivate() && !callee.isFinal() && !callee.typeInfo().isFinal()) return;
         facts.addAll(fieldsAtExit.getOrDefault(callee, Set.of()));
     }
@@ -1020,7 +1024,7 @@ public final class NonNullFacts {
         if (facts != null && walking != null && callee.typeInfo().equals(walking.typeInfo())
             && site instanceof MethodCall mc
             && (mc.object() == null || unwrap(mc.object()) instanceof VariableExpression ve
-                                       && ve.variable() instanceof io.codelaser.maddi.cst.api.variable.This)) {
+                                       && ve.variable() instanceof This)) {
             for (Variable v : facts) {
                 if (v instanceof FieldReference fr && fr.scopeIsThis() && !fr.fieldInfo().isStatic()) fields.add(v);
             }
@@ -1078,7 +1082,7 @@ public final class NonNullFacts {
                 if (found[0]) return false;
                 if (x instanceof Lambda || x instanceof MethodReference
                     || x instanceof ConstructorCall cc && cc.anonymousClass() != null
-                    || x instanceof VariableExpression ve && ve.variable() instanceof io.codelaser.maddi.cst.api.variable.This) {
+                    || x instanceof VariableExpression ve && ve.variable() instanceof This) {
                     found[0] = true;
                     return false;
                 }
@@ -1293,7 +1297,7 @@ public final class NonNullFacts {
         if (mc.parameterExpressions().isEmpty() && walking != null
             && mc.methodInfo().typeInfo().equals(walking.typeInfo())
             && (mc.object() == null || unwrap(mc.object()) instanceof VariableExpression ve
-                                       && ve.variable() instanceof io.codelaser.maddi.cst.api.variable.This)) {
+                                       && ve.variable() instanceof This)) {
             set.addAll(predicates.fieldsNonNullWhen(mc.methodInfo(), when == NullPredicates.When.FALSE_IF_NULL));
         }
         List<Expression> arguments = mc.parameterExpressions();
@@ -1346,7 +1350,7 @@ public final class NonNullFacts {
 
     static boolean superCall(MethodCall mc) {
         return mc.object() instanceof VariableExpression ve
-               && ve.variable() instanceof io.codelaser.maddi.cst.api.variable.This t && t.writeSuper();
+               && ve.variable() instanceof This t && t.writeSuper();
     }
 
     /** Is the value of {@code e} certainly not null, given the facts? */
@@ -1357,7 +1361,7 @@ public final class NonNullFacts {
             case NullConstant _ -> false;
             case ConstructorCall _, StringConstant _, StringConcat _, ArrayInitializer _, Lambda _,
                  MethodReference _, ClassExpression _, ConstantExpression<?> _ -> true; // NullConstant is handled above
-            case VariableExpression ve -> ve.variable() instanceof io.codelaser.maddi.cst.api.variable.This
+            case VariableExpression ve -> ve.variable() instanceof This
                                           || facts.contains(ve.variable())
                                           || notNullable != null && !kotlinSmartCasts && notNullable.test(ve);
             // each branch with its condition's facts: 'key = appName != null ? appName : NO_APP_NAME' (#48 A3, nacos

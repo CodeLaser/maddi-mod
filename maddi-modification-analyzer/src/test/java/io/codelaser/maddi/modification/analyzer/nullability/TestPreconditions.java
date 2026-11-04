@@ -1,21 +1,26 @@
 package io.codelaser.maddi.modification.analyzer.nullability;
 
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.ParameterInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-import io.codelaser.maddi.cst.api.statement.IfElseStatement;
-import io.codelaser.maddi.cst.api.statement.Statement;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.stream.Collectors;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+import io.codelaser.maddi.cst.api.expression.MethodCall;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.ParameterInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.statement.IfElseStatement;
+import io.codelaser.maddi.cst.api.statement.Statement;
 
 /**
  * {@link Preconditions}: a parameter its method answers null for with its own exception.
@@ -49,9 +54,9 @@ public class TestPreconditions extends NullabilityFixtures {
     public void rejectsNull() {
         Report report = run("a.b.RJ", REJECTS, Policy.KOTLIN);
         Set<String> rejecting = report.rejectsNull().stream().map(pi -> pi.methodInfo().name() + ":" + pi.name())
-                .collect(Collectors.toCollection(java.util.TreeSet::new));
+                .collect(Collectors.toCollection(TreeSet::new));
         assertEquals("[<init>:text, ensureNotBlank:s, helped:s]", rejecting.toString());
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         // a null test in the method itself already makes the parameter nullable (Policy.nullTests); through a helper
         // it does not: that is the parameter the printer reports, and the opt-in makes nullable
@@ -60,7 +65,7 @@ public class TestPreconditions extends NullabilityFixtures {
 
         Report optIn = run("a.b.RJ2", REJECTS.replace("RJ", "RJ2"),
                 Policy.KOTLIN.withRejectionsNullable());
-        Map<String, String> o = new java.util.TreeMap<>();
+        Map<String, String> o = new TreeMap<>();
         optIn.verdicts().forEach((info, pt) -> o.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("String?", o.get("a.b.RJ2.helped(String):0:s"), o.toString());
         assertEquals("String", o.get("a.b.RJ2.dereferenced(String):0:s"), o.toString());
@@ -108,12 +113,12 @@ public class TestPreconditions extends NullabilityFixtures {
         assertEquals(true, report.useSites().nonNullAt(last, viaObjects.parameters().getFirst()),
                 "Objects.isNull, from the table");
         MethodInfo other = p.findUniqueMethod("other", 1);
-        List<io.codelaser.maddi.cst.api.expression.MethodCall> calls = new java.util.ArrayList<>();
+        List<MethodCall> calls = new ArrayList<>();
         other.methodBody().statements().getFirst().expression().visit(e -> {
-            if (e instanceof io.codelaser.maddi.cst.api.expression.MethodCall mc) calls.add(mc);
+            if (e instanceof MethodCall mc) calls.add(mc);
             return true;
         });
-        io.codelaser.maddi.cst.api.expression.MethodCall trim = calls.stream()
+        MethodCall trim = calls.stream()
                 .filter(c -> "trim".equals(c.methodInfo().name())).findFirst().orElseThrow();
         assertEquals(true, report.useSites().nonNullAt(trim, other.parameters().getFirst()), "isEmpty is true for null");
     }
@@ -164,7 +169,7 @@ public class TestPreconditions extends NullabilityFixtures {
                 String name = "FD" + (++round[0]);
                 Report report = run("a.b." + name, variant.replace("class FD ", "class " + name + " "),
                         policy);
-                Map<String, String> s = new java.util.TreeMap<>();
+                Map<String, String> s = new TreeMap<>();
                 report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName().replace(name, "FD"), k(pt)));
                 if (!"String?".equals(s.get("a.b.FD.find(Class)")) || "String?".equals(s.get("a.b.FD.findOrFail(Class)"))) {
                     out.append(variant.contains("var d") ? "var " : "typed ").append(policy.world()).append(' ')
@@ -252,14 +257,14 @@ public class TestPreconditions extends NullabilityFixtures {
         Report report = run("a.b.PF", PRECONDITIONS, Policy.KOTLIN);
         System.out.println(explain(report));
         Set<String> preconditions = report.preconditions().stream().map(pi -> pi.methodInfo().typeInfo().simpleName()
-                + "." + pi.methodInfo().name() + ":" + pi.name()).collect(Collectors.toCollection(java.util.TreeSet::new));
+                + "." + pi.methodInfo().name() + ":" + pi.name()).collect(Collectors.toCollection(TreeSet::new));
         assertEquals("[Counter.visit:n, Doc.<init>:text, Doc.from:text, IfSt.replace:newstat, PF.checked:n, PF.ensureNotEmpty:s, PF.named:n, PF.show:n, PF.use:e, "
                      + "PF.use:node, PF.use:parent, PF.use:q, PF.use:s, PF.use:v, Printer.visit:n, St.replace:newstat, "
                      + "Visitor.visit:n]", preconditions.toString(),
                 "Sink: Lenient accepts null; Echo: a method reference implements it; Quiet: a lambda that does not "
                 + "throw; IfSt: through super.replace");
         Set<String> nullArguments = report.nullArguments().stream().map(a -> a.parameter().methodInfo().name() + "("
-                + a.argument() + (a.literal() ? ", literal" : "") + ")").collect(Collectors.toCollection(java.util.TreeSet::new));
+                + a.argument() + (a.literal() ? ", literal" : "") + ")").collect(Collectors.toCollection(TreeSet::new));
         assertEquals("[checked(node.next), ensureNotEmpty(node.label), from(node.label), named(null, literal), replace(parent.parent), visit(node.next)]",
                 nullArguments.toString());
 
@@ -283,7 +288,7 @@ public class TestPreconditions extends NullabilityFixtures {
         assertEquals(report.nullArguments().size(), declared.nullArguments().size(), "decided before the policy");
         // what the printers report (CodeLaser/maddi#125): the declared ones that null reached without the policy
         Set<String> nonNull = declared.preconditionsNonNull().stream().map(pi -> pi.methodInfo().typeInfo().simpleName()
-                + "." + pi.methodInfo().name() + ":" + pi.name()).collect(Collectors.toCollection(java.util.TreeSet::new));
+                + "." + pi.methodInfo().name() + ":" + pi.name()).collect(Collectors.toCollection(TreeSet::new));
         assertEquals("[Counter.visit:n, IfSt.replace:newstat, Printer.visit:n, St.replace:newstat, Visitor.visit:n]",
                 nonNull.toString());
         assertTrue(report.preconditionsNonNull().isEmpty(), "the policy is off");

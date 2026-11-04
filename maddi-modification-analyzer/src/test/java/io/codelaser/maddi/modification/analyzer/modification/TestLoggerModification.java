@@ -17,6 +17,14 @@
 
 package io.codelaser.maddi.modification.analyzer.modification;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import java.util.Comparator;
+import java.util.List;
+
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.Test;
+
 import io.codelaser.maddi.cst.api.info.FieldInfo;
 import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
@@ -25,12 +33,6 @@ import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 import io.codelaser.maddi.modification.analyzer.CommonTest;
 import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.Test;
-
-import java.util.List;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * A logger is a {@code @Container} whose log methods modify, but carry {@code @IgnoreModifications}: logging neither
@@ -122,7 +124,7 @@ public class TestLoggerModification extends CommonTest {
                     .filter(m -> List.of("info", "log", "isLoggable", "isInfoEnabled", "setLevel").contains(m.name())
                                  && m.parameters().size() <= 2
                                  && m.parameters().stream().allMatch(p -> !p.parameterizedType().isFunctionalInterface()))
-                    .sorted(java.util.Comparator.comparing(MethodInfo::fullyQualifiedName))
+                    .sorted(Comparator.comparing(MethodInfo::fullyQualifiedName))
                     .forEach(m -> hints.append("  ").append(m.name()).append('/').append(m.parameters().size())
                             .append(" nonModifying=").append(m.isNonModifying())
                             .append(" ignore=").append(m.isIgnoreModification()).append('\n'));

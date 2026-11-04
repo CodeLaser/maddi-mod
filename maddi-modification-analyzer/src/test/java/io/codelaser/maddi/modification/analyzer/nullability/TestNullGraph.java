@@ -1,17 +1,20 @@
 package io.codelaser.maddi.modification.analyzer.nullability;
 
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.type.ParameterizedType;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.util.Map;
+import java.util.TreeMap;
+import java.util.stream.Collectors;
+
 import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import java.util.Map;
-import java.util.stream.Collectors;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.ParameterInfo;
+import io.codelaser.maddi.cst.api.type.ParameterizedType;
 
 /**
  * {@link NullGraph}: the slots of arrays, type arguments and content, how flows tie them, and the closure over them.
@@ -488,10 +491,10 @@ public class TestNullGraph extends NullabilityFixtures {
         assertEquals("String", byName.get("a.b.R.loop(String)"));
         assertEquals("String", byName.get("a.b.R.constant(String)"));
         assertEquals("String?", byName.get("a.b.R.conditional(String)"));
-        Map<String, String> shadows = new java.util.TreeMap<>();
+        Map<String, String> shadows = new TreeMap<>();
         for (MethodInfo mi : report.verdicts().keySet().stream().filter(i -> i instanceof MethodInfo)
                 .map(i -> (MethodInfo) i).toList()) {
-            for (io.codelaser.maddi.cst.api.info.ParameterInfo pi : mi.parameters()) {
+            for (ParameterInfo pi : mi.parameters()) {
                 ParameterizedType shadow = report.reassigned(pi);
                 if (shadow != null) shadows.put(mi.name(), k(shadow));
             }
@@ -515,7 +518,7 @@ public class TestNullGraph extends NullabilityFixtures {
                     static String none() { return "x"; }
                 }
                 """, Policy.NULL_MARKED);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         for (MethodInfo mi : parsed.methods()) {
             String reached = k(report.verdicts().get(mi)).endsWith("?") ? "reached" : "-";
             s.put(mi.name(), reached + (report.reachedByWrittenNull(mi) ? "/written" : ""));
@@ -564,7 +567,7 @@ public class TestNullGraph extends NullabilityFixtures {
                     static Runnable nullHashers() { return capture(new Object[]{null}); }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Object?[]", s.get("a.b.RA.join(Object[]):0:parts"), s.toString());
         assertEquals("String[]", s.get("a.b.RA.bounds(String[]):0:upperBounds"), s.toString());
@@ -606,7 +609,7 @@ public class TestNullGraph extends NullabilityFixtures {
                     static Object useBuilder(Builder b) { return b.add("x", null); }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("String[]", s.get("a.b.VC.bounds(String[]):0:bounds"), s + "\n" + explain(report));
         assertEquals("String[]", s.get("a.b.VC.caller(String[]):0:upper"), s.toString());
@@ -651,7 +654,7 @@ public class TestNullGraph extends NullabilityFixtures {
                     static String callerBuilt(Object x, Object y) { return Joiner.on(',').join(new Object[]{x, y}); }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("String[]", s.get("a.b.JS.Capturer.capture(String[]):0:upperBounds"), s + "\n" + explain(report));
     }
@@ -682,7 +685,7 @@ public class TestNullGraph extends NullabilityFixtures {
                     static String withDefault() { return getOrDefault(null, "d"); }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("E!", s.get("a.b.MT.Entry.getElement()"), s + "\n" + explain(report));
         assertEquals("E!", s.get("a.b.MT.ImmutableEntry.element"), s.toString());
@@ -724,7 +727,7 @@ public class TestNullGraph extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         String all = s + "\n" + explain(report);
         // the result's elements are the argument array's, as Kotlin infers T from it
@@ -764,9 +767,9 @@ public class TestNullGraph extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
-        Map<String, String> l = new java.util.TreeMap<>();
+        Map<String, String> l = new TreeMap<>();
         report.locals().forEach((local, pt) -> l.put(local.name(), k(pt)));
         assertEquals("List<T?>", l.get("list"), l + "\n" + explain(report));
         // a parameter's array: the callers' nulls belong to their instantiations
@@ -800,9 +803,9 @@ public class TestNullGraph extends NullabilityFixtures {
                     static void use(DB db) { db.setClientVersion(null); }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
-        Map<String, String> l = new java.util.TreeMap<>();
+        Map<String, String> l = new TreeMap<>();
         report.locals().forEach((local, pt) -> l.put(local.name(), k(pt)));
         assertTrue(l.get("map").endsWith("String?>"), l + "\n" + s + "\n" + explain(report));
         assertTrue(s.get("a.b.DB.appLabels").endsWith("String?>"), s + "\n" + explain(report));
@@ -829,7 +832,7 @@ public class TestNullGraph extends NullabilityFixtures {
                     static void loader(FR fr) { fr.load(new ConcurrentHashMap<>()); }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         String field = s.get("a.b.FR.map");
         String parameter = s.get("a.b.FR.load(java.util.concurrent.ConcurrentMap):0:snapshot");
@@ -858,7 +861,7 @@ public class TestNullGraph extends NullabilityFixtures {
                     static void use(MV mv) { mv.add(null, null, "v"); }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Set<String?>", s.get("a.b.MV.namespaces()"), s + "\n" + explain(report));
         assertEquals("Iterator<Entry<String?, String>>", s.get("a.b.MV.iterator()"), s + "\n" + explain(report));
@@ -886,7 +889,7 @@ public class TestNullGraph extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("String?[]", s.get("a.b.FC.NAMES"), s + "\n" + explain(report));
         assertEquals("String?[]", s.get("a.b.FC.plus"), s + "\n" + explain(report));
@@ -918,7 +921,7 @@ public class TestNullGraph extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Long", s.get("a.b.WC.LongFunnel.funnel(Long,StringBuilder):0:value"), s + "\n" + explain(report));
     }
@@ -967,7 +970,7 @@ public class TestNullGraph extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         String context = s + "\n" + explain(report);
         // the null is the receiver's: an Ordering<Object?>
@@ -1002,7 +1005,7 @@ public class TestNullGraph extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("List<String?>", s.get("a.b.VA.args"), s + "\n" + explain(report));
         assertEquals("List<String?>", s.get("a.b.VA.main(java.util.List):0:args"), s + "\n" + explain(report));
@@ -1043,7 +1046,7 @@ public class TestNullGraph extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Map<Desc<Prop>?, Prop>", s.get("a.b.GR.getProperties()"), s + "\n" + explain(report));
     }
@@ -1109,10 +1112,10 @@ public class TestNullGraph extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> p = new java.util.TreeMap<>();
+        Map<String, String> p = new TreeMap<>();
         report.parentClasses().forEach((type, pt) -> p.put(type.fullyQualifiedName(), k(pt)));
         assertEquals("LinkedList<String?>", p.get("a.b.SS.OwnerContext"), p + "\n" + explain(report));
-        Map<String, String> l = new java.util.TreeMap<>();
+        Map<String, String> l = new TreeMap<>();
         report.locals().forEach((local, pt) -> l.put(local.name(), k(pt)));
         // a write through a view loop's variable stays there (NOVIEWLOOPWRITES): the map and the superclass keep Space
         assertFalse(p.containsKey("a.b.SS.Monitor"), p + "\n" + l + "\n" + explain(report));
@@ -1147,11 +1150,11 @@ public class TestNullGraph extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         String all = s + "\n" + explain(report);
         assertFalse(s.get("a.b.PC.PredicateFunction.apply(Object)").endsWith("?"), all);
-        Map<String, String> l = new java.util.TreeMap<>();
+        Map<String, String> l = new TreeMap<>();
         report.locals().forEach((local, pt) -> l.put(local.name(), k(pt)));
         assertTrue(l.get("v").endsWith("?"), l + "\n" + all);
     }
@@ -1189,7 +1192,7 @@ public class TestNullGraph extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         String all = s + "\n" + explain(report);
         assertFalse(s.get("a.b.CV.IntConverter.INSTANCE").contains("String?"), all);
@@ -1212,7 +1215,7 @@ public class TestNullGraph extends NullabilityFixtures {
                     static boolean test(Predicate<? super Integer> p) { return p.apply(null); }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("String", s.get("a.b.CS.Edges.apply(String):0:edge"), s.toString());
         assertEquals("String", s.get("a.b.CS.Edges.last"), s.toString());
@@ -1238,7 +1241,7 @@ public class TestNullGraph extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Map<Object, Object>", s.get("a.b.ES.EMPTY"), s.toString());
         assertEquals("Map<Object, Object>", s.get("a.b.ES.other()"), s + "\n" + locals(report));
@@ -1261,7 +1264,7 @@ public class TestNullGraph extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         String field = s.get("a.b.SI.table");
         assertTrue(field != null && field.contains("?>"), s.toString());
@@ -1289,7 +1292,7 @@ public class TestNullGraph extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("String?[]", s.get("a.b.NW.cleared()"), s + "\n" + explain(report));
         assertEquals("String[]", s.get("a.b.NW.kept()"), s.toString());
@@ -1393,7 +1396,7 @@ public class TestNullGraph extends NullabilityFixtures {
                     Entry<E> getEntry(int index) { return entries[index]; }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         String why = s + "\n" + explain(report);
         assertEquals("ImmutableEntry<E!>[]", s.get("a.b.RM.entries"), why);
@@ -1445,7 +1448,7 @@ public class TestNullGraph extends NullabilityFixtures {
                     Entry entry(int i) { return entries[i]; }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         String why = s + "\n" + explain(report);
         assertEquals("Entry[]", s.get("a.b.GL.entries"), why);
@@ -1474,7 +1477,7 @@ public class TestNullGraph extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Object?", s.get("a.b.SR.getIfPresent(Object):0:key"), s.toString());
         assertTrue(locals(report).contains("use.names: List<String>"), "nothing flows back to the caller: " + locals(report));
@@ -1509,7 +1512,7 @@ public class TestNullGraph extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         String l = locals(report);
         assertTrue(l.contains("nulls.withNull: Map<String, String?>"), l);
@@ -1776,7 +1779,7 @@ public class TestNullGraph extends NullabilityFixtures {
                     static Box<String> box() { return new Box<>(null); }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(label(info), k(pt)));
         assertEquals("E?", s.get("embedded"), s.toString());
         // X!: no claim about X, which is the point -- not X?
@@ -1824,7 +1827,7 @@ public class TestNullGraph extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("List<String?>?", s.get("a.b.PT.Builder.items"), s.toString());
         assertEquals("List<String?>", s.get("a.b.PT.items"), s.toString());
@@ -1853,7 +1856,7 @@ public class TestNullGraph extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Map<String, Object?>", s.get("a.b.TR.extract(a.b.TR.Mapper,String)"), s.toString());
         assertEquals("TypeRef<Map<String, Object?>>", s.get("a.b.TR.MAP_TYPE"), s.toString());
@@ -1895,7 +1898,7 @@ public class TestNullGraph extends NullabilityFixtures {
                     }
                 }
                 """);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Number[]", s.get("a.b.EX.D.from(Number[]):0:levels"), s.toString());
         assertEquals("Number?[]", s.get("a.b.EX.handOut(String[],java.util.function.Function,a.b.EX.Def)"),

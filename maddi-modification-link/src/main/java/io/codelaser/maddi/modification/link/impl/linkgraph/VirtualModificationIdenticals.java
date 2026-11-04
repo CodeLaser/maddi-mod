@@ -1,19 +1,21 @@
 package io.codelaser.maddi.modification.link.impl.linkgraph;
 
-import io.codelaser.maddi.modification.prepwork.Util;
-import io.codelaser.maddi.modification.prepwork.variable.Link;
-import io.codelaser.maddi.modification.prepwork.variable.LinkNature;
-import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
-import io.codelaser.maddi.cst.api.variable.Variable;
-
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+
+import io.codelaser.maddi.cst.api.variable.Variable;
+import io.codelaser.maddi.modification.prepwork.Util;
+import io.codelaser.maddi.modification.prepwork.variable.Link;
+import io.codelaser.maddi.modification.prepwork.variable.LinkNature;
+import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
 
 public class VirtualModificationIdenticals {
 
@@ -48,7 +50,7 @@ public class VirtualModificationIdenticals {
     // the join of two alternatives: every group of the other joined in here (overlapping groups merge)
     public void unionWith(VirtualModificationIdenticals other) {
         other.groups.values().forEach(g -> {
-            java.util.Iterator<Variable> it = g.members().iterator();
+            Iterator<Variable> it = g.members().iterator();
             if (!it.hasNext()) return;
             Variable first = it.next();
             while (it.hasNext()) add(first, g.linkNature(), it.next());
@@ -87,7 +89,7 @@ public class VirtualModificationIdenticals {
     }
 
     private void unindexMember(Variable member) {
-        java.util.function.BiConsumer<Variable, Variable> rm = (p, m) -> {
+        BiConsumer<Variable, Variable> rm = (p, m) -> {
             Set<Variable> set = membersByPrefix.get(p);
             if (set != null) {
                 set.remove(m);

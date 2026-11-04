@@ -1,14 +1,15 @@
 package io.codelaser.maddi.modification.link.impl.graph;
 
-import io.codelaser.maddi.modification.prepwork.variable.LinkNature;
-import org.junit.jupiter.api.Test;
+import static io.codelaser.maddi.modification.link.impl.LinkNatureImpl.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
-import static io.codelaser.maddi.modification.link.impl.LinkNatureImpl.*;
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import org.junit.jupiter.api.Test;
+
+import io.codelaser.maddi.modification.prepwork.variable.LinkNature;
 
 public class TestLabeledGraph {
 

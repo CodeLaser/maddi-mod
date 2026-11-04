@@ -17,13 +17,14 @@
 
 package io.codelaser.maddi.aapi.parser;
 
-import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.*;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 
 /**
  * The two knobs that scope a library's hints to what a consumer sees: {@code -Pmaddi.compose.exclude} (Eclipse

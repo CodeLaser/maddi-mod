@@ -17,16 +17,11 @@
 
 package io.codelaser.maddi.modification.analyzer.impl;
 
-import io.codelaser.maddi.modification.common.util.TolerantWrite;
-import io.codelaser.maddi.modification.analyzer.AbstractMethodAnalyzer;
-import io.codelaser.maddi.modification.analyzer.IteratingAnalyzer;
-import io.codelaser.maddi.cst.api.analysis.Message;
-import io.codelaser.maddi.cst.api.analysis.Value;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.ParameterInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.api.variable.Variable;
-import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
+import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.*;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.FALSE;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.TRUE;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.DEPENDENT;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.INDEPENDENT;
 
 import java.util.*;
 import java.util.List;
@@ -34,11 +29,23 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.*;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.FALSE;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.TRUE;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.DEPENDENT;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.INDEPENDENT;
+import io.codelaser.maddi.cst.api.analysis.Message;
+import io.codelaser.maddi.cst.api.analysis.Value;
+import io.codelaser.maddi.cst.api.expression.Expression;
+import io.codelaser.maddi.cst.api.expression.InlineConditional;
+import io.codelaser.maddi.cst.api.expression.Lambda;
+import io.codelaser.maddi.cst.api.expression.MethodCall;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.ParameterInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.statement.ReturnStatement;
+import io.codelaser.maddi.cst.api.variable.FieldReference;
+import io.codelaser.maddi.cst.api.variable.This;
+import io.codelaser.maddi.cst.api.variable.Variable;
+import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
+import io.codelaser.maddi.modification.analyzer.AbstractMethodAnalyzer;
+import io.codelaser.maddi.modification.analyzer.IteratingAnalyzer;
+import io.codelaser.maddi.modification.common.util.TolerantWrite;
 
 public class AbstractMethodAnalyzerImpl extends CommonAnalyzerImpl implements AbstractMethodAnalyzer {
 
@@ -308,7 +315,7 @@ public class AbstractMethodAnalyzerImpl extends CommonAnalyzerImpl implements Ab
         // debug session sees one veto per attempt and has to iterate runs to enumerate them. This pre-pass
         // prints them all at once (site filter on the ABSTRACT method's FQN).
         if (EventualCluster.SITE_DEBUG && EventualCluster.siteDebugMatches(methodInfo.fullyQualifiedName())) {
-            java.util.List<String> blockers = new java.util.ArrayList<>();
+            List<String> blockers = new ArrayList<>();
             for (MethodInfo implementation : concreteImplementations) {
                 Value.SetOfStrings s = implementation.analysis()
                         .getOrDefault(EVENTUALLY_NON_MODIFYING_METHOD, ValueImpl.SetOfStringsImpl.EMPTY_SET);
@@ -420,8 +427,8 @@ public class AbstractMethodAnalyzerImpl extends CommonAnalyzerImpl implements Ab
         boolean[] anyFamilyCall = {false};
         implementation.methodBody().visit(e -> {
             if (!delegating[0]) return false;
-            if (e instanceof TypeInfo || e instanceof io.codelaser.maddi.cst.api.expression.Lambda) return false;
-            if (e instanceof io.codelaser.maddi.cst.api.statement.ReturnStatement rs) {
+            if (e instanceof TypeInfo || e instanceof Lambda) return false;
+            if (e instanceof ReturnStatement rs) {
                 int kind = x(rs.expression(), family);
                 if (kind == FAMILY) anyFamilyCall[0] = true;
                 else if (kind == OTHER) delegating[0] = false;
@@ -438,13 +445,13 @@ public class AbstractMethodAnalyzerImpl extends CommonAnalyzerImpl implements Ab
 
     // a returned expression: a call into the family, free of 'this', a conditional over those ('c ? Stream.of() :
     // x.names()', SwitchEntryImpl.variableStreamDoNotDescend), or anything else
-    private static int x(io.codelaser.maddi.cst.api.expression.Expression x, Set<MethodInfo> family) {
+    private static int x(Expression x, Set<MethodInfo> family) {
         if (x == null || x.isEmpty()) return OTHER;
-        if (x instanceof io.codelaser.maddi.cst.api.expression.MethodCall mc && inFamily(mc.methodInfo(), family)
+        if (x instanceof MethodCall mc && inFamily(mc.methodInfo(), family)
             && mc.parameterExpressions().stream().allMatch(AbstractMethodAnalyzerImpl::thisFree)) {
             return FAMILY;
         }
-        if (x instanceof io.codelaser.maddi.cst.api.expression.InlineConditional ic) {
+        if (x instanceof InlineConditional ic) {
             int t = x(ic.ifTrue(), family), f = x(ic.ifFalse(), family);
             if (t == OTHER || f == OTHER) return OTHER;
             return t == FAMILY || f == FAMILY ? FAMILY : THIS_FREE;
@@ -456,10 +463,10 @@ public class AbstractMethodAnalyzerImpl extends CommonAnalyzerImpl implements Ab
         return family.contains(callee) || callee.overrides().stream().anyMatch(family::contains);
     }
 
-    private static boolean thisFree(io.codelaser.maddi.cst.api.expression.Expression expression) {
+    private static boolean thisFree(Expression expression) {
         return expression.variableStreamDescend().noneMatch(v ->
-                v instanceof io.codelaser.maddi.cst.api.variable.This
-                || v instanceof io.codelaser.maddi.cst.api.variable.FieldReference fr && fr.scopeIsRecursivelyThis());
+                v instanceof This
+                || v instanceof FieldReference fr && fr.scopeIsRecursivelyThis());
     }
 
     /**

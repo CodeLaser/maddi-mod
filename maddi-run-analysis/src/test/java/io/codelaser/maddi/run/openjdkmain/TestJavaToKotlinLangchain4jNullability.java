@@ -1,12 +1,15 @@
 package io.codelaser.maddi.run.openjdkmain;
 
-import io.codelaser.maddi.run.j2k.JavaToKotlinRatchet;
+import java.nio.file.Path;
+
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 
-import java.nio.file.Path;
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import io.codelaser.maddi.run.j2k.JavaToKotlinRatchet;
 
 /**
  * ⛔ THE RATCHET FOR JAVA → KOTLIN TRANSLATION WITH NULLABILITY, a second corpus: langchain4j-core printed as Kotlin
@@ -23,8 +26,8 @@ public class TestJavaToKotlinLangchain4jNullability {
     /* INFO, as TestNullabilityOracleGuava: at DEBUG the analyzer's log fills the test report. */
     @BeforeAll
     public static void beforeAll() {
-        ((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME))
-                .setLevel(ch.qos.logback.classic.Level.INFO);
+        ((Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME))
+                .setLevel(Level.INFO);
     }
 
     @Test
