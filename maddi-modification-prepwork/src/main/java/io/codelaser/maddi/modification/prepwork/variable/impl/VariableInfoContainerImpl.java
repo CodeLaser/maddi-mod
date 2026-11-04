@@ -55,6 +55,13 @@ public class VariableInfoContainerImpl implements VariableInfoContainer {
         if (merge != null && merge.isSet()) merge.get().clearDerived(derived);
     }
 
+    /** The infos this container owns, as {@link #clearDerived} visits them: the initial, the evaluation, the merge. */
+    public void forEachOwnInfo(java.util.function.Consumer<VariableInfoImpl> consumer) {
+        if (previousOrInitial.isRight()) consumer.accept(previousOrInitial.getRight());
+        if (evaluation != null) consumer.accept(evaluation);
+        if (merge != null && merge.isSet()) consumer.accept(merge.get());
+    }
+
     public void setMerge(VariableInfoImpl merge) {
         this.merge.set(merge);
     }

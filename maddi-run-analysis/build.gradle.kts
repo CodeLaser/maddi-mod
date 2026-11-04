@@ -100,6 +100,7 @@ tasks.test {
     System.getProperty("maddi.rewire.histogram")?.let { systemProperty("maddi.rewire.histogram", it) }
     System.getProperty("maddi.rewire.leakCheck")?.let { systemProperty("maddi.rewire.leakCheck", it) }
     System.getProperty("maddi.rewire.analysis")?.let { systemProperty("maddi.rewire.analysis", it) }
+    System.getProperty("maddi.rewire.carry")?.let { systemProperty("maddi.rewire.carry", it) }
     // 12G: the elasticsearch-server closure under PARALLEL=8; TESTXMX overrides (see maddi-run-openjdk)
     jvmArgs("-Xmx" + (System.getenv("TESTXMX") ?: "12G"))
     jvmArgs(javacAddExports)

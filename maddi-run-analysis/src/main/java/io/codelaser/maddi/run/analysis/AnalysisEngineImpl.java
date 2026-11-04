@@ -228,6 +228,14 @@ public class AnalysisEngineImpl implements AnalysisEngine {
                     new File(checkpointDir)));
             LOGGER.info("CHECKPOINT: writing pass-boundary deltas to {}", checkpointDir);
         }
+        if (request.carryFrom() != null) {
+            io.codelaser.maddi.cst.api.info.InfoMapView view = javaInspector.lastRewireInfoMap();
+            if (view == null) throw new IllegalArgumentException("carryFrom without a re-parse that rewired");
+            for (TypeInfo oldType : request.carryFrom()) {
+                io.codelaser.maddi.modification.prepwork.CarryDerived.primaryType(oldType, view);
+            }
+            LOGGER.info("Carried the analyzer output of {} rewired primary type(s)", request.carryFrom().size());
+        }
         // a seeded request is a warm analysis of the objects an earlier analysis left; the environment gate is the
         // CLI's INCREMENTAL=<checkpoint dir>, a cold parse with restored values
         Set<Info> initialDirty = request.seed() != null ? request.seed()
@@ -238,6 +246,10 @@ public class AnalysisEngineImpl implements AnalysisEngine {
             // must not block the fresh, possibly-lowering re-analysis
             // (statement- and variable-level values included: see ClearDerived)
             Consumer<Info> clearHook = io.codelaser.maddi.modification.prepwork.ClearDerived::element;
+            if (request.seedPrevious() != null) {
+                analyzer.setPriorSummaries(io.codelaser.maddi.modification.analyzer.impl.ElementSummary
+                        .ofTypes(request.seedPrevious()));
+            }
             analyzer.analyze(order, request.callGraph(), initialDirty, clearHook);
         } else if (request.callGraph() != null) {
             analyzer.analyze(order, request.callGraph()); // graph enables worklist narrowing (default ON, NOWORKLIST=1 opts out)
