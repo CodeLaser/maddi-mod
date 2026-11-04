@@ -170,6 +170,14 @@ public interface IteratingAnalyzer {
     }
 
     /**
+     * The early cutoff of the next seeded {@link #analyze}: the previous generation's summaries of the seed's
+     * elements, by fully qualified name; see {@code IteratingAnalyzerImpl.setPriorSummaries}. Default: ignored.
+     */
+    default void setPriorSummaries(java.util.Map<String, String> priorSummaries) {
+        // no-op
+    }
+
+    /**
      * Incremental entry point for the early-cutoff skip (docs/design/analysis-rewiring.md). When {@code initialDirty} is
      * non-null, iteration 1 analyses only those elements (instead of the whole order), the worklist propagates from
      * them through the dependency graph on summary change, and — crucially — the run <em>stops when the worklist is

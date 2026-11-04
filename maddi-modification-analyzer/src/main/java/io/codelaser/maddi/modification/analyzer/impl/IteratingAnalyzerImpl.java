@@ -408,6 +408,27 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
         return certifiedWithoutFrozenValues;
     }
 
+    private java.util.Map<String, String> priorSummaries;
+    private boolean cutoffFellBack;
+
+    /** Whether the last seeded {@link #analyze} with prior summaries fell back to the cold analysis. */
+    public boolean cutoffFellBack() {
+        return cutoffFellBack;
+    }
+
+    /**
+     * The early cutoff of a seeded analysis: the previous generation's {@link ElementSummary} of the seed's elements,
+     * by fully qualified name (null: none). The worklist then stays inside the seed until the seed is certified. When
+     * no seed element with dependents outside the seed differs from its prior summary, the dependents' carried values
+     * still hold and the run ends there. Otherwise (a seed element without a prior counts as different) the run falls
+     * back to the cold analysis, every derived value cleared ({@link #cutoffFellBack()}): re-deriving only what the
+     * change reaches, from carried values, settles elsewhere than a cold run does. Read by the next {@link #analyze}.
+     */
+    @Override
+    public void setPriorSummaries(java.util.Map<String, String> priorSummaries) {
+        this.priorSummaries = priorSummaries;
+    }
+
     /** The reachability rounds of the last {@link #analyze} that threw, and whose verdicts were therefore not written. */
     public int modReachFailures() {
         return modReachFailures;
@@ -474,6 +495,14 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
         // source the clear is a no-op (docs/design/incremental-and-overlay.md §1, "stale values on the seed"). Also
         // the scope of the incremental verification pass and cycle breaking: see scopePass.
         java.util.Set<Info> everAnalyzed = incremental ? new java.util.HashSet<>() : java.util.Set.of();
+        // the early cutoff (setPriorSummaries): the worklist stays inside the seed, and a seed element whose change
+        // would reach outside it waits in 'pending' until the seed is certified; see the cutoff block below
+        java.util.Map<String, String> priors = priorSummaries;
+        priorSummaries = null;
+        boolean cutoff = incremental && priors != null;
+        java.util.Set<Info> cutoffScope = cutoff ? java.util.Set.copyOf(initialDirty) : java.util.Set.of();
+        java.util.Set<Info> pending = new java.util.HashSet<>();
+        if (cutoff) cutoffFellBack = false;
         int iterations = 0;
         int maxIterations = configuration.maxIterations(); // extended per MODREACH re-derivation round
         int modReachRounds = 0; // P2.5: pass <-> re-derivation to joint fixpoint, bounded
@@ -707,6 +736,34 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                               && configuration.stopWhenCycleDetectedAndNoImprovements()
                               && System.getenv("NOPLATEAU") == null
                               && iterations >= 3 && propertiesChanged >= 0.95 * previousPropertiesChanged;
+            if (cutoff && done) {
+                // the early cutoff: the seed is certified on its own (its verification pass and cycle breaking ran
+                // over it alone). Its dependents' carried values were computed against its previous generation:
+                // when no seed element with dependents outside the seed moved, they still hold, and the run is done.
+                // When one moved, re-deriving what it reaches from carried values settles elsewhere than a cold run
+                // (an order the cold schedule never follows; measured on fernflower), so the run falls back to the
+                // cold analysis: every derived value cleared, everything analysed again.
+                cutoff = false;
+                int moved = 0;
+                for (Info c : pending) {
+                    Info mc = mapToOrderElement(c, orderSet);
+                    Info element = mc == null ? c : mc;
+                    String prior = priors.get(element.fullyQualifiedName());
+                    String now = ElementSummary.of(element);
+                    if (prior != null && prior.equals(now)) continue;
+                    if (moved++ < 10) LOGGER.info("Early cutoff: {} moved;\n  prior: {}\n  now:   {}", c, prior, now);
+                }
+                LOGGER.info("Early cutoff: the seed is certified after {} iteration(s); {} of {} seed element(s) with "
+                            + "dependents outside the seed moved", iterations, moved, pending.size());
+                if (moved > 0) {
+                    cutoffFellBack = true;
+                    LOGGER.info("Early cutoff: falling back to the cold analysis of all {} element(s)",
+                            analysisOrder.size());
+                    if (beforeFirstRecompute != null) analysisOrder.forEach(beforeFirstRecompute);
+                    iterate(analysisOrder, dependencyGraph, null, null);
+                    return;
+                }
+            }
             if (iterations == maxIterations || done || plateau) {
                 // clean iff we terminate via a genuine certification (not plateau / maxIterations) with no frozen
                 // optimistic values; re-evaluated on each terminal pass, so a MODREACH re-derivation that continues
@@ -931,11 +988,17 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                     // finding (timefold: ~160 $N.test(...) methods rewriting their summaries per full pass).
                     Info mc = mapToOrderElement(c, orderSet);
                     if (mc != null) next.add(mc);
+                    boolean confined = cutoff && mc != null && cutoffScope.contains(mc);
                     java.util.Set<Info> deps = dependersOf.get(c); // adjacency stays keyed by the raw vertex
                     if (deps != null) {
                         for (Info d : deps) {
                             Info md = mapToOrderElement(d, orderSet);
-                            if (md != null) next.add(md);
+                            if (md == null) continue;
+                            if (confined && !cutoffScope.contains(md)) {
+                                pending.add(c);
+                            } else {
+                                next.add(md);
+                            }
                         }
                     }
                 }
