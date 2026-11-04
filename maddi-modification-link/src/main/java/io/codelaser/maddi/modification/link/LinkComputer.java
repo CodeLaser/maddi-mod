@@ -1,6 +1,8 @@
 package io.codelaser.maddi.modification.link;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
@@ -36,8 +38,8 @@ public interface LinkComputer {
         // no-op by default
     }
 
-    default java.util.Map<MethodInfo, java.util.Set<MethodInfo>> consumedSummaries() {
-        return java.util.Map.of();
+    default Map<MethodInfo, Set<MethodInfo>> consumedSummaries() {
+        return Map.of();
     }
 
     int propertiesChanged();

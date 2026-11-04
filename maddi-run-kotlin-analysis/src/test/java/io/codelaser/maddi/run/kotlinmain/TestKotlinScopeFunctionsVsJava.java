@@ -18,6 +18,7 @@ package io.codelaser.maddi.run.kotlinmain;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -209,7 +210,7 @@ public class TestKotlinScopeFunctionsVsJava {
 
     private static String kotlinStdlibJar() {
         String cp = System.getProperty("maddi.k2.classpath", "");
-        return Stream.of(cp.split(java.io.File.pathSeparator))
+        return Stream.of(cp.split(File.pathSeparator))
                 .filter(p -> Path.of(p).getFileName().toString().matches("kotlin-stdlib-\\d[^-]*\\.jar"))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError(

@@ -1,5 +1,6 @@
 package io.codelaser.maddi.modification.common.util;
 
+import java.lang.annotation.Annotation;
 import java.util.*;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
@@ -304,7 +305,7 @@ abstract class IsolationCore {
         if (typeInfo.isAnnotation()) {
             // an annotation type must implement java.lang.annotation.Annotation (asserted on commit)
             TypeInfo annotation = javaInspector.compiledTypesManager()
-                    .type(java.lang.annotation.Annotation.class);
+                    .type(Annotation.class);
             stub.builder().addInterfaceImplemented(annotation.asSimpleParameterizedType());
             copyMetaAnnotations(typeInfo, stub);
         } else {

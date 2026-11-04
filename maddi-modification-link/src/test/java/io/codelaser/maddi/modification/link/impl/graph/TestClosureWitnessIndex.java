@@ -2,6 +2,8 @@ package io.codelaser.maddi.modification.link.impl.graph;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import java.util.Comparator;
+
 import org.junit.jupiter.api.Test;
 
 import io.codelaser.maddi.modification.link.impl.LinkNatureImpl;
@@ -11,7 +13,7 @@ public class TestClosureWitnessIndex {
     
     @Test
     public void test() {
-        WitnessIndex<String, LinkNature> witnessIndex = new WitnessIndex<>(LinkNature::score, java.util.Comparator.comparing(Object::toString));
+        WitnessIndex<String, LinkNature> witnessIndex = new WitnessIndex<>(LinkNature::score, Comparator.comparing(Object::toString));
         Closure<String, LinkNature> closure = new Closure<>(LinkNature::best);
         closure.add("a", "b", LinkNatureImpl.IS_ELEMENT_OF);
         assertEquals("a ∈ b   \n", closure.print(Object::toString, String::compareTo, witnessIndex));

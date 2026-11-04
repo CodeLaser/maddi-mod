@@ -19,6 +19,7 @@ package io.codelaser.maddi.modification.analyzer.eventual;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.util.ArrayDeque;
 import java.util.Set;
 
 import org.intellij.lang.annotations.Language;
@@ -94,7 +95,7 @@ public class TestEventualClusterAssumptions extends CommonTest {
             // discharge at the contraction is an unconditional verdict of at least immutable-hc. ArrayDeque
             // stands in for the java.util.Set shape: eventual "intent" (faked here), no hc verdict -- every
             // lean on it is doomed mass, so the optimism must be refused and no edge recorded.
-            TypeInfo deque = javaInspector.compiledTypesManager().type(java.util.ArrayDeque.class);
+            TypeInfo deque = javaInspector.compiledTypesManager().type(ArrayDeque.class);
             assertTrue(deque.compilationUnit().externalLibrary(), "harness sanity: ArrayDeque is external");
             deque.findUniqueMethod("addFirst", 1).analysis()
                     .set(PropertyImpl.EVENTUAL_METHOD, ValueImpl.EventualImpl.mark("elements"));

@@ -28,6 +28,9 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import io.codelaser.maddi.annotation.Independent;
 import io.codelaser.maddi.cst.api.analysis.Message;
 import io.codelaser.maddi.cst.api.analysis.Property;
@@ -112,7 +115,7 @@ public class GuardAnalyzerImpl extends CommonAnalyzerImpl implements GuardAnalyz
         this.contractResolution = new ContractResolution(runtime);
     }
 
-    private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger(GuardAnalyzerImpl.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(GuardAnalyzerImpl.class);
     private int overridesWeakeningComputed;
 
     @Override
@@ -922,7 +925,7 @@ public class GuardAnalyzerImpl extends CommonAnalyzerImpl implements GuardAnalyz
             if (parent.typeInfo().compilationUnit().externalLibrary()) continue; // don't police library contracts
             Map<Property, Value> contracts = contractReader.contracts(parent);
             if (!contracts.containsKey(NON_MODIFYING_METHOD)
-                && !io.codelaser.maddi.modification.prepwork.Util.unionOverImplementations(parent)
+                && !Util.unionOverImplementations(parent)
                 && parent.isNonModifying() && methodInfo.isModifying()) {
                 overridesWeakeningComputed++;
                 analyzerMessages.add(MessageImpl.warn(methodInfo, OVERRIDE_WEAKENS_COMPUTED,

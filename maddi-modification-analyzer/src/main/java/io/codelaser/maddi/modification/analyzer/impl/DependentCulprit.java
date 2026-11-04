@@ -19,6 +19,7 @@ package io.codelaser.maddi.modification.analyzer.impl;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Predicate;
 
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.element.Element;
@@ -31,6 +32,7 @@ import io.codelaser.maddi.cst.api.expression.Lambda;
 import io.codelaser.maddi.cst.api.expression.MethodCall;
 import io.codelaser.maddi.cst.api.expression.VariableExpression;
 import io.codelaser.maddi.cst.api.info.FieldInfo;
+import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.statement.ReturnStatement;
@@ -69,7 +71,7 @@ final class DependentCulprit {
                 fieldStep(field));
     }
 
-    private static void writeForReturn(MethodInfo methodInfo, java.util.function.Predicate<Variable> reached,
+    private static void writeForReturn(MethodInfo methodInfo, Predicate<Variable> reached,
                                        Value.Culprit.Step last) {
         if (methodInfo.methodBody() == null) return;
         List<ReturnStatement> returns = new ArrayList<>();
@@ -133,7 +135,7 @@ final class DependentCulprit {
         return Culprits.step(methodInfo, methodInfo, "captures " + reached.simpleName() + ", which is mutable");
     }
 
-    private static void write(io.codelaser.maddi.cst.api.info.Info info, List<Value.Culprit.Step> steps) {
+    private static void write(Info info, List<Value.Culprit.Step> steps) {
         ValueImpl.CulpritImpl culprit = new ValueImpl.CulpritImpl(steps);
         if (info.analysis().haveAnalyzedValueFor(PropertyImpl.DEPENDENT_CULPRIT)) {
             info.analysis().overwrite(PropertyImpl.DEPENDENT_CULPRIT, culprit);
@@ -143,7 +145,7 @@ final class DependentCulprit {
     }
 
     // whether the element reads or writes the variable: the same field (whatever its scope), or the variable itself
-    private static boolean mentions(Element element, java.util.function.Predicate<Variable> variable) {
+    private static boolean mentions(Element element, Predicate<Variable> variable) {
         boolean[] found = {false};
         element.visit((Element e) -> {
             if (found[0]) return false;

@@ -29,6 +29,7 @@ import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.info.TypeParameter;
 import io.codelaser.maddi.cst.api.statement.ForEachStatement;
 import io.codelaser.maddi.cst.api.statement.Statement;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
@@ -65,7 +66,7 @@ public record Report(Map<Info, ParameterizedType> verdicts, Map<Local, Parameter
                      Set<Expression> nonNullCallResults, Set<ParameterInfo> preconditions,
                      List<NullArgument> nullArguments, Set<ParameterInfo> preconditionsNonNull,
                      Set<ParameterInfo> rejectsNull, Set<Object> writtenReach,
-                     Set<io.codelaser.maddi.cst.api.info.TypeParameter> nonNullTypeParameters,
+                     Set<TypeParameter> nonNullTypeParameters,
                      Map<TypeInfo, ParameterizedType> parentClasses)
         implements NullabilityFacts {
 
@@ -77,7 +78,7 @@ public record Report(Map<Info, ParameterizedType> verdicts, Map<Local, Parameter
 
     /** Kotlin: a class or method type parameter the verdicts hold non-null ({@link TypeUses#nonNullBounds}): the printer bounds it by Any. */
     @Override
-    public boolean nonNullTypeParameter(io.codelaser.maddi.cst.api.info.TypeParameter typeParameter) {
+    public boolean nonNullTypeParameter(TypeParameter typeParameter) {
         return nonNullTypeParameters.contains(typeParameter);
     }
 

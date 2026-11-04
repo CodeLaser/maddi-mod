@@ -24,6 +24,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.jar.JarEntry;
 import java.util.jar.JarInputStream;
@@ -80,7 +81,7 @@ public class LoadAnalysisResults {
     // methodLinks, ...) the prepwork codec has no decoder for, and a few whose decoding needs types still being
     // loaded (downcastParameter); a consumer that only wants the published verdicts -- ComposeAnalysisHints, which
     // writes hint sources from a source run -- restricts the load to those.
-    private java.util.function.Predicate<String> propertyKeyFilter = _ -> true;
+    private Predicate<String> propertyKeyFilter = _ -> true;
 
     public LoadAnalysisResults(Runtime runtime, SourceSet sourceSetOfRequest) {
         this.runtime = runtime;
@@ -88,7 +89,7 @@ public class LoadAnalysisResults {
     }
 
     /** Decode only the properties whose key passes {@code filter}; the rest of each results file is skipped. */
-    public LoadAnalysisResults setPropertyKeyFilter(java.util.function.Predicate<String> filter) {
+    public LoadAnalysisResults setPropertyKeyFilter(Predicate<String> filter) {
         this.propertyKeyFilter = Objects.requireNonNull(filter);
         return this;
     }
@@ -470,7 +471,7 @@ public class LoadAnalysisResults {
     }
 
     private static void processData(Codec codec, Codec.Context context, Info info, JSONObject dataJo,
-                                    java.util.function.Predicate<String> keyFilter) {
+                                    Predicate<String> keyFilter) {
         List<Codec.EncodedPropertyValue> epvs = new ArrayList<>();
         for (int i = 1; i < dataJo.size(); i += 2) {
             if (dataJo.get(i) instanceof KeyValuePair kvp2) {

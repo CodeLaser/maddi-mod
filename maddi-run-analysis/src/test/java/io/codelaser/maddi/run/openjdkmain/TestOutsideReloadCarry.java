@@ -26,6 +26,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Predicate;
 
 import javax.tools.JavaCompiler;
 import javax.tools.JavaFileObject;
@@ -41,6 +42,7 @@ import org.junit.jupiter.api.io.TempDir;
 import io.codelaser.maddi.callgraph.ComputeAnalysisOrder;
 import io.codelaser.maddi.callgraph.ComputeCallGraph;
 import io.codelaser.maddi.callgraph.PrimaryTypeUseGraph;
+import io.codelaser.maddi.cst.api.analysis.Property;
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.element.SourceSet;
 import io.codelaser.maddi.cst.api.info.FieldInfo;
@@ -136,7 +138,7 @@ public class TestOutsideReloadCarry {
     // the DERIVED (cross-type) analyzer output: verdicts + link summaries. Precisely the CROSS_TYPE_DERIVED tier --
     // excludes both the parse-time tier the rewire phase already carried (GET_SET_FIELD) and the intrinsic tier
     // prepwork re-derives (VARIABLE_DATA, PART_OF_CONSTRUCTION, ...). Together, phase-carry + prep + this = full output.
-    private static final java.util.function.Predicate<io.codelaser.maddi.cst.api.analysis.Property> DERIVED_OUTPUT =
+    private static final Predicate<Property> DERIVED_OUTPUT =
             AnalysisFingerprint.CROSS_TYPE_DERIVED_ONLY;
 
     /** Carry a type's derived analyzer output onto its rewired copy, via the read-only view. */

@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.modification.analyzer.CommonTest;
+import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
 
 /**
  * Library "view" methods: {@code Collections.synchronizedList(list)} returns an object through which {@code list} can
@@ -45,8 +46,8 @@ public class TestViewMethods extends CommonTest {
     public void test() {
         TypeInfo X = javaInspector.parse("a.b.X", INPUT);
         List<Info> ao = prepWork(X);
-        var iterating = new io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl(javaInspector,
-                new io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl.ConfigurationBuilder()
+        var iterating = new IteratingAnalyzerImpl(javaInspector,
+                new IteratingAnalyzerImpl.ConfigurationBuilder()
                         .setMaxIterations(10)
                         .setModificationViaReachability(true)
                         .build());

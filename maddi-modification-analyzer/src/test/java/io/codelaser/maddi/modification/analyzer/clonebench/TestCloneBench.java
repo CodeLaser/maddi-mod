@@ -151,7 +151,7 @@ public class TestCloneBench extends CommonTest {
         // prep-analyzer/analyzer but shares the one runtime; the clone-bench snippets are independent, and the shared
         // JDK/library analysis is pre-loaded (LoadAnalysisResults), so there are no cross-type writes to race on.
         int parallelism = Integer.getInteger("clonebench.parallelism",
-                Math.max(1, Math.min(java.lang.Runtime.getRuntime().availableProcessors(), 4)));
+                Math.max(1, Math.min(Runtime.getRuntime().availableProcessors(), 4)));
         LOGGER.warn("Analyzing with parallelism {}", parallelism);
 
         AtomicInteger counter = new AtomicInteger();

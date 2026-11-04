@@ -25,12 +25,29 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
 
+import org.apache.commons.io.IOUtils;
+import org.assertj.core.api.Assertions;
+import org.eclipse.collections.api.RichIterable;
+import org.eclipse.collections.impl.factory.Lists;
+import org.hamcrest.Matcher;
+import org.hamcrest.Matchers;
+import org.junit.jupiter.api.extension.ParameterResolutionException;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.platform.commons.JUnitException;
+import org.mockito.Mockito;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.common.collect.ImmutableList;
+import com.google.common.util.concurrent.internal.InternalFutureFailureAccess;
 
 import ch.qos.logback.classic.Level;
 import io.codelaser.maddi.annotation.Immutable;
@@ -41,6 +58,10 @@ import io.codelaser.maddi.inspection.api.integration.JavaInspectorFactory;
 import io.codelaser.maddi.inspection.openjdk.JavaInspectorImpl;
 import io.codelaser.maddi.inspection.resource.InputConfigurationImpl;
 import io.codelaser.maddi.inspection.resource.SourceSetImpl;
+import io.vavr.Value;
+import io.vavr.match.annotation.Patterns;
+import kotlin.Lazy;
+import net.bytebuddy.ByteBuddy;
 
 /**
  * Compiles the hand-written analysis hints in {@code maddi-aapi-archive/src/main/java} into the analysis-result
@@ -123,7 +144,7 @@ public class CompileAnalysisHints {
     }
 
     static int runningJdkRelease() {
-        return java.lang.Runtime.version().feature();
+        return Runtime.version().feature();
     }
 
     /** Compile every configured library into the committed location. */
@@ -177,42 +198,42 @@ public class CompileAnalysisHints {
                 // as for kotlin: the jar must be LOADABLE, through a factory of its own, so that no other library's
                 // class path changes (CodeLaser/maddi#116)
                 compile(new AnalysisHintsCompiler(libraryJavaInspectorFactory("org.assertj.core.api.",
-                        org.assertj.core.api.Assertions.class), null, jdkPreload), library, resultsBase);
+                        Assertions.class), null, jdkPreload), library, resultsBase);
             } else if (GUAVA_LIBRARY.equals(library)) {
                 // the same; failureaccess too: guava's class files reference InternalFutureFailureAccess, a stub
                 // would eat the util.concurrent verdicts the collect hints' signatures reach
                 compile(new AnalysisHintsCompiler(libraryJavaInspectorFactory("com.google.common.",
-                        com.google.common.collect.ImmutableList.class,
-                        com.google.common.util.concurrent.internal.InternalFutureFailureAccess.class), null, jdkPreload),
+                        ImmutableList.class,
+                        InternalFutureFailureAccess.class), null, jdkPreload),
                         library, resultsBase);
             } else if (HAMCREST_LIBRARY.equals(library)) {
                 // as for AssertJ: the jar through a factory of its own (the library-call census, 2026-10-12)
                 compile(new AnalysisHintsCompiler(libraryJavaInspectorFactory("org.hamcrest.",
-                        org.hamcrest.Matchers.class), null, jdkPreload), library, resultsBase);
+                        Matchers.class), null, jdkPreload), library, resultsBase);
             } else if (MOCKITO_LIBRARY.equals(library)) {
                 // as for AssertJ (the verification calls, after the library-call census of 2026-10-12); the jars
                 // Mockito's class files reference too, so that they are not stubbed (JUnit 4 is not on this class path,
                 // objenesis only at run time)
                 compile(new AnalysisHintsCompiler(libraryJavaInspectorFactory("org.mockito.",
-                        org.mockito.Mockito.class, net.bytebuddy.ByteBuddy.class,
-                        org.hamcrest.Matcher.class), null, jdkPreload), library, resultsBase);
+                        Mockito.class, ByteBuddy.class,
+                        Matcher.class), null, jdkPreload), library, resultsBase);
             } else if (COMMONS_IO_LIBRARY.equals(library)) {
                 // as for AssertJ (the library-call census, 2026-10-13)
                 compile(new AnalysisHintsCompiler(libraryJavaInspectorFactory("org.apache.commons.io.",
-                        org.apache.commons.io.IOUtils.class), null, jdkPreload), library, resultsBase);
+                        IOUtils.class), null, jdkPreload), library, resultsBase);
             } else if (JACKSON_LIBRARY.equals(library)) {
                 // the same; jackson-core and -annotations too, which databind's signatures name
                 compile(new AnalysisHintsCompiler(libraryJavaInspectorFactory("com.fasterxml.jackson.",
-                        com.fasterxml.jackson.databind.ObjectMapper.class, com.fasterxml.jackson.core.JsonParser.class,
-                        com.fasterxml.jackson.annotation.JsonInclude.class), null, jdkPreload), library, resultsBase);
+                        ObjectMapper.class, JsonParser.class,
+                        JsonInclude.class), null, jdkPreload), library, resultsBase);
             } else if (JUNIT_PARAMS_LIBRARY.equals(library)) {
                 // junit-jupiter-params is not on the shared factory, which carries junit-jupiter-api only; the api and
                 // platform-commons jars too, which its class files reference (otherwise JUnitException and
                 // ParameterResolutionException are stubbed)
                 compile(new AnalysisHintsCompiler(libraryJavaInspectorFactory("org.junit.jupiter.params.",
-                        org.junit.jupiter.params.provider.Arguments.class,
-                        org.junit.jupiter.api.extension.ParameterResolutionException.class,
-                        org.junit.platform.commons.JUnitException.class), null, jdkPreload), library, resultsBase);
+                        Arguments.class,
+                        ParameterResolutionException.class,
+                        JUnitException.class), null, jdkPreload), library, resultsBase);
             } else {
                 compile(JDK_LIBRARY.equals(library) ? compiler : compilerWithJdk, library, resultsBase);
             }
@@ -224,13 +245,13 @@ public class CompileAnalysisHints {
                 // vavr-match too: io.vavr.Patterns is annotated with io.vavr.match.annotation.Patterns, and without
                 // that class file a stub is created and Patterns' $Cons/$Tuple2/... lose their verdicts
                 compile(new AnalysisHintsCompiler(libraryJavaInspectorFactory("io.vavr.",
-                        io.vavr.Value.class, io.vavr.match.annotation.Patterns.class), null, jdkPreload), library,
+                        Value.class, Patterns.class), null, jdkPreload), library,
                         resultsBase);
             } else if (ECLIPSE_COLLECTIONS_LIBRARY.equals(library)) {
                 // the API jar AND the implementation jar: the hints cover both
                 compile(new AnalysisHintsCompiler(libraryJavaInspectorFactory("org.eclipse.collections.",
-                        org.eclipse.collections.api.RichIterable.class,
-                        org.eclipse.collections.impl.factory.Lists.class), null, jdkPreload), library, resultsBase);
+                        RichIterable.class,
+                        Lists.class), null, jdkPreload), library, resultsBase);
             } else {
                 throw new UnsupportedOperationException("No inspector factory for side-loaded " + library);
             }
@@ -247,7 +268,7 @@ public class CompileAnalysisHints {
         // 'jar:file:...!/...' class file by the JAR'S FILE NAME looked up among the source-set names, and
         // sourceSetOf is what derives that name. A friendlier name makes every type in the jar off-classpath.
         SourceSet maddiAnnotation = SourceSetImpl.sourceSetOf(Immutable.class);
-        SourceSet kotlinStdlib = SourceSetImpl.sourceSetOf(kotlin.Lazy.class);
+        SourceSet kotlinStdlib = SourceSetImpl.sourceSetOf(Lazy.class);
         List<SourceSet> classPath = List.of(javaBase, maddiAnnotation, kotlinStdlib);
 
         return new JavaInspectorFactory() {
@@ -276,7 +297,7 @@ public class CompileAnalysisHints {
     private static JavaInspectorFactory libraryJavaInspectorFactory(String packagePrefix, Class<?>... anchors) {
         SourceSet javaBase = SourceSetImpl.javaBase();
         SourceSet maddiAnnotation = SourceSetImpl.sourceSetOf(Immutable.class);
-        List<SourceSet> libraries = java.util.Arrays.stream(anchors).map(SourceSetImpl::sourceSetOf).toList();
+        List<SourceSet> libraries = Arrays.stream(anchors).map(SourceSetImpl::sourceSetOf).toList();
         List<SourceSet> classPath = new ArrayList<>(List.of(javaBase, maddiAnnotation));
         classPath.addAll(libraries);
         List<SourceSet> dependencies = new ArrayList<>(List.of(maddiAnnotation));

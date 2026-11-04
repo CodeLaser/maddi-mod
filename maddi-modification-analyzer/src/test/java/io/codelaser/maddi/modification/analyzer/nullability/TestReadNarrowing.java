@@ -7,11 +7,14 @@ import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import io.codelaser.maddi.cst.api.expression.Expression;
 import io.codelaser.maddi.cst.api.expression.MethodCall;
 import io.codelaser.maddi.cst.api.expression.VariableExpression;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.statement.LocalVariableCreation;
 import io.codelaser.maddi.cst.api.statement.Statement;
+import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.cst.api.variable.Variable;
 
 /**
@@ -249,8 +252,8 @@ public class TestReadNarrowing extends NullabilityFixtures {
         TypeInfo group = parsed.subTypes().stream().filter(t -> "Group".equals(t.simpleName())).findFirst().orElseThrow();
         MethodInfo buildNode = group.findUniqueMethod("buildNode", 0);
         Statement read = buildNode.methodBody().statements().getFirst();
-        io.codelaser.maddi.cst.api.variable.Variable parent = ((io.codelaser.maddi.cst.api.statement.LocalVariableCreation) read)
-                .localVariable().assignmentExpression() instanceof io.codelaser.maddi.cst.api.expression.MethodCall mc
+        Variable parent = ((LocalVariableCreation) read)
+                .localVariable().assignmentExpression() instanceof MethodCall mc
                 && mc.object() instanceof VariableExpression ve ? ve.variable() : null;
         assertEquals(true, report.useSites().nonNullAt(read, parent), "Group never stores a null parent");
     }
@@ -303,8 +306,8 @@ public class TestReadNarrowing extends NullabilityFixtures {
     private Boolean parentReadNonNull(Report report, String type) {
         TypeInfo t = parsed.subTypes().stream().filter(x -> type.equals(x.simpleName())).findFirst().orElseThrow();
         Statement read = t.findUniqueMethod("up", 0).methodBody().statements().getFirst();
-        var value = ((io.codelaser.maddi.cst.api.statement.LocalVariableCreation) read).localVariable().assignmentExpression();
-        var parent = ((io.codelaser.maddi.cst.api.variable.FieldReference) ((VariableExpression) value).variable())
+        var value = ((LocalVariableCreation) read).localVariable().assignmentExpression();
+        var parent = ((FieldReference) ((VariableExpression) value).variable())
                 .scopeVariable();
         return report.useSites().nonNullAt(read, parent);
     }
@@ -377,7 +380,7 @@ public class TestReadNarrowing extends NullabilityFixtures {
 
     private static boolean movesKnown(Report report, MethodInfo method) {
         Statement read = method.methodBody().statements().getFirst();
-        io.codelaser.maddi.cst.api.expression.Expression size = ((io.codelaser.maddi.cst.api.statement.LocalVariableCreation) read).localVariable().assignmentExpression();
+        Expression size = ((LocalVariableCreation) read).localVariable().assignmentExpression();
         Variable moves = ((VariableExpression) ((MethodCall) size).object()).variable();
         return report.useSites().nonNullAt(read, moves);
     }
@@ -385,8 +388,8 @@ public class TestReadNarrowing extends NullabilityFixtures {
     // the facts on 'parent' when the method's 'String n = parent.name;' starts
     private static boolean parentKnown(Report report, MethodInfo method) {
         Statement read = method.methodBody().statements().getFirst();
-        io.codelaser.maddi.cst.api.variable.FieldReference name = (io.codelaser.maddi.cst.api.variable.FieldReference)
-                ((VariableExpression) ((io.codelaser.maddi.cst.api.statement.LocalVariableCreation) read).localVariable()
+        FieldReference name = (FieldReference)
+                ((VariableExpression) ((LocalVariableCreation) read).localVariable()
                         .assignmentExpression()).variable();
         return report.useSites().nonNullAt(read, ((VariableExpression) name.scope()).variable());
     }

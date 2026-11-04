@@ -19,6 +19,8 @@ package io.codelaser.maddi.modification.common.getset;
 
 import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.GET_SET_FIELD;
 
+import java.util.function.BiConsumer;
+
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.element.Source;
 import io.codelaser.maddi.cst.api.expression.*;
@@ -31,7 +33,7 @@ import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 
 public record ApplyGetSetTranslation(Runtime runtime,
-                                     java.util.function.BiConsumer<MethodInfo, Value.FieldValue> observer)
+                                     BiConsumer<MethodInfo, Value.FieldValue> observer)
         implements TranslationMap {
 
     public ApplyGetSetTranslation(Runtime runtime) {

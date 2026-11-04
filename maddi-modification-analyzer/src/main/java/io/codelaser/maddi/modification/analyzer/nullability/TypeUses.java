@@ -19,14 +19,19 @@ package io.codelaser.maddi.modification.analyzer.nullability;
 
 import static io.codelaser.maddi.modification.analyzer.nullability.Types.*;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 import io.codelaser.maddi.cst.api.element.Element;
+import io.codelaser.maddi.cst.api.expression.AnnotationExpression;
 import io.codelaser.maddi.cst.api.expression.Cast;
 import io.codelaser.maddi.cst.api.expression.ConstructorCall;
 import io.codelaser.maddi.cst.api.expression.Expression;
@@ -37,6 +42,7 @@ import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.info.TypeParameter;
 import io.codelaser.maddi.cst.api.statement.LocalVariableCreation;
 import io.codelaser.maddi.cst.api.type.NullableState;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
@@ -63,7 +69,7 @@ final class TypeUses {
      would otherwise reject, and to any type variable used in such a position. guava LocalCache.kt:1102/1020,
      CollectCollectors.kt:24 (2026-10-18). Gate NONULLMARKEDBOUNDS.
      */
-    final Set<io.codelaser.maddi.cst.api.info.TypeParameter> nonNullTypeParameters = new HashSet<>();
+    final Set<TypeParameter> nonNullTypeParameters = new HashSet<>();
 
     private static final Switches.Gate NULL_MARKED_BOUNDS_OFF = Switches.gate("NONULLMARKEDBOUNDS");
     private static final Switches.Gate MEMBERLESS_BOUNDS_OFF = Switches.gate("NOMEMBERLESSBOUNDS");
@@ -78,7 +84,7 @@ final class TypeUses {
                 packageInfoAnnotations.put(t.packageName(), t.annotations());
             }
         }
-        Set<TypeInfo> types = new java.util.LinkedHashSet<>();
+        Set<TypeInfo> types = new LinkedHashSet<>();
         for (MethodInfo mi : methods) types.add(mi.typeInfo());
         for (FieldInfo fi : fields) types.add(fi.owner());
         // a type without members of its own too: 'interface NullComparatorFactory<Solution_, T> extends
@@ -126,7 +132,7 @@ final class TypeUses {
          Where it cannot be (a @Nullable use, a library's type variable), the position is left unbounded,
          and everything is worked out again without it.
          */
-        Set<io.codelaser.maddi.cst.api.info.TypeParameter> blocked = new HashSet<>();
+        Set<TypeParameter> blocked = new HashSet<>();
         while (true) {
             nonNullTypeParameters.clear();
             for (TypeInfo t : types) {
@@ -135,7 +141,7 @@ final class TypeUses {
                     if (!nullableBound(tp) && !blocked.contains(tp)) nonNullTypeParameters.add(tp);
                 }
             }
-            Set<io.codelaser.maddi.cst.api.info.TypeParameter> conflicts = new HashSet<>();
+            Set<TypeParameter> conflicts = new HashSet<>();
             boolean changed = true;
             while (changed) {
                 changed = false;
@@ -163,8 +169,8 @@ final class TypeUses {
      NOOVERRIDEBOUNDS.
      */
     private boolean overrideFamilyBounds(List<MethodInfo> methods,
-                                         Set<io.codelaser.maddi.cst.api.info.TypeParameter> blocked,
-                                         Set<io.codelaser.maddi.cst.api.info.TypeParameter> conflicts) {
+                                         Set<TypeParameter> blocked,
+                                         Set<TypeParameter> conflicts) {
         boolean changed = false;
         for (MethodInfo mi : methods) {
             int n = mi.typeParameters().size();
@@ -196,7 +202,7 @@ final class TypeUses {
 
     private static final Switches.Gate OVERRIDE_BOUNDS_OFF = Switches.gate("NOOVERRIDEBOUNDS");
 
-    private final Map<String, List<io.codelaser.maddi.cst.api.expression.AnnotationExpression>> packageInfoAnnotations
+    private final Map<String, List<AnnotationExpression>> packageInfoAnnotations
             = new HashMap<>();
 
     // strict: a supertype, or a parameter an override repeats, where the printer cannot write 'B & Any'
@@ -250,8 +256,8 @@ final class TypeUses {
     }
 
     private boolean carryNonNull(ParameterizedType use, Info where, boolean strict, Set<TypeInfo> types,
-                                 Set<io.codelaser.maddi.cst.api.info.TypeParameter> blocked,
-                                 Set<io.codelaser.maddi.cst.api.info.TypeParameter> conflicts) {
+                                 Set<TypeParameter> blocked,
+                                 Set<TypeParameter> conflicts) {
         if (use == null) return false;
         boolean changed = false;
         TypeInfo sup = use.typeInfo();
@@ -298,8 +304,8 @@ final class TypeUses {
 
     private boolean carryInstantiation(ParameterizedType declared, ParameterizedType concrete, MethodInfo callee,
                                        Info where, Set<TypeInfo> types,
-                                       Set<io.codelaser.maddi.cst.api.info.TypeParameter> blocked,
-                                       Set<io.codelaser.maddi.cst.api.info.TypeParameter> conflicts) {
+                                       Set<TypeParameter> blocked,
+                                       Set<TypeParameter> conflicts) {
         if (declared == null || concrete == null || declared.arrays() != concrete.arrays()) return false;
         var position = declared.typeParameter();
         if (position != null) {
@@ -338,7 +344,7 @@ final class TypeUses {
     static final String NULL_MARKED_DEBUG = System.getenv("NULLMARKEDDEBUG");
     private final List<String> debugConflicts = new ArrayList<>();
 
-    private void debugNullMarked(Set<TypeInfo> types, Set<io.codelaser.maddi.cst.api.info.TypeParameter> blocked) {
+    private void debugNullMarked(Set<TypeInfo> types, Set<TypeParameter> blocked) {
         List<String> lines = new ArrayList<>(debugConflicts);
         lines.add("blocked " + blocked.size() + ", non-null " + nonNullTypeParameters.size() + ", package-infos "
                   + packageInfoAnnotations.size());
@@ -349,13 +355,13 @@ final class TypeUses {
             }
         }
         try {
-            java.nio.file.Files.write(java.nio.file.Path.of(NULL_MARKED_DEBUG), lines);
-        } catch (java.io.IOException ignored) {
+            Files.write(Path.of(NULL_MARKED_DEBUG), lines);
+        } catch (IOException ignored) {
         }
     }
 
     // '<T extends @Nullable Object>' (or any @Nullable bound)
-    private static boolean nullableBound(io.codelaser.maddi.cst.api.info.TypeParameter tp) {
+    private static boolean nullableBound(TypeParameter tp) {
         return tp.typeBounds().stream().anyMatch(b -> explicit(b.annotations()) == NullableState.NULLABLE);
     }
 
@@ -375,7 +381,7 @@ final class TypeUses {
         return Boolean.TRUE.equals(marked);
     }
 
-    private static Boolean markedBy(List<io.codelaser.maddi.cst.api.expression.AnnotationExpression> annotations) {
+    private static Boolean markedBy(List<AnnotationExpression> annotations) {
         if (annotations.stream().anyMatch(a -> a.typeInfo() != null && "NullUnmarked".equals(a.typeInfo().simpleName()))) {
             return false;
         }

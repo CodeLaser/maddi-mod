@@ -3,9 +3,11 @@ package io.codelaser.maddi.run.openjdkmain;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -24,6 +26,8 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.modification.common.util.IsolateClass;
@@ -40,8 +44,8 @@ public class TestIsolateFernflowerGroup {
 
     @BeforeAll
     public static void beforeAll() {
-        ((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME))
-                .setLevel(ch.qos.logback.classic.Level.WARN);
+        ((Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME))
+                .setLevel(Level.WARN);
     }
 
     @Test
@@ -68,7 +72,7 @@ public class TestIsolateFernflowerGroup {
         Path out = Path.of("build/isolate/fernflower-domhelper");
         if (Files.exists(out)) {
             try (var walk = Files.walk(out)) {
-                walk.sorted(java.util.Comparator.reverseOrder()).forEach(p -> p.toFile().delete());
+                walk.sorted(Comparator.reverseOrder()).forEach(p -> p.toFile().delete());
             }
         }
         List<Path> files = new ArrayList<>();
@@ -112,7 +116,7 @@ public class TestIsolateFernflowerGroup {
             }
             return sb.toString();
         } catch (IOException e) {
-            throw new java.io.UncheckedIOException(e);
+            throw new UncheckedIOException(e);
         }
     }
 }

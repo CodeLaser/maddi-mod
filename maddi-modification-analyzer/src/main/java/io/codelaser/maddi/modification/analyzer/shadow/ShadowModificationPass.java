@@ -4,10 +4,13 @@ import static io.codelaser.maddi.modification.prepwork.callgraph.ComputePartOfCo
 import static io.codelaser.maddi.modification.prepwork.callgraph.ComputePartOfConstructionFinalField.PART_OF_CONSTRUCTION;
 
 import java.util.*;
+import java.util.function.BiConsumer;
+import java.util.function.Predicate;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.codelaser.maddi.cst.api.analysis.Property;
 import io.codelaser.maddi.cst.api.analysis.PropertyValueMap;
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.element.Element;
@@ -15,14 +18,17 @@ import io.codelaser.maddi.cst.api.element.SourceSet;
 import io.codelaser.maddi.cst.api.expression.AnnotationExpression;
 import io.codelaser.maddi.cst.api.expression.Assignment;
 import io.codelaser.maddi.cst.api.expression.ConstructorCall;
+import io.codelaser.maddi.cst.api.expression.Expression;
 import io.codelaser.maddi.cst.api.expression.Lambda;
 import io.codelaser.maddi.cst.api.expression.MethodCall;
 import io.codelaser.maddi.cst.api.expression.MethodReference;
+import io.codelaser.maddi.cst.api.expression.TypeExpression;
 import io.codelaser.maddi.cst.api.expression.VariableExpression;
 import io.codelaser.maddi.cst.api.info.*;
 import io.codelaser.maddi.cst.api.statement.Block;
 import io.codelaser.maddi.cst.api.statement.LocalTypeDeclaration;
 import io.codelaser.maddi.cst.api.statement.Statement;
+import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.api.variable.DependentVariable;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.cst.api.variable.LocalVariable;
@@ -34,6 +40,7 @@ import io.codelaser.maddi.modification.common.AnalysisHelper;
 import io.codelaser.maddi.modification.common.util.Culprits;
 import io.codelaser.maddi.modification.common.util.OwnStaticState;
 import io.codelaser.maddi.modification.link.LinkComputer;
+import io.codelaser.maddi.modification.link.impl.Gate;
 import io.codelaser.maddi.modification.link.impl.LinkComputerImpl;
 import io.codelaser.maddi.modification.link.impl.LinkNatureImpl;
 import io.codelaser.maddi.modification.link.impl.LinkVariable;
@@ -246,7 +253,7 @@ public class ShadowModificationPass {
     }
 
     private void diff(List<Divergence> divergences, List<Divergence> reverse, String propertyName,
-                      PropertyValueMap analysis, io.codelaser.maddi.cst.api.analysis.Property property,
+                      PropertyValueMap analysis, Property property,
                       boolean reached, Info info, String detail) {
         Value.Bool frozen = analysis.getOrNull(property, ValueImpl.BoolImpl.class);
         if (frozen == null || !frozen.hasAValue()) return; // undecided: nothing to diff against
@@ -279,7 +286,7 @@ public class ShadowModificationPass {
         // stricter than the engine, downgrading e.g. Element.annotations() (default body
         // List.of()) to the dispatch union the engine deliberately does not compute.
         for (MethodInfo overridden : mi.overrides()) {
-            if (!io.codelaser.maddi.modification.prepwork.Util.unionOverImplementations(overridden)) continue;
+            if (!Util.unionOverImplementations(overridden)) continue;
             // An OUT-OF-ORDER abstract (jar/aapi) with a decided TRUE is authority, not fixpoint
             // optimism: writeVerdicts never visits it, no union is computed over it, and an E6 edge
             // into it would teleport ONE implementation's evidence to EVERY call site of the
@@ -323,7 +330,7 @@ public class ShadowModificationPass {
             taintUnprojected(mi, "no METHOD_LINKS"); // no summary at all: no evidence for this method's own nodes (§10.1)
             return;
         }
-        if (io.codelaser.maddi.modification.prepwork.Util.unionOverImplementations(mi)) {
+        if (Util.unionOverImplementations(mi)) {
             // (a throw-only placeholder too: its body is no evidence for a call that completes, work list O2)
             // no body, no local evidence: the shallow mlv conservatively claims "modified" where the
             // frozen property holds the precise union-over-implementations value. P3 refinement, by
@@ -517,7 +524,7 @@ public class ShadowModificationPass {
     }
 
     /** #25: is the structural twin of a modification property decided TRUE? Absent, it falls back to the deep one. */
-    private static boolean twinTrue(PropertyValueMap analysis, io.codelaser.maddi.cst.api.analysis.Property twin) {
+    private static boolean twinTrue(PropertyValueMap analysis, Property twin) {
         Value.Bool s = analysis.getOrNull(twin, ValueImpl.BoolImpl.class);
         return s != null && s.isTrue();
     }
@@ -570,7 +577,7 @@ public class ShadowModificationPass {
             if (opaque[0]) return false;
             // only a BOUND method reference (this::m, local::m, field::m) captures a receiver whose
             // deferred modification the walk cannot see; an unbound/static one (Type::m) does not
-            if (e instanceof MethodReference mr && !(mr.scope() instanceof io.codelaser.maddi.cst.api.expression.TypeExpression)
+            if (e instanceof MethodReference mr && !(mr.scope() instanceof TypeExpression)
                 || e instanceof ConstructorCall cc && cc.anonymousClass() != null
                 || e instanceof LocalTypeDeclaration) {
                 opaque[0] = true;
@@ -655,7 +662,7 @@ public class ShadowModificationPass {
     private boolean walkable(MethodInfo method) {
         return walkableCache.computeIfAbsent(method, m -> orderMethods.contains(m)
                 && m.methodBody() != null && !m.methodBody().isEmpty()
-                && !io.codelaser.maddi.modification.prepwork.Util.unionOverImplementations(m)
+                && !Util.unionOverImplementations(m)
                 && !bodyIsOpaque(m));
     }
 
@@ -676,7 +683,7 @@ public class ShadowModificationPass {
     /** an in-order abstract with implementations, all in order and overriding it: its union is the E6 edges' */
     private boolean e6Rederivable(MethodInfo method) {
         if (!orderMethods.contains(method)
-            || !io.codelaser.maddi.modification.prepwork.Util.unionOverImplementations(method)
+            || !Util.unionOverImplementations(method)
             || explicitlyContractedModified(method)) return false;
         Value.SetOfMethodInfo impls = method.analysis().getOrDefault(PropertyImpl.IMPLEMENTATIONS,
                 ValueImpl.SetOfMethodInfoImpl.EMPTY);
@@ -699,7 +706,7 @@ public class ShadowModificationPass {
 
     private void handleBlock(MethodInfo mi, Block block) {
         for (Statement statement : block.statements()) {
-            Set<Block> subBlocks = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+            Set<Block> subBlocks = Collections.newSetFromMap(new IdentityHashMap<>());
             statement.subBlockStream().forEach(sb -> {
                 subBlocks.add(sb);
                 handleBlock(mi, sb);
@@ -745,7 +752,7 @@ public class ShadowModificationPass {
                     // it onto our argument. That is the same "teleport" the E6 out-of-order guard above exists
                     // to prevent. Caught in 3s by the MODREACH variant of
                     // TestIgnoreModificationsOnFunctionalParameter, which is why that fast twin exists.
-                    io.codelaser.maddi.cst.api.type.ParameterizedType receiverType =
+                    ParameterizedType receiverType =
                             mc.object() == null ? null : mc.object().parameterizedType();
                     if (!disclaimed) {
                         handleCallSite(mi, vd, mc.methodInfo(), mc.analysis(), mc.parameterExpressions(), receiverType,
@@ -800,7 +807,7 @@ public class ShadowModificationPass {
             // getOrDefault FALSE): an abstract in-order callee whose verdict never decides — a SAM
             // whose only implementations are lambdas, never order elements — was treated as modifying
             // at this very call site; the pass must not read that undecidedness as absence of evidence
-            if (io.codelaser.maddi.modification.prepwork.Util.unionOverImplementations(callee)) {
+            if (Util.unionOverImplementations(callee)) {
                 if (!callee.isIgnoreModification() && !callee.isFinalizer()
                     && callee.analysis().getOrNull(PropertyImpl.NON_MODIFYING_METHOD, ValueImpl.BoolImpl.class) == null) {
                     seedWithOrigin(callee, mi, "undecided abstract callee");
@@ -823,7 +830,7 @@ public class ShadowModificationPass {
     }
 
     /** @see io.codelaser.maddi.modification.link.impl.MethodModification the engine-side twin of this rule */
-    private boolean receiverDisclaimed(io.codelaser.maddi.cst.api.expression.Expression receiver) {
+    private boolean receiverDisclaimed(Expression receiver) {
         return receiver instanceof VariableExpression ve
                && Util.variableAndScopes(ve.variable()).anyMatch(Variable::isIgnoreModifications);
     }
@@ -884,8 +891,8 @@ public class ShadowModificationPass {
     }
 
     private void handleCallSite(MethodInfo mi, VariableData vd, MethodInfo callee, PropertyValueMap analysis,
-                                List<io.codelaser.maddi.cst.api.expression.Expression> argumentExpressions,
-                                io.codelaser.maddi.cst.api.type.ParameterizedType receiverType,
+                                List<Expression> argumentExpressions,
+                                ParameterizedType receiverType,
                                 Variable receiver) {
         if (callee == null || callee.parameters().isEmpty()) return;
         // engine mirror (MethodModification.functionalReceiver): the SAM of one of our own functional parameters
@@ -901,7 +908,7 @@ public class ShadowModificationPass {
             // frontier: they must not receive an optimistic TRUE at cutover (§10.1).
             if (callee.methodBody() != null && !callee.methodBody().isEmpty() && !callee.isAbstract()) {
                 missingArgLinkAnalyzedCallees.merge(callee.fullyQualifiedName(), 1, Integer::sum);
-                for (io.codelaser.maddi.cst.api.expression.Expression arg : argumentExpressions) {
+                for (Expression arg : argumentExpressions) {
                     projectReceiverChain(mi, vd, arg, null).forEach(node ->
                             taint(node, "call to " + callee + " in " + mi + " without argument links"));
                 }
@@ -919,7 +926,7 @@ public class ShadowModificationPass {
                             }
                         }
                     } else if (cpi.index() < argumentExpressions.size()) {
-                        io.codelaser.maddi.cst.api.expression.Expression arg = argumentExpressions.get(cpi.index());
+                        Expression arg = argumentExpressions.get(cpi.index());
                         if (arg instanceof VariableExpression ve && Util.isHiddenContentField(ve.variable())) continue;
                         for (Object node : projectReceiverChain(mi, vd, arg, null)) {
                             addEdge(cpi, node);
@@ -1006,7 +1013,7 @@ public class ShadowModificationPass {
     // TestOptimisticModificationShapes.o1c).
     // ... and by the OUTER callee, the method invoked on the chain's result (null: an argument), which decides which
     // of the inner callee's return-value links carry the modification (followsReturnLink)
-    private final Map<MethodInfo, Map<io.codelaser.maddi.cst.api.expression.Expression, Map<MethodInfo, Set<Object>>>>
+    private final Map<MethodInfo, Map<Expression, Map<MethodInfo, Set<Object>>>>
             receiverChainCache = new HashMap<>();
 
     // A chain can lead back to itself: a view local projects onto the view's argument (projectViewLocal), and that
@@ -1014,13 +1021,13 @@ public class ShadowModificationPass {
     // is marked in progress (its depth) before it is computed; a re-entry returns nothing, the outer computation
     // collecting the rest. A result that read an entry still in progress below it is incomplete and is not cached:
     // only the outermost entry of such a cycle, which has seen all of it, is.
-    private final Map<MethodInfo, Map<io.codelaser.maddi.cst.api.expression.Expression, Map<MethodInfo, Integer>>>
+    private final Map<MethodInfo, Map<Expression, Map<MethodInfo, Integer>>>
             receiverChainInProgress = new HashMap<>();
     private int receiverChainDepth;
     private int receiverChainLowestReentry = Integer.MAX_VALUE;
 
     private Set<Object> projectReceiverChain(MethodInfo mi, VariableData vd,
-                                             io.codelaser.maddi.cst.api.expression.Expression receiver,
+                                             Expression receiver,
                                              MethodInfo outer) {
         if (receiver == null) return Set.of();
         Map<MethodInfo, Set<Object>> cache = receiverChainCache.computeIfAbsent(mi, _ -> new IdentityHashMap<>())
@@ -1055,7 +1062,7 @@ public class ShadowModificationPass {
     }
 
     private Set<Object> computeReceiverChain(MethodInfo mi, VariableData vd,
-                                             io.codelaser.maddi.cst.api.expression.Expression receiver,
+                                             Expression receiver,
                                              MethodInfo outer) {
         switch (receiver) {
             case null -> {
@@ -1121,7 +1128,7 @@ public class ShadowModificationPass {
                     for (Link link : mlv.ofReturnValue()) {
                         if (link.linkNature() != LinkNatureImpl.IS_ELEMENT_OF
                             || !resultFqn.equals(link.from().fullyQualifiedName())) continue;
-                        io.codelaser.maddi.cst.api.expression.Expression container = switch (Util.firstRealVariable(link.to())) {
+                        Expression container = switch (Util.firstRealVariable(link.to())) {
                             case This thisVar when callee.typeInfo().isEqualToOrInnerClassOf(thisVar.typeInfo()) ->
                                     mc.object();
                             case ParameterInfo pi when pi.methodInfo() == callee
@@ -1274,7 +1281,7 @@ public class ShadowModificationPass {
         return node instanceof DeepOnly(Object inner) ? inner : node;
     }
 
-    private static final boolean NO_VIEW_LOCAL = io.codelaser.maddi.modification.link.impl.Gate.isSet("NOVIEWLOCAL");
+    private static final boolean NO_VIEW_LOCAL = Gate.isSet("NOVIEWLOCAL");
 
     /*
      A local initialised with a call whose result is a VIEW of an argument: the callee's summary says
@@ -1304,7 +1311,7 @@ public class ShadowModificationPass {
     }
 
     private Set<Object> projectModificationIdenticals(MethodInfo mi, VariableData vd,
-                                                      io.codelaser.maddi.cst.api.expression.Expression receiver,
+                                                      Expression receiver,
                                                       MethodInfo callee) {
         if (!(receiver instanceof VariableExpression ve) || callee == null) return Set.of();
         VariableInfoContainer vic = vd.variableInfoContainerOrNull(ve.variable().fullyQualifiedName());
@@ -1471,12 +1478,12 @@ public class ShadowModificationPass {
      * annotations — the contracts changed nothing at all.
      */
     public WriteCounts writeVerdicts(List<Info> analysisOrder, Report report,
-                                     java.util.function.Predicate<Info> contracted) {
+                                     Predicate<Info> contracted) {
         AnalysisHelper analysisHelper = new AnalysisHelper();
         int[] counts = new int[8]; // indexed by the write-result constants
         Set<Info> changed = new LinkedHashSet<>();
         boolean[] weakened = {false};
-        java.util.function.BiConsumer<Info, Integer> track = (element, result) -> {
+        BiConsumer<Info, Integer> track = (element, result) -> {
             if (result == DOWNGRADED || result == DECIDED_FALSE) weakened[0] = true;
             if (result == DOWNGRADED || result == DECIDED_FALSE || result == DECIDED_TRUE
                 || result == REVERSE_UPGRADED) {
@@ -1535,7 +1542,7 @@ public class ShadowModificationPass {
      round: a later MODREACH round can reach it along another chain. An element left unmodified keeps a stale one
      from an earlier round, if any, which the consumers ignore (they show a why only beside its annotation).
      */
-    private void writeCulprit(Info info, io.codelaser.maddi.cst.api.analysis.Property property, Report report) {
+    private void writeCulprit(Info info, Property property, Report report) {
         if (!recordSites || !report.reached().contains(info)) return;
         Value.Bool value = info.analysis().getOrNull(property, ValueImpl.BoolImpl.class);
         if (value == null || !value.isFalse()) return;
@@ -1617,7 +1624,7 @@ public class ShadowModificationPass {
 
     // a library callee whose verdict is the defaults analyzer's assumption, not an annotation's statement
     private static boolean assumed(Object node) {
-        io.codelaser.maddi.cst.api.analysis.Property property = switch (node) {
+        Property property = switch (node) {
             case MethodInfo _ -> PropertyImpl.NON_MODIFYING_METHOD;
             case ParameterInfo _ -> PropertyImpl.UNMODIFIED_PARAMETER;
             default -> null;
@@ -1650,7 +1657,7 @@ public class ShadowModificationPass {
     private static final int NO_CHANGE = 0, DOWNGRADED = 1, DECIDED_FALSE = 2, DECIDED_TRUE = 3,
             LEFT_UNDECIDED = 4, REVERSE_KEPT = 5, REVERSE_UPGRADED = 6, CONTRACT_KEPT = 7;
 
-    private int write(PropertyValueMap analysis, io.codelaser.maddi.cst.api.analysis.Property property,
+    private int write(PropertyValueMap analysis, Property property,
                       boolean reached, boolean tainted, boolean immutableType, Object element,
                       boolean contracted) {
         Value.Bool current = analysis.getOrNull(property, ValueImpl.BoolImpl.class);
@@ -1738,7 +1745,7 @@ public class ShadowModificationPass {
     of the engine's level rule (ReceiverLevel): a call cannot modify a container whose own fields cannot change,
     whatever it holds.
      */
-    private boolean immutableForModification(io.codelaser.maddi.cst.api.type.ParameterizedType pt) {
+    private boolean immutableForModification(ParameterizedType pt) {
         return analysisHelper.typeImmutable(pt).isImmutable()
                || ReceiverLevel.enabled() && ReceiverLevel.immutableBaseType(pt);
     }

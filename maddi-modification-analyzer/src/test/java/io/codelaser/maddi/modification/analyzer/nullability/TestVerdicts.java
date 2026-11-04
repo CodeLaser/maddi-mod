@@ -2,8 +2,11 @@ package io.codelaser.maddi.modification.analyzer.nullability;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.stream.Collectors;
 
 import org.intellij.lang.annotations.Language;
@@ -11,6 +14,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.statement.LocalVariableCreation;
 
 /**
  * {@link Verdicts}: what the verdicts make of the closure, stored-only parameters and asserted locals.
@@ -79,10 +83,10 @@ public class TestVerdicts extends NullabilityFixtures {
                 nonNull.block: Block
                 reassigned.block: Block?""", locals(report));
         // the printer's lookup, by declaring element
-        List<String> asserted = new java.util.ArrayList<>();
+        List<String> asserted = new ArrayList<>();
         for (MethodInfo mi : parsed.methods()) {
             mi.methodBody().visit(e -> {
-                if (e instanceof io.codelaser.maddi.cst.api.statement.LocalVariableCreation lvc) {
+                if (e instanceof LocalVariableCreation lvc) {
                     lvc.localVariableStream().filter(lv -> report.assertedAtDeclaration(mi, lvc, lv))
                             .forEach(lv -> asserted.add(mi.name() + "." + lv.simpleName()));
                 }
@@ -123,10 +127,10 @@ public class TestVerdicts extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        List<String> asserted = new java.util.ArrayList<>();
+        List<String> asserted = new ArrayList<>();
         for (MethodInfo mi : parsed.methods()) {
             mi.methodBody().visit(e -> {
-                if (e instanceof io.codelaser.maddi.cst.api.statement.LocalVariableCreation lvc) {
+                if (e instanceof LocalVariableCreation lvc) {
                     lvc.localVariableStream().filter(lv -> report.assertedAtDeclaration(mi, lvc, lv))
                             .forEach(lv -> asserted.add(mi.name() + "." + lv.simpleName()));
                 }
@@ -173,11 +177,11 @@ public class TestVerdicts extends NullabilityFixtures {
                 }
                 """, Policy.KOTLIN);
         System.out.println(explain(report));
-        List<String> asserted = new java.util.ArrayList<>();
-        List<String> unobserved = new java.util.ArrayList<>();
+        List<String> asserted = new ArrayList<>();
+        List<String> unobserved = new ArrayList<>();
         for (MethodInfo mi : parsed.methods()) {
             mi.methodBody().visit(e -> {
-                if (e instanceof io.codelaser.maddi.cst.api.statement.LocalVariableCreation lvc) {
+                if (e instanceof LocalVariableCreation lvc) {
                     lvc.localVariableStream().forEach(lv -> {
                         if (report.assertedAtDeclaration(mi, lvc, lv)) asserted.add(mi.name() + "." + lv.simpleName());
                         if (report.unobservedBeforeDereference(mi, lvc, lv)) {
@@ -188,8 +192,8 @@ public class TestVerdicts extends NullabilityFixtures {
                 return true;
             });
         }
-        java.util.Collections.sort(asserted);
-        java.util.Collections.sort(unobserved);
+        Collections.sort(asserted);
+        Collections.sort(unobserved);
         assertEquals("[alias.block, key.from, key.to, next.block, range.block]", asserted.toString());
         // key.from: fernflower ControlFlowGraph:337, 'to = instrBlocks.get(...)' reads the container, not 'from';
         // range.block: ControlFlowGraph:351, 'protectedRange.add(block)' refers to it;
@@ -228,7 +232,7 @@ public class TestVerdicts extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Executor?", s.get("a.b.RA.Builder.executor(java.util.concurrent.Executor):0:executor"), s.toString());
         assertEquals("String", s.get("a.b.RA.Builder.name(String):0:name"), s.toString());
@@ -261,7 +265,7 @@ public class TestVerdicts extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("String", s.get("a.b.SO.Switch.replace(String,String):1:newValue"), s.toString());
         assertEquals("String", s.get("a.b.SO.Statement.replace(String,String):1:newValue"), s.toString());

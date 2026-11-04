@@ -39,7 +39,7 @@ import io.codelaser.maddi.modification.prepwork.io.DecoratorImpl;
 
 class DecoratorWithComments extends DecoratorImpl {
 
-    private final io.codelaser.maddi.cst.api.runtime.Runtime runtime;
+    private final Runtime runtime;
     private final Map<Element, Element> translationMap;
     private final Function<Element, AnalysisHintsParser.Data> dataProvider;
     private final Function<Element, ShallowAnalyzer.InfoData> infoDataProvider;

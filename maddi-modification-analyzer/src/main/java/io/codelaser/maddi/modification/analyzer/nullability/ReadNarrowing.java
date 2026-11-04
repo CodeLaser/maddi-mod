@@ -25,7 +25,9 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Stream;
 
+import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.expression.ArrayInitializer;
 import io.codelaser.maddi.cst.api.expression.Assignment;
 import io.codelaser.maddi.cst.api.expression.ConstantExpression;
@@ -47,6 +49,7 @@ import io.codelaser.maddi.cst.api.statement.ExplicitConstructorInvocation;
 import io.codelaser.maddi.cst.api.statement.Statement;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
+import io.codelaser.maddi.cst.api.variable.This;
 import io.codelaser.maddi.modification.prepwork.Util;
 
 /**
@@ -125,9 +128,9 @@ final class ReadNarrowing {
     }
 
     // the values a constructor's body assigns to 'this.fi'
-    private static java.util.stream.Stream<Expression> assignmentsOf(MethodInfo constructor, FieldInfo fi) {
+    private static Stream<Expression> assignmentsOf(MethodInfo constructor, FieldInfo fi) {
         Block body = constructor.methodBody();
-        if (body == null) return java.util.stream.Stream.of();
+        if (body == null) return Stream.of();
         List<Expression> values = new ArrayList<>();
         body.visit(e -> {
             if (e instanceof Assignment a && a.variableTarget() instanceof FieldReference fr && fr.fieldInfo() == fi
@@ -200,7 +203,7 @@ final class ReadNarrowing {
             if (nullClasses.isEmpty()) return NarrowedReads.NONE;
             Map<MethodInfo, FieldInfo> getters = new HashMap<>();
             for (MethodInfo mi : index.analysed) {
-                io.codelaser.maddi.cst.api.analysis.Value.FieldValue fv = mi.getSetField();
+                Value.FieldValue fv = mi.getSetField();
                 if (fv == null || fv.field() == null || fv.setter() || fv.hasIndex() || mi.isStatic()
                     || !mi.parameters().isEmpty() || index.implementations.containsKey(mi)
                     || !nullClasses.containsKey(fv.field())) continue;
@@ -297,7 +300,7 @@ final class ReadNarrowing {
             return switch (x) {
                 case VariableExpression ve -> switch (ve.variable()) {
                     case ParameterInfo pi -> env.containsKey(pi) ? env.get(pi) : reached.contains(pi) || external.contains(pi);
-                    case io.codelaser.maddi.cst.api.variable.This _ -> false;
+                    case This _ -> false;
                     case FieldReference fr when !Util.virtual(fr) -> reached.contains(fr.fieldInfo())
                                                                      || external.contains(fr.fieldInfo());
                     default -> true;

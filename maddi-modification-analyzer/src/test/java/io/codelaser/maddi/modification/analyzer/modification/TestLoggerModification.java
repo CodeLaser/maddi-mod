@@ -19,6 +19,7 @@ package io.codelaser.maddi.modification.analyzer.modification;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import java.util.Comparator;
 import java.util.List;
 
 import org.intellij.lang.annotations.Language;
@@ -123,7 +124,7 @@ public class TestLoggerModification extends CommonTest {
                     .filter(m -> List.of("info", "log", "isLoggable", "isInfoEnabled", "setLevel").contains(m.name())
                                  && m.parameters().size() <= 2
                                  && m.parameters().stream().allMatch(p -> !p.parameterizedType().isFunctionalInterface()))
-                    .sorted(java.util.Comparator.comparing(MethodInfo::fullyQualifiedName))
+                    .sorted(Comparator.comparing(MethodInfo::fullyQualifiedName))
                     .forEach(m -> hints.append("  ").append(m.name()).append('/').append(m.parameters().size())
                             .append(" nonModifying=").append(m.isNonModifying())
                             .append(" ignore=").append(m.isIgnoreModification()).append('\n'));

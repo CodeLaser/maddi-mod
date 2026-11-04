@@ -41,6 +41,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import io.codelaser.maddi.callgraph.ComputeAnalysisOrder;
 import io.codelaser.maddi.callgraph.ComputeCallGraph;
+import io.codelaser.maddi.callgraph.PrimaryTypeUseGraph;
 import io.codelaser.maddi.cst.api.analysis.Property;
 import io.codelaser.maddi.cst.api.info.FieldInfo;
 import io.codelaser.maddi.cst.api.info.Info;
@@ -168,7 +169,7 @@ public class TestEarlyCutoffSkip {
         Files.writeString(baseFile, "// a comment\n\n" + BASE);
         JavaInspector.ReloadResult rr = javaInspector.reloadSources(inputConfiguration(), Map.of());
         Set<TypeInfo> changed = rr.sourceHasChanged();
-        Set<TypeInfo> dependents = new io.codelaser.maddi.callgraph.PrimaryTypeUseGraph(
+        Set<TypeInfo> dependents = new PrimaryTypeUseGraph(
                 ccg0.graph()).dependentsOf(changed);
         JavaInspector.Invalidated inv = ti ->
                 changed.contains(ti) ? INVALID : dependents.contains(ti) ? REWIRE : UNCHANGED;

@@ -21,6 +21,7 @@ import static io.codelaser.maddi.modification.analyzer.nullability.Types.*;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -29,6 +30,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Stream;
 
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.element.Element;
@@ -49,6 +51,7 @@ import io.codelaser.maddi.cst.api.statement.Block;
 import io.codelaser.maddi.cst.api.statement.ExpressionAsStatement;
 import io.codelaser.maddi.cst.api.statement.ForEachStatement;
 import io.codelaser.maddi.cst.api.statement.ForStatement;
+import io.codelaser.maddi.cst.api.statement.IfElseStatement;
 import io.codelaser.maddi.cst.api.statement.LocalVariableCreation;
 import io.codelaser.maddi.cst.api.statement.ReturnStatement;
 import io.codelaser.maddi.cst.api.statement.Statement;
@@ -181,7 +184,7 @@ final class CallResults {
      'subRange.lowerBound' in the other, made Range.lowerBound and ImmutableRangeSet's 'Cut<C>?' nullable,
      2026-10-17). Only an if without else whose block ends in a throw or return.
      */
-    final Set<Statement> deadNullAssignments = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+    final Set<Statement> deadNullAssignments = Collections.newSetFromMap(new IdentityHashMap<>());
 
     void deadNullAssignments(Block block) {
         List<Statement> statements = block.statements();
@@ -189,7 +192,7 @@ final class CallResults {
             Statement statement = statements.get(i);
             for (Block sub : statement.subBlocks()) deadNullAssignments(sub);
             if (i + 1 >= statements.size()
-                || !(statements.get(i + 1) instanceof io.codelaser.maddi.cst.api.statement.IfElseStatement ifs)
+                || !(statements.get(i + 1) instanceof IfElseStatement ifs)
                 || ifs.elseBlock() != null && !ifs.elseBlock().isEmpty() || !exits(ifs.block())) {
                 continue;
             }
@@ -824,7 +827,7 @@ final class CallResults {
         if (lib != null) {
             // not a member Kotlin itself types nullable ('Map.get(k): V?'): the local must then be declared so
             if (!(target instanceof Local && seedStatement != null && deadNullAssignments.contains(seedStatement)
-                  && java.util.stream.Stream.concat(java.util.stream.Stream.of(callee), overrides(callee).stream())
+                  && Stream.concat(Stream.of(callee), overrides(callee).stream())
                           .noneMatch(m -> Contracts.KOTLIN_COLLECTIONS.contains(m.typeInfo().fullyQualifiedName())))) {
                 seeds.seedIndirect(target, "assigned " + lib);
             } else if (!GUARDED_LOCALS_OFF.get()) {

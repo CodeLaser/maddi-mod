@@ -20,6 +20,9 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.expression.ConstructorCall;
 import io.codelaser.maddi.cst.api.expression.MethodCall;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
@@ -53,8 +56,8 @@ public class TestLibraryCallCensus {
 
     @BeforeAll
     public static void beforeAll() {
-        ((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME))
-                .setLevel(ch.qos.logback.classic.Level.WARN);
+        ((Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME))
+                .setLevel(Level.WARN);
     }
 
     // library -> {calls, members, calls without hints, modifying calls}, per corpus and over all of them
@@ -168,7 +171,7 @@ public class TestLibraryCallCensus {
         return r + ":" + ps;
     }
 
-    private static String state(io.codelaser.maddi.cst.api.analysis.Value.Nullability n) {
+    private static String state(Value.Nullability n) {
         return switch (n.state()) {
             case NONNULL -> "N";
             case NULLABLE -> "Q";

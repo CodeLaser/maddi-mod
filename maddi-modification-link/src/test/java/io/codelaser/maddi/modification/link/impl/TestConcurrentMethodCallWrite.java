@@ -22,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -83,7 +84,7 @@ public class TestConcurrentMethodCallWrite extends CommonTest {
                 for (Future<?> future : futures) {
                     try {
                         future.get();
-                    } catch (java.util.concurrent.ExecutionException e) {
+                    } catch (ExecutionException e) {
                         failures.add(e.getCause());
                     }
                 }

@@ -22,6 +22,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.SequencedMap;
 import java.util.Set;
+import java.util.function.Predicate;
 import java.util.stream.Stream;
 
 import io.codelaser.maddi.cst.api.analysis.Codec;
@@ -157,7 +158,7 @@ public class VariableDataImpl implements VariableData {
     }
 
     /** {@link VariableInfoContainerImpl#clearDerived} on every container. */
-    public void clearDerived(java.util.function.Predicate<io.codelaser.maddi.cst.api.analysis.Property> derived) {
+    public void clearDerived(Predicate<Property> derived) {
         vicByFqn.values().forEach(vic -> {
             if (vic instanceof VariableInfoContainerImpl impl) impl.clearDerived(derived);
         });

@@ -135,7 +135,7 @@ public class MethodAnalyzer {
     /** Start collecting for a primary type; false when a collection is already open (a nested doType). */
     boolean startGetSetAssumptions() {
         if (getSetAssumptions.get() != null) return false;
-        getSetAssumptions.set(new java.util.HashMap<>());
+        getSetAssumptions.set(new HashMap<>());
         return true;
     }
 

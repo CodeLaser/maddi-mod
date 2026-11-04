@@ -18,9 +18,12 @@
 package io.codelaser.maddi.modification.analyzer;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import io.codelaser.maddi.cst.api.analysis.Message;
 import io.codelaser.maddi.cst.api.info.Info;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
 
 public interface SingleIterationAnalyzer {
 
@@ -46,7 +49,7 @@ public interface SingleIterationAnalyzer {
      * shallow analysis of an abstract type's methods and fields, an abstract method without implementations) is
      * done for them too, whatever the pass. Holds for the next {@code go} only.
      */
-    default void setFirstVisits(java.util.Set<Info> firstVisits) {
+    default void setFirstVisits(Set<Info> firstVisits) {
     }
 
     int propertiesChanged();
@@ -55,9 +58,9 @@ public interface SingleIterationAnalyzer {
      * Summary-consumption edges discovered by the link computer (consumer read consumed's METHOD_LINKS
      * while computing its own links) — see LinkComputer.recordSummaryConsumption. Accumulated over the run.
      */
-    default java.util.Map<io.codelaser.maddi.cst.api.info.MethodInfo,
-            java.util.Set<io.codelaser.maddi.cst.api.info.MethodInfo>> consumedSummaries() {
-        return java.util.Map.of();
+    default Map<MethodInfo,
+            Set<MethodInfo>> consumedSummaries() {
+        return Map.of();
     }
 
     /**
@@ -65,14 +68,14 @@ public interface SingleIterationAnalyzer {
      * per-element counter-delta attribution united with the write-target attribution from TolerantWrite (which
      * also catches the link computer's on-demand recursion writing a CALLEE's summary mid-caller).
      */
-    java.util.Set<Info> changedInfos();
+    Set<Info> changedInfos();
 
     /**
      * Worklist v2: only elements whose EXTERNALLY VISIBLE summary changed (method links/modification verdicts,
      * field/type verdicts) — the set whose dependents must be re-analyzed. Element-internal (statement-level)
      * changes are excluded: dependents cannot observe them.
      */
-    java.util.Set<Info> summaryChangedInfos();
+    Set<Info> summaryChangedInfos();
 
     /** Findings (warnings/errors about the analyzed code) collected by all analyzers of this iteration. */
     List<Message> messages();

@@ -20,8 +20,10 @@ package io.codelaser.maddi.modification.analyzer.nullability;
 import static io.codelaser.maddi.modification.analyzer.nullability.Types.*;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -29,10 +31,12 @@ import java.util.Map;
 import java.util.Set;
 
 import io.codelaser.maddi.cst.api.expression.ArrayInitializer;
+import io.codelaser.maddi.cst.api.expression.ArrayLength;
 import io.codelaser.maddi.cst.api.expression.Assignment;
 import io.codelaser.maddi.cst.api.expression.BinaryOperator;
 import io.codelaser.maddi.cst.api.expression.ConstructorCall;
 import io.codelaser.maddi.cst.api.expression.Expression;
+import io.codelaser.maddi.cst.api.expression.IntConstant;
 import io.codelaser.maddi.cst.api.expression.Lambda;
 import io.codelaser.maddi.cst.api.expression.MethodCall;
 import io.codelaser.maddi.cst.api.expression.NullConstant;
@@ -45,6 +49,7 @@ import io.codelaser.maddi.cst.api.statement.BreakOrContinueStatement;
 import io.codelaser.maddi.cst.api.statement.ExpressionAsStatement;
 import io.codelaser.maddi.cst.api.statement.ForEachStatement;
 import io.codelaser.maddi.cst.api.statement.ForStatement;
+import io.codelaser.maddi.cst.api.statement.IfElseStatement;
 import io.codelaser.maddi.cst.api.statement.LocalVariableCreation;
 import io.codelaser.maddi.cst.api.statement.ReturnStatement;
 import io.codelaser.maddi.cst.api.statement.Statement;
@@ -53,6 +58,7 @@ import io.codelaser.maddi.cst.api.variable.DependentVariable;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.cst.api.variable.LocalVariable;
 import io.codelaser.maddi.cst.api.variable.Variable;
+import io.codelaser.maddi.modification.common.util.Culprits;
 
 /**
  * Where null enters the graph: a seed is a node that may be null by itself, with its origin (the cause chains end
@@ -64,7 +70,7 @@ final class Seeds {
     private final Index index;
     // Culprits: the statement the walk is at, where a seed recorded now comes from
     private final WalkSite site;
-    private final boolean recordSites = io.codelaser.maddi.modification.common.util.Culprits.ENABLED;
+    private final boolean recordSites = Culprits.ENABLED;
 
     Seeds(Trace trace, Index index, WalkSite site) {
         this.trace = trace;
@@ -74,9 +80,9 @@ final class Seeds {
 
     // each null literal of an analysed body, by identity: a NullConstant equals every other, a Source only compares
     // line and column; a marker whose literal is not found here (a decoded summary) is seeded where it arrives
-    private final Map<Expression, MethodInfo> nullOwners = new java.util.IdentityHashMap<>();
+    private final Map<Expression, MethodInfo> nullOwners = new IdentityHashMap<>();
     // array creations ('new T[n]') the next statement fills completely before anything reads them (indexFills)
-    private final Set<Expression> filledCreations = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+    private final Set<Expression> filledCreations = Collections.newSetFromMap(new IdentityHashMap<>());
     // gate NOFIELDFILL: only a local's declaration counts as the creation the next loop fills (A/B for CodeLaser/maddi-mod#22 gap 4)
     private static final Switches.Gate FIELD_FILLS_OFF = Switches.gate("NOFIELDFILL");
     // nodes seeded by a null that is written (a literal, an argument, an initializer, an annotation), not by indirect
@@ -150,7 +156,7 @@ final class Seeds {
         if (type == null || type.arrays() == 0) return 0;
         List<Expression> sizes = cc.parameterExpressions().stream().filter(e -> !e.isEmpty()).toList();
         // 'new T[0]': no elements (guava's EMPTY_ARRAY)
-        if (!sizes.isEmpty() && sizes.getFirst() instanceof io.codelaser.maddi.cst.api.expression.IntConstant ic
+        if (!sizes.isEmpty() && sizes.getFirst() instanceof IntConstant ic
             && ic.constant() == 0) return 0;
         int dimensions = sizes.size();
         if (dimensions > 0 && dimensions < type.arrays()) return dimensions;
@@ -233,18 +239,18 @@ final class Seeds {
         if (loop.initializers().size() != 1 || !(loop.initializers().getFirst() instanceof LocalVariableCreation init)
             || init.localVariableStream().count() != 1) return false;
         LocalVariable index = init.localVariableStream().findFirst().orElseThrow();
-        if (!(index.assignmentExpression() instanceof io.codelaser.maddi.cst.api.expression.IntConstant zero)
+        if (!(index.assignmentExpression() instanceof IntConstant zero)
             || zero.constant() != 0) return false;
         if (!(NonNullFacts.unwrap(loop.expression()) instanceof BinaryOperator bo) || bo.operator() == null
             || !"<".equals(bo.operator().name()) || !isVariable(bo.lhs(), index)) return false;
         Expression bound = NonNullFacts.unwrap(bo.rhs());
         boolean sameBound = bound.equals(NonNullFacts.unwrap(size))
-                            || bound instanceof io.codelaser.maddi.cst.api.expression.ArrayLength length
+                            || bound instanceof ArrayLength length
                                && isVariable(length.scope(), array);
         if (!sameBound || loop.updaters().size() != 1 || !(loop.updaters().getFirst() instanceof Assignment step)
             || !index.equals(step.variableTarget()) || !step.assignmentOperatorIsPlus()
             || step.prefixPrimitiveOperator() == null
-               && !(step.value() instanceof io.codelaser.maddi.cst.api.expression.IntConstant one && one.constant() == 1)) {
+               && !(step.value() instanceof IntConstant one && one.constant() == 1)) {
             return false;
         }
         boolean[] escapes = {false};
@@ -298,7 +304,7 @@ final class Seeds {
             if (st instanceof LocalVariableCreation lvc) {
                 for (LocalVariable lv : lvc.localVariableStream().toList()) {
                     if (lv.parameterizedType().isInt() && lv.assignmentExpression() instanceof
-                            io.codelaser.maddi.cst.api.expression.IntConstant zero && zero.constant() == 0) {
+                            IntConstant zero && zero.constant() == 0) {
                         counters.add(lv);
                     }
                 }
@@ -310,12 +316,12 @@ final class Seeds {
 
     // 'if (n == 0) return ...;' without else: the array has no element yet to fill
     private static boolean emptyReturn(Statement st, Variable sizeLocal, Expression sizeCall) {
-        if (!(st instanceof io.codelaser.maddi.cst.api.statement.IfElseStatement ifs)
+        if (!(st instanceof IfElseStatement ifs)
             || ifs.elseBlock() != null && !ifs.elseBlock().isEmpty()
             || ifs.block().statements().size() != 1 || !(ifs.block().statements().getFirst() instanceof ReturnStatement)
             || !(NonNullFacts.unwrap(ifs.expression()) instanceof BinaryOperator bo) || bo.operator() == null
             || !"==".equals(bo.operator().name())
-            || !(NonNullFacts.unwrap(bo.rhs()) instanceof io.codelaser.maddi.cst.api.expression.IntConstant zero)
+            || !(NonNullFacts.unwrap(bo.rhs()) instanceof IntConstant zero)
             || zero.constant() != 0) return false;
         Expression lhs = NonNullFacts.unwrap(bo.lhs());
         return sizeLocal != null ? isVariable(lhs, sizeLocal) : lhs.equals(sizeCall);

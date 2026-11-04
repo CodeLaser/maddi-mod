@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 
 import org.apache.commons.cli.ParseException;
 import org.junit.jupiter.api.BeforeAll;
@@ -46,7 +48,7 @@ public class TestGuava {
         // (GUAVA.md §Regenerating), at the work ceiling it names. Read before the fixpoint engine's class loads.
         String resultsDir = System.getenv("GUAVA_RESULTS_DIR");
         if (resultsDir != null) System.setProperty("maddi.workCeiling", "30000000");
-        java.util.List<String> args = new java.util.ArrayList<>(java.util.List.of(
+        List<String> args = new ArrayList<>(List.of(
                 "--input-configuration=" + CONFIG
                 , "--analysis-steps=modification"
                 , "--preload-analysis-results-dirs=../../maddi/maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles/jdk"

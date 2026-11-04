@@ -3,11 +3,14 @@ package io.codelaser.maddi.modification.link.impl.linkgraph;
 import static io.codelaser.maddi.modification.link.impl.LinkNatureImpl.CONTAINS_AS_FIELD;
 
 import java.util.*;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.runtime.Runtime;
 import io.codelaser.maddi.cst.api.variable.DependentVariable;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
@@ -133,7 +136,7 @@ public class Graph {
     public void join(List<State> alternatives, String statementIndex) {
         SharedVariables.JoinPlan plan = sharedVariables.planJoin(alternatives.stream()
                 .map(State::sharedVariables).toList());
-        List<State> linked = new java.util.ArrayList<>(alternatives.size());
+        List<State> linked = new ArrayList<>(alternatives.size());
         for (int i = 0; i < alternatives.size(); i++) {
             List<SharedVariables.JoinEdge> edges = plan.edgesPerAlternative().get(i);
             if (edges.isEmpty()) {
@@ -220,7 +223,7 @@ public class Graph {
         for (Variable v : assigned) {
             if (sharedVariables.isKnown(v) && sharedVariables.isSourceAtOtherStatement(v, statementIndex)
                 && !sharedVariables.isReassignment(v, statementIndex)
-                && !(v instanceof io.codelaser.maddi.cst.api.info.ParameterInfo)
+                && !(v instanceof ParameterInfo)
                 && !sharedVariables.groupHoldsReturnValue(v)) {
                 clearRepExpansionCache();
                 touchVariable(v);
@@ -401,7 +404,7 @@ public class Graph {
         // whole graph — reuse cannot pay off there, so bail to dirty-all (the pre-reuse behavior)
         // instead of grinding memory and CPU (the 512m test-worker OOM). Per-statement budget.
         long[] budget = {REUSE_BUDGET};
-        java.util.function.Consumer<Variable> push = v -> {
+        Consumer<Variable> push = v -> {
             budget[0]--;
             if (dirty.add(v)) work.push(v);
         };
@@ -643,8 +646,8 @@ public class Graph {
     decision and the ⊇→~ rewrite collection — emitted earlier, they leak into verdicts (the reverted VMIFP
     experiment: ⊇→~ fired, 'newly created cannot be modified' nearly flipped).
      */
-    public java.util.List<Link> vmiDirectionalFacts(Variable owner) {
-        java.util.List<Link> result = new ArrayList<>();
+    public List<Link> vmiDirectionalFacts(Variable owner) {
+        List<Link> result = new ArrayList<>();
         virtualModificationIdenticals.groupsOf(owner).forEach(group -> {
             if (!group.linkNature().pass().isEmpty()) return;
             Variable face = group.members().stream()
@@ -854,7 +857,7 @@ public class Graph {
     // the work ceiling, as soon as a statement marks alternatives: TestAlternativeSources' retry test
     public static volatile boolean DEGRADE_ON_ALT_SOURCES_FOR_TESTING;
     // recipients marked as alternatives, over the whole run: what the tests read (TestAlternativeSources)
-    public static final java.util.concurrent.atomic.AtomicLong ALT_MARKS = new java.util.concurrent.atomic.AtomicLong();
+    public static final AtomicLong ALT_MARKS = new AtomicLong();
 
     public static boolean altSourcesOff() {
         return ALT_SOURCES_OFF.get();
@@ -891,7 +894,7 @@ public class Graph {
         // when this statement's own single-source assignments connect them ('copyD.a ← 1:a, copyD.a ← 0:d.a' with
         // the default '1:a ← 0:d.a'): union-find over the reps, along the single-source assignments
         Map<Variable, Variable> parent = new HashMap<>();
-        java.util.function.Function<Variable, Variable> find = new java.util.function.Function<>() {
+        Function<Variable, Variable> find = new Function<>() {
             @Override
             public Variable apply(Variable v) {
                 Variable rep = sharedVariables.translateForward(v);
@@ -995,7 +998,7 @@ public class Graph {
             touchAll(sharedVariables.allShared(from));
             touchAll(sharedVariables.allShared(to));
             boolean fromInGroups = sharedVariables.isKnown(from);
-            if (fromInGroups && !(from instanceof io.codelaser.maddi.modification.prepwork.variable.ReturnVariable)
+            if (fromInGroups && !(from instanceof ReturnVariable)
                 && sharedVariables.isReassignment(from, statementIndex)) {
                 // genuine reassignment ('from' was assigned at an earlier statement, now assigned again): drop its
                 // old group membership. A second value assigned in the SAME statement (multi-valued 'm = cond ? a : b'
@@ -1005,7 +1008,7 @@ public class Graph {
                 sharedVariables.remove(from);
                 // TODO what with fromInGraph?
             } else if (!NO_SRC_EVICT && fromInGroups && sharedVariables.isSourceAtOtherStatement(from, statementIndex)
-                       && !(from instanceof io.codelaser.maddi.cst.api.info.ParameterInfo)
+                       && !(from instanceof ParameterInfo)
                        && !sharedVariables.groupHoldsReturnValue(from)) {
                 // a source is assigned a new value: the group keeps the old one. The rep edge below made every
                 // other member hold the new value as well ('x = h.next; h.next = y; return x' read '← 1:y', and
@@ -1117,7 +1120,7 @@ public class Graph {
         // order decides which derivation paths fire first (see IncrementalFixpointEngine.addSymmetricEdge)
         var forwardLinksList = variablesInGraph
                 .stream()
-                .sorted(java.util.Comparator.comparing(Variable::fullyQualifiedName))
+                .sorted(Comparator.comparing(Variable::fullyQualifiedName))
                 .map(v -> new AbstractMap.SimpleEntry<>(v, engine.edges(v)))
                 .toList();
         engine.removeVertices(variablesInGraph);

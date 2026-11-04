@@ -25,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.File;
 import java.io.IOException;
 import java.util.List;
+import java.util.Objects;
 
 import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.DisplayName;
@@ -89,7 +90,7 @@ public class TestWriteAnalysisUnnamedPackage extends CommonTest {
 
         File written = new File(dest, "_unnamed_package.json");
         assertTrue(written.canRead(), () -> "expected " + written + ", found "
-                                            + List.of(java.util.Objects.requireNonNull(dest.list())));
+                                            + List.of(Objects.requireNonNull(dest.list())));
 
         // and it round-trips: the restored analysis equals what was written
         javaInspector.invalidateAllSources();

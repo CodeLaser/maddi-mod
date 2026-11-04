@@ -29,6 +29,7 @@ import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.modification.link.CommonTest;
 import io.codelaser.maddi.modification.link.LinkComputer;
 import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
+import io.codelaser.maddi.modification.prepwork.Util;
 import io.codelaser.maddi.modification.prepwork.variable.MethodLinkedVariables;
 
 /**
@@ -184,8 +185,8 @@ public class TestAdapterChainGrowth extends CommonTest {
             int r = round;
             mlv.ofReturnValue().forEach(link -> assertTrue(
                     !link.from().equals(link.to())
-                    && !io.codelaser.maddi.modification.prepwork.Util.scopeVariables(link.to()).contains(link.from())
-                    && !io.codelaser.maddi.modification.prepwork.Util.scopeVariables(link.from()).contains(link.to()),
+                    && !Util.scopeVariables(link.to()).contains(link.from())
+                    && !Util.scopeVariables(link.from()).contains(link.to()),
                     "round " + r + ": self-field link " + link));
             // and the two alternatives both survive: rv may be the argument, or hold it
             assertTrue(s.contains("wrapList←Λ0:iterable"), "rv may be the argument: " + s);

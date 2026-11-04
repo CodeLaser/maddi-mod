@@ -13,6 +13,9 @@ import io.codelaser.maddi.cst.api.info.*;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 import io.codelaser.maddi.modification.analyzer.CommonTest;
+import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
+import io.codelaser.maddi.modification.analyzer.impl.SingleIterationAnalyzerImpl;
+import io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl;
 import io.codelaser.maddi.modification.prepwork.variable.Links;
 import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
 
@@ -360,8 +363,8 @@ public class TestFieldAnalyzerFinalField extends CommonTest {
         // jenkins' ProcessTree.SolarisProcess/AIXProcess getArguments(): a first version of the fix of
         // testBranchThenAStatement emptied the summary ('[] --> -'), so the field read as @Independent. Object
         // creations must be tracked, as in a corpus run: the fresh 'oc:' source is what the fix put back
-        var tracking = new io.codelaser.maddi.modification.analyzer.impl.SingleIterationAnalyzerImpl(javaInspector,
-                new io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl.ConfigurationBuilder()
+        var tracking = new SingleIterationAnalyzerImpl(javaInspector,
+                new IteratingAnalyzerImpl.ConfigurationBuilder()
                         .setModificationViaReachability(true).build());
         StringBuilder report = new StringBuilder();
         boolean ok = true;
@@ -374,8 +377,8 @@ public class TestFieldAnalyzerFinalField extends CommonTest {
             MethodInfo get = type.methods().stream().filter(m -> m.name().equals("getArguments")).findFirst()
                     .orElseThrow();
             String mlv = String.valueOf(get.analysis().getOrNull(
-                    io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl.METHOD_LINKS,
-                    io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl.class));
+                    MethodLinkedVariablesImpl.METHOD_LINKS,
+                    MethodLinkedVariablesImpl.class));
             Value.Independent independent = type.getFieldByName("arguments", true).analysis()
                     .getOrNull(PropertyImpl.INDEPENDENT_FIELD, ValueImpl.IndependentImpl.class);
             report.append(fixture[0]).append(": ").append(mlv).append(" / ").append(independent).append('\n');
@@ -419,8 +422,8 @@ public class TestFieldAnalyzerFinalField extends CommonTest {
         // guava's LinkedHashMultimap.MultimapIterationChain.firstEntry: on the path through the first then-block,
         // 'first' holds the object 'succ.pred = pred' modifies; linked apart and joined, 'first' left succ's group
         // (it is succ's object in one alternative only) and the later modification no longer reached it
-        var tracking = new io.codelaser.maddi.modification.analyzer.impl.SingleIterationAnalyzerImpl(javaInspector,
-                new io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl.ConfigurationBuilder()
+        var tracking = new SingleIterationAnalyzerImpl(javaInspector,
+                new IteratingAnalyzerImpl.ConfigurationBuilder()
                         .setModificationViaReachability(true).build());
         TypeInfo type = javaInspector.parse("a.b.Chain", DETACHED_THEN_MODIFIED);
         List<Info> ao = prepWork(type);
@@ -429,8 +432,8 @@ public class TestFieldAnalyzerFinalField extends CommonTest {
         tracking.go(ao);
         MethodInfo succeeds = type.findUniqueMethod("succeeds", 2);
         String mlv = String.valueOf(succeeds.analysis().getOrNull(
-                io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl.METHOD_LINKS,
-                io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl.class));
+                MethodLinkedVariablesImpl.METHOD_LINKS,
+                MethodLinkedVariablesImpl.class));
         Value.Bool unmodified = type.getFieldByName("first", true).analysis()
                 .getOrNull(PropertyImpl.UNMODIFIED_FIELD, ValueImpl.BoolImpl.class);
         assertTrue(mlv.contains("this.first*") && unmodified != null && unmodified.isFalse(),
@@ -470,8 +473,8 @@ public class TestFieldAnalyzerFinalField extends CommonTest {
         // timefold's ToMapPerKeyCounter.add: linked apart and joined, 'h' left the group of the new object (it is
         // that object in one alternative only); the join edge 'h ← rep' did not carry the faces ('h.value ← 0:v'),
         // and once carried, 'return h' grouped them under the return's rep, which the extraction did not read
-        var tracking = new io.codelaser.maddi.modification.analyzer.impl.SingleIterationAnalyzerImpl(javaInspector,
-                new io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl.ConfigurationBuilder()
+        var tracking = new SingleIterationAnalyzerImpl(javaInspector,
+                new IteratingAnalyzerImpl.ConfigurationBuilder()
                         .setModificationViaReachability(true).build());
         TypeInfo type = javaInspector.parse("a.b.Counter", FACE_AFTER_JOIN);
         List<Info> ao = prepWork(type);
@@ -480,8 +483,8 @@ public class TestFieldAnalyzerFinalField extends CommonTest {
         tracking.go(ao);
         MethodInfo add = type.findUniqueMethod("add", 1);
         String mlv = String.valueOf(add.analysis().getOrNull(
-                io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl.METHOD_LINKS,
-                io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl.class));
+                MethodLinkedVariablesImpl.METHOD_LINKS,
+                MethodLinkedVariablesImpl.class));
         assertTrue(mlv.contains("add.value←0:v"), "add: " + mlv);
     }
 
@@ -517,8 +520,8 @@ public class TestFieldAnalyzerFinalField extends CommonTest {
         // activemq's BrokerService.addInterceptors: 'broker = new X(broker)' in several ifs. Copying the faces of the
         // group 'broker' left at the join onto 'broker' itself made the summary claim fields of the caller's object
         // ('0:broker.b.b ← oc'); the member's name after the join also stands for the caller's object
-        var tracking = new io.codelaser.maddi.modification.analyzer.impl.SingleIterationAnalyzerImpl(javaInspector,
-                new io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl.ConfigurationBuilder()
+        var tracking = new SingleIterationAnalyzerImpl(javaInspector,
+                new IteratingAnalyzerImpl.ConfigurationBuilder()
                         .setModificationViaReachability(true).build());
         TypeInfo type = javaInspector.parse("a.b.Interceptors", REASSIGNED_PARAMETER);
         List<Info> ao = prepWork(type);
@@ -527,8 +530,8 @@ public class TestFieldAnalyzerFinalField extends CommonTest {
         tracking.go(ao);
         MethodInfo add = type.findUniqueMethod("add", 1);
         String mlv = String.valueOf(add.analysis().getOrNull(
-                io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl.METHOD_LINKS,
-                io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl.class));
+                MethodLinkedVariablesImpl.METHOD_LINKS,
+                MethodLinkedVariablesImpl.class));
         assertTrue(!mlv.contains("0:broker.b.b") && !mlv.contains("add.b.b"), "add: " + mlv);
     }
 }

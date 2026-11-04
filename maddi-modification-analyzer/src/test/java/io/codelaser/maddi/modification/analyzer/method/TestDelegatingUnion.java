@@ -22,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import java.util.List;
 
 import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -125,7 +126,7 @@ public class TestDelegatingUnion extends CommonTest {
      while the union is correctly @Dependent -- the implementation is decided before the union and cannot come down.
      An optimistic (unsound) independence, pre-existing; kept as the reproducer.
      */
-    @org.junit.jupiter.api.Disabled("pre-existing: a delegating implementation decided @Independent before its @Dependent union")
+    @Disabled("pre-existing: a delegating implementation decided @Independent before its @Dependent union")
     @DisplayName("veto: one implementation exposing its own mutable field keeps the union and the delegator dependent")
     @Test
     public void veto() {

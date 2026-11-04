@@ -30,6 +30,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Predicate;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -332,7 +333,7 @@ public class ShallowTypeAnalyzer extends AnnotationToProperty {
 
     /** The evidence for a hierarchy inconsistency: each public supertype whose value is below the threshold. */
     private Message[] supertypesBelow(TypeInfo typeInfo, Property property, Value defaultValue,
-                                      java.util.function.Predicate<Value> below) {
+                                      Predicate<Value> below) {
         return typeInfo.recursiveSuperTypeStream().filter(TypeInfo::isPublic).distinct()
                 .map(ti -> Map.entry(ti, ti.analysis().getOrDefault(property, defaultValue)))
                 .filter(e -> below.test(e.getValue()))

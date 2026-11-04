@@ -35,6 +35,7 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 
 import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
 import io.codelaser.maddi.cst.api.element.SourceSet;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
@@ -47,9 +48,9 @@ public class TestLoadAnalyzedPackageFiles {
 
     @BeforeAll
     public static void beforeAll() {
-        ((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME)).setLevel(Level.INFO);
-        ((ch.qos.logback.classic.Logger) LoggerFactory.getLogger("io.codelaser.maddi.shallow")).setLevel(Level.DEBUG);
-        ((ch.qos.logback.classic.Logger) LoggerFactory.getLogger("io.codelaser.maddi.modification")).setLevel(Level.DEBUG);
+        ((Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME)).setLevel(Level.INFO);
+        ((Logger) LoggerFactory.getLogger("io.codelaser.maddi.shallow")).setLevel(Level.DEBUG);
+        ((Logger) LoggerFactory.getLogger("io.codelaser.maddi.modification")).setLevel(Level.DEBUG);
     }
 
     @Test

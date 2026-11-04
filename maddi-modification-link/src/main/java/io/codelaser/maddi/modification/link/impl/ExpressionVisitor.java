@@ -11,6 +11,7 @@ import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.codelaser.maddi.cst.api.analysis.PropertyValueMap;
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.element.RecordPattern;
 import io.codelaser.maddi.cst.api.expression.*;
@@ -704,7 +705,7 @@ public record ExpressionVisitor(Runtime runtime,
 
     // last-write-wins for the element-internal call-site argument links; same monitor discipline as
     // TolerantWrite (PropertyValueMapImpl's own methods synchronize on the map)
-    private static void writeArgumentLinks(io.codelaser.maddi.cst.api.analysis.PropertyValueMap analysis,
+    private static void writeArgumentLinks(PropertyValueMap analysis,
                                            LinkComputer.ListOfLinks list) {
         synchronized (analysis) {
             if (analysis.haveAnalyzedValueFor(LinkComputerImpl.LINKED_VARIABLES_ARGUMENTS)) {

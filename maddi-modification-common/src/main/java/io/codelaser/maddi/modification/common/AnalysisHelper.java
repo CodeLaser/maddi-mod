@@ -21,7 +21,10 @@ import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.FALSE;
 import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.TRUE;
 import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.*;
 
+import java.util.AbstractMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.element.SourceSet;
@@ -121,20 +124,20 @@ public class AnalysisHelper {
      visible. Gate NOEXTENSIBLEHC: the substitution for every type, as before.
      */
     private static final boolean EXTENSIBLE_HC_OFF = System.getenv("NOEXTENSIBLEHC") != null;
-    private static final ThreadLocal<java.util.Set<TypeInfo>> HC_VISITING =
-            ThreadLocal.withInitial(java.util.HashSet::new);
+    private static final ThreadLocal<Set<TypeInfo>> HC_VISITING =
+            ThreadLocal.withInitial(HashSet::new);
 
     private boolean hiddenContentOnlyFromTypeParameters(TypeInfo typeInfo) {
         if (EXTENSIBLE_HC_OFF) return true;
         if (typeInfo.isExtensible()) return false;
         if (!isPartOfSourceCode(typeInfo)) return true;
-        java.util.Set<TypeInfo> visiting = HC_VISITING.get();
+        Set<TypeInfo> visiting = HC_VISITING.get();
         if (!visiting.add(typeInfo)) return true; // a recursive type: decided by its other fields
         try {
             // the type's own type parameters read as deeply immutable, at any depth (Optional<T>'s T); matched on the
             // type parameter, not on ParameterizedType equality, which includes annotations and nullability
-            java.util.Set<?> own = java.util.Set.copyOf(typeInfo.typeParameters());
-            Map<ParameterizedType, Value.Immutable> typeParametersImmutable = new java.util.AbstractMap<>() {
+            Set<?> own = Set.copyOf(typeInfo.typeParameters());
+            Map<ParameterizedType, Value.Immutable> typeParametersImmutable = new AbstractMap<>() {
                 @Override
                 public Value.Immutable get(Object key) {
                     return key instanceof ParameterizedType pt && pt.arrays() == 0 && pt.typeParameter() != null
@@ -142,8 +145,8 @@ public class AnalysisHelper {
                 }
 
                 @Override
-                public java.util.Set<Entry<ParameterizedType, Value.Immutable>> entrySet() {
-                    return java.util.Set.of();
+                public Set<Entry<ParameterizedType, Value.Immutable>> entrySet() {
+                    return Set.of();
                 }
             };
             for (var fieldInfo : typeInfo.fields()) {

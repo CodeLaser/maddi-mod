@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.stream.Collectors;
 
 import org.intellij.lang.annotations.Language;
@@ -76,7 +77,7 @@ public class TestCallResults extends NullabilityFixtures {
                     static Integer none() { return parse(null); }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("ThrowingFunction<String?, T!>", s.get("a.b.LP.extract(String,a.b.LP.ThrowingFunction):1:parser"),
                 s.toString());
@@ -106,7 +107,7 @@ public class TestCallResults extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> l = new java.util.TreeMap<>();
+        Map<String, String> l = new TreeMap<>();
         report.locals().forEach((local, pt) -> l.put(local.name(), k(pt)));
         assertEquals("List<Function<String, String?>>", l.get("chain"), l + "\n" + explain(report));
     }
@@ -147,9 +148,9 @@ public class TestCallResults extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> l = new java.util.TreeMap<>();
+        Map<String, String> l = new TreeMap<>();
         report.locals().forEach((local, pt) -> l.put(local.name(), k(pt)));
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("List<Function<Supplier<String?>, String?>>", l.get("functions"), l + "\n" + explain(report));
         assertEquals("Chain<String?>", l.get("chain"), l + "\n" + explain(report));
@@ -192,9 +193,9 @@ public class TestCallResults extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
-        Map<String, String> l = new java.util.TreeMap<>();
+        Map<String, String> l = new TreeMap<>();
         report.locals().forEach((local, pt) -> l.put(local.name(), k(pt)));
         assertEquals("Set<String>", l.get("nonNullAdditions"), l + "\n" + explain(report));
         assertEquals("Set<String>", s.get("a.b.SF.names()"), s + "\n" + explain(report));
@@ -225,7 +226,7 @@ public class TestCallResults extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Supplier<String?>", s.get("a.b.MR.Listener.<init>(java.util.function.Supplier):0:supplier"),
                 s + "\n" + explain(report));
@@ -248,7 +249,7 @@ public class TestCallResults extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("ConcurrentHashMap<Class<?!>, String?>", s.get("a.b.CA.cache"), s + "\n" + explain(report));
     }
@@ -274,7 +275,7 @@ public class TestCallResults extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("String?", s.get("a.b.LG.issueOld(String)"), s + "\n" + explain(report));
     }
@@ -305,7 +306,7 @@ public class TestCallResults extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Map<Plugin, String?>", s.get("a.b.CC.deprecated()"), s + "\n" + explain(report));
     }
@@ -413,7 +414,7 @@ public class TestCallResults extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Iterator<T?>", s.get("a.b.RM.removeNull(java.util.Iterator):0:itr"), s + "\n" + explain(report));
         assertEquals("Iterator<T!>", s.get("a.b.RM.removeNull(java.util.Iterator)"), s + "\n" + explain(report));
@@ -441,7 +442,7 @@ public class TestCallResults extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         String all = s + "\n" + explain(report);
         assertFalse(s.get("a.b.KA.resolveInternal(String)").endsWith("?"), all);
@@ -488,7 +489,7 @@ public class TestCallResults extends NullabilityFixtures {
                     static Base nothing() { return make(null); }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         String l = locals(report);
         assertTrue(l.contains("drain.queuedTask: Runnable?"), l);
@@ -792,7 +793,7 @@ public class TestCallResults extends NullabilityFixtures {
     @Test
     public void returnThroughParameterPerCall() {
         Report report = run("a.b.G9", GAP9);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(label(info), k(pt)));
         assertEquals("Integer?", s.get("getInteger(1:defaultValue)"), s.toString());
         String r = s.entrySet().stream().filter(e -> e.getKey().equals("getInteger()")).map(Map.Entry::getValue)
@@ -808,7 +809,7 @@ public class TestCallResults extends NullabilityFixtures {
     @Test
     public void returnThroughParameterPerCallKotlin() {
         Report report = run("a.b.G9", GAP9, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(label(info), k(pt)));
         assertEquals("Integer", s.get("timeoutValue()"), s.toString());
         assertEquals("Integer?", s.get("retriesValue()"), s.toString());
@@ -833,7 +834,7 @@ public class TestCallResults extends NullabilityFixtures {
                     List<String> items() { return items; }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("String?", s.get("a.b.LF.of(String):0:s"), s.toString());
         assertEquals("List<String>", s.get("a.b.LF.<init>(java.util.List):0:items"), s.toString());
@@ -854,7 +855,7 @@ public class TestCallResults extends NullabilityFixtures {
                     Optional<String> name() { return Optional.ofNullable(name); }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("String?", s.get("a.b.OE.name"), s.toString());
         assertEquals("Optional<String>", s.get("a.b.OE.name()"), s.toString());
@@ -879,7 +880,7 @@ public class TestCallResults extends NullabilityFixtures {
                     static Object none(int i) throws Exception { return call(() -> null); }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Integer?", s.get("a.b.LR.<init>(Integer):0:max"), s.toString());
         assertEquals("Function<String, Integer?>", s.get("a.b.LR.<init>(java.util.function.Function):0:provider"),

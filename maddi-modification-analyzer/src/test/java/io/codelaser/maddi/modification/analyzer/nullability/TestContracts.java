@@ -6,13 +6,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import io.codelaser.maddi.cst.api.info.Info;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.TypeParameter;
 import io.codelaser.maddi.cst.api.type.NullableState;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
 
@@ -159,14 +165,14 @@ public class TestContracts extends NullabilityFixtures {
                     static String use(Upper u) { return u.convert("x", true); }
                 }
                 """;
-        Map<String, String> kotlin = new java.util.TreeMap<>();
+        Map<String, String> kotlin = new TreeMap<>();
         run("a.b.CV", src, Policy.KOTLIN).verdicts()
                 .forEach((info, pt) -> kotlin.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("A?", kotlin.get("a.b.CV.Converter.doForward(Object):0:a"), kotlin.toString());
         assertEquals("String?", kotlin.get("a.b.CV.Upper.doForward(String):0:s"), kotlin.toString());
         assertEquals("String?", kotlin.get("a.b.CV.Length.doForward(String):0:s"), kotlin.toString());
 
-        Map<String, String> flow = new java.util.TreeMap<>();
+        Map<String, String> flow = new TreeMap<>();
         run("a.b.CV2", src.replace("CV", "CV2"), Policy.NULL_MARKED_FLOW_ONLY).verdicts()
                 .forEach((info, pt) -> flow.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("String", flow.get("a.b.CV2.Length.doForward(String):0:s"), flow.toString());
@@ -182,7 +188,7 @@ public class TestContracts extends NullabilityFixtures {
     @DisplayName("Kotlin: an override's return is no wider than the overridden member's")
     @Test
     public void overrideOfTypeVariableReturn() {
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         run("a.b.OR", """
                 package a.b;
                 import java.util.AbstractMap;
@@ -229,7 +235,7 @@ public class TestContracts extends NullabilityFixtures {
     @DisplayName("Kotlin: an override's type-argument slots equal the overridden member's")
     @Test
     public void overrideTypeArgumentSlots() {
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         run("a.b.SL", """
                 package a.b;
                 import java.util.AbstractSet;
@@ -314,7 +320,7 @@ public class TestContracts extends NullabilityFixtures {
     @DisplayName("Kotlin: a bounded type parameter's slot is non-null")
     @Test
     public void boundedTypeParameterSlot() {
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         run("a.b.BS", """
                 package a.b;
                 class BS {
@@ -347,7 +353,7 @@ public class TestContracts extends NullabilityFixtures {
     @DisplayName("Kotlin: a type-argument slot holding a type variable is not made nullable")
     @Test
     public void typeVariableSlot() {
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         run("a.b.TV", """
                 package a.b;
                 class TV {
@@ -382,7 +388,7 @@ public class TestContracts extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Strong?", s.get("a.b.EB.StrongHelper.copy(a.b.EB.Strong)"), s.toString());
         assertEquals("E?", s.get("a.b.EB.Helper.copy(a.b.EB.Entry)"), s.toString());
@@ -403,7 +409,7 @@ public class TestContracts extends NullabilityFixtures {
                     static Object[] pass(@Nullable String[] p) { return p; }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         String all = s + "\n" + explain(report);
         assertFalse(s.get("a.b.EA.entries").endsWith("]?"), all);
@@ -437,14 +443,14 @@ public class TestContracts extends NullabilityFixtures {
                     static void use(Box<String, String> b) { b.put("a", null); }
                 }
                 """, Policy.KOTLIN);
-        Map<String, io.codelaser.maddi.cst.api.info.TypeParameter> tps = new java.util.TreeMap<>();
+        Map<String, TypeParameter> tps = new TreeMap<>();
         parsed.subTypes().forEach(st -> st.typeParameters().forEach(tp -> tps.put(st.simpleName() + "." + tp.simpleName(), tp)));
         assertTrue(report.nonNullTypeParameter(tps.get("Box.K")), tps.toString());
         assertTrue(report.nonNullTypeParameter(tps.get("Box.V")));
         assertFalse(report.nonNullTypeParameter(tps.get("Lenient.T")));
         assertTrue(report.nonNullTypeParameter(tps.get("Sub.E")), "carried over through the supertype");
         assertFalse(report.nonNullTypeParameter(tps.get("Free.F")));
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertFalse(s.get("a.b.NM.use(a.b.NM.Box):0:b").contains("?"), s + "\n" + explain(report));
     }
@@ -495,9 +501,9 @@ public class TestContracts extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, io.codelaser.maddi.cst.api.info.TypeParameter> tps = new java.util.TreeMap<>();
+        Map<String, TypeParameter> tps = new TreeMap<>();
         parsed.subTypes().forEach(st -> st.typeParameters().forEach(tp -> tps.put(st.simpleName() + "." + tp.simpleName(), tp)));
-        java.util.stream.Stream.concat(java.util.stream.Stream.of(parsed), parsed.subTypes().stream())
+        Stream.concat(Stream.of(parsed), parsed.subTypes().stream())
                 .forEach(st -> st.methods().forEach(m -> m.typeParameters()
                         .forEach(tp -> tps.put(m.name() + "." + tp.simpleName(), tp))));
         assertTrue(report.nonNullTypeParameter(tps.get("Response.T")), tps.toString());
@@ -548,7 +554,7 @@ public class TestContracts extends NullabilityFixtures {
                     static List<Object> copy(Iterable<?> it) { return new ArrayList<>(); }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> l = new java.util.TreeMap<>();
+        Map<String, String> l = new TreeMap<>();
         report.locals().forEach((local, pt) -> l.put(local.name(), k(pt)));
         assertTrue(l.get("free").contains("?"), l + "\n" + explain(report));
         assertFalse(l.get("list").contains("?"), l + "\n" + explain(report));
@@ -611,9 +617,9 @@ public class TestContracts extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        java.util.Set<String> nonNull = new java.util.TreeSet<>();
+        Set<String> nonNull = new TreeSet<>();
         for (Info info : report.verdicts().keySet()) {
-            if (info instanceof io.codelaser.maddi.cst.api.info.MethodInfo mi) {
+            if (info instanceof MethodInfo mi) {
                 for (var tp : mi.typeParameters()) {
                     if (report.nonNullTypeParameter(tp)) nonNull.add(mi.fullyQualifiedName() + " " + tp.simpleName());
                 }
@@ -658,7 +664,7 @@ public class TestContracts extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("String", s.get("a.b.NR.generateDisplayNameForClass(Class)"), s + "\n" + explain(report));
     }
@@ -682,7 +688,7 @@ public class TestContracts extends NullabilityFixtures {
                     static Task<Void> submit(Runnable r) { return Task.create(r, null); }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         String all = s + "\n" + explain(report);
         assertFalse(s.get("a.b.PP.Task.create(Runnable,Object):1:result").endsWith("?"), all);
@@ -722,7 +728,7 @@ public class TestContracts extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         String all = s + "\n" + explain(report);
         assertFalse(s.get("a.b.LC.keySet()").endsWith("?"), all);
@@ -771,7 +777,7 @@ public class TestContracts extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         String all = s + "\n" + explain(report);
         assertFalse(s.get("a.b.NO.Natural.nullsFirst()").endsWith("?"), all);
@@ -802,7 +808,7 @@ public class TestContracts extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("V?", s.get("a.b.JD.Fwd.replace(Object,Object)"), s.toString());
         assertEquals("V?", s.get("a.b.JD.View.get(Object)"), s.toString());
@@ -833,7 +839,7 @@ public class TestContracts extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("F!", s.get("a.b.TO.Function.apply(Object):0:input"), s.toString());
         assertEquals("Cut", s.get("a.b.TO.Cut.compareTo(a.b.TO.Cut):0:that"), s.toString());
@@ -877,7 +883,7 @@ public class TestContracts extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Map<C!, V!>", s.get("a.b.PN.Table.create()"), s + "\n" + explain(report));
         assertEquals("T?", s.get("a.b.PN.Supplier.get()"), "the declaration keeps it; the printer prints T");
@@ -932,7 +938,7 @@ public class TestContracts extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("V!", s.get("a.b.NI.Cell.getValue()"), s + "\n" + explain(report));
         assertEquals("V?", s.get("a.b.NI.Table.$0.getValue()"), s.toString());
@@ -970,7 +976,7 @@ public class TestContracts extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Map<String, String>", s.get("a.b.LZ.chained()"), s + "\n" + explain(report));
         assertEquals("Map<String, String>", s.get("a.b.LZ.separate()"), s + "\n" + explain(report));
@@ -1135,7 +1141,7 @@ public class TestContracts extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("Res", s.get("a.b.BO.Exec.execute(int)"), s.toString());
         assertEquals("Res?", s.get("a.b.BO.Plain.find(int)"), s.toString());
@@ -1160,7 +1166,7 @@ public class TestContracts extends NullabilityFixtures {
                     }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(info.fullyQualifiedName(), k(pt)));
         assertEquals("String?", s.get("a.b.IF.find(int)"), s.toString());
         assertEquals("List<String>", s.get("a.b.IF.one(int)"), s.toString());

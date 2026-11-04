@@ -24,6 +24,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.codelaser.maddi.cst.api.analysis.Message;
@@ -51,7 +52,7 @@ Process:
     - AnalysisHintsWriter (here, to update the hints file), uses AnalysisHintsComposer
  */
 public class AnalysisHintsCompiler {
-    private static final org.slf4j.Logger LOGGER = LoggerFactory.getLogger(AnalysisHintsCompiler.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(AnalysisHintsCompiler.class);
 
     private final CompilerVisitor compilerVisitor;
     private final JavaInspectorFactory javaInspectorFactory;

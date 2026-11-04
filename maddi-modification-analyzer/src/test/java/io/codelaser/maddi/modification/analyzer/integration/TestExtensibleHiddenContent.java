@@ -21,6 +21,7 @@ import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.IMMUTABLE_TYPE;
 import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.INDEPENDENT_TYPE;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import java.io.IOException;
 import java.util.List;
 
 import org.intellij.lang.annotations.Language;
@@ -105,7 +106,7 @@ public class TestExtensibleHiddenContent extends CommonTest {
 
     @DisplayName("#81: substitution of type arguments only when the hidden content is the type parameters'")
     @Test
-    public void test() throws java.io.IOException {
+    public void test() throws IOException {
         AnalyzerBundle bundle = buildAnalyzerBundle();
         TypeInfo X = bundle.javaInspector().parse("a.b.X", INPUT);
         List<Info> ao = bundle.prepAnalyzer().doPrimaryType(X);

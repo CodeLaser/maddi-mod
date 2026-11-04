@@ -17,6 +17,7 @@ import io.codelaser.maddi.cst.api.runtime.Runtime;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.inspection.api.integration.JavaInspector;
 import io.codelaser.maddi.inspection.api.resource.InputConfiguration;
+import io.codelaser.maddi.inspection.openjdk.JavaInspectorImpl;
 import io.codelaser.maddi.inspection.resource.InputConfigurationImpl;
 import io.codelaser.maddi.inspection.resource.SourceSetImpl;
 
@@ -30,7 +31,7 @@ public class TestModuleGatedHints {
 
     private JavaInspector inspectorWithoutDesktop() throws Exception {
         SourceSet javaBase = SourceSetImpl.javaBase();
-        JavaInspector ji = new io.codelaser.maddi.inspection.openjdk.JavaInspectorImpl();
+        JavaInspector ji = new JavaInspectorImpl();
         ji.preload("java.base::java.util.");
         // deliberately NOT preloading java.desktop / java.net.http, and NOT on the classpath below
         InputConfiguration ic = new InputConfigurationImpl.Builder()

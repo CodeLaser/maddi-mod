@@ -22,6 +22,7 @@ import static io.codelaser.maddi.inspection.integration.JavaInspectorImpl.TEST_P
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -135,7 +136,7 @@ public class TestPrimaryTypeUseGraph extends CommonTest {
         Set<TypeInfo> dependents = useGraph.dependentsOf(changed);
         // Mid uses Base, so Mid is reachable from the changed set -- but it is changed, so it must not be reported
         assertEquals(Set.of(top), dependents);
-        assertTrue(java.util.Collections.disjoint(changed, dependents));
+        assertTrue(Collections.disjoint(changed, dependents));
     }
 
     @DisplayName("module vertices are skipped rather than projected: ModuleInfo.typeInfo() throws")

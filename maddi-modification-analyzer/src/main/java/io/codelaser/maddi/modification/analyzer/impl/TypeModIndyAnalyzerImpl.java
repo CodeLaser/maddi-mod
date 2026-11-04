@@ -23,6 +23,8 @@ import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.TRUE;
 import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.*;
 import static io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl.METHOD_LINKS;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -31,10 +33,19 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import io.codelaser.maddi.cst.api.analysis.Message;
 import io.codelaser.maddi.cst.api.analysis.Value;
+import io.codelaser.maddi.cst.api.element.Element;
+import io.codelaser.maddi.cst.api.expression.Cast;
+import io.codelaser.maddi.cst.api.expression.EnclosedExpression;
+import io.codelaser.maddi.cst.api.expression.Expression;
+import io.codelaser.maddi.cst.api.expression.InlineConditional;
+import io.codelaser.maddi.cst.api.expression.Lambda;
+import io.codelaser.maddi.cst.api.expression.MethodCall;
+import io.codelaser.maddi.cst.api.expression.VariableExpression;
 import io.codelaser.maddi.cst.api.info.FieldInfo;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.statement.ReturnStatement;
 import io.codelaser.maddi.cst.api.statement.Statement;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
@@ -159,10 +170,10 @@ public class TypeModIndyAnalyzerImpl extends CommonAnalyzerImpl implements TypeM
             || methodInfo.returnType().arrays() > 0 || methodInfo.returnType().typeParameter() != null) {
             return;
         }
-        List<io.codelaser.maddi.cst.api.expression.Expression> returned = new java.util.ArrayList<>();
-        methodInfo.methodBody().visit((io.codelaser.maddi.cst.api.element.Element e) -> {
-            if (e instanceof io.codelaser.maddi.cst.api.expression.Lambda) return false; // its returns are its own
-            if (e instanceof io.codelaser.maddi.cst.api.statement.ReturnStatement rs && rs.expression() != null
+        List<Expression> returned = new ArrayList<>();
+        methodInfo.methodBody().visit((Element e) -> {
+            if (e instanceof Lambda) return false; // its returns are its own
+            if (e instanceof ReturnStatement rs && rs.expression() != null
                 && !rs.expression().isEmpty()) {
                 returned.add(rs.expression());
             }
@@ -187,23 +198,23 @@ public class TypeModIndyAnalyzerImpl extends CommonAnalyzerImpl implements TypeM
     }
 
     /** Whether every value the expression can take is the null constant (true for an empty stream of returns). */
-    private static boolean onlyNull(io.codelaser.maddi.cst.api.expression.Expression value) {
+    private static boolean onlyNull(Expression value) {
         return switch (value) {
-            case io.codelaser.maddi.cst.api.expression.EnclosedExpression ee -> onlyNull(ee.inner());
-            case io.codelaser.maddi.cst.api.expression.Cast cast -> onlyNull(cast.expression());
-            case io.codelaser.maddi.cst.api.expression.InlineConditional ic -> onlyNull(ic.ifTrue()) && onlyNull(ic.ifFalse());
+            case EnclosedExpression ee -> onlyNull(ee.inner());
+            case Cast cast -> onlyNull(cast.expression());
+            case InlineConditional ic -> onlyNull(ic.ifTrue()) && onlyNull(ic.ifFalse());
             default -> value.isNullConstant();
         };
     }
 
     /** TRUE, FALSE, or null when a source callee has not been decided yet. */
-    private Boolean unmodifiableValue(io.codelaser.maddi.cst.api.expression.Expression value, int depth) {
+    private Boolean unmodifiableValue(Expression value, int depth) {
         if (value.isNullConstant()) return true;
         if (depth > 3) return false;
         switch (value) {
-            case io.codelaser.maddi.cst.api.expression.EnclosedExpression ee -> { return unmodifiableValue(ee.inner(), depth + 1); }
-            case io.codelaser.maddi.cst.api.expression.Cast cast -> { return unmodifiableValue(cast.expression(), depth + 1); }
-            case io.codelaser.maddi.cst.api.expression.InlineConditional ic -> {
+            case EnclosedExpression ee -> { return unmodifiableValue(ee.inner(), depth + 1); }
+            case Cast cast -> { return unmodifiableValue(cast.expression(), depth + 1); }
+            case InlineConditional ic -> {
                 Boolean t = unmodifiableValue(ic.ifTrue(), depth + 1);
                 if (t != null && !t) return false;
                 Boolean f = unmodifiableValue(ic.ifFalse(), depth + 1);
@@ -219,21 +230,21 @@ public class TypeModIndyAnalyzerImpl extends CommonAnalyzerImpl implements TypeM
             if (type.arrays() == 0 && type.typeInfo() != null) {
                 Value.Bool unmodifiableType = type.typeInfo().analysis().getOrNull(UNMODIFIABLE_TYPE, ValueImpl.BoolImpl.class);
                 if (unmodifiableType != null && unmodifiableType.isTrue()) return true;
-                if (unmodifiableType == null && !(value instanceof io.codelaser.maddi.cst.api.expression.MethodCall)
+                if (unmodifiableType == null && !(value instanceof MethodCall)
                     && type.typeInfo().compilationUnit() != null && type.typeInfo().compilationUnit().sourceSet() != null
                     && !type.typeInfo().compilationUnit().sourceSet().externalLibrary()) {
                     return null; // a source type: its verdict arrives with the type analyzers
                 }
             }
         }
-        if (value instanceof io.codelaser.maddi.cst.api.expression.MethodCall mc && mc.methodInfo() != null) {
+        if (value instanceof MethodCall mc && mc.methodInfo() != null) {
             MethodInfo callee = mc.methodInfo();
             Boolean ofOverrides = unmodifiableOverrides(callee);
             if (Boolean.FALSE.equals(ofOverrides)) return false;
             Boolean ofCallee = unmodifiableCallee(callee);
             return ofCallee == null || !ofCallee ? ofCallee : ofOverrides;
         }
-        if (value instanceof io.codelaser.maddi.cst.api.expression.VariableExpression ve
+        if (value instanceof VariableExpression ve
             && ve.variable() instanceof FieldReference fr) {
             Value.Immutable ofField = fr.fieldInfo().analysis().getOrNull(IMMUTABLE_FIELD, ValueImpl.ImmutableImpl.class);
             return ofField != null && ofField.isAtLeastImmutableHC();
@@ -581,7 +592,7 @@ normal methods: does a modification to the return value imply any modification i
         if (exceptions.isEmpty()) return worst;
         // state them on the DECLARED return type, as @Independent(except = "remove") does (the pass set also holds
         // the inner class's own overriding methods, which a caller of the declared type never names)
-        io.codelaser.maddi.cst.api.info.TypeInfo returnType = methodInfo.returnType().bestTypeInfo();
+        TypeInfo returnType = methodInfo.returnType().bestTypeInfo();
         if (returnType != null) {
             Set<MethodInfo> onReturnType = new HashSet<>();
             for (MethodInfo m : exceptions) {
@@ -592,7 +603,7 @@ normal methods: does a modification to the return value imply any modification i
             if (!onReturnType.isEmpty()) exceptions = onReturnType;
         }
         List<MethodInfo> sorted = exceptions.stream()
-                .sorted(java.util.Comparator.comparing(MethodInfo::fullyQualifiedName)).toList();
+                .sorted(Comparator.comparing(MethodInfo::fullyQualifiedName)).toList();
         return new ValueImpl.IndependentImpl(worst.isIndependent() ? 2 : 1, Map.of(), sorted);
     }
 

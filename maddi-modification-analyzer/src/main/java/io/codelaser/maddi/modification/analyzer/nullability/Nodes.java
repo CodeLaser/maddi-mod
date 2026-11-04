@@ -25,12 +25,16 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import io.codelaser.maddi.cst.api.element.Element;
 import io.codelaser.maddi.cst.api.expression.Assignment;
 import io.codelaser.maddi.cst.api.expression.Expression;
+import io.codelaser.maddi.cst.api.expression.IntConstant;
 import io.codelaser.maddi.cst.api.expression.Lambda;
 import io.codelaser.maddi.cst.api.expression.MethodCall;
+import io.codelaser.maddi.cst.api.expression.UnaryOperator;
 import io.codelaser.maddi.cst.api.expression.VariableExpression;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
@@ -168,14 +172,14 @@ final class Nodes {
     // 'x.§$$s[-k]' is the k-th type argument's slice; -1 when the index is not such a constant
     private static int sliceIndex(DependentVariable dv) {
         Expression index = dv.indexExpression();
-        if (index instanceof io.codelaser.maddi.cst.api.expression.UnaryOperator uo
-            && uo.expression() instanceof io.codelaser.maddi.cst.api.expression.IntConstant ic) {
+        if (index instanceof UnaryOperator uo
+            && uo.expression() instanceof IntConstant ic) {
             return ic.constant() - 1;
         }
-        if (index instanceof io.codelaser.maddi.cst.api.expression.IntConstant ic && ic.constant() < 0) {
+        if (index instanceof IntConstant ic && ic.constant() < 0) {
             return -ic.constant() - 1;
         }
-        java.util.regex.Matcher m = java.util.regex.Pattern.compile("\\[-(\\d+)]$").matcher(dv.simpleName());
+        Matcher m = Pattern.compile("\\[-(\\d+)]$").matcher(dv.simpleName());
         return m.find() ? Integer.parseInt(m.group(1)) - 1 : -1;
     }
 

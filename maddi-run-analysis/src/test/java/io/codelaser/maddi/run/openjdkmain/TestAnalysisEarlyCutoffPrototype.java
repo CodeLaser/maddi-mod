@@ -23,10 +23,14 @@ import static org.junit.jupiter.api.Assertions.*;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -147,7 +151,7 @@ public class TestAnalysisEarlyCutoffPrototype {
     private TreeMap<String, FingerPrint> analyzeAndFingerprint() throws IOException {
         JavaInspector javaInspector = new JavaInspectorImpl(true, false);
         javaInspector.initialize(inputConfiguration());
-        ParseResult pr = javaInspector.parse(java.util.Map.of(), JavaInspectorImpl.DETAILED_SOURCES).parseResult();
+        ParseResult pr = javaInspector.parse(Map.of(), JavaInspectorImpl.DETAILED_SOURCES).parseResult();
         prepAndAnalyze(javaInspector, pr);
         return fingerprintAll(javaInspector, pr);
     }
@@ -209,13 +213,13 @@ public class TestAnalysisEarlyCutoffPrototype {
         write(DATA_V1);
         JavaInspector javaInspector = new JavaInspectorImpl(true, false);
         javaInspector.initialize(inputConfiguration());
-        ParseResult pr0 = javaInspector.parse(java.util.Map.of(), JavaInspectorImpl.DETAILED_SOURCES).parseResult();
+        ParseResult pr0 = javaInspector.parse(Map.of(), JavaInspectorImpl.DETAILED_SOURCES).parseResult();
         ComputeCallGraph ccg0 = prepAndAnalyze(javaInspector, pr0);
         TreeMap<String, FingerPrint> before = fingerprintAll(javaInspector, pr0);
 
         // edit Data with a leading comment, then drive the real incremental reload path
         Files.writeString(sourceDir.resolve("x/Data.java"), "// a leading comment\n\n" + DATA_V1);
-        JavaInspector.ReloadResult rr = javaInspector.reloadSources(inputConfiguration(), java.util.Map.of());
+        JavaInspector.ReloadResult rr = javaInspector.reloadSources(inputConfiguration(), Map.of());
         Set<TypeInfo> changed = rr.sourceHasChanged();
         assertFalse(changed.isEmpty(), "the edited Data must be reported as source-changed");
 
@@ -241,12 +245,12 @@ public class TestAnalysisEarlyCutoffPrototype {
         write(DATA_V1);
         JavaInspector javaInspector = new JavaInspectorImpl(true, false);
         javaInspector.initialize(inputConfiguration());
-        ParseResult pr0 = javaInspector.parse(java.util.Map.of(), JavaInspectorImpl.DETAILED_SOURCES).parseResult();
+        ParseResult pr0 = javaInspector.parse(Map.of(), JavaInspectorImpl.DETAILED_SOURCES).parseResult();
         ComputeCallGraph ccg0 = prepAndAnalyze(javaInspector, pr0);
         TreeMap<String, FingerPrint> before = fingerprintAll(javaInspector, pr0);
 
         Files.writeString(sourceDir.resolve("x/Data.java"), "// a leading comment\n\n" + DATA_V1);
-        JavaInspector.ReloadResult rr = javaInspector.reloadSources(inputConfiguration(), java.util.Map.of());
+        JavaInspector.ReloadResult rr = javaInspector.reloadSources(inputConfiguration(), Map.of());
         Set<TypeInfo> changed = rr.sourceHasChanged();
         Set<TypeInfo> dependents = new PrimaryTypeUseGraph(ccg0.graph()).dependentsOf(changed);
         JavaInspector.Invalidated invalidated = ti ->
@@ -258,17 +262,17 @@ public class TestAnalysisEarlyCutoffPrototype {
 
         // one-hop dependents from the run-0 use graph (edge t -> Y means Y uses t), keyed by fqn
         G<TypeInfo> useGraph = new PrimaryTypeUseGraph(ccg0.graph()).graph();
-        java.util.Map<String, TypeInfo> byFqn = new java.util.HashMap<>();
+        Map<String, TypeInfo> byFqn = new HashMap<>();
         pr0.primaryTypes().forEach(t -> byFqn.put(t.fullyQualifiedName(), t));
-        java.util.function.Function<String, Set<String>> immediateDependents = fqn -> {
+        Function<String, Set<String>> immediateDependents = fqn -> {
             TypeInfo t = byFqn.get(fqn);
             V<TypeInfo> v = t == null ? null : useGraph.vertex(t);
             if (v == null) return Set.of();
             return useGraph.edges(v).keySet().stream().map(V::t)
-                    .map(TypeInfo::fullyQualifiedName).collect(java.util.stream.Collectors.toSet());
+                    .map(TypeInfo::fullyQualifiedName).collect(Collectors.toSet());
         };
         Set<String> seed = changed.stream().map(TypeInfo::fullyQualifiedName)
-                .collect(java.util.stream.Collectors.toSet());
+                .collect(Collectors.toSet());
 
         // recompute = look up the post-edit fingerprint (a stand-in for actually re-analysing t; the real per-type
         // recompute against carried dependencies is the documented production-integration gap, docs/design/analysis-rewiring.md)

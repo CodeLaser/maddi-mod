@@ -1,9 +1,12 @@
 package io.codelaser.maddi.modification.link.impl;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.stream.Collectors;
 
 import org.jetbrains.annotations.NotNull;
@@ -12,6 +15,7 @@ import io.codelaser.maddi.cst.api.analysis.Codec;
 import io.codelaser.maddi.cst.api.analysis.Property;
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.info.InfoMapView;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.translate.TranslationMap;
 import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
@@ -56,12 +60,12 @@ public class MethodLinkedVariablesImpl implements MethodLinkedVariables, Value {
         // inherit run-to-run nondeterminism (the composed-dogfood 24 ↔ 10 bistability). Variable is
         // Comparable (FQN order, consistent with equals).
         this.modified = modified.isEmpty() ? modified
-                : java.util.Collections.unmodifiableSortedSet(new java.util.TreeSet<>(modified));
+                : Collections.unmodifiableSortedSet(new TreeSet<>(modified));
         this.assigned = assigned.isEmpty() ? assigned
-                : java.util.Collections.unmodifiableSortedSet(new java.util.TreeSet<>(assigned));
+                : Collections.unmodifiableSortedSet(new TreeSet<>(assigned));
         assert modified.containsAll(deepOnlyModified) : "deep-only is a subset of modified";
         this.deepOnlyModified = deepOnlyModified.isEmpty() ? deepOnlyModified
-                : java.util.Collections.unmodifiableSortedSet(new java.util.TreeSet<>(deepOnlyModified));
+                : Collections.unmodifiableSortedSet(new TreeSet<>(deepOnlyModified));
     }
 
     @Override
@@ -118,9 +122,9 @@ public class MethodLinkedVariablesImpl implements MethodLinkedVariables, Value {
         List<Links> ofParams = encodedParams.stream()
                 .map(e -> decodeLinks(codec, context, e))
                 .toList();
-        Set<Variable> modifiedVariables = new java.util.HashSet<>();
-        Set<Variable> assignedVariables = new java.util.HashSet<>();
-        Set<Variable> deepOnlyVariables = new java.util.HashSet<>();
+        Set<Variable> modifiedVariables = new HashSet<>();
+        Set<Variable> assignedVariables = new HashSet<>();
+        Set<Variable> deepOnlyVariables = new HashSet<>();
         for (int i = 2; i < list.size(); i++) {
             Codec.EncodedValue e = list.get(i);
             List<Codec.EncodedValue> sub = codec.decodeList(context, e);
@@ -159,7 +163,7 @@ public class MethodLinkedVariablesImpl implements MethodLinkedVariables, Value {
             // pass-carrying ≡ variant (☷): [symbol, methodInfo...] — see LinksImpl.encodeLink
             List<Codec.EncodedValue> natureList = codec.decodeList(context, natureEv);
             assert "☷".equals(codec.decodeString(context, natureList.getFirst()));
-            java.util.Set<io.codelaser.maddi.cst.api.info.MethodInfo> pass = new java.util.HashSet<>();
+            Set<MethodInfo> pass = new HashSet<>();
             for (int i = 1; i < natureList.size(); i++) {
                 pass.add(codec.decodeMethodInfo(context, natureList.get(i)));
             }

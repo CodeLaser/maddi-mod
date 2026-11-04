@@ -10,7 +10,9 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.slf4j.Logger;
 
+import io.codelaser.maddi.annotation.Container;
 import io.codelaser.maddi.cst.api.element.SourceSet;
 import io.codelaser.maddi.inspection.api.resource.InputConfiguration;
 import io.codelaser.maddi.inspection.resource.InputConfigurationImpl;
@@ -33,8 +35,8 @@ public class TestAnalysisHintsCompilation {
                 .setWorkingDirectory(".")
                 .addSourceSets(aapiSource)
                 .addClassPathParts(SourceSetImpl.javaBase(),
-                        SourceSetImpl.sourceSetOf(io.codelaser.maddi.annotation.Container.class),
-                        SourceSetImpl.sourceSetOf(org.slf4j.Logger.class))
+                        SourceSetImpl.sourceSetOf(Container.class),
+                        SourceSetImpl.sourceSetOf(Logger.class))
                 .build();
         AnalysisHintsConfigurationImpl aapi = (AnalysisHintsConfigurationImpl) new AnalysisHintsConfigurationImpl.Builder()
                 .setAnalysisResultsTargetDir(resultsDir.toString())  // use case 2

@@ -20,6 +20,7 @@ package io.codelaser.maddi.modification.analyzer.impl;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.expression.Assignment;
@@ -235,7 +236,7 @@ public class DynamicImmutabilityInference {
      * types. Both enumerations here need the same scope: it is the set of places that may touch a private
      * member, and — given the finality gate — the set of places that may assign a final field.
      */
-    private static void forEachMethodOfPrimaryType(TypeInfo typeInfo, java.util.function.Consumer<MethodInfo> action) {
+    private static void forEachMethodOfPrimaryType(TypeInfo typeInfo, Consumer<MethodInfo> action) {
         typeInfo.primaryType().recursiveSubTypeStream()
                 .flatMap(TypeInfo::constructorAndMethodStream)
                 .filter(mi -> !mi.methodBody().isEmpty())

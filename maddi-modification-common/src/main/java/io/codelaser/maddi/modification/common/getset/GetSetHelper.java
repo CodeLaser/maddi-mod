@@ -19,6 +19,8 @@ package io.codelaser.maddi.modification.common.getset;
 
 import static io.codelaser.maddi.inspection.api.util.CreateSyntheticFieldsForGetSet.*;
 
+import java.util.List;
+
 import io.codelaser.maddi.annotation.Fluent;
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.expression.Assignment;
@@ -109,7 +111,7 @@ public class GetSetHelper {
         return methodInfo.analysis().getOrCreate(PropertyImpl.GET_SET_FIELD, () -> {
             // peel a prefix of inert guard statements; recognition then runs on the first non-inert statement
             int guards = leadingInertGuardCount(methodInfo, methodBody);
-            java.util.List<Statement> statements = methodBody.statements();
+            List<Statement> statements = methodBody.statements();
             if (guards >= statements.size()) return null; // only guards, no return/assignment: not an accessor
             Statement s0 = statements.get(guards);
             // a non-local return (a Kotlin lambda's) does not return this method's value: not a getter

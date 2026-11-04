@@ -30,6 +30,7 @@ import io.codelaser.maddi.cst.api.element.*;
 import io.codelaser.maddi.cst.api.expression.AnnotationExpression;
 import io.codelaser.maddi.cst.api.info.*;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
+import io.codelaser.maddi.cst.api.type.Wildcard;
 import io.codelaser.maddi.inspection.api.integration.JavaInspector;
 import io.codelaser.maddi.inspection.api.integration.JavaInspectorFactory;
 import io.codelaser.maddi.inspection.api.parser.ParseResult;
@@ -366,8 +367,8 @@ public class AnalysisHintsParser implements AnnotationProvider {
         return b1.equals(b2);
     }
 
-    private static boolean sameWildcard(io.codelaser.maddi.cst.api.type.Wildcard w1,
-                                        io.codelaser.maddi.cst.api.type.Wildcard w2) {
+    private static boolean sameWildcard(Wildcard w1,
+                                        Wildcard w2) {
         if (w1 == null || w2 == null) return w1 == w2;
         return w1.isUnbound() == w2.isUnbound() && w1.isExtends() == w2.isExtends() && w1.isSuper() == w2.isSuper();
     }

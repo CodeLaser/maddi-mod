@@ -11,6 +11,7 @@ import io.codelaser.maddi.cst.api.analysis.Codec;
 import io.codelaser.maddi.cst.api.analysis.Property;
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.info.InfoMapView;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.runtime.Runtime;
 import io.codelaser.maddi.cst.api.translate.TranslationMap;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
@@ -96,19 +97,19 @@ public class LinksImpl implements Links {
         // Iterator.remove-style annotations) additionally carries its method set, so it encodes as a list
         // [symbol, methodInfo...] — the decoder branches on isList. Deterministic order for stable output.
         Codec.EncodedValue natureEv;
-        java.util.Set<io.codelaser.maddi.cst.api.info.MethodInfo> pass = link.linkNature().pass();
+        Set<MethodInfo> pass = link.linkNature().pass();
         if (pass == null || pass.isEmpty()) {
             natureEv = codec.encodeString(context, link.linkNature().toString());
         } else {
-            List<Codec.EncodedValue> natureList = new java.util.ArrayList<>();
+            List<Codec.EncodedValue> natureList = new ArrayList<>();
             natureList.add(codec.encodeString(context, link.linkNature().toString()));
             pass.stream()
-                    .sorted(java.util.Comparator.comparing(
-                            io.codelaser.maddi.cst.api.info.MethodInfo::fullyQualifiedName))
+                    .sorted(Comparator.comparing(
+                            MethodInfo::fullyQualifiedName))
                     .forEach(mi -> natureList.add(codec.encodeMethodInfo(context, mi)));
             natureEv = codec.encodeList(context, natureList);
         }
-        List<Codec.EncodedValue> parts = new java.util.ArrayList<>(List.of(
+        List<Codec.EncodedValue> parts = new ArrayList<>(List.of(
                 codec.encodeVariable(context, link.from()),
                 natureEv,
                 codec.encodeVariable(context, link.to())
@@ -149,7 +150,7 @@ public class LinksImpl implements Links {
      * back to the lexicographically smaller rendering.
      */
     @Override
-    public boolean strictlyRicherThan(io.codelaser.maddi.cst.api.analysis.Value other) {
+    public boolean strictlyRicherThan(Value other) {
         if (!(other instanceof LinksImpl o)) return false;
         int c = Integer.compare(linkSet.size(), o.linkSet.size());
         if (c != 0) return c > 0;

@@ -1,18 +1,29 @@
 package io.codelaser.maddi.run.openjdkmain;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
 import io.codelaser.maddi.analysis.api.PrepOutcome;
 import io.codelaser.maddi.analysis.api.PrepRequest;
 import io.codelaser.maddi.callgraph.ComputeAnalysisOrder;
+import io.codelaser.maddi.cst.api.expression.MethodCall;
 import io.codelaser.maddi.cst.api.info.Info;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.type.NullableState;
 import io.codelaser.maddi.inspection.api.integration.JavaInspector;
 import io.codelaser.maddi.modification.analyzer.IteratingAnalyzer;
 import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
@@ -24,6 +35,7 @@ import io.codelaser.maddi.modification.analyzer.nullability.Policy;
 import io.codelaser.maddi.modification.analyzer.nullability.Report;
 import io.codelaser.maddi.modification.analyzer.nullability.Switches;
 import io.codelaser.maddi.modification.analyzer.nullability.World;
+import io.codelaser.maddi.modification.link.impl.LinkComputerImpl;
 import io.codelaser.maddi.run.analysis.AnalysisEngineImpl;
 import io.codelaser.maddi.run.j2k.JavaToKotlinRatchet;
 
@@ -41,16 +53,16 @@ public class TestFernflowerNullabilityCauses {
 
     @BeforeAll
     public static void beforeAll() {
-        ((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME))
-                .setLevel(ch.qos.logback.classic.Level.INFO);
+        ((Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME))
+                .setLevel(Level.INFO);
     }
 
     @Test
     public void test() throws Exception {
         // NULLABILITY_CORPUS (passed on by a --no-daemon build): another J2K corpus, e.g. langchain4j
-        String corpusName = java.util.Objects.requireNonNullElse(System.getenv("NULLABILITY_CORPUS"), "fernflower");
+        String corpusName = Objects.requireNonNullElse(System.getenv("NULLABILITY_CORPUS"), "fernflower");
         // nacos: one module per run, J2K_NACOS_MAIN as TestJavaToKotlinNacosNullability (api/main by default)
-        String nacosMain = java.util.Objects.requireNonNullElse(System.getenv("J2K_NACOS_MAIN"), "api/main");
+        String nacosMain = Objects.requireNonNullElse(System.getenv("J2K_NACOS_MAIN"), "api/main");
         long parseStart = System.nanoTime();
         // jenkins: its core module, as TestJavaToKotlinJenkinsNullability
         JavaToKotlinRatchet.Corpus corpus = switch (corpusName) {
@@ -93,7 +105,7 @@ public class TestFernflowerNullabilityCauses {
         // environment's (Switches), each written to build/<corpus>-nullability-causes-<side>.txt; without it, one pass
         // to build/<corpus>-nullability-causes.txt. The phases' times go to build/<corpus>-nullability-timing.txt.
         String sides = System.getenv("NULLABILITY_SIDES");
-        List<String> timing = new java.util.ArrayList<>(List.of("parse " + parseMs + " ms", "prep " + prepMs + " ms",
+        List<String> timing = new ArrayList<>(List.of("parse " + parseMs + " ms", "prep " + prepMs + " ms",
                 "analysis " + analysisMs + " ms"));
         for (String side : sides == null ? List.of("") : List.of(sides.split(","))) {
             Switches.offForNextPasses(side.isEmpty() || "on".equals(side) ? Set.of() : Set.of(side.split("\\+")));
@@ -107,37 +119,37 @@ public class TestFernflowerNullabilityCauses {
             long passMs = (System.nanoTime() - passStart) / 1_000_000;
             // NULLMARKEDDEBUG=<file>: each pass rewrites it; keep one per side
             String boundsDump = System.getenv("NULLMARKEDDEBUG");
-            if (boundsDump != null && sides != null && java.nio.file.Files.exists(Path.of(boundsDump))) {
-                java.nio.file.Files.copy(Path.of(boundsDump), Path.of(boundsDump + "-" + side),
-                        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            if (boundsDump != null && sides != null && Files.exists(Path.of(boundsDump))) {
+                Files.copy(Path.of(boundsDump), Path.of(boundsDump + "-" + side),
+                        StandardCopyOption.REPLACE_EXISTING);
             }
             List<String> lines = lines(report, corpus);
             timing.add("pass " + (side.isEmpty() ? "on" : side) + " " + passMs + " ms");
             String suffix = side.isEmpty() ? "" : "-" + side;
-            java.nio.file.Files.write(Path.of("build/" + corpusName + "-nullability-causes" + suffix + ".txt"), lines);
-            org.junit.jupiter.api.Assertions.assertFalse(lines.isEmpty());
+            Files.write(Path.of("build/" + corpusName + "-nullability-causes" + suffix + ".txt"), lines);
+            Assertions.assertFalse(lines.isEmpty());
         }
-        java.nio.file.Files.write(Path.of("build/" + corpusName + "-nullability-timing.txt"), timing);
+        Files.write(Path.of("build/" + corpusName + "-nullability-timing.txt"), timing);
         timing.forEach(t -> System.err.println("NULLTIMING " + corpusName + " " + t));
     }
 
     private static List<String> lines(Report report, JavaToKotlinRatchet.Corpus corpus) {
-        List<String> lines = new java.util.ArrayList<>();
+        List<String> lines = new ArrayList<>();
         report.verdicts().forEach((info, pt) -> {
             String n = info.fullyQualifiedName();
             for (int i = 0; i < pt.parameters().size(); i++) {
-                if (pt.parameters().get(i).nullable() == io.codelaser.maddi.cst.api.type.NullableState.NULLABLE) {
+                if (pt.parameters().get(i).nullable() == NullableState.NULLABLE) {
                     lines.add(n + " [" + i + "] :: " + report.explain(new Arg(info, i)));
                 }
             }
-            if (pt.nullable() == io.codelaser.maddi.cst.api.type.NullableState.NULLABLE) {
+            if (pt.nullable() == NullableState.NULLABLE) {
                 lines.add(n + " TOP :: " + report.explain(info));
             }
         });
         // a superclass's nullable type arguments (NullabilityFacts.parentClass), with what reaches them
         report.parentClasses().forEach((type, parent) -> {
             for (int i = 0; i < parent.parameters().size(); i++) {
-                if (parent.parameters().get(i).nullable() == io.codelaser.maddi.cst.api.type.NullableState.NULLABLE) {
+                if (parent.parameters().get(i).nullable() == NullableState.NULLABLE) {
                     lines.add(type.fullyQualifiedName() + " SUPER [" + i + "] :: "
                               + report.explain(new Arg(new AnonymousThis(type), i)));
                 }
@@ -148,9 +160,9 @@ public class TestFernflowerNullabilityCauses {
         report.locals().forEach((local, pt) -> {
             String where = local.methodInfo().fullyQualifiedName();
             boolean nullableElements = pt.arrays() > 0 && pt.componentType().nullable()
-                    == io.codelaser.maddi.cst.api.type.NullableState.NULLABLE;
+                    == NullableState.NULLABLE;
             for (int i = 0; i < pt.parameters().size(); i++) {
-                if (pt.parameters().get(i).nullable() == io.codelaser.maddi.cst.api.type.NullableState.NULLABLE) {
+                if (pt.parameters().get(i).nullable() == NullableState.NULLABLE) {
                     lines.add(where + " LOCAL " + local.name() + " [" + i + "] :: "
                               + report.explain(new Arg(local, i)));
                 }
@@ -163,22 +175,22 @@ public class TestFernflowerNullabilityCauses {
                           + (pt.arrays() > 0 ? " elements " + pt.componentType().nullable() : ""));
             }
         });
-        java.util.Collections.sort(lines);
+        Collections.sort(lines);
         // CAUSES_CALLS=<method>:<callee>: in that method, each call to that callee with its argument links
-        String calls = java.util.Objects.requireNonNullElse(System.getenv("CAUSES_CALLS"), "");
+        String calls = Objects.requireNonNullElse(System.getenv("CAUSES_CALLS"), "");
         if (calls.contains(":")) {
             String method = calls.substring(0, calls.indexOf(':'));
             String callee = calls.substring(calls.indexOf(':') + 1);
-            corpus.types().stream().flatMap(io.codelaser.maddi.cst.api.info.TypeInfo::recursiveSubTypeStream)
-                    .flatMap(io.codelaser.maddi.cst.api.info.TypeInfo::constructorAndMethodStream)
+            corpus.types().stream().flatMap(TypeInfo::recursiveSubTypeStream)
+                    .flatMap(TypeInfo::constructorAndMethodStream)
                     .filter(mi -> mi.name().equals(method) && mi.methodBody() != null)
                     .forEach(mi -> mi.methodBody().visit(e -> {
-                        if (e instanceof io.codelaser.maddi.cst.api.expression.MethodCall mc
+                        if (e instanceof MethodCall mc
                             && mc.methodInfo() != null && callee.equals(mc.methodInfo().name())) {
                             lines.add("CALL " + mc.source().compact2() + " " + mc.methodInfo().fullyQualifiedName()
                                       + " args=" + mc.analysis().getOrNull(
-                                    io.codelaser.maddi.modification.link.impl.LinkComputerImpl.LINKED_VARIABLES_ARGUMENTS,
-                                    io.codelaser.maddi.modification.link.impl.LinkComputerImpl.ListOfLinksImpl.class));
+                                    LinkComputerImpl.LINKED_VARIABLES_ARGUMENTS,
+                                    LinkComputerImpl.ListOfLinksImpl.class));
                         }
                         return true;
                     }));

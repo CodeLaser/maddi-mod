@@ -22,6 +22,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -153,7 +154,7 @@ public class EventualClusterContraction {
             for (TypeInfo t : retract) {
                 Set<TypeInfo> assumed = assumptions.getOrDefault(t, Set.of());
                 String broken = assumed.stream().filter(c -> !discharged.contains(c))
-                        .map(TypeInfo::fullyQualifiedName).sorted().collect(java.util.stream.Collectors.joining(", "));
+                        .map(TypeInfo::fullyQualifiedName).sorted().collect(Collectors.joining(", "));
                 System.out.println("ECRETRACT " + t.fullyQualifiedName() + " <- broken: ["
                         + broken + "] (cascade if empty)");
             }

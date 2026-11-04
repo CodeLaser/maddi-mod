@@ -2,6 +2,7 @@ package io.codelaser.maddi.modification.analyzer.kotlin;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
@@ -157,7 +158,7 @@ public abstract class CommonKotlinAnalyzerTest {
 
     private static SourceSet kotlinStdlib() {
         String cp = System.getProperty("java.class.path", "");
-        Path jar = Stream.of(cp.split(java.io.File.pathSeparator)).map(Path::of)
+        Path jar = Stream.of(cp.split(File.pathSeparator)).map(Path::of)
                 .filter(p -> p.getFileName().toString().matches("kotlin-stdlib-\\d[^-]*\\.jar"))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError("no kotlin-stdlib jar on the test class path: " + cp));

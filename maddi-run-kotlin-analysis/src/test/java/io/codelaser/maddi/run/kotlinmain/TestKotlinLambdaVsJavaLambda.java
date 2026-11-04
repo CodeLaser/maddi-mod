@@ -19,10 +19,14 @@ package io.codelaser.maddi.run.kotlinmain;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
+import java.io.File;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Set;
+import java.util.jar.JarFile;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -207,15 +211,15 @@ public class TestKotlinLambdaVsJavaLambda {
      */
     private static String kotlinStdlibJar() {
         String cp = System.getProperty("maddi.k2.classpath", "");
-        String jar = Stream.of(cp.split(java.io.File.pathSeparator))
+        String jar = Stream.of(cp.split(File.pathSeparator))
                 .filter(p -> Path.of(p).getFileName().toString().matches("kotlin-stdlib-\\d[^-]*\\.jar"))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError(
                         "no kotlin-stdlib jar on -Dmaddi.k2.classpath (" + cp + "); this test cannot run"));
-        try (java.util.jar.JarFile jf = new java.util.jar.JarFile(jar)) {
+        try (JarFile jf = new JarFile(jar)) {
             assertNotNull(jf.getEntry("kotlin/collections/CollectionsKt.class"), jar + " is not the Kotlin stdlib");
-        } catch (java.io.IOException e) {
-            throw new java.io.UncheckedIOException(e);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
         }
         return jar;
     }

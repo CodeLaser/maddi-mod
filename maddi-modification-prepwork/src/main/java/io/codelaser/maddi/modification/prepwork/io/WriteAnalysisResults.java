@@ -37,6 +37,7 @@ import org.slf4j.LoggerFactory;
 
 import io.codelaser.maddi.cst.api.analysis.Codec;
 import io.codelaser.maddi.cst.api.analysis.Property;
+import io.codelaser.maddi.cst.api.analysis.PropertyValueMap;
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.element.SourceSet;
 import io.codelaser.maddi.cst.api.info.*;
@@ -106,7 +107,7 @@ public class WriteAnalysisResults {
         return this;
     }
 
-    private boolean writeFalseExplicitly(Info info, io.codelaser.maddi.cst.api.analysis.PropertyValueMap.PropertyValue pv) {
+    private boolean writeFalseExplicitly(Info info, PropertyValueMap.PropertyValue pv) {
         return !explicitFalse.isEmpty()
                && explicitFalse.contains(pv.property())
                && pv.value() instanceof Value.Bool b && b.isFalse();
@@ -237,7 +238,7 @@ public class WriteAnalysisResults {
     private int skippedValues;
 
     private Codec.EncodedPropertyValue encodeOrSkip(Codec codec, Codec.Context context,
-                                                    io.codelaser.maddi.cst.api.analysis.PropertyValueMap.PropertyValue pv) {
+                                                    PropertyValueMap.PropertyValue pv) {
         try {
             return codec.encode(context, pv.property(), pv.value());
         } catch (RuntimeException | AssertionError | StackOverflowError e) {

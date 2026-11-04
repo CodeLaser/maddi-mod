@@ -59,6 +59,7 @@ import java.util.TreeSet;
 import java.util.Vector;
 import java.util.WeakHashMap;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -228,7 +229,7 @@ public class TestJdkCollectionMutators {
 
     private static String signature(Method m) {
         return m.getName() + Arrays.stream(m.getParameterTypes()).map(Class::getTypeName)
-                .collect(java.util.stream.Collectors.joining(",", "(", ")"));
+                .collect(Collectors.joining(",", "(", ")"));
     }
 
     private static MethodInfo find(JavaInspector javaInspector, Method m) {

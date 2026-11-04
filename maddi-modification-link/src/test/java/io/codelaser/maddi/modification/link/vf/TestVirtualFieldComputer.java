@@ -83,10 +83,10 @@ public class TestVirtualFieldComputer extends CommonTest {
     public void listIterator() {
         VirtualFieldComputer vfc = new VirtualFieldComputer(javaInspector);
 
-        TypeInfo iterator = javaInspector.compiledTypesManager().type(java.util.Iterator.class);
+        TypeInfo iterator = javaInspector.compiledTypesManager().type(Iterator.class);
         assertEquals("§m - E[] §es", vfc.compute(iterator).toString());
         // next() and previous() return one E; computed from the methods alone, that read multiplicity 1, a single §e
-        TypeInfo listIterator = javaInspector.compiledTypesManager().type(java.util.ListIterator.class);
+        TypeInfo listIterator = javaInspector.compiledTypesManager().type(ListIterator.class);
         assertEquals(2, vfc.maxMultiplicityFromMethods(listIterator));
         assertEquals("§m - E[] §es", vfc.compute(listIterator).toString());
     }

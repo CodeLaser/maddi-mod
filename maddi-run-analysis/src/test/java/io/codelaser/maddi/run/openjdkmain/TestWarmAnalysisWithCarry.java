@@ -40,6 +40,7 @@ import io.codelaser.maddi.callgraph.CallGraphContributions;
 import io.codelaser.maddi.callgraph.ComputeAnalysisOrder;
 import io.codelaser.maddi.callgraph.ComputeCallGraph;
 import io.codelaser.maddi.callgraph.PrimaryTypeUseGraph;
+import io.codelaser.maddi.cst.api.analysis.Property;
 import io.codelaser.maddi.cst.api.element.SourceSet;
 import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.InfoMapView;
@@ -105,7 +106,7 @@ public class TestWarmAnalysisWithCarry {
             }
             """;
 
-    private static final Predicate<io.codelaser.maddi.cst.api.analysis.Property> OUTPUT =
+    private static final Predicate<Property> OUTPUT =
             AnalysisFingerprint.ANALYZER_OUTPUT_ONLY;
 
     private record Warm(JavaInspector inspector, SourceSet set, ParseResult pr, Set<String> recomputed,

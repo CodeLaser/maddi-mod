@@ -218,7 +218,7 @@ public class DecoratorImpl implements Qualification.Decorator {
                 propertyUnmodified = !methodInfo.isConstructor() && analysis.getOrDefault(NON_MODIFYING_METHOD, FALSE).isTrue()
                         ? NON_MODIFYING_METHOD : null;
                 modifiedHcOnly = propertyUnmodified == null && !methodInfo.isConstructor() && analysis.getOrDefault(
-                        io.codelaser.maddi.cst.impl.analysis.PropertyImpl.STRUCTURALLY_NON_MODIFYING_METHOD, FALSE).isTrue();
+                        PropertyImpl.STRUCTURALLY_NON_MODIFYING_METHOD, FALSE).isTrue();
                 // a "hidden content only" modification is a positive verdict, printed like @NotModified is
                 if ((explicit || modifiedHcOnly) && !methodInfo.isConstructor() && propertyUnmodified == null) {
                     propertyModifiedAnnotated = NON_MODIFYING_METHOD;
@@ -262,7 +262,7 @@ public class DecoratorImpl implements Qualification.Decorator {
                 propertyUnmodified = !pi.parameterizedType().isPrimitiveStringClass()
                                      && isUnmodified ? UNMODIFIED_PARAMETER : null;
                 modifiedHcOnly = !isUnmodified && analysis.getOrDefault(
-                        io.codelaser.maddi.cst.impl.analysis.PropertyImpl.STRUCTURALLY_UNMODIFIED_PARAMETER, FALSE).isTrue();
+                        PropertyImpl.STRUCTURALLY_UNMODIFIED_PARAMETER, FALSE).isTrue();
                 propertyModifiedAnnotated = !pi.parameterizedType().isPrimitiveStringClass()
                                             && !isUnmodified
                                             && (explicit || modifiedHcOnly || isAnnotated(pi, UNMODIFIED_PARAMETER))
@@ -484,7 +484,7 @@ public class DecoratorImpl implements Qualification.Decorator {
                 // task #42: name the cast targets — actionable for the caller (an argument that is
                 // none of these types is not modified by this method)
                 List<Expression> targets = downcastValue.variableToTypeInfoSet().values().stream()
-                        .flatMap(java.util.Set::stream)
+                        .flatMap(Set::stream)
                         .map(TypeInfo::fullyQualifiedName)
                         .distinct().sorted()
                         .map(fqn -> (Expression) runtime.newStringConstant(fqn))

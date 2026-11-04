@@ -19,6 +19,7 @@ package io.codelaser.maddi.modification.common.util;
 
 import java.net.URI;
 import java.util.List;
+import java.util.Objects;
 
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.element.Element;
@@ -74,7 +75,7 @@ public final class Culprits {
         if (!chain.isEmpty()) {
             Value.Culprit.Step last = chain.getLast();
             if (last.line() == step.line() && last.column() == step.column()
-                && java.util.Objects.equals(last.uri(), step.uri())) {
+                && Objects.equals(last.uri(), step.uri())) {
                 chain.set(chain.size() - 1, step);
                 return;
             }

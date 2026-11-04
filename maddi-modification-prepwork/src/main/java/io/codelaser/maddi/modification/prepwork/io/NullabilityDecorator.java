@@ -194,7 +194,7 @@ public class NullabilityDecorator implements Qualification.Decorator {
     // in the @NullMarked style, a method with an undecided parameter or return (not a type variable: parametric)
     private boolean unmarked(MethodInfo mi) {
         if (options.writeNonNull || nullUnmarkedAnnotation == null) return false;
-        return java.util.stream.Stream.concat(mi.parameters().stream(), Stream.of(mi))
+        return Stream.concat(mi.parameters().stream(), Stream.of(mi))
                 .anyMatch(e -> state(e) == NullableState.UNSPECIFIED && !isTypeVariable(type(e)));
     }
 

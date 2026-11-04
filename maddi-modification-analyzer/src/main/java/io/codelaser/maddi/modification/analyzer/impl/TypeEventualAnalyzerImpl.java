@@ -27,6 +27,7 @@ import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.NON_MODIFYING_ME
 import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.UNMODIFIED_PARAMETER;
 import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.EventualImpl.NOT_EVENTUAL;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -40,7 +41,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import io.codelaser.maddi.cst.api.analysis.Message;
+import io.codelaser.maddi.cst.api.analysis.Property;
 import io.codelaser.maddi.cst.api.analysis.Value;
+import io.codelaser.maddi.cst.api.element.Element;
 import io.codelaser.maddi.cst.api.expression.Assignment;
 import io.codelaser.maddi.cst.api.expression.Cast;
 import io.codelaser.maddi.cst.api.expression.ConstructorCall;
@@ -742,7 +745,7 @@ public class TypeEventualAnalyzerImpl extends CommonAnalyzerImpl implements Type
         }
 
         /** No side contributions from a conditional region; a {@code @Mark} seen there still taints. */
-        private void conditional(io.codelaser.maddi.cst.api.element.Element element) {
+        private void conditional(Element element) {
             if (element == null) return;
             element.visit(e -> {
                 if (e instanceof TypeInfo) return false; // local/anonymous types: their own walks
@@ -1982,7 +1985,7 @@ public class TypeEventualAnalyzerImpl extends CommonAnalyzerImpl implements Type
      *  implementations' excuses, and the code paths they excuse cannot execute on an argument of this cone. */
     private boolean residueVacuousOnCone(TypeInfo rootType, Set<String> residue) {
         if (residue.isEmpty()) return true;
-        java.util.ArrayDeque<TypeInfo> todo = new java.util.ArrayDeque<>();
+        ArrayDeque<TypeInfo> todo = new ArrayDeque<>();
         Set<TypeInfo> seen = new HashSet<>();
         todo.add(rootType);
         while (!todo.isEmpty()) {
@@ -2341,7 +2344,7 @@ public class TypeEventualAnalyzerImpl extends CommonAnalyzerImpl implements Type
     }
 
     private static boolean anyImplementationModifies(MethodInfo methodInfo,
-                                                     io.codelaser.maddi.cst.api.analysis.Property property) {
+                                                     Property property) {
         for (MethodInfo implementation : methodInfo.analysis()
                 .getOrDefault(property, ValueImpl.SetOfMethodInfoImpl.EMPTY).methodInfoSet()) {
             Value.Bool nonModifying = implementation.analysis()

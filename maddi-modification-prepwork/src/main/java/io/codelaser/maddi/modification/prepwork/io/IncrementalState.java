@@ -25,6 +25,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -161,11 +163,11 @@ public record IncrementalState(Map<String, String> analysisFingerprints,
             parseStringMap(json.substring(0, src < 0 ? (cs < 0 ? json.length() : cs) : src), fingerprints);
             if (src >= 0) parseStringMap(json.substring(src, cs < 0 ? json.length() : cs), sourceFps);
             if (cs >= 0) {
-                java.util.regex.Matcher c = java.util.regex.Pattern
+                Matcher c = Pattern
                         .compile("\"([^\"]+)\":\\s*\\[([^]]*)]").matcher(json.substring(cs));
                 while (c.find()) {
                     Set<String> set = new TreeSet<>();
-                    java.util.regex.Matcher e = java.util.regex.Pattern
+                    Matcher e = Pattern
                             .compile("\"([^\"]+)\"").matcher(c.group(2));
                     while (e.find()) set.add(e.group(1));
                     consumers.put(c.group(1), set);
@@ -181,7 +183,7 @@ public record IncrementalState(Map<String, String> analysisFingerprints,
     }
 
     private static void parseStringMap(String part, Map<String, String> target) {
-        java.util.regex.Matcher m = java.util.regex.Pattern
+        Matcher m = Pattern
                 .compile("\"([^\"]+)\":\\s*\"([^\"]*)\"").matcher(part);
         while (m.find()) target.put(m.group(1), m.group(2));
     }

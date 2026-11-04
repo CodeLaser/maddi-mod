@@ -21,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -437,7 +438,7 @@ public class TestLoweredShapesVsJava {
 
     /** The fully qualified names of the methods this method's tree holds a method reference to. */
     private static List<String> referencedMethods(MethodInfo method) {
-        List<String> found = new java.util.ArrayList<>();
+        List<String> found = new ArrayList<>();
         method.methodBody().visit(e -> {
             if (e instanceof MethodReference mr) found.add(mr.methodInfo().fullyQualifiedName());
             return true;

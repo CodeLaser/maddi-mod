@@ -2,15 +2,19 @@ package io.codelaser.maddi.modification.analyzer.shadow;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import java.io.IOException;
 import java.util.*;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.DynamicTest;
 import org.junit.jupiter.api.TestFactory;
 
+import io.codelaser.maddi.callgraph.ComputeAnalysisOrder;
 import io.codelaser.maddi.cst.api.analysis.Property;
 import io.codelaser.maddi.cst.api.analysis.PropertyValueMap;
+import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
@@ -155,12 +159,12 @@ public class TestReachabilityOnClosure extends CommonTest {
                 () -> assertClosureEqualsCold(edited, false))).toList();
     }
 
-    private void assertClosureEqualsCold(String edited, boolean modReach) throws java.io.IOException {
+    private void assertClosureEqualsCold(String edited, boolean modReach) throws IOException {
         beforeEach(); // a fresh inspector: the same sources cannot be parsed twice in one
         ParseResult parseResult = javaInspector.parse(SOURCES, javaInspector.failFast()).parseResult();
         Set<TypeInfo> all = SOURCES.keySet().stream().map(parseResult::findType).collect(Collectors.toSet());
         G<Info> graph = prepAnalyzer.doPrimaryTypesReturnGraph(all);
-        List<Info> order = new io.codelaser.maddi.callgraph.ComputeAnalysisOrder().go(graph);
+        List<Info> order = new ComputeAnalysisOrder().go(graph);
         analyzer(modReach).analyze(order, graph);
         Map<String, String> cold = verdicts(all);
 
@@ -210,7 +214,7 @@ public class TestReachabilityOnClosure extends CommonTest {
     }
 
     private static void clearCrossTypeDerived(TypeInfo t) {
-        java.util.function.Predicate<Property> toClear = p -> AnalysisFingerprint.CROSS_TYPE_DERIVED_ONLY.test(p)
+        Predicate<Property> toClear = p -> AnalysisFingerprint.CROSS_TYPE_DERIVED_ONLY.test(p)
                                                               && !PropertyImpl.IMPLEMENTATIONS.key().equals(p.key());
         t.analysis().removeIf(toClear);
         t.constructorAndMethodStream().forEach(m -> {
@@ -237,7 +241,7 @@ public class TestReachabilityOnClosure extends CommonTest {
 
     private static String values(PropertyValueMap analysis) {
         return PROPERTIES.stream().map(p -> {
-            var v = analysis.getOrNull(p, io.codelaser.maddi.cst.api.analysis.Value.class);
+            var v = analysis.getOrNull(p, Value.class);
             return v == null ? null : p.key() + "=" + v;
         }).filter(Objects::nonNull).collect(Collectors.joining(" "));
     }

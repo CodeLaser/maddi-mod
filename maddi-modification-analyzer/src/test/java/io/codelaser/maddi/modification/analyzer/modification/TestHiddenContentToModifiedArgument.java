@@ -21,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Set;
 
 import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.DisplayName;
@@ -216,7 +217,7 @@ public class TestHiddenContentToModifiedArgument extends CommonTest {
         assertFalse(modified(x, "make"), "no teleport: make only builds a pair");
 
         assertFalse(applyTo.parameters().getFirst().isModified(), "handed whole to the method's own function (#69)");
-        assertEquals(java.util.Set.of("1:0"), applyTo.parameters().getFirst().analysis().getOrDefault(
+        assertEquals(Set.of("1:0"), applyTo.parameters().getFirst().analysis().getOrDefault(
                 PropertyImpl.MODIFIED_THROUGH_PASSED_FUNCTION, ValueImpl.SetOfStringsImpl.EMPTY_SET).set(),
                 "... the entry is the channel to the caller");
         assertTrue(modified(x, "caller2"), "Append modifies caller2's sb");

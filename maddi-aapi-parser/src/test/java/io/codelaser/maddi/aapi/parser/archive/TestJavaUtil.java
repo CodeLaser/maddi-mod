@@ -27,6 +27,7 @@ import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.NullabilityImpl.UNS
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.Test;
@@ -38,6 +39,8 @@ import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
+import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
+import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 
 public class TestJavaUtil extends CommonTest {
 
@@ -69,7 +72,7 @@ public class TestJavaUtil extends CommonTest {
         assertEquals("java.util.Collections.sort(java.util.List,java.util.Comparator)", sort.fullyQualifiedName());
         assertSame(TRUE, sort.parameters().get(1).analysis().getOrDefault(IGNORE_MODIFICATIONS_PARAMETER, FALSE));
 
-        TypeInfo completableFuture = compiledTypesManager().typeIfLoaded(java.util.concurrent.CompletableFuture.class);
+        TypeInfo completableFuture = compiledTypesManager().typeIfLoaded(CompletableFuture.class);
         MethodInfo runAsync = completableFuture.findUniqueMethod("runAsync", 2);
         assertSame(TRUE, runAsync.parameters().getFirst().analysis().getOrDefault(IGNORE_MODIFICATIONS_PARAMETER, FALSE));
         assertSame(FALSE, runAsync.parameters().get(1).analysis().getOrDefault(IGNORE_MODIFICATIONS_PARAMETER, FALSE));
@@ -480,8 +483,8 @@ public class TestJavaUtil extends CommonTest {
     public void testCollectionsUnmodifiableList() {
         TypeInfo collections = compiledTypesManager().typeIfLoaded(Collections.class);
         MethodInfo methodInfo = collections.findUniqueMethod("unmodifiableList", 1);
-        assertTrue(methodInfo.analysis().getOrDefault(io.codelaser.maddi.cst.impl.analysis.PropertyImpl.UNMODIFIABLE_VIEW_METHOD,
-                io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.FALSE).isTrue());
+        assertTrue(methodInfo.analysis().getOrDefault(PropertyImpl.UNMODIFIABLE_VIEW_METHOD,
+                ValueImpl.BoolImpl.FALSE).isTrue());
         assertSame(MUTABLE, methodInfo.analysis().getOrDefault(IMMUTABLE_METHOD, MUTABLE));
         assertTrue(methodInfo.isNonModifying());
         assertFalse(methodInfo.parameters().getFirst().isModified());

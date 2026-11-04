@@ -32,6 +32,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import io.codelaser.maddi.annotation.ImmutableContainer;
 import io.codelaser.maddi.callgraph.ComputeAnalysisOrder;
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.element.SourceSet;
@@ -301,7 +302,7 @@ public class TestKotlinLazyVsJavaLazy {
         // loaded 'jar:file:...!/...' class file by looking the JAR'S FILE NAME up among the source-set names,
         // and sourceSetOf is what derives that name (tail(uri)). Naming the set anything friendlier makes every
         // annotation type resolve to "off-classpath", after which the contract silently never arrives.
-        SourceSet annotations = SourceSetImpl.sourceSetOf(io.codelaser.maddi.annotation.ImmutableContainer.class);
+        SourceSet annotations = SourceSetImpl.sourceSetOf(ImmutableContainer.class);
         SourceSet javaSet = new SourceSetImpl.Builder().setName("java/main")
                 .setSourceDirectories(List.of(jDir)).setUri(jDir.toUri())
                 .setDependencies(List.of(annotations)).build();

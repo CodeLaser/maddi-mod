@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -23,6 +24,7 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import ch.qos.logback.classic.Level;
 import io.codelaser.maddi.analysis.api.PrepOutcome;
 import io.codelaser.maddi.analysis.api.PrepRequest;
 import io.codelaser.maddi.callgraph.ComputeAnalysisOrder;
@@ -74,8 +76,8 @@ public class TestNullabilityOracleGuava {
      */
     @BeforeAll
     public static void beforeAll() {
-        ((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME))
-                .setLevel(ch.qos.logback.classic.Level.INFO);
+        ((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME))
+                .setLevel(Level.INFO);
     }
 
     private record Parsed(JavaInspector javaInspector, Summary summary, List<TypeInfo> types) {
@@ -272,7 +274,7 @@ public class TestNullabilityOracleGuava {
                                                  Report report) {
         NullabilityComparison comparison = new NullabilityComparison();
         int[] missing = new int[1];
-        List<String> disagreements = new java.util.ArrayList<>();
+        List<String> disagreements = new ArrayList<>();
         declarations(types, dn, (kind, info, declared) -> {
             ParameterizedType verdict = report.verdicts().get(info);
             if (verdict == null) {
@@ -315,14 +317,14 @@ public class TestNullabilityOracleGuava {
         LOGGER.info("INFERENCE ({} policy), {} declarations without a verdict\n{}", name, missing[0],
                 comparison.report());
         // every disagreement with its cause chain, for classification: kind, shape, element, chain
-        java.nio.file.Path out = java.nio.file.Path.of("build", "nullability-oracle-guava-" + name + ".tsv");
+        Path out = Path.of("build", "nullability-oracle-guava-" + name + ".tsv");
         try {
-            java.nio.file.Files.createDirectories(out.getParent());
-            java.nio.file.Files.write(out, disagreements.stream().sorted().toList());
+            Files.createDirectories(out.getParent());
+            Files.write(out, disagreements.stream().sorted().toList());
             LOGGER.info("INFERENCE ({} policy): {} disagreements written to {}", name, disagreements.size(),
                     out.toAbsolutePath());
         } catch (IOException e) {
-            throw new java.io.UncheckedIOException(e);
+            throw new UncheckedIOException(e);
         }
         return comparison;
     }

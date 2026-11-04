@@ -1,5 +1,7 @@
 package io.codelaser.maddi.run.openjdkmain;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
 import io.codelaser.maddi.run.j2k.JavaToKotlinRatchet;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
@@ -20,8 +22,8 @@ public class TestJavaToKotlinTimefoldNullability {
     /* INFO, as TestNullabilityOracleGuava: at DEBUG the analyzer's log fills the test report. */
     @BeforeAll
     public static void beforeAll() {
-        ((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME))
-                .setLevel(ch.qos.logback.classic.Level.INFO);
+        ((Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME))
+                .setLevel(Level.INFO);
     }
 
     @Test

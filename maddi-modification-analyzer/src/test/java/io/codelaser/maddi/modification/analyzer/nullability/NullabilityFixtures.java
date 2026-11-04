@@ -1,11 +1,14 @@
 package io.codelaser.maddi.modification.analyzer.nullability;
 
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
 import org.intellij.lang.annotations.Language;
 
+import io.codelaser.maddi.cst.api.expression.MethodCall;
 import io.codelaser.maddi.cst.api.info.FieldInfo;
 import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
@@ -112,7 +115,7 @@ abstract class NullabilityFixtures extends CommonTest {
 
     // every local verdict, sorted: 'method.name: Type', a counter per method and name so sibling locals both show
     static String locals(Report report) {
-        Map<String, Integer> seen = new java.util.HashMap<>();
+        Map<String, Integer> seen = new HashMap<>();
         return report.locals().entrySet().stream()
                 .map(e -> {
                     String key = e.getKey().methodInfo().name() + "." + e.getKey().name();
@@ -128,11 +131,11 @@ abstract class NullabilityFixtures extends CommonTest {
                 .collect(Collectors.toMap(e -> e.getKey().fullyQualifiedName(), e -> k(e.getValue())));
     }
 
-    List<io.codelaser.maddi.cst.api.expression.MethodCall> calls(String method, String callee) {
+    List<MethodCall> calls(String method, String callee) {
         MethodInfo mi = parsed.methods().stream().filter(m -> m.name().equals(method)).findFirst().orElseThrow();
-        List<io.codelaser.maddi.cst.api.expression.MethodCall> out = new java.util.ArrayList<>();
+        List<MethodCall> out = new ArrayList<>();
         mi.methodBody().visit(e -> {
-            if (e instanceof io.codelaser.maddi.cst.api.expression.MethodCall mc && mc.methodInfo() != null
+            if (e instanceof MethodCall mc && mc.methodInfo() != null
                 && mc.methodInfo().name().equals(callee)) out.add(mc);
             return true;
         });

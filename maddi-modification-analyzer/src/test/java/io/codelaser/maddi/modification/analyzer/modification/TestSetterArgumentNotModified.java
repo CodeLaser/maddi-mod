@@ -15,6 +15,7 @@ import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.modification.analyzer.CommonTest;
+import io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl;
 import io.codelaser.maddi.modification.prepwork.variable.VariableData;
 import io.codelaser.maddi.modification.prepwork.variable.VariableInfo;
 import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
@@ -67,7 +68,7 @@ public class TestSetterArgumentNotModified extends CommonTest {
         VariableInfo vi = vd.variableInfo(command);
         return m.name() + ": command modified=" + command.isModified() + " vd=" + vi.isModified() + " links="
                + vi.linkedVariables() + " mlv=" + m.analysis().getOrNull(METHOD_LINKS,
-                io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl.class);
+                MethodLinkedVariablesImpl.class);
     }
 
     @DisplayName("a setter's argument, and the object it was read from, are not modified")

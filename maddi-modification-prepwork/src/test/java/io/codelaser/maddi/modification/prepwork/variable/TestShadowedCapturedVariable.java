@@ -25,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 
 import java.io.IOException;
 import java.net.URISyntaxException;
+import java.util.List;
 
 import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.BeforeEach;
@@ -106,7 +107,7 @@ public class TestShadowedCapturedVariable extends CommonTest {
         ConstructorCall cc = (ConstructorCall) ((ReturnStatement) make.methodBody().lastStatement()).expression();
         MethodInfo run = cc.anonymousClass().findUniqueMethod("run", 1);
 
-        java.util.List<Statement> runStmts = run.methodBody().statements();
+        List<Statement> runStmts = run.methodBody().statements();
         Statement builderStmt = runStmts.get(0);          // StringBuilder e = new StringBuilder(env);  -- reads outer
         IfElseStatement ifStmt = (IfElseStatement) runStmts.get(1);
         ForEachStatement forEach = (ForEachStatement) ifStmt.block().statements().get(0);

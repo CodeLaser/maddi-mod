@@ -4,6 +4,7 @@ import static io.codelaser.maddi.modification.common.CommonTest.javaInspectorFac
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -144,7 +145,7 @@ public class TestIsolateClass8Natures {
     private Map<String, String> isolate(String... fqns) {
         var parsed = javaInspector.parse(SOURCES,
                 new JavaInspector.ParseOptions.Builder().setDetailedSources(true).setFailFast(true).build());
-        List<TypeInfo> types = java.util.Arrays.stream(fqns).map(parsed.parseResult()::findType).toList();
+        List<TypeInfo> types = Arrays.stream(fqns).map(parsed.parseResult()::findType).toList();
         IsolateClass.Result r = isolateClass.isolate(types);
         Map<MethodInfo, String> memberSources = new LinkedHashMap<>();
         for (MethodInfo original : r.markers().values()) {

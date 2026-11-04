@@ -57,7 +57,7 @@ public class TestAnalysisHintsComposer extends CommonTest {
 
     @BeforeAll
     public static void beforeAll() {
-        ((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME)).setLevel(Level.INFO);
+        ((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME)).setLevel(Level.INFO);
         ((ch.qos.logback.classic.Logger) LoggerFactory.getLogger("io.codelaser.maddi.aapi")).setLevel(Level.DEBUG);
     }
 
@@ -65,7 +65,7 @@ public class TestAnalysisHintsComposer extends CommonTest {
     public void test() throws IOException, URISyntaxException {
         SourceSet javaBase = SourceSetImpl.javaBase();
         SourceSet maddiSupport = SourceSetImpl.sourceSetOf(Immutable.class);
-        SourceSet slf4jApi = SourceSetImpl.sourceSetOf(org.slf4j.Logger.class);
+        SourceSet slf4jApi = SourceSetImpl.sourceSetOf(Logger.class);
 
         JavaInspector javaInspector = new io.codelaser.maddi.inspection.openjdk.JavaInspectorImpl();
         javaInspector.preload("java.base::java.util");

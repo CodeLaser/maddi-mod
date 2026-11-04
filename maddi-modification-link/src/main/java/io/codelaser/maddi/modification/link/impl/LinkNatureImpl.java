@@ -82,10 +82,10 @@ public class LinkNatureImpl implements LinkNature {
         if (pass.isEmpty()) {
             this.pass = pass;
         } else {
-            java.util.TreeSet<MethodInfo> sorted =
-                    new java.util.TreeSet<>(java.util.Comparator.comparing(MethodInfo::fullyQualifiedName));
+            TreeSet<MethodInfo> sorted =
+                    new TreeSet<>(Comparator.comparing(MethodInfo::fullyQualifiedName));
             sorted.addAll(pass);
-            this.pass = java.util.Collections.unmodifiableSortedSet(sorted);
+            this.pass = Collections.unmodifiableSortedSet(sorted);
         }
         this.score = score;
     }

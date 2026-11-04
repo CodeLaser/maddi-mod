@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
 
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -110,7 +111,7 @@ public class TestEngineDeterminism {
             String facts = factsOf(build(perm).printClosure());
             if (reference == null) {
                 reference = facts;
-                org.junit.jupiter.api.Assertions.assertTrue(facts.contains("m ∩ copy"),
+                Assertions.assertTrue(facts.contains("m ∩ copy"),
                         "the two-level composite must derive:\n" + facts);
             } else {
                 assertEquals(reference, facts, "insertion order changed the fact set: " + perm);

@@ -20,6 +20,7 @@ import static io.codelaser.maddi.inspection.resource.SourceSetImpl.testProtocolS
 import static io.codelaser.maddi.modification.common.CommonTest.javaInspectorWithExtras;
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 
@@ -106,7 +107,7 @@ public class TestObjectReturnDefault extends CommonTest {
      */
     @DisplayName("without any hints: still no refused downgrade")
     @Test
-    public void withoutHints() throws java.io.IOException {
+    public void withoutHints() throws IOException {
         JavaInspector ji = javaInspectorWithExtras(testProtocolSourceSet(), List.of(), List.of());
         ji.setParameterNames(true);
         ji.onlyPreload();

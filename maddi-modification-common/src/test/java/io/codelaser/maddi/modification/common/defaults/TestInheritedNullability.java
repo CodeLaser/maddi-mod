@@ -21,6 +21,7 @@ import static io.codelaser.maddi.modification.common.defaults.ShallowMethodAnaly
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -66,7 +67,7 @@ public class TestInheritedNullability {
     }
 
     private String inherit(ParameterizedType pt, List<NullableState> priority, String... shapes) {
-        List<Declared> declared = java.util.Arrays.stream(shapes)
+        List<Declared> declared = Arrays.stream(shapes)
                 .map(s -> new Declared(pt, NullabilityImpl.fromShape(s))).toList();
         return ((NullabilityImpl) inherited(NullableState.NONNULL, pt, declared, priority)).shape();
     }

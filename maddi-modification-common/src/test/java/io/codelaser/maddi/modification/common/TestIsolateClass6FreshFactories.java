@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -271,7 +272,7 @@ public class TestIsolateClass6FreshFactories {
         var parsed = javaInspector.parse(sources,
                 new JavaInspector.ParseOptions.Builder().setDetailedSources(true).setFailFast(true).build());
         // the group isolate: Use AND Item verbatim, the way a corpus driver carries a DTO beside its host
-        IsolateClass.Result r = isolateClass.isolate(java.util.List.of(parsed.parseResult().findType("a.b.Use"),
+        IsolateClass.Result r = isolateClass.isolate(List.of(parsed.parseResult().findType("a.b.Use"),
                 parsed.parseResult().findType("p.q.Item")));
         Map<MethodInfo, String> memberSources = new LinkedHashMap<>();
         for (MethodInfo original : r.markers().values()) {

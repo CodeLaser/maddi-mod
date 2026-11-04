@@ -19,6 +19,7 @@ package io.codelaser.maddi.modification.analyzer.impl;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
 
 import io.codelaser.maddi.cst.api.analysis.Property;
 import io.codelaser.maddi.cst.api.analysis.Value;
@@ -129,7 +130,7 @@ public class ContractResolution {
         });
     }
 
-    private Outcome cached(Info info, Property property, java.util.function.Function<Property, Outcome> compute) {
+    private Outcome cached(Info info, Property property, Function<Property, Outcome> compute) {
         return cache.computeIfAbsent(info, _ -> new ConcurrentHashMap<>()).computeIfAbsent(property, compute);
     }
 
@@ -139,7 +140,7 @@ public class ContractResolution {
     }
 
     private Inherited strongestInherited(MethodInfo methodInfo, Property property,
-                                         java.util.function.Function<MethodInfo, Value> contractOfParent) {
+                                         Function<MethodInfo, Value> contractOfParent) {
         Inherited best = Inherited.NONE;
         for (MethodInfo parent : methodInfo.overrides()) {
             Value fromParent = contractOfParent.apply(parent);

@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import org.intellij.lang.annotations.Language;
@@ -104,7 +105,7 @@ public class TestVirtualFieldComputer3 extends CommonTest {
     @Test
     public void needsVirtualFunctionInJavaUtilFunction() {
         VirtualFieldComputer vfc = new VirtualFieldComputer(javaInspector);
-        TypeInfo function = javaInspector.compiledTypesManager().type(java.util.function.Function.class);
+        TypeInfo function = javaInspector.compiledTypesManager().type(Function.class);
         assertEquals(VirtualFields.NONE, vfc.compute(function));
         assertFalse(Util.needsVirtual(function.asParameterizedType()));
     }
@@ -114,7 +115,7 @@ public class TestVirtualFieldComputer3 extends CommonTest {
     public void functionalInterfaceInJavaUtilFunction() {
         VirtualFieldComputer vfc = new VirtualFieldComputer(javaInspector);
         TypeInfo function = javaInspector.compiledTypesManager()
-                .type(java.util.function.Function.class);
+                .type(Function.class);
         assertEquals(VirtualFields.NONE, vfc.compute(function));
     }
 

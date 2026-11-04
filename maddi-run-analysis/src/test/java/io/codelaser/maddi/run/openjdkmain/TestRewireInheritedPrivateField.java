@@ -25,7 +25,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.stream.Stream;
 
 import javax.tools.JavaCompiler;
@@ -148,7 +150,7 @@ public class TestRewireInheritedPrivateField {
         return type.constructorAndMethodStream()
                 .map(m -> m.analysis().getOrNull(MethodLinkedVariablesImpl.METHOD_LINKS,
                         MethodLinkedVariablesImpl.class))
-                .filter(java.util.Objects::nonNull)
+                .filter(Objects::nonNull)
                 .flatMap(mlv -> Stream.concat(Stream.of(mlv.ofReturnValue()), mlv.ofParameters().stream()))
                 .flatMap(Links::stream)
                 .flatMap(l -> Stream.of(l.from(), l.to()))
@@ -173,7 +175,7 @@ public class TestRewireInheritedPrivateField {
         ParseResult pr0 = javaInspector.parse(Map.of(), JavaInspectorImpl.DETAILED_SOURCES).parseResult();
         ComputeCallGraph ccg0 = analyze(javaInspector, pr0);
         TypeInfo oldSub = pr0.findType("c.d.Sub");
-        Map<String, String> linksBefore = new java.util.TreeMap<>();
+        Map<String, String> linksBefore = new TreeMap<>();
         oldSub.constructorAndMethodStream().forEach(m -> linksBefore.put(m.name(), String.valueOf(m.analysis()
                 .getOrNull(MethodLinkedVariablesImpl.METHOD_LINKS, MethodLinkedVariablesImpl.class))));
         // the shape: get() returns Base's private field, which its links name as a field of Sub
@@ -197,12 +199,12 @@ public class TestRewireInheritedPrivateField {
         TypeInfo oldBag = pr0.findType("c.d.Bag");
         TypeInfo newBag = pr1.findType("c.d.Bag");
         assertNotSame(oldBag, newBag, "Bag was rewired");
-        Map<String, String> bagBefore = new java.util.TreeMap<>();
+        Map<String, String> bagBefore = new TreeMap<>();
         oldBag.constructorAndMethodStream().forEach(m -> bagBefore.put(m.name(), String.valueOf(m.analysis()
                 .getOrNull(MethodLinkedVariablesImpl.METHOD_LINKS, MethodLinkedVariablesImpl.class))));
         oldBag.constructorAndMethodStream().forEach(oldMethod -> view.methodInfo(oldMethod).analysis()
                 .setAll(oldMethod.analysis().rewire(view, AnalysisFingerprint.CROSS_TYPE_DERIVED_ONLY)));
-        Map<String, String> bagAfter = new java.util.TreeMap<>();
+        Map<String, String> bagAfter = new TreeMap<>();
         newBag.constructorAndMethodStream().forEach(m -> bagAfter.put(m.name(), String.valueOf(m.analysis()
                 .getOrNull(MethodLinkedVariablesImpl.METHOD_LINKS, MethodLinkedVariablesImpl.class))));
         assertEquals(bagBefore, bagAfter, "Bag's links are carried as they were");
@@ -211,7 +213,7 @@ public class TestRewireInheritedPrivateField {
                 "a virtual field of Bag, owned by the rewired Bag: " + virtual);
         virtual.forEach(f -> assertNotSame(oldBag, f.owner(), () -> f + " is owned by the old Bag"));
 
-        Map<String, String> linksAfter = new java.util.TreeMap<>();
+        Map<String, String> linksAfter = new TreeMap<>();
         newSub.constructorAndMethodStream().forEach(m -> linksAfter.put(m.name(), String.valueOf(m.analysis()
                 .getOrNull(MethodLinkedVariablesImpl.METHOD_LINKS, MethodLinkedVariablesImpl.class))));
         assertEquals(linksBefore, linksAfter, "the links are carried as they were");

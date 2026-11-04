@@ -18,14 +18,17 @@
 package io.codelaser.maddi.modification.analyzer.nullability;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Supplier;
 
 import io.codelaser.maddi.cst.api.expression.*;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.statement.*;
+import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.cst.api.variable.Variable;
 
 /**
@@ -118,7 +121,7 @@ public final class NullPredicates {
         Map<Variable, When> tests = fieldTests.get(method);
         if (tests == null) return Set.of();
         When neverForNull = result ? When.FALSE_IF_NULL : When.TRUE_IF_NULL;
-        Set<Variable> set = new java.util.HashSet<>();
+        Set<Variable> set = new HashSet<>();
         tests.forEach((field, when) -> {
             if (when == neverForNull) set.add(field);
         });
@@ -127,13 +130,13 @@ public final class NullPredicates {
 
     // the fields of this compared with null in the body
     private static Set<Variable> testedFields(MethodInfo m) {
-        Set<Variable> fields = new java.util.HashSet<>();
+        Set<Variable> fields = new HashSet<>();
         m.methodBody().visit(e -> {
             if (e instanceof BinaryOperator bo && (operator(bo, "==") || operator(bo, "!="))) {
                 Expression other = bo.lhs() instanceof NullConstant ? bo.rhs()
                         : bo.rhs() instanceof NullConstant ? bo.lhs() : null;
                 if (other != null && NonNullFacts.unwrap(other) instanceof VariableExpression ve
-                    && ve.variable() instanceof io.codelaser.maddi.cst.api.variable.FieldReference fr
+                    && ve.variable() instanceof FieldReference fr
                     && fr.scopeIsThis() && !fr.fieldInfo().isStatic()) {
                     fields.add(ve.variable());
                 }
@@ -276,14 +279,14 @@ public final class NullPredicates {
     }
 
     // 'a && b': b is evaluated only when a is true; false whenever either is
-    private static Boolean and(Boolean a, java.util.function.Supplier<Boolean> b) {
+    private static Boolean and(Boolean a, Supplier<Boolean> b) {
         if (a == Boolean.FALSE) return false;
         Boolean vb = b.get();
         if (a == Boolean.TRUE) return vb;
         return vb == Boolean.FALSE ? Boolean.FALSE : null;
     }
 
-    private static Boolean or(Boolean a, java.util.function.Supplier<Boolean> b) {
+    private static Boolean or(Boolean a, Supplier<Boolean> b) {
         if (a == Boolean.TRUE) return true;
         Boolean vb = b.get();
         if (a == Boolean.FALSE) return vb;

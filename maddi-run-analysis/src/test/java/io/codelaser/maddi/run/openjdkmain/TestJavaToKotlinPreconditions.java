@@ -8,6 +8,8 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
 import io.codelaser.maddi.cst.print.kotlin.KotlinPrintOptions;
 import io.codelaser.maddi.modification.analyzer.nullability.Policy;
 import io.codelaser.maddi.modification.analyzer.nullability.Report;
@@ -28,8 +30,8 @@ public class TestJavaToKotlinPreconditions {
 
     @BeforeAll
     public static void beforeAll() {
-        ((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME))
-                .setLevel(ch.qos.logback.classic.Level.INFO);
+        ((Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME))
+                .setLevel(Level.INFO);
     }
 
     @Test

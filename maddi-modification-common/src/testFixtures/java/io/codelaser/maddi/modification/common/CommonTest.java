@@ -16,6 +16,7 @@ import io.codelaser.maddi.cst.api.element.SourceSet;
 import io.codelaser.maddi.inspection.api.integration.JavaInspector;
 import io.codelaser.maddi.inspection.api.integration.JavaInspectorFactory;
 import io.codelaser.maddi.inspection.api.resource.InputConfiguration;
+import io.codelaser.maddi.inspection.openjdk.JavaInspectorImpl;
 import io.codelaser.maddi.inspection.resource.InputConfigurationImpl;
 import io.codelaser.maddi.inspection.resource.SourceSetImpl;
 import io.codelaser.maddi.support.SetOnce;
@@ -41,7 +42,7 @@ public class CommonTest {
         // classpath -- which is how OrgE2immuSupport stopped resolving.
         SourceSet maddiAnnotation = SourceSetImpl.sourceSetOf(Immutable.class);
         SourceSet maddiSupport = SourceSetImpl.sourceSetOf(SetOnce.class, maddiAnnotation);
-        SourceSet slf4jApi = SourceSetImpl.sourceSetOf(org.slf4j.Logger.class);
+        SourceSet slf4jApi = SourceSetImpl.sourceSetOf(Logger.class);
         SourceSet logbackClassic = SourceSetImpl.sourceSetOf(Logger.class);
         SourceSet junitPlatform = SourceSetImpl.sourceSetOf(JUnitException.class);
         SourceSet jupiter = SourceSetImpl.sourceSetOf(Test.class, junitPlatform);
@@ -92,14 +93,14 @@ public class CommonTest {
         // classpath -- which is how OrgE2immuSupport stopped resolving.
         SourceSet maddiAnnotation = SourceSetImpl.sourceSetOf(Immutable.class);
         SourceSet maddiSupport = SourceSetImpl.sourceSetOf(SetOnce.class, maddiAnnotation);
-        SourceSet slf4jApi = SourceSetImpl.sourceSetOf(org.slf4j.Logger.class);
+        SourceSet slf4jApi = SourceSetImpl.sourceSetOf(Logger.class);
         SourceSet logbackClassic = SourceSetImpl.sourceSetOf(Logger.class);
         SourceSet junitPlatform = SourceSetImpl.sourceSetOf(JUnitException.class);
         SourceSet jupiter = SourceSetImpl.sourceSetOf(Test.class, junitPlatform);
         SourceSet opentest4j = SourceSetImpl.sourceSetOf(AssertionFailedError.class);
         SourceSet annotations = SourceSetImpl.sourceSetOf(NotNull.class);
 
-        JavaInspector javaInspector = new io.codelaser.maddi.inspection.openjdk.JavaInspectorImpl();
+        JavaInspector javaInspector = new JavaInspectorImpl();
         javaInspector.preload("java.base::java.util.");
         javaInspector.preload("java.base::java.net");
         javaInspector.preload("java.base::java.io");

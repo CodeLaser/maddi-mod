@@ -17,17 +17,26 @@
 
 package io.codelaser.maddi.aapi.parser;
 
+import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import ch.qos.logback.classic.Level;
 import io.codelaser.maddi.annotation.Immutable;
+import io.codelaser.maddi.cst.api.analysis.Property;
 import io.codelaser.maddi.cst.api.analysis.PropertyValueMap;
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.element.Element;
@@ -90,7 +99,7 @@ public class ComposeAnalysisHints {
         SourceSet maddiAnnotation = SourceSetImpl.sourceSetOf(Immutable.class);
         // comma-separated: the library's own class first, then one class of each jar its class files refer to
         // (vavr: io.vavr.Value,io.vavr.match.annotation.Patterns)
-        List<SourceSet> libraries = new java.util.ArrayList<>();
+        List<SourceSet> libraries = new ArrayList<>();
         for (String a : anchor.split(",")) libraries.add(SourceSetImpl.sourceSetOf(Class.forName(a.trim())));
 
         JavaInspector javaInspector = new JavaInspectorImpl();
@@ -128,10 +137,10 @@ public class ComposeAnalysisHints {
                 info -> info.access().isPublic());
         String notes = System.getProperty("maddi.compose.notes");
         if (notes != null && !notes.isBlank()) {
-            List<ExpectedRow> rows = readExpectedRows(java.nio.file.Path.of(notes));
+            List<ExpectedRow> rows = readExpectedRows(Path.of(notes));
             LOGGER.info("Read {} EXPECTED row(s) from {}", rows.size(), notes);
-            String report = java.nio.file.Path.of(notes).getFileName().toString();
-            java.util.Set<String> annotatedAsExpected = applyExpected(rows, primaryTypes);
+            String report = Path.of(notes).getFileName().toString();
+            Set<String> annotatedAsExpected = applyExpected(rows, primaryTypes);
             LOGGER.info("Annotated {} type(s) with their EXPECTED verdict", annotatedAsExpected.size());
             composer.setTypeNotes(typeInfo -> rows.stream()
                     .filter(r -> !r.isMemberRow() && r.matches(typeInfo.fullyQualifiedName()))
@@ -147,7 +156,7 @@ public class ComposeAnalysisHints {
         // imports resolved from the main source set, which sees the whole class path: the jar's own source set sees
         // nothing, and star-import clashes (java.util.* vs io.vavr.collection.*) would go undetected
         // EXPLICIT decoration: hints written from a computed analysis must round-trip to it (see DecoratorImpl)
-        composer.write(apiTypes, new java.io.File(out), new DecoratorImpl(javaInspector.runtime(),
+        composer.write(apiTypes, new File(out), new DecoratorImpl(javaInspector.runtime(),
                 javaInspector.mainSources(), dollarMap, preload != null && !preload.isBlank()),
                 javaInspector.mainSources());
     }
@@ -156,7 +165,7 @@ public class ComposeAnalysisHints {
      The keys the hint decorator prints (DecoratorImpl), minus downcastParameter. Everything else in a source run's
      results is internal to the analysis.
      */
-    private static final java.util.Set<String> PUBLISHED_KEYS = java.util.Set.of("analyzerError", "commutableMethods",
+    private static final Set<String> PUBLISHED_KEYS = Set.of("analyzerError", "commutableMethods",
             "containerType", "eventualMethod", "eventualParameter", "eventuallyFinalField", "eventuallyImmutableType",
             "eventuallyNonModifyingMethod", "eventuallyUnmodifiedParameter", "finalField", "finalizerMethod",
             "fluentMethod", "getSetEquivalent", "getSetField", "identityMethod", "ignoreModMethod",
@@ -211,7 +220,7 @@ public class ComposeAnalysisHints {
         Boolean container = null; // null: not stated, keep the computed value
         boolean utilityClass = false;
         Value.Independent independent = null;
-        java.util.regex.Matcher m = java.util.regex.Pattern
+        Matcher m = Pattern
                 .compile("^@(\\w+)(?:\\(([^)]*)\\))?\\s*").matcher(rest);
         while (!rest.isEmpty()) {
             m.reset(rest);
@@ -260,8 +269,8 @@ public class ComposeAnalysisHints {
      are at least hc-independent. The computed value stays visible in the type's comment.
      Returns the fully qualified names of the types that got their EXPECTED annotations.
      */
-    static java.util.Set<String> applyExpected(List<ExpectedRow> rows, List<TypeInfo> primaryTypes) {
-        java.util.Set<String> applied = new java.util.HashSet<>();
+    static Set<String> applyExpected(List<ExpectedRow> rows, List<TypeInfo> primaryTypes) {
+        Set<String> applied = new HashSet<>();
         List<TypeInfo> allTypes = primaryTypes.stream().flatMap(TypeInfo::recursiveSubTypeStream).toList();
         for (TypeInfo typeInfo : allTypes) {
             String fqn = typeInfo.fullyQualifiedName();
@@ -288,8 +297,8 @@ public class ComposeAnalysisHints {
         return applied;
     }
 
-    private static final java.util.Set<io.codelaser.maddi.cst.api.analysis.Property> EVENTUAL_MEMBER_PROPERTIES =
-            java.util.Set.of(PropertyImpl.EVENTUAL_METHOD, PropertyImpl.EVENTUALLY_NON_MODIFYING_METHOD,
+    private static final Set<Property> EVENTUAL_MEMBER_PROPERTIES =
+            Set.of(PropertyImpl.EVENTUAL_METHOD, PropertyImpl.EVENTUALLY_NON_MODIFYING_METHOD,
                     PropertyImpl.EVENTUAL_PARAMETER, PropertyImpl.EVENTUALLY_UNMODIFIED_PARAMETER);
 
     private static void applyExpectedType(TypeInfo typeInfo, ExpectedType expected) {
@@ -333,9 +342,9 @@ public class ComposeAnalysisHints {
         }
     }
 
-    static List<ExpectedRow> readExpectedRows(java.nio.file.Path report) throws IOException {
-        List<ExpectedRow> rows = new java.util.ArrayList<>();
-        for (String line : java.nio.file.Files.readAllLines(report)) {
+    static List<ExpectedRow> readExpectedRows(Path report) throws IOException {
+        List<ExpectedRow> rows = new ArrayList<>();
+        for (String line : Files.readAllLines(report)) {
             if (!line.startsWith("| `")) continue;
             String[] cells = line.split("\\|");
             if (cells.length < 5) continue;

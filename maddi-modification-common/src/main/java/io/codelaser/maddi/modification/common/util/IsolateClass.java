@@ -1,14 +1,20 @@
 package io.codelaser.maddi.modification.common.util;
 
+import java.lang.annotation.Annotation;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.TreeSet;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import org.slf4j.Logger;
@@ -139,7 +145,7 @@ public class IsolateClass {
         /** every static import the emitted project needs, over all its isolated units */
         public Set<String> staticImports() {
             return staticImportsPerType.values().stream().flatMap(Set::stream)
-                    .collect(java.util.stream.Collectors.toCollection(java.util.TreeSet::new));
+                    .collect(Collectors.toCollection(TreeSet::new));
         }
 
         /**
@@ -211,7 +217,7 @@ public class IsolateClass {
             // Returning false sends the caller down its ordinary path, which puts the member on the stub of the
             // type that declares it -- where the isolated type inherits it from, exactly as in the original.
             if (isolatedTypeInherits(currentOriginalType, owner)) return false;
-            staticImports.computeIfAbsent(currentOriginalType, _ -> new java.util.TreeSet<>())
+            staticImports.computeIfAbsent(currentOriginalType, _ -> new TreeSet<>())
                     .add(owner.fullyQualifiedName() + "." + memberName);
             return true;
         }
@@ -236,7 +242,7 @@ public class IsolateClass {
         // the isolated types' own members, which are printed verbatim and so need no stub; identity, because two
         // overloads of one name are different members and only the exact one is already declared
         final Set<MethodInfo> keptVerbatim =
-                java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+                Collections.newSetFromMap(new IdentityHashMap<>());
 
         /**
          * The test is "is this method kept verbatim, and is the owner a type that has it", NOT "is the owner the
@@ -491,7 +497,7 @@ public class IsolateClass {
         }
         if (typeInfo.isAnnotation()) {
             // as for an annotation stub: the interface every annotation type implements, and its own @Target
-            TypeInfo annotation = javaInspector.compiledTypesManager().type(java.lang.annotation.Annotation.class);
+            TypeInfo annotation = javaInspector.compiledTypesManager().type(Annotation.class);
             isolated.builder().addInterfaceImplemented(annotation.asSimpleParameterizedType());
             data.copyMetaAnnotations(typeInfo, isolated);
         }
@@ -552,11 +558,11 @@ public class IsolateClass {
      */
     private static Map<Boolean, Set<TypeInfo>> arbitrateImports(ClassStubs data) {
         Set<String> singleImportedByOriginal = data.originalTypes.stream()
-                .map(TypeInfo::compilationUnit).filter(java.util.Objects::nonNull)
+                .map(TypeInfo::compilationUnit).filter(Objects::nonNull)
                 .flatMap(cu -> cu.importStatements().stream())
                 .filter(is -> !is.isStar())
                 .map(is -> is.importString())
-                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+                .collect(Collectors.toUnmodifiableSet());
         // candidate -> was it named by its simple name in the verbatim text?
         Map<TypeInfo, Boolean> candidates = new LinkedHashMap<>();
         // The sibling isolates, and ONLY when there is more than one: a candidate is a type some OTHER unit may

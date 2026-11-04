@@ -35,12 +35,20 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import io.codelaser.maddi.cst.api.analysis.Message;
 import io.codelaser.maddi.cst.api.analysis.Value;
+import io.codelaser.maddi.cst.api.expression.Assignment;
+import io.codelaser.maddi.cst.api.expression.Cast;
+import io.codelaser.maddi.cst.api.expression.EnclosedExpression;
+import io.codelaser.maddi.cst.api.expression.Expression;
+import io.codelaser.maddi.cst.api.expression.InlineConditional;
+import io.codelaser.maddi.cst.api.expression.MethodCall;
+import io.codelaser.maddi.cst.api.expression.NullConstant;
 import io.codelaser.maddi.cst.api.info.FieldInfo;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.runtime.Runtime;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
+import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 import io.codelaser.maddi.modification.analyzer.IteratingAnalyzer;
 import io.codelaser.maddi.modification.analyzer.TypeImmutableAnalyzer;
@@ -48,7 +56,9 @@ import io.codelaser.maddi.modification.analyzer.TypeIndependentAnalyzer;
 import io.codelaser.maddi.modification.common.AnalysisHelper;
 import io.codelaser.maddi.modification.common.defaults.ContractReader;
 import io.codelaser.maddi.modification.common.util.TolerantWrite;
+import io.codelaser.maddi.modification.link.impl.Gate;
 import io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl;
+import io.codelaser.maddi.modification.prepwork.Util;
 import io.codelaser.maddi.modification.prepwork.variable.Link;
 import io.codelaser.maddi.modification.prepwork.variable.MethodLinkedVariables;
 
@@ -67,7 +77,7 @@ public class TypeIndependentAnalyzerImpl extends CommonAnalyzerImpl implements T
     // log-only diagnostic gate, shared name with TypeEventualAnalyzerImpl / TypeImmutableAnalyzerImpl
     private static final String EC_TYPE_DEBUG = System.getenv("EC_TYPE_DEBUG");
     // #82: NOSUPERWAIT restores the concrete-methods shortcut for an undecided abstract SOURCE supertype
-    private static final boolean NO_SUPER_WAIT = io.codelaser.maddi.modification.link.impl.Gate.isSet("NOSUPERWAIT");
+    private static final boolean NO_SUPER_WAIT = Gate.isSet("NOSUPERWAIT");
     // INDEPENDENCEWALK=0 restores the min over supertype verdicts (A/B switch, as INTERFACEWALK on the immutability side)
     private static final boolean INDEPENDENCE_WALK = !"0".equals(System.getenv("INDEPENDENCEWALK"));
 
@@ -515,7 +525,7 @@ public class TypeIndependentAnalyzerImpl extends CommonAnalyzerImpl implements T
      */
     private boolean ignoreModificationsAccessor(MethodInfo methodInfo) {
         if (isIgnoreModAccessor(methodInfo)) return true;
-        if (!io.codelaser.maddi.modification.prepwork.Util.unionOverImplementations(methodInfo)) return false;
+        if (!Util.unionOverImplementations(methodInfo)) return false;
         for (MethodInfo im : methodInfo.analysis()
                 .getOrDefault(IMPLEMENTATIONS, ValueImpl.SetOfMethodInfoImpl.EMPTY).methodInfoSet()) {
             if (isIgnoreModAccessor(im)) return true;
@@ -565,7 +575,7 @@ public class TypeIndependentAnalyzerImpl extends CommonAnalyzerImpl implements T
     /** @param parameterIndex -1 for the return value */
     private boolean sharedContentCommits(TypeInfo member, MethodInfo abstractMethod, int parameterIndex,
                                          String what) {
-        if (!io.codelaser.maddi.modification.prepwork.Util.unionOverImplementations(abstractMethod)) return false;
+        if (!Util.unionOverImplementations(abstractMethod)) return false;
         Value.SetOfMethodInfo implementations = abstractMethod.analysis()
                 .getOrDefault(IMPLEMENTATIONS, ValueImpl.SetOfMethodInfoImpl.EMPTY);
         if (implementations.isEmpty()) return false;
@@ -625,14 +635,14 @@ public class TypeIndependentAnalyzerImpl extends CommonAnalyzerImpl implements T
 
     private boolean fieldWrapperProvablyImmutable(FieldInfo fieldInfo) {
         return wrapperImmutableCache.computeIfAbsent(fieldInfo, f -> {
-            java.util.List<io.codelaser.maddi.cst.api.expression.Expression> writes = new java.util.ArrayList<>();
-            io.codelaser.maddi.cst.api.expression.Expression init = f.initializer();
+            List<Expression> writes = new ArrayList<>();
+            Expression init = f.initializer();
             if (init != null && !init.isEmpty()) writes.add(init);
             for (MethodInfo ctor : f.owner().constructors()) {
                 if (ctor.methodBody().isEmpty()) continue;
                 ctor.methodBody().visit(e -> {
-                    if (e instanceof io.codelaser.maddi.cst.api.expression.Assignment a
-                        && a.variableTarget() instanceof io.codelaser.maddi.cst.api.variable.FieldReference fr
+                    if (e instanceof Assignment a
+                        && a.variableTarget() instanceof FieldReference fr
                         && fr.scopeIsThis() && f.equals(fr.fieldInfo())) {
                         writes.add(a.value());
                     }
@@ -647,22 +657,22 @@ public class TypeIndependentAnalyzerImpl extends CommonAnalyzerImpl implements T
     // Kotlin's copies are copies, not immutable ones: toList/toSet/toMap return a fresh ArrayList, LinkedHashSet,
     // LinkedHashMap; listOf(a, b) is Arrays.asList, setOf/mapOf a LinkedHashSet/Map. A getter hands out a mutable
     // wrapper. Only the empty singletons cannot be mutated.
-    private static final java.util.Set<String> KOTLIN_COPIES = java.util.Set.of("emptyList", "emptySet", "emptyMap");
+    private static final Set<String> KOTLIN_COPIES = Set.of("emptyList", "emptySet", "emptyMap");
 
-    private static boolean immutableCopyExpression(io.codelaser.maddi.cst.api.expression.Expression expr) {
-        if (expr instanceof io.codelaser.maddi.cst.api.expression.NullConstant) {
+    private static boolean immutableCopyExpression(Expression expr) {
+        if (expr instanceof NullConstant) {
             return true; // a null wrapper cannot be mutated; the null-tolerant copyOf ternary shape
         }
-        if (expr instanceof io.codelaser.maddi.cst.api.expression.Cast c) {
+        if (expr instanceof Cast c) {
             return immutableCopyExpression(c.expression());
         }
-        if (expr instanceof io.codelaser.maddi.cst.api.expression.EnclosedExpression ee) {
+        if (expr instanceof EnclosedExpression ee) {
             return immutableCopyExpression(ee.inner());
         }
-        if (expr instanceof io.codelaser.maddi.cst.api.expression.InlineConditional ic) {
+        if (expr instanceof InlineConditional ic) {
             return immutableCopyExpression(ic.ifTrue()) && immutableCopyExpression(ic.ifFalse());
         }
-        if (expr instanceof io.codelaser.maddi.cst.api.expression.MethodCall mc) {
+        if (expr instanceof MethodCall mc) {
             MethodInfo mi = mc.methodInfo();
             String name = mi.name();
             if (("copyOf".equals(name) || "of".equals(name)) && mi.isStatic()) {

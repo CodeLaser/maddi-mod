@@ -10,13 +10,16 @@ import java.util.List;
 
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
+import org.slf4j.Logger;
 
+import io.codelaser.maddi.annotation.Container;
 import io.codelaser.maddi.cst.api.element.SourceSet;
 import io.codelaser.maddi.inspection.api.resource.InputConfiguration;
 import io.codelaser.maddi.inspection.resource.InputConfigurationImpl;
 import io.codelaser.maddi.inspection.resource.SourceSetImpl;
 import io.codelaser.maddi.run.config.AnalysisHintsConfigurationImpl;
 import io.codelaser.maddi.run.config.Configuration;
+import io.codelaser.maddi.support.Either;
 
 /**
  * Manual generator (use case 2 of the AnalysisHints configuration): compiles the curated
@@ -41,9 +44,9 @@ public class GenerateSupportAnalysisResults {
                 .setWorkingDirectory(".")
                 .addSourceSets(aapiSource)
                 .addClassPathParts(SourceSetImpl.javaBase(),
-                        SourceSetImpl.sourceSetOf(io.codelaser.maddi.annotation.Container.class),
-                        SourceSetImpl.sourceSetOf(io.codelaser.maddi.support.Either.class),
-                        SourceSetImpl.sourceSetOf(org.slf4j.Logger.class))
+                        SourceSetImpl.sourceSetOf(Container.class),
+                        SourceSetImpl.sourceSetOf(Either.class),
+                        SourceSetImpl.sourceSetOf(Logger.class))
                 .build();
         AnalysisHintsConfigurationImpl aapi = (AnalysisHintsConfigurationImpl) new AnalysisHintsConfigurationImpl.Builder()
                 .setAnalysisResultsTargetDir(target.toString())

@@ -17,9 +17,12 @@
 
 package io.codelaser.maddi.modification.analyzer.impl;
 
+import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -33,6 +36,7 @@ import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
+import io.codelaser.maddi.modification.prepwork.Util;
 
 /**
  * EXPERIMENTAL, gated on {@code EVENTUALCLUSTER=1}. Breaks the circular recognition that stops the {@code Info}
@@ -158,7 +162,7 @@ public class EventualCluster {
      */
     public boolean isGroundedInMark(TypeInfo start) {
         if (!ENABLED || groundedCache.contains(start)) return true;
-        java.util.ArrayDeque<TypeInfo> todo = new java.util.ArrayDeque<>();
+        ArrayDeque<TypeInfo> todo = new ArrayDeque<>();
         Set<TypeInfo> seen = new HashSet<>();
         todo.add(start);
         seen.add(start);
@@ -168,7 +172,7 @@ public class EventualCluster {
                 groundedCache.add(start);
                 return true;
             }
-            java.util.List<TypeInfo> next = new java.util.ArrayList<>();
+            List<TypeInfo> next = new ArrayList<>();
             ParameterizedType parent = t.parentClass();
             if (parent != null && parent.typeInfo() != null) next.add(parent.typeInfo());
             for (ParameterizedType itf : t.interfacesImplemented()) {
@@ -189,7 +193,7 @@ public class EventualCluster {
         return false;
     }
 
-    private static void addTypeInfos(ParameterizedType pt, java.util.List<TypeInfo> out) {
+    private static void addTypeInfos(ParameterizedType pt, List<TypeInfo> out) {
         if (pt.typeInfo() != null) out.add(pt.typeInfo());
         for (ParameterizedType p : pt.parameters()) addTypeInfos(p, out);
     }
@@ -247,7 +251,7 @@ public class EventualCluster {
 
     private static boolean setterOrImplementedBySetter(MethodInfo methodInfo) {
         if (isSetter(methodInfo)) return true;
-        if (!io.codelaser.maddi.modification.prepwork.Util.unionOverImplementations(methodInfo)) return false;
+        if (!Util.unionOverImplementations(methodInfo)) return false;
         for (MethodInfo implementation : methodInfo.analysis()
                 .getOrDefault(PropertyImpl.IMPLEMENTATIONS, ValueImpl.SetOfMethodInfoImpl.EMPTY)
                 .methodInfoSet()) {
@@ -349,7 +353,7 @@ public class EventualCluster {
                                + " [" + debugContext.get() + "]");
         }
         if (admissible) {
-            java.util.ArrayDeque<java.util.List<TypeInfo[]>> stack = assumptionBuffers.get();
+            ArrayDeque<List<TypeInfo[]>> stack = assumptionBuffers.get();
             if (!stack.isEmpty()) {
                 // success-only witnessing: inside a buffered computation, the edge only reaches the ledger if
                 // the computation lands its property -- a bailed attempt (retried next iteration, possibly
@@ -384,8 +388,8 @@ public class EventualCluster {
     }
 
     // per-thread stack of assumption buffers; the type loop runs computations in parallel, one per thread
-    private final ThreadLocal<java.util.ArrayDeque<java.util.List<TypeInfo[]>>> assumptionBuffers =
-            ThreadLocal.withInitial(java.util.ArrayDeque::new);
+    private final ThreadLocal<ArrayDeque<List<TypeInfo[]>>> assumptionBuffers =
+            ThreadLocal.withInitial(ArrayDeque::new);
 
     // log-only diagnostic (MODREACH_EXPLAIN style): print DIRECT assumption edges whose candidate FQN
     // matches any comma-separated substring -- the ledger the contraction walks is otherwise only visible
@@ -503,7 +507,7 @@ public class EventualCluster {
      *  {@link #commitAssumptionBuffer()} or {@link #discardAssumptionBuffer()}. No-op off the gate. */
     public void beginAssumptionBuffer() {
         if (!ENABLED) return;
-        assumptionBuffers.get().push(new java.util.ArrayList<>());
+        assumptionBuffers.get().push(new ArrayList<>());
     }
 
     /** The buffered computation landed its property: its optimistic edges enter the ledger. */

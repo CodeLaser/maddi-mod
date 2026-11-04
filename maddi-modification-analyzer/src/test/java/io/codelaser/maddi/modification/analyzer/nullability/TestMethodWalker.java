@@ -4,14 +4,20 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.stream.Collectors;
 
 import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import io.codelaser.maddi.cst.api.expression.Assignment;
+import io.codelaser.maddi.cst.api.expression.ConstructorCall;
+import io.codelaser.maddi.cst.api.expression.Expression;
 import io.codelaser.maddi.cst.api.expression.MethodCall;
 import io.codelaser.maddi.cst.api.expression.VariableExpression;
 import io.codelaser.maddi.cst.api.info.FieldInfo;
@@ -19,9 +25,14 @@ import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.statement.Block;
+import io.codelaser.maddi.cst.api.statement.ExpressionAsStatement;
 import io.codelaser.maddi.cst.api.statement.IfElseStatement;
+import io.codelaser.maddi.cst.api.statement.LocalVariableCreation;
 import io.codelaser.maddi.cst.api.statement.Statement;
 import io.codelaser.maddi.cst.api.statement.TryStatement;
+import io.codelaser.maddi.cst.api.statement.WhileStatement;
+import io.codelaser.maddi.cst.api.variable.DependentVariable;
+import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.cst.api.variable.Variable;
 
 /**
@@ -48,9 +59,9 @@ public class TestMethodWalker extends NullabilityFixtures {
                 .findFirst().orElseThrow().getValue()));
         // the lookup the printer uses: by declaring element
         MethodInfo sibling = parsed.findUniqueMethod("sibling", 1);
-        io.codelaser.maddi.cst.api.statement.Statement ifElse = sibling.methodBody().statements().getFirst();
-        var first = (io.codelaser.maddi.cst.api.statement.LocalVariableCreation) ifElse.block().statements().getFirst();
-        var second = (io.codelaser.maddi.cst.api.statement.LocalVariableCreation) ifElse.otherBlocksStream()
+        Statement ifElse = sibling.methodBody().statements().getFirst();
+        var first = (LocalVariableCreation) ifElse.block().statements().getFirst();
+        var second = (LocalVariableCreation) ifElse.otherBlocksStream()
                 .findFirst().orElseThrow().statements().getFirst();
         assertEquals("String?", k(report.local(sibling, first, first.localVariable())));
         assertEquals("String", k(report.local(sibling, second, second.localVariable())));
@@ -100,9 +111,9 @@ public class TestMethodWalker extends NullabilityFixtures {
         Report report = run("a.b.N", NESTED_LOCALS);
         String all = locals(report);
         System.out.println(all);
-        org.junit.jupiter.api.Assertions.assertTrue(all.contains("flatten.shortEntry: Node?"), all);
-        org.junit.jupiter.api.Assertions.assertTrue(all.contains("flatten.longEntry: Node?"), all);
-        org.junit.jupiter.api.Assertions.assertTrue(all.contains("flatten.entry: StackEntry?"), all);
+        Assertions.assertTrue(all.contains("flatten.shortEntry: Node?"), all);
+        Assertions.assertTrue(all.contains("flatten.longEntry: Node?"), all);
+        Assertions.assertTrue(all.contains("flatten.entry: StackEntry?"), all);
     }
 
     @Language("java")
@@ -161,7 +172,7 @@ public class TestMethodWalker extends NullabilityFixtures {
         assertEquals("String?", byLabel.get("lazy"), "Java's default value");
         assertEquals("String", byLabel.get("getLazy()"), "the lazy getter: null only in the branch that assigns");
         String locals = locals(report);
-        org.junit.jupiter.api.Assertions.assertTrue(locals.contains("lookup.v: String?"), locals);
+        Assertions.assertTrue(locals.contains("lookup.v: String?"), locals);
     }
 
     @Language("java")
@@ -178,12 +189,12 @@ public class TestMethodWalker extends NullabilityFixtures {
     @Test
     public void smartCasts() {
         Report report = run("a.b.K", SMART_CASTS);
-        io.codelaser.maddi.cst.api.info.MethodInfo checked = parsed.findUniqueMethod("checked", 1);
-        io.codelaser.maddi.cst.api.statement.Statement ret = checked.methodBody().statements().getLast();
+        MethodInfo checked = parsed.findUniqueMethod("checked", 1);
+        Statement ret = checked.methodBody().statements().getLast();
         assertEquals(true, report.useSites().nonNullAt(ret, checked.parameters().getFirst()));
         assertEquals(true, report.smartCasts().nonNullAt(ret, checked.parameters().getFirst()));
-        io.codelaser.maddi.cst.api.info.MethodInfo required = parsed.findUniqueMethod("required", 1);
-        io.codelaser.maddi.cst.api.statement.Statement ret2 = required.methodBody().statements().getLast();
+        MethodInfo required = parsed.findUniqueMethod("required", 1);
+        Statement ret2 = required.methodBody().statements().getLast();
         ParameterInfo r = required.parameters().getFirst();
         // the JDK hint: requireNonNull's parameter demands non-null, so Java knows; Kotlin does not smart-cast
         assertEquals(true, report.useSites().nonNullAt(ret2, r));
@@ -243,23 +254,23 @@ public class TestMethodWalker extends NullabilityFixtures {
         MethodInfo build = parsed.findUniqueMethod("build", 1);
         MethodInfo[] make = {null};
         build.methodBody().visit(e -> {
-            if (e instanceof io.codelaser.maddi.cst.api.expression.ConstructorCall cc && cc.anonymousClass() != null) {
+            if (e instanceof ConstructorCall cc && cc.anonymousClass() != null) {
                 make[0] = cc.anonymousClass().findUniqueMethod("make", 1);
             }
             return true;
         });
-        io.codelaser.maddi.cst.api.statement.Statement ifStatement = make[0].methodBody().statements().get(1);
-        io.codelaser.maddi.cst.api.statement.Statement assignment = ifStatement.block().statements().getFirst();
-        io.codelaser.maddi.cst.api.variable.Variable[] count = {null};
-        List<io.codelaser.maddi.cst.api.expression.Expression> calls = new java.util.ArrayList<>();
+        Statement ifStatement = make[0].methodBody().statements().get(1);
+        Statement assignment = ifStatement.block().statements().getFirst();
+        Variable[] count = {null};
+        List<Expression> calls = new ArrayList<>();
         assignment.expression().visit(e -> {
             if (e instanceof VariableExpression ve && "count".equals(ve.variable().simpleName())) count[0] = ve.variable();
-            if (e instanceof io.codelaser.maddi.cst.api.expression.MethodCall mc) calls.add(mc);
+            if (e instanceof MethodCall mc) calls.add(mc);
             return true;
         });
         StringBuilder sb = new StringBuilder("statement=" + report.smartCasts().nonNullAt(assignment, count[0]));
         for (var call : calls) sb.append("; ").append(call).append("=").append(report.smartCasts().nonNullAt(call, count[0]));
-        Map<String, String> l = new java.util.TreeMap<>();
+        Map<String, String> l = new TreeMap<>();
         report.locals().forEach((local, pt) -> l.put(local.methodInfo().name() + "." + local.name(), k(pt)));
         assertEquals("AtomicLong?", l.get("build.count"), l + " " + sb);
         assertEquals(false, report.smartCasts().nonNullAt(assignment, count[0]), sb.toString());
@@ -294,9 +305,9 @@ public class TestMethodWalker extends NullabilityFixtures {
                 }
                 """, Policy.KOTLIN);
         MethodInfo run = parsed.findUniqueMethod("run", 0);
-        io.codelaser.maddi.cst.api.statement.Statement loop = run.methodBody().statements().getFirst();
-        io.codelaser.maddi.cst.api.statement.Statement call = loop.block().statements().getLast();
-        io.codelaser.maddi.cst.api.variable.Variable[] next = {null};
+        Statement loop = run.methodBody().statements().getFirst();
+        Statement call = loop.block().statements().getLast();
+        Variable[] next = {null};
         call.expression().visit(e -> {
             if (e instanceof VariableExpression ve && "next".equals(ve.variable().simpleName())) next[0] = ve.variable();
             return true;
@@ -326,7 +337,7 @@ public class TestMethodWalker extends NullabilityFixtures {
         parsed.subTypes().forEach(st -> {
             if ("Ref".equals(st.simpleName())) ctor[0] = st.findConstructor(2);
         });
-        io.codelaser.maddi.cst.api.statement.Statement cleanUp = ctor[0].methodBody().statements().get(1);
+        Statement cleanUp = ctor[0].methodBody().statements().get(1);
         ParameterInfo queue = ctor[0].parameters().get(1);
         assertEquals(false, report.smartCasts().nonNullAt(cleanUp, queue));
         assertEquals(true, report.useSites().nonNullAt(cleanUp, queue));
@@ -343,11 +354,11 @@ public class TestMethodWalker extends NullabilityFixtures {
 
     private boolean smartCastAtReturn(Report report, String method, int n, String field) {
         MethodInfo mi = parsed.findUniqueMethod(method, n);
-        io.codelaser.maddi.cst.api.statement.Statement ret = mi.methodBody().statements().getLast();
-        io.codelaser.maddi.cst.api.variable.Variable[] found = {null};
+        Statement ret = mi.methodBody().statements().getLast();
+        Variable[] found = {null};
         ret.expression().visit(e -> {
             if (found[0] == null && e instanceof VariableExpression ve
-                && ve.variable() instanceof io.codelaser.maddi.cst.api.variable.FieldReference fr
+                && ve.variable() instanceof FieldReference fr
                 && field.equals(fr.fieldInfo().name())) found[0] = fr;
             return true;
         });
@@ -414,10 +425,10 @@ public class TestMethodWalker extends NullabilityFixtures {
     public void readLoop() {
         Report report = run("a.b.RL", READ_LOOP);
         MethodInfo count = parsed.findUniqueMethod("count", 1);
-        io.codelaser.maddi.cst.api.statement.WhileStatement loop = (io.codelaser.maddi.cst.api.statement.WhileStatement)
+        WhileStatement loop = (WhileStatement)
                 count.methodBody().statements().get(2);
-        io.codelaser.maddi.cst.api.statement.Statement body = loop.block().statements().getFirst();
-        io.codelaser.maddi.cst.api.variable.Variable line = ((io.codelaser.maddi.cst.api.statement.LocalVariableCreation)
+        Statement body = loop.block().statements().getFirst();
+        Variable line = ((LocalVariableCreation)
                 count.methodBody().statements().get(1)).localVariable();
         assertEquals(true, report.useSites().nonNullAt(body, line), "inside the loop");
         assertEquals(false, report.smartCasts().nonNullAt(body, line), "not a Kotlin smart cast");
@@ -471,15 +482,15 @@ public class TestMethodWalker extends NullabilityFixtures {
         assertEquals("String?", byLabel.get("cached"));
         // the printer's view: in 'v != null && accept(v)', the call has v; Kotlin smart-casts it too
         MethodInfo both = parsed.findUniqueMethod("both", 1);
-        io.codelaser.maddi.cst.api.statement.Statement ret = both.methodBody().statements().getLast();
-        java.util.List<io.codelaser.maddi.cst.api.expression.MethodCall> calls = new java.util.ArrayList<>();
+        Statement ret = both.methodBody().statements().getLast();
+        List<MethodCall> calls = new ArrayList<>();
         ret.expression().visit(e -> {
-            if (e instanceof io.codelaser.maddi.cst.api.expression.MethodCall mc
+            if (e instanceof MethodCall mc
                 && "accept".equals(mc.methodInfo().name())) calls.add(mc);
             return true;
         });
-        io.codelaser.maddi.cst.api.expression.MethodCall accept = calls.getFirst();
-        io.codelaser.maddi.cst.api.variable.Variable v = ((io.codelaser.maddi.cst.api.statement.LocalVariableCreation)
+        MethodCall accept = calls.getFirst();
+        Variable v = ((LocalVariableCreation)
                 both.methodBody().statements().getFirst()).localVariable();
         assertEquals(true, report.smartCasts().nonNullAt(accept, v));
     }
@@ -512,19 +523,19 @@ public class TestMethodWalker extends NullabilityFixtures {
         TypeInfo n = parsed;
         MethodInfo top = n.findUniqueMethod("top", 1);
         ParameterInfo np = top.parameters().getFirst();
-        io.codelaser.maddi.cst.api.statement.Statement loop = top.methodBody().statements().get(1);
+        Statement loop = top.methodBody().statements().get(1);
         assertEquals(false, report.useSites().nonNullAt(loop, np), "the loop assigns n: not known at its condition");
         MethodInfo cases = n.findUniqueMethod("cases", 2);
         ParameterInfo s = cases.parameters().get(1);
-        io.codelaser.maddi.cst.api.statement.Statement sw = cases.methodBody().statements().getFirst();
-        io.codelaser.maddi.cst.api.statement.Statement returnInCase2 = sw.subBlockStream().findFirst().orElseThrow()
+        Statement sw = cases.methodBody().statements().getFirst();
+        Statement returnInCase2 = sw.subBlockStream().findFirst().orElseThrow()
                 .statements().get(2);
         assertEquals(false, report.useSites().nonNullAt(returnInCase2, s), "case 2 is not reached through case 0");
         MethodInfo arms = n.findUniqueMethod("arms", 2);
         ParameterInfo armsS = arms.parameters().get(1);
-        List<io.codelaser.maddi.cst.api.expression.MethodCall> calls = new java.util.ArrayList<>();
+        List<MethodCall> calls = new ArrayList<>();
         arms.methodBody().statements().getFirst().expression().visit(e -> {
-            if (e instanceof io.codelaser.maddi.cst.api.expression.MethodCall mc) calls.add(mc);
+            if (e instanceof MethodCall mc) calls.add(mc);
             return true;
         });
         assertEquals("hashCode", calls.get(1).methodInfo().name());
@@ -658,10 +669,10 @@ public class TestMethodWalker extends NullabilityFixtures {
                 }
                 """, Policy.NULL_MARKED_FLOW_ONLY.withoutContracts().withWorld(World.CLOSED));
         System.out.println(explain(report));
-        Map<String, Boolean> present = new java.util.TreeMap<>();
-        List<MethodInfo> methods = new java.util.ArrayList<>(parsed.methods());
+        Map<String, Boolean> present = new TreeMap<>();
+        List<MethodInfo> methods = new ArrayList<>(parsed.methods());
         parsed.findUniqueMethod("iterator", 0).methodBody().visit(e -> {
-            if (e instanceof io.codelaser.maddi.cst.api.expression.ConstructorCall cc && cc.anonymousClass() != null) {
+            if (e instanceof ConstructorCall cc && cc.anonymousClass() != null) {
                 methods.addAll(cc.anonymousClass().methods());
             }
             return true;
@@ -716,7 +727,7 @@ public class TestMethodWalker extends NullabilityFixtures {
                     }
                 }
                 """, Policy.NULL_MARKED_FLOW_ONLY.withoutContracts().withWorld(World.CLOSED));
-        Map<String, Boolean> present = new java.util.TreeMap<>();
+        Map<String, Boolean> present = new TreeMap<>();
         parsed.methods().forEach(m -> m.methodBody().visit(e -> {
             if (e instanceof MethodCall mc && mc.methodInfo() != null && "get".equals(mc.methodInfo().name())) {
                 present.merge(m.name(), report.useSites().keyPresentWhenCalled(mc), Boolean::logicalAnd);
@@ -736,7 +747,7 @@ public class TestMethodWalker extends NullabilityFixtures {
     @DisplayName("key presence: a call handed the map to an unmodified parameter keeps it, in a try's catch too")
     @Test
     public void keyPresenceAcrossUnmodifiedCall() {
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         run("a.b.KU", """
                 package a.b;
                 import java.util.HashMap;
@@ -817,14 +828,14 @@ public class TestMethodWalker extends NullabilityFixtures {
                 }
                 """, Policy.KOTLIN);
         MethodInfo count = parsed.findUniqueMethod("count", 2);
-        List<io.codelaser.maddi.cst.api.expression.VariableExpression> derefs = new java.util.ArrayList<>();
-        List<Statement> inner = new java.util.ArrayList<>();
+        List<VariableExpression> derefs = new ArrayList<>();
+        List<Statement> inner = new ArrayList<>();
         count.methodBody().visit(e -> {
             if (e instanceof IfElseStatement ifElse) inner.add(ifElse.block().statements().getFirst());
             return true;
         });
         Statement use = inner.getFirst();
-        io.codelaser.maddi.cst.api.variable.Variable child = report.smartCasts().before(use).stream()
+        Variable child = report.smartCasts().before(use).stream()
                 .filter(v -> v.simpleName().equals("child")).findFirst().orElse(null);
         System.out.println("SMART " + report.smartCasts().before(use) + " JAVA " + report.useSites().before(use));
         assertEquals(null, child, "contains(Object) accepts null: Kotlin knows nothing about child");
@@ -1065,7 +1076,7 @@ public class TestMethodWalker extends NullabilityFixtures {
                     static void caller() { plain(null); }
                 }
                 """, Policy.KOTLIN);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(label(info), k(pt)));
         assertEquals("Integer?", s.get("ensureNotNegative(0:i)"), s.toString());
         assertEquals("Object?[]", s.get("illegalArgument(1:args)"), s.toString());
@@ -1146,10 +1157,10 @@ public class TestMethodWalker extends NullabilityFixtures {
         MethodInfo mi = parsed.methods().stream().filter(m -> m.name().equals(method)).findFirst().orElseThrow();
         boolean[] found = {false, false};
         mi.methodBody().visit(e -> {
-            if (e instanceof io.codelaser.maddi.cst.api.statement.ExpressionAsStatement eas
-                && eas.expression() instanceof io.codelaser.maddi.cst.api.expression.MethodCall mc
+            if (e instanceof ExpressionAsStatement eas
+                && eas.expression() instanceof MethodCall mc
                 && mc.methodInfo() != null && "timeout".equals(mc.methodInfo().name())
-                && mc.object() instanceof io.codelaser.maddi.cst.api.expression.VariableExpression ve) {
+                && mc.object() instanceof VariableExpression ve) {
                 found[0] = true;
                 found[1] = report.useSites().nonNullAt(eas, ve.variable());
             }
@@ -1234,11 +1245,11 @@ public class TestMethodWalker extends NullabilityFixtures {
                     }
                 }
                 """);
-        List<io.codelaser.maddi.cst.api.expression.MethodCall> conditional = calls("conditional", "getExpected");
+        List<MethodCall> conditional = calls("conditional", "getExpected");
         assertEquals(2, conditional.size());
         assertFalse(report.useSites().pureCallNonNullWhenCalled(conditional.get(0)), "the test itself");
         assertTrue(report.useSites().pureCallNonNullWhenCalled(conditional.get(1)), "the else branch");
-        List<io.codelaser.maddi.cst.api.expression.MethodCall> interrupted = calls("interrupted", "getExpected");
+        List<MethodCall> interrupted = calls("interrupted", "getExpected");
         assertEquals(2, interrupted.size());
         assertFalse(report.useSites().pureCallNonNullWhenCalled(interrupted.get(1)), "after a modifying call");
     }
@@ -1415,9 +1426,9 @@ public class TestMethodWalker extends NullabilityFixtures {
         assertFalse(receiverKnownAtReturn(report, parsed.findUniqueMethod("referenced", 0)), "this::referenced");
         assertFalse(receiverKnownAtReturn(report, parsed.findUniqueMethod("initialLength", 0)), "the initializer");
         assertFalse(receiverKnownAtReturn(report, parsed.findUniqueMethod("anonymous", 0)), "the anonymous class");
-        io.codelaser.maddi.cst.api.expression.MethodCall equals = calls("looped", "equals").getFirst();
+        MethodCall equals = calls("looped", "equals").getFirst();
         assertTrue(report.useSites().nonNullAt(equals,
-                ((io.codelaser.maddi.cst.api.expression.VariableExpression) equals.object()).variable()),
+                ((VariableExpression) equals.object()).variable()),
                 "in the catch of the loop, as CredentialWatcher.loadPropertyPathToStream");
         assertTrue(report.useSites().nonNullAtExit(parsed.findUniqueMethod("looped", 0),
                 parsed.getFieldByName("path", true)), "the loop assigns it only non-null values");
@@ -1471,7 +1482,7 @@ public class TestMethodWalker extends NullabilityFixtures {
                         .withWorld(World.CLOSED).withoutTestNulls());
         assertTrue(keyKnownAtRemove(report, "free"), "app != null ? app : \"none\"");
         assertFalse(keyKnownAtRemove(report, "unguarded"), "b ? app : \"none\"");
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(label(info), k(pt)));
         assertEquals("Res", s.get("conf()"), s.toString());
         assertEquals("Res", s.get("<init>(0:res)"), s.toString());
@@ -1515,7 +1526,7 @@ public class TestMethodWalker extends NullabilityFixtures {
                     }
                 }
                 """);
-        Map<String, String> s = new java.util.TreeMap<>();
+        Map<String, String> s = new TreeMap<>();
         report.verdicts().forEach((info, pt) -> s.put(label(info), k(pt)));
         assertEquals("Object", s.get("guarded(0:val)"), s.toString());
         assertEquals("Object", s.get("chained(0:val)"), s.toString());
@@ -1563,14 +1574,14 @@ public class TestMethodWalker extends NullabilityFixtures {
     private boolean receiverKnownInCondition(Report report, String method) {
         MethodInfo mi = parsed.methods().stream().filter(m -> m.name().equals(method)).findFirst().orElseThrow();
         Statement loop = mi.methodBody().statements().get(1);
-        List<io.codelaser.maddi.cst.api.expression.MethodCall> calls = new java.util.ArrayList<>();
+        List<MethodCall> calls = new ArrayList<>();
         loop.expression().visit(e -> {
-            if (e instanceof io.codelaser.maddi.cst.api.expression.MethodCall mc && mc.object() != null
-                && mc.object() instanceof io.codelaser.maddi.cst.api.expression.VariableExpression) calls.add(mc);
+            if (e instanceof MethodCall mc && mc.object() != null
+                && mc.object() instanceof VariableExpression) calls.add(mc);
             return true;
         });
-        io.codelaser.maddi.cst.api.expression.MethodCall first = calls.getFirst();
-        Variable clazz = ((io.codelaser.maddi.cst.api.expression.VariableExpression) first.object()).variable();
+        MethodCall first = calls.getFirst();
+        Variable clazz = ((VariableExpression) first.object()).variable();
         return report.useSites().nonNullAt(loop, clazz) || report.useSites().nonNullAt(first, clazz);
     }
 
@@ -1579,14 +1590,14 @@ public class TestMethodWalker extends NullabilityFixtures {
         MethodInfo mi = parsed.methods().stream()
                 .filter(m -> m.name().equals(method) && m.parameters().size() >= 1).findFirst().orElseThrow();
         Statement st = mi.methodBody().statements().get(1);
-        List<io.codelaser.maddi.cst.api.expression.MethodCall> removes = new java.util.ArrayList<>();
+        List<MethodCall> removes = new ArrayList<>();
         st.visit(e -> {
-            if (e instanceof io.codelaser.maddi.cst.api.expression.MethodCall mc && mc.methodInfo() != null
+            if (e instanceof MethodCall mc && mc.methodInfo() != null
                 && "remove".equals(mc.methodInfo().name())) removes.add(mc);
             return true;
         });
-        io.codelaser.maddi.cst.api.expression.MethodCall remove = removes.getFirst();
-        Variable key = ((io.codelaser.maddi.cst.api.expression.VariableExpression) remove.parameterExpressions()
+        MethodCall remove = removes.getFirst();
+        Variable key = ((VariableExpression) remove.parameterExpressions()
                 .getFirst()).variable();
         return report.useSites().nonNullAt(st, key) || report.useSites().nonNullAt(remove, key);
     }
@@ -1594,18 +1605,18 @@ public class TestMethodWalker extends NullabilityFixtures {
     // the facts on x when the method's 'return x.m();' starts
     private static boolean receiverKnownAtReturn(Report report, MethodInfo method) {
         Statement rs = method.methodBody().statements().getFirst();
-        io.codelaser.maddi.cst.api.expression.MethodCall mc =
-                (io.codelaser.maddi.cst.api.expression.MethodCall) rs.expression();
-        Variable x = ((io.codelaser.maddi.cst.api.expression.VariableExpression) mc.object()).variable();
+        MethodCall mc =
+                (MethodCall) rs.expression();
+        Variable x = ((VariableExpression) mc.object()).variable();
         return report.useSites().nonNullAt(rs, x);
     }
 
     // the facts on 'buffer' when the method's 'buffer[pos++] = v' starts
     private static boolean bufferKnownAtWrite(Report report, MethodInfo method) {
         Statement write = method.methodBody().statements().getLast();
-        io.codelaser.maddi.cst.api.expression.Assignment a =
-                (io.codelaser.maddi.cst.api.expression.Assignment) write.expression();
-        Variable buffer = ((io.codelaser.maddi.cst.api.variable.DependentVariable) a.variableTarget()).arrayVariable();
+        Assignment a =
+                (Assignment) write.expression();
+        Variable buffer = ((DependentVariable) a.variableTarget()).arrayVariable();
         return report.useSites().nonNullAt(write, buffer);
     }
 
@@ -1653,7 +1664,7 @@ public class TestMethodWalker extends NullabilityFixtures {
         TryStatement assigning = (TryStatement) parsed.findUniqueMethod("body", 1).methodBody().statements().get(1)
                 .block().statements().getFirst();
         Statement first = assigning.block().statements().getFirst();
-        Variable t = ((io.codelaser.maddi.cst.api.expression.Assignment) first.expression()).variableTarget();
+        Variable t = ((Assignment) first.expression()).variableTarget();
         assertEquals(true, report.useSites().nonNullAt(first, t), "the body's start");
         assertEquals(false, report.useSites().nonNullAt(assigning.catchClauses().getFirst().block().statements()
                 .getFirst(), t), "the catch: the body may have assigned t");
@@ -1693,8 +1704,8 @@ public class TestMethodWalker extends NullabilityFixtures {
                 }
                 """);
         Statement read = parsed.findUniqueMethod("take", 0).methodBody().statements().get(1);
-        io.codelaser.maddi.cst.api.variable.FieldReference value = (io.codelaser.maddi.cst.api.variable.FieldReference)
-                ((VariableExpression) ((io.codelaser.maddi.cst.api.statement.LocalVariableCreation) read).localVariable()
+        FieldReference value = (FieldReference)
+                ((VariableExpression) ((LocalVariableCreation) read).localVariable()
                         .assignmentExpression()).variable();
         Variable next = ((VariableExpression) value.scope()).variable();
         assertEquals(true, report.useSites().nonNullAt(read, next), "after 'if (!hasNext()) throw'");

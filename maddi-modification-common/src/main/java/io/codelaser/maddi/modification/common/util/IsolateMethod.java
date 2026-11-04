@@ -118,7 +118,7 @@ public class IsolateMethod {
      *
      * @param known the placement evidence of a previous round, or null to decide on the reference at hand
      */
-    private MethodStubs buildData(MethodInfo methodInfo, io.codelaser.maddi.cst.api.runtime.Runtime runtime,
+    private MethodStubs buildData(MethodInfo methodInfo, Runtime runtime,
                            String simpleName, Placement known) {
         TypeInfo originalType = methodInfo.typeInfo().primaryType();
         CompilationUnit newCu = runtime.newCompilationUnitBuilder()
@@ -162,7 +162,7 @@ public class IsolateMethod {
 
     public Result isolate(MethodInfo methodInfo, String customClassName) {
         TypeInfo originalType = methodInfo.typeInfo().primaryType();
-        io.codelaser.maddi.cst.api.runtime.Runtime runtime = javaInspector.runtime();
+        Runtime runtime = javaInspector.runtime();
         String simpleName = customClassName == null
                 ? originalType.simpleName() + "_" + methodInfo.name()
                 : customClassName;

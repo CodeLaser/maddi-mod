@@ -22,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -212,7 +213,7 @@ public class TestKotlinAnalysisRoundTrip {
      */
     private static String fingerprint(TypeInfo type) {
         return type.methodStream()
-                .sorted(java.util.Comparator.comparing(MethodInfo::name))
+                .sorted(Comparator.comparing(MethodInfo::name))
                 .map(m -> m.name() + " nonModifying=" + nonModifying(m)
                           + " params=" + m.parameters().stream()
                                   .map(p -> p.simpleName() + ":" + p.analysis()

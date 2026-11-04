@@ -1,14 +1,19 @@
 package io.codelaser.maddi.modification.link.impl.localvar;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.LongAdder;
+import java.util.function.Function;
 
 import io.codelaser.maddi.cst.api.runtime.Runtime;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.cst.impl.variable.LocalVariableImpl;
+import io.codelaser.maddi.modification.link.impl.Gate;
 import io.codelaser.maddi.modification.link.impl.LinkVariable;
 
 public class SharedVariable extends LocalVariableImpl implements LinkVariable {
@@ -35,10 +40,10 @@ public class SharedVariable extends LocalVariableImpl implements LinkVariable {
      * state. {@link io.codelaser.maddi.modification.link.impl.LinkComputerImpl}'s VL2O tier counters are the
      * same idiom.
      */
-    private static final java.util.concurrent.atomic.LongAdder ASSIGNMENT_SOURCE_COMPUTATIONS =
-            new java.util.concurrent.atomic.LongAdder();
-    private static final java.util.concurrent.atomic.LongAdder FORWARD_ASSIGNMENT_REBUILDS =
-            new java.util.concurrent.atomic.LongAdder();
+    private static final LongAdder ASSIGNMENT_SOURCE_COMPUTATIONS =
+            new LongAdder();
+    private static final LongAdder FORWARD_ASSIGNMENT_REBUILDS =
+            new LongAdder();
 
     public static void resetCoreLoopCounters() {
         ASSIGNMENT_SOURCE_COMPUTATIONS.reset();
@@ -72,8 +77,8 @@ public class SharedVariable extends LocalVariableImpl implements LinkVariable {
     public static final class Data {
         private final Set<Variable> variables;
         private final List<Assignment> assignments;
-        private final java.util.Map<Variable, Set<Variable>> assignmentSourcesCache = new java.util.HashMap<>();
-        private java.util.Map<Variable, List<Variable>> forwardAssignments;
+        private final Map<Variable, Set<Variable>> assignmentSourcesCache = new HashMap<>();
+        private Map<Variable, List<Variable>> forwardAssignments;
 
         public Data() {
             this(new LinkedHashSet<>(), new ArrayList<>());
@@ -146,7 +151,7 @@ public class SharedVariable extends LocalVariableImpl implements LinkVariable {
      * ▶ <b>AN A/B ONLY PRICES WHAT IT ACTUALLY REMOVES.</b> The get/put form allocates nothing on a hit.
      */
     public Set<Variable> assignmentSources(Variable variable,
-                                           java.util.function.Function<Variable, Set<Variable>> compute) {
+                                           Function<Variable, Set<Variable>> compute) {
         Set<Variable> cached = data.assignmentSourcesCache.get(variable);
         if (cached != null) return cached;
         ASSIGNMENT_SOURCE_COMPUTATIONS.increment();
@@ -156,10 +161,10 @@ public class SharedVariable extends LocalVariableImpl implements LinkVariable {
     }
 
     /** The forward adjacency of {@link #assignments}, shared by every query against this group. */
-    public java.util.Map<Variable, List<Variable>> forwardAssignments() {
+    public Map<Variable, List<Variable>> forwardAssignments() {
         if (data.forwardAssignments == null) {
             FORWARD_ASSIGNMENT_REBUILDS.increment();
-            java.util.Map<Variable, List<Variable>> fwd = new java.util.HashMap<>();
+            Map<Variable, List<Variable>> fwd = new HashMap<>();
             for (Assignment a : data.assignments) {
                 fwd.computeIfAbsent(a.from(), k -> new ArrayList<>()).add(a.to());
             }
@@ -231,7 +236,7 @@ public class SharedVariable extends LocalVariableImpl implements LinkVariable {
      (CodeLaser/maddi-mod#72, 4a). So bridge it: every 'x ← variable' and 'variable ← y' leave 'x ← y', at the
      index where x was assigned. Gate NOBRIDGE: drop the assignments, as before.
      */
-    private static final boolean NO_BRIDGE = io.codelaser.maddi.modification.link.impl.Gate.isSet("NOBRIDGE");
+    private static final boolean NO_BRIDGE = Gate.isSet("NOBRIDGE");
 
     public void remove(Variable variable) {
         data.variables.remove(variable);

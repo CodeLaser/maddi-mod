@@ -7,6 +7,8 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
 import io.codelaser.maddi.cst.impl.analysis.ModificationFacts;
 import io.codelaser.maddi.cst.impl.analysis.NullabilityFacts;
 import io.codelaser.maddi.cst.print.kotlin.KotlinPrintOptions;
@@ -31,8 +33,8 @@ public class TestJavaToKotlinAblation {
 
     @BeforeAll
     public static void beforeAll() {
-        ((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME))
-                .setLevel(ch.qos.logback.classic.Level.INFO);
+        ((Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME))
+                .setLevel(Level.INFO);
     }
 
     @Test

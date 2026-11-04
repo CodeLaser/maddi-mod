@@ -20,6 +20,7 @@ package io.codelaser.maddi.modification.analyzer.nullability;
 import static io.codelaser.maddi.modification.analyzer.nullability.Types.*;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
@@ -29,6 +30,7 @@ import java.util.Set;
 
 import io.codelaser.maddi.cst.api.element.Element;
 import io.codelaser.maddi.cst.api.expression.Assignment;
+import io.codelaser.maddi.cst.api.expression.BinaryOperator;
 import io.codelaser.maddi.cst.api.expression.ClassExpression;
 import io.codelaser.maddi.cst.api.expression.ConstantExpression;
 import io.codelaser.maddi.cst.api.expression.ConstructorCall;
@@ -49,6 +51,7 @@ import io.codelaser.maddi.cst.api.statement.ReturnStatement;
 import io.codelaser.maddi.cst.api.statement.Statement;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
+import io.codelaser.maddi.cst.api.variable.This;
 
 /**
  * The read-only indexes of one round of the nullability pass, built before the graph (phase 1 of
@@ -105,7 +108,7 @@ final class Index {
                 if (e instanceof MethodCall mc && mc.methodInfo() != null && !mc.methodInfo().isStatic()) {
                     Expression object = mc.object();
                     if (object instanceof VariableExpression ve
-                        && ve.variable() instanceof io.codelaser.maddi.cst.api.variable.This t && t.writeSuper()) {
+                        && ve.variable() instanceof This t && t.writeSuper()) {
                         superCalled.add(mc.methodInfo());
                     }
                     ParameterizedType type = object == null ? null : object.parameterizedType();
@@ -244,7 +247,7 @@ final class Index {
             candidates.put(fi, true);
         }
         if (candidates.isEmpty()) return;
-        java.util.Set<Element> accounted = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+        Set<Element> accounted = Collections.newSetFromMap(new IdentityHashMap<>());
         Map<MethodInfo, KeyedAccessor> putters = new HashMap<>();
         Map<MethodInfo, KeyedAccessor> getters = new HashMap<>();
         for (MethodInfo mi : methods) {
@@ -272,7 +275,7 @@ final class Index {
                         if (!emptyNewMap(a.value())) candidates.put(fr.fieldInfo(), false);
                     }
                     // a string concatenation reads the map's toString(); also when the parser gives a plain '+'
-                    case io.codelaser.maddi.cst.api.expression.BinaryOperator bo when bo instanceof StringConcat
+                    case BinaryOperator bo when bo instanceof StringConcat
                             || bo.parameterizedType() != null && bo.parameterizedType().arrays() == 0
                                && bo.parameterizedType().typeInfo() != null
                                && "java.lang.String".equals(bo.parameterizedType().typeInfo().fullyQualifiedName()) -> {

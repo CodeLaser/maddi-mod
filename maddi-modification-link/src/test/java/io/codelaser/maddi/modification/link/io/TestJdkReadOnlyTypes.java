@@ -30,6 +30,7 @@ import java.lang.reflect.Modifier;
 import java.net.URI;
 import java.nio.Buffer;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.CharBuffer;
 import java.nio.DoubleBuffer;
 import java.nio.FloatBuffer;
@@ -37,6 +38,7 @@ import java.nio.IntBuffer;
 import java.nio.LongBuffer;
 import java.nio.ReadOnlyBufferException;
 import java.nio.ShortBuffer;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.FileSystem;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
@@ -238,7 +240,7 @@ public class TestJdkReadOnlyTypes {
     }
 
     private static boolean contains(byte[] bytes, String text) {
-        byte[] wanted = text.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        byte[] wanted = text.getBytes(StandardCharsets.UTF_8);
         outer:
         for (int i = 0; i <= bytes.length - wanted.length; i++) {
             for (int j = 0; j < wanted.length; j++) {
@@ -289,7 +291,7 @@ public class TestJdkReadOnlyTypes {
         if (type == LongBuffer.class) return LongBuffer.allocate(1);
         if (type == FloatBuffer.class) return FloatBuffer.allocate(1);
         if (type == DoubleBuffer.class) return DoubleBuffer.allocate(1);
-        if (type == java.nio.ByteOrder.class) return java.nio.ByteOrder.BIG_ENDIAN;
+        if (type == ByteOrder.class) return ByteOrder.BIG_ENDIAN;
         return null;
     }
 

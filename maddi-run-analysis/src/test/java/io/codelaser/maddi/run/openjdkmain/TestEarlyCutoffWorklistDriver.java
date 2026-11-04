@@ -56,6 +56,7 @@ import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 import io.codelaser.maddi.graph.G;
+import io.codelaser.maddi.graph.V;
 import io.codelaser.maddi.inspection.api.integration.JavaInspector;
 import io.codelaser.maddi.inspection.api.parser.ParseResult;
 import io.codelaser.maddi.inspection.api.resource.InputConfiguration;
@@ -239,7 +240,7 @@ public class TestEarlyCutoffWorklistDriver {
         G<TypeInfo> useGraph = new PrimaryTypeUseGraph(ccg0.graph()).graph();
         Map<TypeInfo, Set<TypeInfo>> deps = new HashMap<>();
         useGraph.vertices().forEach(v -> {
-            Map<io.codelaser.maddi.graph.V<TypeInfo>, Long> out = useGraph.edges(v); // null for a sink
+            Map<V<TypeInfo>, Long> out = useGraph.edges(v); // null for a sink
             Set<TypeInfo> users = out == null ? Set.of() : out.keySet().stream()
                     .map(u -> pr1.findType(u.t().fullyQualifiedName())).collect(Collectors.toSet());
             deps.put(pr1.findType(v.t().fullyQualifiedName()), users);

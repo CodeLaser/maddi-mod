@@ -27,7 +27,9 @@ import java.util.stream.Stream;
 
 import org.jetbrains.annotations.NotNull;
 
+import io.codelaser.maddi.cst.api.element.Element;
 import io.codelaser.maddi.cst.api.expression.IntConstant;
+import io.codelaser.maddi.cst.api.expression.Lambda;
 import io.codelaser.maddi.cst.api.info.FieldInfo;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
@@ -260,13 +262,13 @@ public class Util {
         return found == null ? source : found;
     }
 
-    private static MethodInfo lambdaContainer(io.codelaser.maddi.cst.api.element.Element root,
+    private static MethodInfo lambdaContainer(Element root,
                                               MethodInfo lambdaMethod,
                                               MethodInfo current) {
         MethodInfo[] found = {null};
         root.visit(e -> {
             if (found[0] != null) return false;
-            if (e instanceof io.codelaser.maddi.cst.api.expression.Lambda lambda) {
+            if (e instanceof Lambda lambda) {
                 if (lambda.methodInfo() == lambdaMethod) {
                     found[0] = current;
                 } else if (lambda.methodInfo().methodBody() != null) {

@@ -20,6 +20,7 @@ package io.codelaser.maddi.modification.analyzer.modification;
 import java.util.List;
 
 import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -80,11 +81,11 @@ public class TestLoopTransformDivergence extends CommonTest {
         // construction-confined, never-exposed int[] — a defensive VALUE copy links coords ~/∈ to
         // the ctor parameter, but the transported content (int) is immutable: no aliasing, no
         // dependence. Both the transformed and untransformed sides now agree on @ImmutableHC.
-        org.junit.jupiter.api.Assertions.assertTrue(coords.isUnmodified());
-        org.junit.jupiter.api.Assertions.assertEquals("@Independent",
+        Assertions.assertTrue(coords.isUnmodified());
+        Assertions.assertEquals("@Independent",
                 String.valueOf(coords.analysis().getOrNull(PropertyImpl.INDEPENDENT_FIELD,
                         ValueImpl.IndependentImpl.class)));
-        org.junit.jupiter.api.Assertions.assertEquals("@Immutable(hc=true)",
+        Assertions.assertEquals("@Immutable(hc=true)",
                 String.valueOf(point.analysis().getOrNull(PropertyImpl.IMMUTABLE_TYPE,
                         ValueImpl.ImmutableImpl.class)));
     }
@@ -125,13 +126,13 @@ public class TestLoopTransformDivergence extends CommonTest {
         System.out.println("DIVERGENCE-M independentField=" + indep);
         System.out.println("DIVERGENCE-M immutable=" + pointM.analysis().getOrNull(PropertyImpl.IMMUTABLE_TYPE,
                 ValueImpl.ImmutableImpl.class));
-        org.junit.jupiter.api.Assertions.assertNotNull(indep);
-        org.junit.jupiter.api.Assertions.assertFalse(indep.isIndependent(),
+        Assertions.assertNotNull(indep);
+        Assertions.assertFalse(indep.isIndependent(),
                 "shared mutable elements: the field depends on the ctor parameter");
         Value.Immutable imm = pointM.analysis().getOrNull(PropertyImpl.IMMUTABLE_TYPE,
                 ValueImpl.ImmutableImpl.class);
-        org.junit.jupiter.api.Assertions.assertNotNull(imm);
-        org.junit.jupiter.api.Assertions.assertFalse(imm.isAtLeastImmutableHC(),
+        Assertions.assertNotNull(imm);
+        Assertions.assertFalse(imm.isAtLeastImmutableHC(),
                 "must not be promoted: the hidden content is reachable through the caller's array");
     }
 }

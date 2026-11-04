@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Set;
 
 import io.codelaser.maddi.cst.api.analysis.Property;
+import io.codelaser.maddi.cst.api.expression.AnnotationExpression;
 import io.codelaser.maddi.cst.api.expression.ConstructorCall;
 import io.codelaser.maddi.cst.api.expression.Expression;
 import io.codelaser.maddi.cst.api.expression.InlineConditional;
@@ -85,9 +86,9 @@ final class Types {
         return !m.isAbstract() && m.methodBody() != null;
     }
 
-    static NullableState explicit(List<io.codelaser.maddi.cst.api.expression.AnnotationExpression> list) {
+    static NullableState explicit(List<AnnotationExpression> list) {
         boolean nonNull = false;
-        for (io.codelaser.maddi.cst.api.expression.AnnotationExpression ae : list) {
+        for (AnnotationExpression ae : list) {
             String name = ae.typeInfo().simpleName();
             if (NullAnnotations.NULLABLE.contains(name)) return NullableState.NULLABLE;
             if (NullAnnotations.NON_NULL.contains(name)) nonNull = true;

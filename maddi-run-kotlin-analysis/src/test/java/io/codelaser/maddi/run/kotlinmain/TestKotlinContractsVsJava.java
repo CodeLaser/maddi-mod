@@ -31,6 +31,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.codelaser.maddi.annotation.NotModified;
 import io.codelaser.maddi.callgraph.ComputeAnalysisOrder;
 import io.codelaser.maddi.cst.api.element.SourceSet;
 import io.codelaser.maddi.cst.api.info.Info;
@@ -224,7 +225,7 @@ public class TestKotlinContractsVsJava {
 
     /** The jar holding io.codelaser.maddi.annotation, located from a class it contains. */
     private static Path annotationJar() throws Exception {
-        return Path.of(io.codelaser.maddi.annotation.NotModified.class.getProtectionDomain().getCodeSource()
+        return Path.of(NotModified.class.getProtectionDomain().getCodeSource()
                 .getLocation().toURI());
     }
 

@@ -52,6 +52,7 @@ import io.codelaser.maddi.cst.api.analysis.Property;
 import io.codelaser.maddi.cst.api.element.Element;
 import io.codelaser.maddi.cst.api.element.SourceSet;
 import io.codelaser.maddi.cst.api.info.Info;
+import io.codelaser.maddi.cst.api.info.InfoMapView;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.output.Qualification;
@@ -63,6 +64,7 @@ import io.codelaser.maddi.inspection.api.integration.JavaInspector;
 import io.codelaser.maddi.inspection.api.integration.JavaInspectorFactory;
 import io.codelaser.maddi.modification.analyzer.CheckpointWriter;
 import io.codelaser.maddi.modification.analyzer.IteratingAnalyzer;
+import io.codelaser.maddi.modification.analyzer.impl.ElementSummary;
 import io.codelaser.maddi.modification.analyzer.impl.EventualCluster;
 import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
 import io.codelaser.maddi.modification.analyzer.impl.StaticSideEffectAnalyzerImpl;
@@ -71,8 +73,11 @@ import io.codelaser.maddi.modification.analyzer.nullability.Policy;
 import io.codelaser.maddi.modification.analyzer.shadow.ShadowModificationPass;
 import io.codelaser.maddi.modification.common.AnalyzerException;
 import io.codelaser.maddi.modification.common.defaults.ShallowMethodAnalyzer;
+import io.codelaser.maddi.modification.common.util.Culprits;
 import io.codelaser.maddi.modification.link.impl.LinkFactsImpl;
 import io.codelaser.maddi.modification.link.io.LinkCodec;
+import io.codelaser.maddi.modification.prepwork.CarryDerived;
+import io.codelaser.maddi.modification.prepwork.ClearDerived;
 import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
 import io.codelaser.maddi.modification.prepwork.io.AnalysisFingerprint;
 import io.codelaser.maddi.modification.prepwork.io.DecoratorImpl;
@@ -139,7 +144,7 @@ public class AnalysisEngineImpl implements AnalysisEngine {
     }
 
     @Override
-    public String outputDump(io.codelaser.maddi.cst.api.runtime.Runtime runtime, TypeInfo primaryType) {
+    public String outputDump(Runtime runtime, TypeInfo primaryType) {
         return AnalysisFingerprint.normalize(AnalysisFingerprint.dump(runtime, primaryType,
                 AnalysisFingerprint.ANALYZER_OUTPUT_ONLY), AnalysisFingerprint.DEFAULT);
     }
@@ -158,16 +163,16 @@ public class AnalysisEngineImpl implements AnalysisEngine {
         ModificationOptions o = request.options();
         boolean sseBefore = StaticSideEffectAnalyzerImpl.ENABLED;
         boolean clusterBefore = EventualCluster.ENABLED;
-        boolean culpritsBefore = io.codelaser.maddi.modification.common.util.Culprits.ENABLED;
+        boolean culpritsBefore = Culprits.ENABLED;
         if (o.staticSideEffects() != null) StaticSideEffectAnalyzerImpl.ENABLED = o.staticSideEffects();
         if (o.eventualCluster() != null) EventualCluster.ENABLED = o.eventualCluster();
-        if (o.culprits() != null) io.codelaser.maddi.modification.common.util.Culprits.ENABLED = o.culprits();
+        if (o.culprits() != null) Culprits.ENABLED = o.culprits();
         try {
             return modificationWithSwitchesSet(request);
         } finally {
             StaticSideEffectAnalyzerImpl.ENABLED = sseBefore;
             EventualCluster.ENABLED = clusterBefore;
-            io.codelaser.maddi.modification.common.util.Culprits.ENABLED = culpritsBefore;
+            Culprits.ENABLED = culpritsBefore;
         }
     }
 
@@ -230,10 +235,10 @@ public class AnalysisEngineImpl implements AnalysisEngine {
             LOGGER.info("CHECKPOINT: writing pass-boundary deltas to {}", checkpointDir);
         }
         if (request.carryFrom() != null) {
-            io.codelaser.maddi.cst.api.info.InfoMapView view = javaInspector.lastRewireInfoMap();
+            InfoMapView view = javaInspector.lastRewireInfoMap();
             if (view == null) throw new IllegalArgumentException("carryFrom without a re-parse that rewired");
             for (TypeInfo oldType : request.carryFrom()) {
-                io.codelaser.maddi.modification.prepwork.CarryDerived.primaryType(oldType, view);
+                CarryDerived.primaryType(oldType, view);
             }
             LOGGER.info("Carried the analyzer output of {} rewired primary type(s)", request.carryFrom().size());
         }
@@ -246,9 +251,9 @@ public class AnalysisEngineImpl implements AnalysisEngine {
             // clear-before-recompute: a dirtied element's carried cross-type-derived values
             // must not block the fresh, possibly-lowering re-analysis
             // (statement- and variable-level values included: see ClearDerived)
-            Consumer<Info> clearHook = io.codelaser.maddi.modification.prepwork.ClearDerived::element;
+            Consumer<Info> clearHook = ClearDerived::element;
             if (request.seedPrevious() != null) {
-                analyzer.setPriorSummaries(io.codelaser.maddi.modification.analyzer.impl.ElementSummary
+                analyzer.setPriorSummaries(ElementSummary
                         .ofTypes(request.seedPrevious()));
             }
             analyzer.analyze(order, request.callGraph(), initialDirty, clearHook);

@@ -12,6 +12,7 @@ import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.modification.analyzer.CommonTest;
+import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
 
 /**
  * PLAN-modification-reachability phase 0: the deep capture chain. An object captured in a field,
@@ -45,8 +46,8 @@ public class TestDeepCaptureChain extends CommonTest {
         // downgrading the frozen optimistic TRUEs the iterating fixpoint certified.
         TypeInfo X = javaInspector.parse("a.b.X", INPUT);
         List<Info> ao = prepWork(X);
-        var iterating = new io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl(javaInspector,
-                new io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl.ConfigurationBuilder()
+        var iterating = new IteratingAnalyzerImpl(javaInspector,
+                new IteratingAnalyzerImpl.ConfigurationBuilder()
                         .setMaxIterations(10)
                         .setModificationViaReachability(true) // implies trackObjectCreations
                         .build());

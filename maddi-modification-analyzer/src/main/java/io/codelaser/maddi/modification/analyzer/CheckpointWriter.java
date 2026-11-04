@@ -20,9 +20,13 @@ package io.codelaser.maddi.modification.analyzer;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.Set;
+import java.util.function.Supplier;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -58,7 +62,7 @@ public class CheckpointWriter implements AnalysisValueFeed {
     private static final Logger LOGGER = LoggerFactory.getLogger(CheckpointWriter.class);
 
     private final Runtime runtime;
-    private final java.util.function.Supplier<Codec> codecSupplier;
+    private final Supplier<Codec> codecSupplier;
     private final File directory;
     private final long waveFlushIntervalMillis;
     private int typesWritten;
@@ -75,11 +79,11 @@ public class CheckpointWriter implements AnalysisValueFeed {
      * whichever file first used the marker, and every other file's reference then fails decode
      * ('Cannot find $_ce0M'). A fresh codec per file makes each file self-contained.
      */
-    public CheckpointWriter(Runtime runtime, java.util.function.Supplier<Codec> codecSupplier, File directory) {
+    public CheckpointWriter(Runtime runtime, Supplier<Codec> codecSupplier, File directory) {
         this(runtime, codecSupplier, directory, DEFAULT_WAVE_FLUSH_INTERVAL_MILLIS);
     }
 
-    public CheckpointWriter(Runtime runtime, java.util.function.Supplier<Codec> codecSupplier, File directory,
+    public CheckpointWriter(Runtime runtime, Supplier<Codec> codecSupplier, File directory,
                             long waveFlushIntervalMillis) {
         this.runtime = runtime;
         this.codecSupplier = codecSupplier;
@@ -135,15 +139,15 @@ public class CheckpointWriter implements AnalysisValueFeed {
         for (TypeInfo primary : primaries) {
             Trie<TypeInfo> trie = new Trie<>();
             trie.add(primary.fullyQualifiedName().split("\\."), primary);
-            java.nio.file.Path tmpDir = null;
+            Path tmpDir = null;
             try {
                 tmpDir = Files.createTempDirectory(directory.toPath(), ".w");
                 new WriteAnalysisResults(runtime).write(tmpDir.toFile(), trie, codecSupplier.get());
                 try (var files = Files.walk(tmpDir).filter(p -> p.toString().endsWith(".json"))) {
-                    for (java.nio.file.Path p : files.toList()) {
+                    for (Path p : files.toList()) {
                         Files.move(p, directory.toPath().resolve(p.getFileName()),
-                                java.nio.file.StandardCopyOption.ATOMIC_MOVE,
-                                java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                                StandardCopyOption.ATOMIC_MOVE,
+                                StandardCopyOption.REPLACE_EXISTING);
                     }
                 }
                 ok++;
@@ -152,8 +156,8 @@ public class CheckpointWriter implements AnalysisValueFeed {
                 LOGGER.debug("Checkpoint skip {} after {}: {}", primary, label, e.toString());
             } finally {
                 if (tmpDir != null) {
-                    try (var leftovers = Files.walk(tmpDir).sorted(java.util.Comparator.reverseOrder())) {
-                        for (java.nio.file.Path p : leftovers.toList()) Files.deleteIfExists(p);
+                    try (var leftovers = Files.walk(tmpDir).sorted(Comparator.reverseOrder())) {
+                        for (Path p : leftovers.toList()) Files.deleteIfExists(p);
                     } catch (IOException ignored) {
                         // temp-dir cleanup is best-effort
                     }

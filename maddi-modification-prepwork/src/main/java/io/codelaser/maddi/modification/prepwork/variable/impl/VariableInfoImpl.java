@@ -17,10 +17,14 @@
 
 package io.codelaser.maddi.modification.prepwork.variable.impl;
 
+import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
+import java.util.function.Predicate;
 
 import io.codelaser.maddi.cst.api.analysis.Property;
 import io.codelaser.maddi.cst.api.analysis.PropertyValueMap;
+import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.info.InfoMapView;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.variable.LocalVariable;
@@ -73,7 +77,7 @@ public class VariableInfoImpl implements VariableInfo, AnalysisAccessRecorder.Ow
      * {@code setLinkedVariables} and the analysis map only move a value up, so a re-analysis on new inputs would keep
      * the old, stronger value.
      */
-    public void clearDerived(java.util.function.Predicate<io.codelaser.maddi.cst.api.analysis.Property> derived) {
+    public void clearDerived(Predicate<Property> derived) {
         linkedVariables = null;
         analysis.removeIf(derived);
     }
@@ -104,10 +108,10 @@ public class VariableInfoImpl implements VariableInfo, AnalysisAccessRecorder.Ow
         return contentKey(l1).equals(contentKey(l2));
     }
 
-    private static java.util.Set<java.util.List<Object>> contentKey(Links links) {
-        java.util.Set<java.util.List<Object>> set = new java.util.HashSet<>();
+    private static Set<List<Object>> contentKey(Links links) {
+        Set<List<Object>> set = new HashSet<>();
         for (Link link : links) {
-            set.add(java.util.List.of(link.from(), link.linkNature(), link.to(), link.mediated()));
+            set.add(List.of(link.from(), link.linkNature(), link.to(), link.mediated()));
         }
         return set;
     }
@@ -174,7 +178,7 @@ public class VariableInfoImpl implements VariableInfo, AnalysisAccessRecorder.Ow
 
     @Override
     public boolean isStructurallyUnmodified() {
-        io.codelaser.maddi.cst.api.analysis.Value.Bool structural =
+        Value.Bool structural =
                 analysis.getOrNull(STRUCTURALLY_UNMODIFIED_VARIABLE, ValueImpl.BoolImpl.class);
         return structural != null ? structural.isTrue() : isUnmodified();
     }
