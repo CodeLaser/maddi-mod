@@ -459,6 +459,8 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
     private static final String TRIP_DIAG = System.getenv("TRIPDIAG");
     // TRIPDIAG_FULL=<fqn substring>: also print the whole summary of the matching inputs
     private static final String TRIP_DIAG_FULL = System.getenv("TRIPDIAG_FULL");
+    // LINKINPUTS=<fqn substring>: the same input fingerprint at EVERY linking of a matching method, tripped or not
+    private static final String LINK_INPUTS = System.getenv("LINKINPUTS");
     private final java.util.concurrent.atomic.AtomicInteger tripDiagCount = new java.util.concurrent.atomic.AtomicInteger();
 
     private void tripDiag(MethodInfo methodInfo, Graph graph) {
@@ -484,7 +486,8 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
     private void reportWork(MethodInfo methodInfo, SourceMethodComputer computer, boolean tripped) {
         Graph graph = computer.linkGraph.graph();
         long work = graph.engine().work();
-        if (tripped && TRIP_DIAG != null && methodInfo.fullyQualifiedName().contains(TRIP_DIAG)) {
+        if (tripped && TRIP_DIAG != null && methodInfo.fullyQualifiedName().contains(TRIP_DIAG)
+            || LINK_INPUTS != null && methodInfo.fullyQualifiedName().contains(LINK_INPUTS)) {
             tripDiag(methodInfo, graph);
         }
         if (WORK_DUMP != null && methodInfo.fullyQualifiedName().contains(WORK_DUMP)) {
