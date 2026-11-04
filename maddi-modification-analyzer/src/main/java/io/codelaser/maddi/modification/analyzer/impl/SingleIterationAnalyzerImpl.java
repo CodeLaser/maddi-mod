@@ -98,6 +98,30 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
     // EXPERIMENT (#82): the deterministic alternative to SEQCYCLEBREAKING that keeps the loop parallel; see goInternal
     static final boolean CYCLE_BREAKING_SWEEP = Gate.isSet("CBSWEEP");
 
+    // DIAGNOSTIC (#91): PARSHUFFLE=<seed> submits each parallel pass's elements (and each first-iteration wave's
+    // units) in a seeded random order. The order is arbitrary under PARALLEL anyway; this moves the thread timing
+    // on purpose, to expose verdicts that depend on it without needing machine load.
+    private static final Long PARALLEL_SHUFFLE_SEED = parseShuffleSeed();
+
+    private static Long parseShuffleSeed() {
+        String s = System.getenv("PARSHUFFLE");
+        if (s == null || s.isBlank()) return null;
+        try {
+            return Long.parseLong(s.trim());
+        } catch (NumberFormatException e) {
+            return (long) s.trim().hashCode();
+        }
+    }
+
+    private int shufflePass;
+
+    private <T> List<T> submissionOrder(List<T> list) {
+        if (PARALLEL_SHUFFLE_SEED == null) return list;
+        List<T> copy = new ArrayList<>(list);
+        java.util.Collections.shuffle(copy, new java.util.Random(PARALLEL_SHUFFLE_SEED * 31 + shufflePass++));
+        return copy;
+    }
+
     private static int parallelThreads() {
         String s = System.getenv("PARALLEL");
         if (s == null) {
@@ -319,7 +343,7 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
                     for (List<List<Info>> wave : firstIterationWaves) {
                         waveIndex++;
                         List<java.util.concurrent.Future<?>> futures = new ArrayList<>(wave.size());
-                        for (List<Info> unit : wave) {
+                        for (List<Info> unit : submissionOrder(wave)) {
                             futures.add(pool.submit(() -> {
                                 for (Info info : unit) {
                                     processElement(info, loopCycleBreaking, true, abstractTypes);
@@ -354,7 +378,7 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
             linkComputer.setLockComputeDisabled(true);
             try (java.util.concurrent.ExecutorService pool =
                          java.util.concurrent.Executors.newFixedThreadPool(PARALLEL_THREADS)) {
-                for (Info info : analysisOrder) {
+                for (Info info : submissionOrder(analysisOrder)) {
                     futures.add(pool.submit(() -> {
                         long t0 = System.nanoTime();
                         try {
