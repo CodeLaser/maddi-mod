@@ -82,10 +82,12 @@
 # 152 -> 151, nullable warnings stay 18.
 # 2026-10-19, maddi d31f0f731, e9a7e4927, 9680a9230: a raw cast into a parameterized target, an array of a type parameter as
 # Object[], an array as varargs arguments, getMethod's types, Map.of()'s key notnull: 300 -> 301 compiling files, 198 -> 192 errors, nullable warnings stay 18.
+# 2026-11-04, maddi-mod 0c2f5ebe (#68 in @NullMarked scope) with maddi f6f4387a3 (lambda adapters and IComparable<T>
+# bridges with the analysis's verdicts), on the Mac: nullable warnings 18 -> 12; compiling files and errors unchanged.
 types	346
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	346
 compilingFiles	301
 unmappedJdkUses	151
-nullableWarnings	18
+nullableWarnings	12
