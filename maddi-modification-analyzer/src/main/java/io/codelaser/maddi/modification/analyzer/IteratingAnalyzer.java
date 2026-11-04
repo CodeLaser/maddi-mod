@@ -200,4 +200,13 @@ public interface IteratingAnalyzer {
 
     /** Findings (warnings/errors about the analyzed code) collected across all iterations; empty before analyze(). */
     List<Message> messages();
+
+    /**
+     * After a seeded {@link #analyze(List, io.codelaser.maddi.graph.G, java.util.Set, java.util.function.Consumer)}:
+     * the elements it analysed, the seed and whatever the worklist pulled in; {@link #messages()} are about these
+     * only. Null after a cold analysis.
+     */
+    default java.util.Set<Info> lastScope() {
+        return null;
+    }
 }

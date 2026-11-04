@@ -283,7 +283,9 @@ public class AnalysisEngineImpl implements AnalysisEngine {
                 LOGGER.warn("Cannot save incremental state: {}", e.toString());
             }
         }
-        return new ModificationOutcome(messages, fpSets);
+        // a seeded analysis' messages are about its scope only: say which elements that is
+        Set<Info> scope = analyzer.lastScope();
+        return new ModificationOutcome(messages, fpSets, scope == null ? null : Set.copyOf(scope));
     }
 
     /**

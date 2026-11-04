@@ -56,6 +56,8 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
     // is the sole starting-state-dependent step, so if it never fired the framework is confluent. See
     // ModificationAnalysisResource#incrementalAnalyze.
     private boolean certifiedWithoutFrozenValues;
+    /* the scope of the last seeded analysis, see lastScope(); null after a cold one */
+    private java.util.Set<Info> lastScope;
     // how many reachability rounds threw and were skipped: the run goes on with the fixpoint's verdicts, so without
     // this count a corpus A/B of a MODREACH change compares fixpoint verdicts on both sides (CodeLaser/maddi-mod#75)
     private int modReachFailures;
@@ -392,6 +394,11 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
     }
 
     @Override
+    public java.util.Set<Info> lastScope() {
+        return lastScope;
+    }
+
+    @Override
     public List<Message> messages() {
         return Stream.concat(lastRun == null ? Stream.of() : lastRun.messages().stream(),
                 guardMessages.stream()).toList();
@@ -474,6 +481,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
         // source the clear is a no-op (docs/design/incremental-and-overlay.md §1, "stale values on the seed"). Also
         // the scope of the incremental verification pass and cycle breaking: see scopePass.
         java.util.Set<Info> everAnalyzed = incremental ? new java.util.HashSet<>() : java.util.Set.of();
+        this.lastScope = incremental ? java.util.Collections.unmodifiableSet(everAnalyzed) : null;
         int iterations = 0;
         int maxIterations = configuration.maxIterations(); // extended per MODREACH re-derivation round
         int modReachRounds = 0; // P2.5: pass <-> re-derivation to joint fixpoint, bounded

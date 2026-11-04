@@ -150,7 +150,11 @@ public class TestWarmAnalysisAfterPartialReparse {
             recomputed.add(info.fullyQualifiedName());
             io.codelaser.maddi.modification.prepwork.ClearDerived.element(info);
         };
-        new IteratingAnalyzerImpl(inspector, configuration()).analyze(order, ccg.graph(), seed, clearBeforeRecompute);
+        IteratingAnalyzerImpl analyzer = new IteratingAnalyzerImpl(inspector, configuration());
+        analyzer.analyze(order, ccg.graph(), seed, clearBeforeRecompute);
+        // the scope it reports, which its messages are about, is what it cleared and analysed
+        assertEquals(recomputed, analyzer.lastScope().stream().map(Info::fullyQualifiedName)
+                .collect(java.util.stream.Collectors.toCollection(java.util.TreeSet::new)));
         return new Warm(inspector, set, pr, recomputed, before);
     }
 
