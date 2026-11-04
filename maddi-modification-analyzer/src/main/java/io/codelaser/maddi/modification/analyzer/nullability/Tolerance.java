@@ -17,6 +17,7 @@
 
 package io.codelaser.maddi.modification.analyzer.nullability;
 
+import io.codelaser.maddi.cst.api.expression.MethodCall;
 import io.codelaser.maddi.cst.api.expression.VariableExpression;
 import io.codelaser.maddi.cst.api.info.FieldInfo;
 import io.codelaser.maddi.cst.impl.analysis.NullAnnotations;
@@ -83,6 +84,7 @@ final class Tolerance {
      analysed method (overridesAnalysed).
      */
     void tolerantParameters(List<MethodInfo> methods) {
+        this.methods = methods;
         // what null reaches without these seeds: a field or a return that is nullable anyway may take the parameter
         Set<Object> before = graph.closure(new HashMap<>());
         for (MethodInfo mi : methods) {
@@ -261,6 +263,7 @@ final class Tolerance {
                 }
                 case Content _, Arg _ when declaredSlot(n) && !TOLERANT_SLOTS_OFF.get() -> {
                     if (!before.contains(n)) return trace.tolerance(from, n, "non-null slot");
+                    if (dereferencedRead(n)) return trace.tolerance(from, n, "nullable anyway, dereferenced when read");
                     trace.tolerance(from, n, "nullable anyway");
                     continue;
                 }
@@ -296,6 +299,70 @@ final class Tolerance {
     }
 
     private static final Switches.Gate OVERRIDE_TOLERATES_OFF = Switches.gate("NOOVERRIDETOLERATES");
+
+    /*
+     CodeLaser/maddi-mod#93: a slot that is nullable anyway takes the parameter without deciding about it, but its
+     readers may still dereference what they read. timefold's Joiners.equal(l, r) stores the mappings as elements of
+     the joiner's mapping arrays, which DummyMemberAccessor.getGetterFunction()'s null makes nullable anyway (through
+     Joiners.lessThan); matches() calls 'getRightMapping(i).apply(b)'. A reader is a getter returning the slot whose
+     call result is dereferenced directly, or a local the slot flows into that a body demands; a few steps from the
+     slot, through slots, locals and returns only. Gate NODEREFERENCEDSLOTS.
+     */
+    private boolean dereferencedRead(Object slot) {
+        if (DEREFERENCED_SLOTS_OFF.get() || methods == null) return false;
+        Set<MethodInfo> dereferenced = dereferencedResults();
+        Set<Object> seen = new HashSet<>();
+        List<Object> frontier = List.of(slot);
+        for (int depth = 0; depth < MAX_READER_DEPTH && !frontier.isEmpty(); depth++) {
+            List<Object> next = new java.util.ArrayList<>();
+            for (Object n : frontier) {
+                for (Object s : graph.successors.getOrDefault(n, Set.of())) {
+                    if (!seen.add(s)) continue;
+                    switch (s) {
+                        case MethodInfo m -> {
+                            if (dereferenced.contains(m)) return true;
+                            next.add(m);
+                        }
+                        case Local local -> {
+                            if (demanded(local.methodInfo(), v -> (v instanceof LocalVariable || v instanceof ParameterInfo)
+                                                                  && v.simpleName().equals(local.name()))) {
+                                return true;
+                            }
+                            next.add(local);
+                        }
+                        case Content _, Arg _ -> next.add(s);
+                        default -> {
+                        }
+                    }
+                }
+            }
+            frontier = next;
+        }
+        return false;
+    }
+
+    private static final int MAX_READER_DEPTH = 4;
+    private static final Switches.Gate DEREFERENCED_SLOTS_OFF = Switches.gate("NODEREFERENCEDSLOTS");
+    private List<MethodInfo> methods;
+    private Set<MethodInfo> dereferencedResults;
+
+    // the methods whose call result some body dereferences directly: 'getRightMapping(i).apply(b)'
+    private Set<MethodInfo> dereferencedResults() {
+        if (dereferencedResults != null) return dereferencedResults;
+        Set<MethodInfo> out = new HashSet<>();
+        for (MethodInfo mi : methods) {
+            if (mi.methodBody() == null) continue;
+            mi.methodBody().visit(e -> {
+                if (e instanceof MethodCall mc && mc.methodInfo() != null && !mc.methodInfo().isStatic()
+                    && mc.object() != null && NonNullFacts.unwrap(mc.object()) instanceof MethodCall inner
+                    && inner.methodInfo() != null && index.analysed.contains(inner.methodInfo())) {
+                    out.add(inner.methodInfo());
+                }
+                return true;
+            });
+        }
+        return dereferencedResults = out;
+    }
 
     // gate NOLIBRARYRETURN: the return of an override of a library method ends the tolerance, as any other (A/B)
     private static final Switches.Gate LIBRARY_RETURN_OFF = Switches.gate("NOLIBRARYRETURN");

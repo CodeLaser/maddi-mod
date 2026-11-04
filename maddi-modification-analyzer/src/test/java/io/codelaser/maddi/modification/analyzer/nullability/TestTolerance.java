@@ -357,14 +357,16 @@ public class TestTolerance extends NullabilityFixtures {
         // the control: the body does handle null
         assertEquals("Class<?!>?", v.get("a.b.TD.top(Class):0:containingClass"));
 
-        // each gate brings back the tolerance it closes
+        // each gate brings back the tolerance it closes; the padded arrays' elements, nullable anyway without the
+        // sibling fills, are dereferenced when read (matches()), which #93's NODEREFERENCEDSLOTS closes as well
         Map<String, String> gates = Map.of(
                 "NOENCLOSEDDEMANDS", "a.b.TD.onPartial(java.util.function.Consumer):0:consumer",
                 "NOREFERENCEDEMANDS", "a.b.TD.of(a.b.TD.Director):0:director",
-                "NOSIBLINGFILLS", "a.b.TD.equal(java.util.function.Function,java.util.function.Function):0:leftMapping",
+                "NOSIBLINGFILLS,NODEREFERENCEDSLOTS",
+                "a.b.TD.equal(java.util.function.Function,java.util.function.Function):0:leftMapping",
                 "NOINITIALIZERARGUMENTS", "a.b.TD.equal(java.util.function.Function,java.util.function.Function):1:rightMapping");
         gates.forEach((gate, key) -> {
-            Switches.offForNextPasses(Set.of(gate));
+            Switches.offForNextPasses(Set.of(gate.split(",")));
             try {
                 Map<String, String> off = byName(new NullabilityPass(Policy.NULL_MARKED_FLOW_ONLY)
                         .go(analysisOrder));
@@ -607,5 +609,128 @@ public class TestTolerance extends NullabilityFixtures {
         Map<String, String> control = byName(run("a.b.UC", withoutOverride, Policy.KOTLIN));
         assertEquals("Object", control.get("a.b.UC.Joiner.join(Object,Object,Object[]):0:first"), control.toString());
         assertEquals("Iterable<Object>", control.get("a.b.UC.Joiner.iterable(Object,Object,Object[])"));
+    }
+
+    /*
+     CodeLaser/maddi-mod#93, timefold's Joiners.equal(l, r) outside a @NullMarked scope: the mappings become elements of
+     the joiners' mapping arrays, nullable anyway through DummyMemberAccessor.getGetterFunction()'s null handed to
+     Joiners.lessThan. matches() dereferences what getRightMapping(i) reads, so the parameter does not tolerate null.
+     */
+    @DisplayName("#93: a slot nullable anyway still ends the tolerance when its reads are dereferenced")
+    @Test
+    public void toleranceEndsAtDereferencedSlot() {
+        String input = """
+                package a.b;
+                import java.util.Arrays;
+                import java.util.List;
+                import java.util.Objects;
+                import java.util.function.Function;
+                public class TF {
+                    public enum JoinerType { EQUAL, LESS; boolean matches(Object a, Object b) { return a == b; } }
+                    public interface BiJoiner<A, B> { BiJoiner<A, B> and(BiJoiner<A, B> other); }
+                    public abstract static class AbstractJoiner<Right_> {
+                        protected final Function<Right_, Object>[] rightMappings;
+                        protected final JoinerType[] joinerTypes;
+                        protected AbstractJoiner(Function<Right_, ?> rightMapping, JoinerType joinerType) {
+                            this(new Function[] { rightMapping }, new JoinerType[] { joinerType });
+                        }
+                        protected AbstractJoiner(Function<Right_, ?>[] rightMappings, JoinerType[] joinerTypes) {
+                            this.rightMappings = (Function<Right_, Object>[]) Objects.requireNonNull(rightMappings);
+                            this.joinerTypes = Objects.requireNonNull(joinerTypes);
+                        }
+                        public final Function<Right_, Object> getRightMapping(int index) { return rightMappings[index]; }
+                        public final int getJoinerCount() { return joinerTypes.length; }
+                        public final JoinerType getJoinerType(int index) { return joinerTypes[index]; }
+                    }
+                    public static final class DefaultBiJoiner<A, B> extends AbstractJoiner<B> implements BiJoiner<A, B> {
+                        private static final DefaultBiJoiner NONE = new DefaultBiJoiner(new Function[0], new JoinerType[0], new Function[0]);
+                        private final Function<A, Object>[] leftMappings;
+                        public DefaultBiJoiner(Function<A, ?> leftMapping, JoinerType joinerType, Function<B, ?> rightMapping) {
+                            super(rightMapping, joinerType);
+                            this.leftMappings = new Function[] { leftMapping };
+                        }
+                        public DefaultBiJoiner(Function<A, ?>[] leftMappings, JoinerType[] joinerTypes, Function<B, ?>[] rightMappings) {
+                            super(rightMappings, joinerTypes);
+                            this.leftMappings = (Function<A, Object>[]) Objects.requireNonNull(leftMappings);
+                        }
+                        public static <A, B> DefaultBiJoiner<A, B> merge(List<DefaultBiJoiner<A, B>> joinerList) {
+                            return switch (joinerList.size()) {
+                                case 0 -> NONE;
+                                case 1 -> joinerList.getFirst();
+                                default -> joinerList.stream().reduce(NONE, DefaultBiJoiner::and);
+                            };
+                        }
+                        @Override
+                        public DefaultBiJoiner<A, B> and(BiJoiner<A, B> otherJoiner) {
+                            var castJoiner = (DefaultBiJoiner<A, B>) otherJoiner;
+                            var joinerCount = getJoinerCount();
+                            var castJoinerCount = castJoiner.getJoinerCount();
+                            var newJoinerCount = joinerCount + castJoinerCount;
+                            var newJoinerTypes = Arrays.copyOf(this.joinerTypes, newJoinerCount);
+                            var newLeftMappings = Arrays.copyOf(this.leftMappings, newJoinerCount);
+                            var newRightMappings = Arrays.copyOf(this.rightMappings, newJoinerCount);
+                            for (var i = 0; i < castJoinerCount; i++) {
+                                var newJoinerIndex = i + joinerCount;
+                                newJoinerTypes[newJoinerIndex] = castJoiner.getJoinerType(i);
+                                newLeftMappings[newJoinerIndex] = castJoiner.getLeftMapping(i);
+                                newRightMappings[newJoinerIndex] = castJoiner.getRightMapping(i);
+                            }
+                            return new DefaultBiJoiner<>(newLeftMappings, newJoinerTypes, newRightMappings);
+                        }
+                        public Function<A, Object> getLeftMapping(int index) { return leftMappings[index]; }
+                        public boolean matches(A a, B b) {
+                            var joinerCount = getJoinerCount();
+                            for (var i = 0; i < joinerCount; i++) {
+                                var joinerType = getJoinerType(i);
+                                var leftMapping = getLeftMapping(i).apply(a);
+                                var rightMapping = getRightMapping(i).apply(b);
+                                if (!joinerType.matches(leftMapping, rightMapping)) return false;
+                            }
+                            return true;
+                        }
+                    }
+                    public static final class Joiners {
+                        public static <A, B, T> BiJoiner<A, B> equal(Function<A, T> leftMapping, Function<B, T> rightMapping) {
+                            return new DefaultBiJoiner<>(leftMapping, JoinerType.EQUAL, rightMapping);
+                        }
+                        public static <A, T> BiJoiner<A, A> lessThan(Function<A, T> mapping) {
+                            return new DefaultBiJoiner<>(mapping, JoinerType.LESS, mapping);
+                        }
+                    }
+                    // the control: a slot nullable anyway whose reader checks what it reads
+                    public static final class Checked {
+                        private final Object[] values;
+                        public Checked(Object value) { this(new Object[] { value }); }
+                        public Checked(Object[] values) { this.values = values; }
+                        public static Checked nothing() { return new Checked(new Object[] { null }); }
+                        public Object get(int i) { return values[i]; }
+                        public String describe(int i) { Object o = get(i); return o == null ? "-" : o.toString(); }
+                    }
+                    public static final class DummyMemberAccessor {
+                        public Function<Object, Object> getGetterFunction() { return null; }
+                    }
+                    public static final class InnerConstraintFactory {
+                        public BiJoiner<Object, Object> buildLessThanId(DummyMemberAccessor accessor) {
+                            Function<Object, Object> planningIdGetter = accessor.getGetterFunction();
+                            return Joiners.lessThan(planningIdGetter);
+                        }
+                    }
+                }
+                """;
+        Map<String, String> v = byName(run("a.b.TF", input, Policy.KOTLIN));
+        String equal = "a.b.TF.Joiners.equal(java.util.function.Function,java.util.function.Function)";
+        assertEquals("Function<A!, T!>", v.get(equal + ":0:leftMapping"), v.toString());
+        assertEquals("Function<B!, T!>", v.get(equal + ":1:rightMapping"));
+        // the null itself still reaches lessThan's mapping and the arrays
+        assertEquals("Function<A!, T!>?", v.get("a.b.TF.Joiners.lessThan(java.util.function.Function):0:mapping"));
+        assertEquals("Object?", v.get("a.b.TF.Checked.<init>(Object):0:value"));
+
+        Switches.offForNextPasses(Set.of("NODEREFERENCEDSLOTS"));
+        try {
+            Map<String, String> off = byName(new NullabilityPass(Policy.KOTLIN).go(analysisOrder));
+            assertEquals("Function<B!, T!>?", off.get(equal + ":1:rightMapping"));
+        } finally {
+            Switches.offForNextPasses(Set.of());
+        }
     }
 }
