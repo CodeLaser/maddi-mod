@@ -98,13 +98,62 @@ public class AnalysisHelper {
         if (dynamicBaseValue.isAtLeastImmutableHC() && !parameterizedType.parameters().isEmpty()) {
             Value.Bool ignoreTypeParameters = bestType.analysis().getOrDefault(PropertyImpl.IMMUTABLE_TYPE_INDEPENDENT_OF_TYPE_PARAMETERS,
                     FALSE);
-            if (ignoreTypeParameters.isFalse()) {
+            if (ignoreTypeParameters.isFalse() && hiddenContentOnlyFromTypeParameters(bestType)) {
                 return parameterizedType.parameters().stream()
                         .map(pt -> typeImmutable(pt, dynamicValues))
                         .reduce(ValueImpl.ImmutableImpl.IMMUTABLE, Value.Immutable::min);
             }
         }
         return dynamicBaseValue;
+    }
+
+    /*
+     CodeLaser/maddi-mod#81: the type arguments replace a parameterized type's hidden content only when that hidden
+     content comes from the type parameters alone. An extensible type (an interface, a non-final non-sealed class) is
+     hidden content whatever its type arguments are: a field of type Wrap<String> may hold any implementation of Wrap,
+     and what that implementation carries is hidden content (road-to-immutability: "extensible => hidden content").
+     A non-extensible source type keeps the substitution when every instance field is typed by a type parameter, or
+     is deeply immutable once the type parameters are (Optional<T>, Box<T>); a field that is hidden content otherwise
+     (Object, an interface) makes it hc whatever T is. A non-extensible library type keeps it: its fields are not
+     visible. Gate NOEXTENSIBLEHC: the substitution for every type, as before.
+     */
+    private static final boolean EXTENSIBLE_HC_OFF = System.getenv("NOEXTENSIBLEHC") != null;
+    private static final ThreadLocal<java.util.Set<TypeInfo>> HC_VISITING =
+            ThreadLocal.withInitial(java.util.HashSet::new);
+
+    private boolean hiddenContentOnlyFromTypeParameters(TypeInfo typeInfo) {
+        if (EXTENSIBLE_HC_OFF) return true;
+        if (typeInfo.isExtensible()) return false;
+        if (!isPartOfSourceCode(typeInfo)) return true;
+        java.util.Set<TypeInfo> visiting = HC_VISITING.get();
+        if (!visiting.add(typeInfo)) return true; // a recursive type: decided by its other fields
+        try {
+            // the type's own type parameters read as deeply immutable, at any depth (Optional<T>'s T); matched on the
+            // type parameter, not on ParameterizedType equality, which includes annotations and nullability
+            java.util.Set<?> own = java.util.Set.copyOf(typeInfo.typeParameters());
+            Map<ParameterizedType, Value.Immutable> typeParametersImmutable = new java.util.AbstractMap<>() {
+                @Override
+                public Value.Immutable get(Object key) {
+                    return key instanceof ParameterizedType pt && pt.arrays() == 0 && pt.typeParameter() != null
+                           && own.contains(pt.typeParameter()) ? ValueImpl.ImmutableImpl.IMMUTABLE : null;
+                }
+
+                @Override
+                public java.util.Set<Entry<ParameterizedType, Value.Immutable>> entrySet() {
+                    return java.util.Set.of();
+                }
+            };
+            for (var fieldInfo : typeInfo.fields()) {
+                if (fieldInfo.isStatic()) continue;
+                ParameterizedType type = fieldInfo.type();
+                if (type.typeParameter() != null && type.arrays() == 0) continue;
+                Value.Immutable immutable = typeImmutable(type, typeParametersImmutable, false);
+                if (immutable == null || !immutable.isImmutable()) return false;
+            }
+            return true;
+        } finally {
+            visiting.remove(typeInfo);
+        }
     }
 
     private Value.Immutable containerTypeImmutable(TypeInfo containerType,
@@ -157,7 +206,7 @@ public class AnalysisHelper {
         if (immutable.isImmutableHC() && !parameterizedType.parameters().isEmpty()) {
             Value.Bool tpBool = bestType.analysis().getOrDefault(PropertyImpl.IMMUTABLE_TYPE_INDEPENDENT_OF_TYPE_PARAMETERS,
                     FALSE);
-            if (tpBool.isFalse()) {
+            if (tpBool.isFalse() && hiddenContentOnlyFromTypeParameters(bestType)) {
                 return parameterizedType.parameters().stream()
                         .map(this::typeIndependent)
                         .reduce(ValueImpl.IndependentImpl.INDEPENDENT, Value.Independent::min);

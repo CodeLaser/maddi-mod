@@ -392,6 +392,10 @@ public class TypeImmutableAnalyzerImpl extends CommonAnalyzerImpl implements Typ
             for (FieldInfo fieldInfo : type.fields()) {
                 if (typeInfo.equals(fieldInfo.type().bestTypeInfo())) continue; // self-reference
                 Immutable immutable = analysisHelper.typeImmutableNullIfUndecided(fieldInfo.type());
+                // CodeLaser/maddi-mod#81: what the field holds, when it is hc-free where its declared type is not
+                // (a field of type Wrap<String> only ever assigned 'new Constant<>(..)'); DynamicImmutabilityInference
+                Immutable dynamic = DynamicImmutability.ofField(fieldInfo);
+                if (dynamic != null && dynamic.isImmutable()) continue;
                 if (immutable == null) {
                     undecided = true;
                 } else if (!immutable.isImmutable()) {

@@ -19,6 +19,7 @@ package io.codelaser.maddi.modification.analyzer.nullability;
 
 import io.codelaser.maddi.cst.api.expression.VariableExpression;
 import io.codelaser.maddi.cst.api.info.FieldInfo;
+import io.codelaser.maddi.cst.impl.analysis.NullAnnotations;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.type.NullableState;
@@ -90,7 +91,7 @@ final class Tolerance {
                 ParameterizedType type = pi.parameterizedType();
                 if (primitive(type) || isTypeVariable(type) || before.contains(pi) || contracts.nonNullContracts.contains(pi)
                     || contracts.explicitState(pi) == NullableState.NONNULL || contracts.libraryNonNullParameter(mi, pi.index())
-                    || hook(mi, pi) || overloadedAt(mi, pi) || overridesAnalysed(mi)) continue;
+                    || hook(mi, pi) || overloadedAt(mi, pi) || overridesAnalysed(mi) || nullMarked(mi)) continue;
                 if (tolerates(pi, before)) {
                     seeds.seedIndirect(pi, mi.fullyQualifiedName() + " tolerates null in " + pi.name()
                                            + ", callable from outside");
@@ -98,6 +99,19 @@ final class Tolerance {
             }
         }
     }
+
+    /*
+     A @NullMarked scope (the method, its types, package-info, module) declares an unannotated parameter non-null, as
+     an explicit annotation does, and the author's declaration wins over a defensive null check, as it does for
+     '@NonNull String s'. timefold's Joiners.equal(leftMapping, rightMapping): the mappings are dereferenced through an
+     element of the joiner's mapping array, which the walk does not follow, and 23 nullable warnings appeared in the
+     C# translation (maddi-csharp, 2026-11-04). A type variable is excluded before this. Gate NOTOLERANTNULLMARKED.
+     */
+    private static boolean nullMarked(MethodInfo mi) {
+        return !TOLERANT_NULL_MARKED_OFF.get() && NullAnnotations.inNullMarkedScope(mi);
+    }
+
+    private static final Switches.Gate TOLERANT_NULL_MARKED_OFF = Switches.gate("NOTOLERANTNULLMARKED");
 
     /*
      An overridden method that ignores a parameter is a hook (guava's Service.Listener.failed(from, failure) { }): its
@@ -190,6 +204,12 @@ final class Tolerance {
                 case ParameterInfo pi -> {
                     MethodInfo m = pi.methodInfo();
                     if (!hasBody(m) || demanded(m, v -> pi.equals(v))) return trace.tolerance(from, n, "demanded");
+                    // passed on to a parameter its @NullMarked scope declares non-null: a demand, as a contract is
+                    // (timefold's Joiners.equal(l, r) hands both to DefaultBiJoiner's @NullMarked constructor)
+                    if (pi != start && !isTypeVariable(pi.parameterizedType()) && nullMarked(m)
+                        && contracts.explicitState(pi) != NullableState.NULLABLE) {
+                        return trace.tolerance(from, n, "@NullMarked");
+                    }
                 }
                 case Local local -> {
                     // by name, as NonNullFacts compares locals; a reassigned parameter's shadow is the parameter

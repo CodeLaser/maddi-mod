@@ -469,4 +469,59 @@ public class TestTolerance extends NullabilityFixtures {
             Switches.offForNextPasses(Set.of());
         }
     }
+
+    /*
+     A @NullMarked scope declares an unannotated parameter non-null, and the declaration wins over the tolerance, as an
+     explicit non-null annotation does. timefold's Joiners.equal(leftMapping, rightMapping) hand the mappings to a
+     joiner's mapping array, whose element the walk does not follow to the '.apply' (maddi-csharp, 2026-11-04). The
+     same shape outside the scope stays #68's case; @NullUnmarked lifts the scope.
+     */
+    @DisplayName("#68: a parameter in a @NullMarked scope is not tolerant")
+    @Test
+    public void toleranceNotInNullMarkedScope() {
+        String input = """
+                package a.b;
+                import java.util.Arrays;
+                public class NM {
+                    @interface NullMarked {}
+                    @interface NullUnmarked {}
+                    @NullMarked
+                    public static class Marked {
+                        private Object[] mappings;
+                        public Marked(Object mapping) { this.mappings = new Object[] { mapping }; }
+                        public void grow(int n) { mappings = Arrays.copyOf(mappings, n); }
+                        public static String describe(Object o) { return o == null ? "-" : o.toString(); }
+                        @NullUnmarked
+                        public static String unmarked(Object o) { return o == null ? "-" : o.toString(); }
+                    }
+                    // the parameter goes into a field that is nullable anyway: the walk continues past it
+                    @NullMarked
+                    public static class Sink {
+                        private Object mapping;
+                        public Sink(Object mapping) { this.mapping = mapping; }
+                        public void clear() { mapping = null; }
+                    }
+                    public static class Plain {
+                        public static String describe(Object o) { return o == null ? "-" : o.toString(); }
+                        // passed on to a @NullMarked constructor's parameter: a demand (timefold's Joiners.equal)
+                        public static Sink wrap(Object mapping) { return new Sink(mapping); }
+                    }
+                }
+                """;
+        Map<String, String> v = byName(run("a.b.NM", input, Policy.NULL_MARKED_FLOW_ONLY));
+        assertEquals("Object", v.get("a.b.NM.Marked.<init>(Object):0:mapping"), v.toString());
+        assertEquals("Object", v.get("a.b.NM.Marked.describe(Object):0:o"));
+        assertEquals("Object?", v.get("a.b.NM.Marked.unmarked(Object):0:o"));
+        assertEquals("Object?", v.get("a.b.NM.Plain.describe(Object):0:o"));
+        assertEquals("Object", v.get("a.b.NM.Plain.wrap(Object):0:mapping"));
+
+        Switches.offForNextPasses(Set.of("NOTOLERANTNULLMARKED"));
+        try {
+            Map<String, String> off = byName(new NullabilityPass(Policy.NULL_MARKED_FLOW_ONLY).go(analysisOrder));
+            assertEquals("Object?", off.get("a.b.NM.Marked.describe(Object):0:o"));
+            assertEquals("Object?", off.get("a.b.NM.Plain.wrap(Object):0:mapping"));
+        } finally {
+            Switches.offForNextPasses(Set.of());
+        }
+    }
 }

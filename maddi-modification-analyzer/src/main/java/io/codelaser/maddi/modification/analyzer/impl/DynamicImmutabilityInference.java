@@ -90,6 +90,8 @@ public class DynamicImmutabilityInference {
      */
     private static final int MAX_DEPTH = 5;
 
+    private static final boolean CONCRETE_FIELD_OFF = System.getenv("NOCONCRETEFIELD") != null;
+
     // AnalysisHelper holds no state, so one instance serves the static classification path that GuardAnalyzerImpl
     // shares (see provenImmutability): producer and guard must agree on what counts as proof, or the guard would
     // warn about a promise the inference is happy to make.
@@ -108,7 +110,12 @@ public class DynamicImmutabilityInference {
         // Only a field whose declared type leaves something to say. A field already immutable by declared type
         // needs no dynamic value, and DynamicImmutability would ignore anything below immutable-HC anyway.
         Value.Immutable ofDeclaredType = ANALYSIS_HELPER.typeImmutable(fieldInfo.type());
-        if (ofDeclaredType != null && ofDeclaredType.isAtLeastImmutableHC()) return;
+        // CodeLaser/maddi-mod#81: a field of an extensible type is hidden content (Wrap<String>), but a field every
+        // assignment of which constructs a final class ('this.w = new Constant<>("x")') holds exactly that class,
+        // and is as immutable as the class with its type arguments: the dynamic value may be hc-free where the
+        // declared type is not. Gate NOCONCRETEFIELD.
+        boolean onlyHcFree = ofDeclaredType != null && ofDeclaredType.isAtLeastImmutableHC();
+        if (onlyHcFree && (CONCRETE_FIELD_OFF || ofDeclaredType.isImmutable())) return;
 
         if (!fieldInfo.isPropertyFinal()) return; // see "Soundness": the assignment set would be incomplete
 
@@ -120,7 +127,7 @@ public class DynamicImmutabilityInference {
             if (proven == null) return; // unproven or not yet decided: decline, and try again next pass
             meet = meet.min(proven);
         }
-        if (meet.isAtLeastImmutableHC()) {
+        if (onlyHcFree ? meet.isImmutable() : meet.isAtLeastImmutableHC()) {
             fieldInfo.analysis().set(PropertyImpl.IMMUTABLE_FIELD, meet);
             CommonAnalyzerImpl.DECIDE.debug("DII: Decide dynamic immutable of field {} = {}", fieldInfo, meet);
             propertyChanges.incrementAndGet();
