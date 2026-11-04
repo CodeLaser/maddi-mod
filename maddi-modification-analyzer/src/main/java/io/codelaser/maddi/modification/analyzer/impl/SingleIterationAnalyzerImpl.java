@@ -95,6 +95,33 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
     // pass that moment depends on thread timing, and so does the verdict (guava, 8 threads: 6-10 FPDUMP lines
     // differ between runs, 0 sequentially). Opt-in while measuring.
     static final boolean SEQUENTIAL_CYCLE_BREAKING = Gate.isSet("SEQCYCLEBREAKING");
+    // EXPERIMENT (#82): the deterministic alternative to SEQCYCLEBREAKING that keeps the loop parallel; see goInternal
+    static final boolean CYCLE_BREAKING_SWEEP = Gate.isSet("CBSWEEP");
+    private static final int MAX_SWEEP_ROUNDS = 25;
+
+    // DIAGNOSTIC (#91): PARSHUFFLE=<seed> submits each parallel pass's elements (and each first-iteration wave's
+    // units) in a seeded random order. The order is arbitrary under PARALLEL anyway; this moves the thread timing
+    // on purpose, to expose verdicts that depend on it without needing machine load.
+    private static final Long PARALLEL_SHUFFLE_SEED = parseShuffleSeed();
+
+    private static Long parseShuffleSeed() {
+        String s = System.getenv("PARSHUFFLE");
+        if (s == null || s.isBlank()) return null;
+        try {
+            return Long.parseLong(s.trim());
+        } catch (NumberFormatException e) {
+            return (long) s.trim().hashCode();
+        }
+    }
+
+    private int shufflePass;
+
+    private <T> List<T> submissionOrder(List<T> list) {
+        if (PARALLEL_SHUFFLE_SEED == null) return list;
+        List<T> copy = new ArrayList<>(list);
+        java.util.Collections.shuffle(copy, new java.util.Random(PARALLEL_SHUFFLE_SEED * 31 + shufflePass++));
+        return copy;
+    }
 
     private static int parallelThreads() {
         String s = System.getenv("PARALLEL");
@@ -256,6 +283,13 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
         }
     }
 
+    // whether the next pass covers the whole order (or, incremental, the whole scope): only such a pass may sweep
+    private boolean fullPass = true;
+
+    public void setFullPass(boolean fullPass) {
+        this.fullPass = fullPass;
+    }
+
     // see SingleIterationAnalyzer.setFirstVisits; read by processElement, possibly from worker threads
     private volatile Set<Info> firstVisits = Set.of();
 
@@ -277,6 +311,17 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
         // first iteration only; concurrent for the strata-parallel path
         Set<TypeInfo> abstractTypes = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
+        // CBSWEEP (#82): under cycle breaking, the per-element loop runs WITHOUT it, and the defaults are applied
+        // afterwards in a sequential sweep over the fields and types, in analysis order, and only on a full pass
+        // whose loop changed nothing. That state is the fixpoint without cycle breaking, the same whatever the
+        // thread timing, and a sequential sweep over it decides the same defaults in every run.
+        boolean sweepMode = activateCycleBreaking && CYCLE_BREAKING_SWEEP;
+        boolean loopCycleBreaking = activateCycleBreaking && !sweepMode;
+        // and the type analyzers leave the loop for the sequential second type pass: the eventual family is
+        // write-once, and its assumption ledger records whether a candidate already had its verdict when a member
+        // leaned on it. In a parallel loop that depends on thread timing (guava: CaseFormat.$0/$1 retracted by
+        // cascade at 8 threads, kept sequentially).
+        typesInSecondPassOnly = sweepMode;
         long startLoop = System.currentTimeMillis();
         if (PARALLEL_THREADS > 1 && firstIteration && firstIterationWaves != null
             && analysisOrder.size() >= MIN_ELEMENTS_FOR_PARALLEL) {
@@ -287,7 +332,7 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
                 LOGGER.warn("Wave element count {} != analysis order size {}; falling back to sequential",
                         elements, analysisOrder.size());
                 for (Info info : analysisOrder) {
-                    processElement(info, activateCycleBreaking, true, abstractTypes);
+                    processElement(info, loopCycleBreaking, true, abstractTypes);
                 }
             } else {
                 LOGGER.info("Strata-parallel FIRST iteration: {} threads, {} waves, {} units, {} elements",
@@ -299,10 +344,10 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
                     for (List<List<Info>> wave : firstIterationWaves) {
                         waveIndex++;
                         List<java.util.concurrent.Future<?>> futures = new ArrayList<>(wave.size());
-                        for (List<Info> unit : wave) {
+                        for (List<Info> unit : submissionOrder(wave)) {
                             futures.add(pool.submit(() -> {
                                 for (Info info : unit) {
-                                    processElement(info, activateCycleBreaking, true, abstractTypes);
+                                    processElement(info, loopCycleBreaking, true, abstractTypes);
                                 }
                             }));
                         }
@@ -334,11 +379,11 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
             linkComputer.setLockComputeDisabled(true);
             try (java.util.concurrent.ExecutorService pool =
                          java.util.concurrent.Executors.newFixedThreadPool(PARALLEL_THREADS)) {
-                for (Info info : analysisOrder) {
+                for (Info info : submissionOrder(analysisOrder)) {
                     futures.add(pool.submit(() -> {
                         long t0 = System.nanoTime();
                         try {
-                            processElement(info, activateCycleBreaking, false, abstractTypes);
+                            processElement(info, loopCycleBreaking, false, abstractTypes);
                         } finally {
                             elementMillis.put(info, (System.nanoTime() - t0) / 1_000_000);
                         }
@@ -360,7 +405,7 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
             java.util.Map<Info, Long> elementMillis = LOGGER.isInfoEnabled() ? new java.util.HashMap<>() : null;
             for (Info info : analysisOrder) {
                 long t0 = System.nanoTime();
-                processElement(info, activateCycleBreaking, firstIteration, abstractTypes);
+                processElement(info, loopCycleBreaking, firstIteration, abstractTypes);
                 if (elementMillis != null) elementMillis.put(info, (System.nanoTime() - t0) / 1_000_000);
             }
             if (elementMillis != null) {
@@ -407,24 +452,53 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
         }
 
         long startSecondPass = System.currentTimeMillis();
-        /*
-        run once more, because the abstract method analyzer may have resolved independence and modification values
-        for abstract methods.
-         */
-        for (TypeInfo typeInfo : typesInOrder) {
-            if (faultTolerant && failed.contains(typeInfo)) continue;
-            int changesBefore2 = propertiesChanged.get();
-            try {
-                runTypeAnalyzers(activateCycleBreaking, typeInfo);
-            } catch (RuntimeException | AssertionError | StackOverflowError e) {
-                LOGGER.error("Caught exception (2nd type pass) on {}", typeInfo, e);
-                if (!faultTolerant) throw e;
-                failed.add(typeInfo);
-                messages.add(crashFinding(typeInfo, e));
-            } finally {
-                if (propertiesChanged.get() > changesBefore2) changedInfos.add(typeInfo);
+        boolean sweep = sweepMode && fullPass && propertiesChanged.get() == 0;
+        boolean typeCycleBreaking = sweepMode ? sweep : activateCycleBreaking;
+        // CBSWEEP: a sweep repeats in place until it changes nothing. Type-level conclusions feed each other (an
+        // implementor's verdict gives its interface the mark labels); one round per pass made every link of such a
+        // chain cost a worklist drain plus a full pass, and the dogfood ran out of iterations (120) mid-epoch.
+        int sweepRound = 0;
+        boolean again;
+        do {
+            int changesBeforeRound = propertiesChanged.get();
+            if (sweep) {
+                if (sweepRound == 0) LOGGER.info("Cycle-breaking sweep over {} elements", analysisOrder.size());
+                for (Info info : analysisOrder) {
+                    if (!(info instanceof FieldInfo fieldInfo) || faultTolerant && failed.contains(info)) continue;
+                    int changesBefore = propertiesChanged.get();
+                    try {
+                        fieldAnalyzer.go(fieldInfo, true);
+                    } catch (RuntimeException | AssertionError | StackOverflowError e) {
+                        LOGGER.error("Caught exception (cycle-breaking sweep) on {}", fieldInfo, e);
+                        if (!faultTolerant) throw e;
+                        failed.add(fieldInfo);
+                        messages.add(crashFinding(fieldInfo, e));
+                    } finally {
+                        if (propertiesChanged.get() > changesBefore) changedInfos.add(fieldInfo);
+                    }
+                }
             }
-        }
+            /*
+            run once more, because the abstract method analyzer may have resolved independence and modification values
+            for abstract methods.
+             */
+            for (TypeInfo typeInfo : typesInOrder) {
+                if (faultTolerant && failed.contains(typeInfo)) continue;
+                int changesBefore2 = propertiesChanged.get();
+                try {
+                    runTypeAnalyzers(typeCycleBreaking, typeInfo);
+                } catch (RuntimeException | AssertionError | StackOverflowError e) {
+                    LOGGER.error("Caught exception (2nd type pass) on {}", typeInfo, e);
+                    if (!faultTolerant) throw e;
+                    failed.add(typeInfo);
+                    messages.add(crashFinding(typeInfo, e));
+                } finally {
+                    if (propertiesChanged.get() > changesBefore2) changedInfos.add(typeInfo);
+                }
+            }
+            again = sweep && propertiesChanged.get() > changesBeforeRound && ++sweepRound < MAX_SWEEP_ROUNDS;
+        } while (again);
+        if (sweepRound > 0) LOGGER.info("Cycle-breaking sweep: {} extra round(s)", sweepRound);
         long end = System.currentTimeMillis();
         LOGGER.info("Phase timing: main loop {} ms, abstract batch {} ms, 2nd type pass {} ms",
                 endLoop - startLoop, startSecondPass - startAbstract, end - startSecondPass);
@@ -588,6 +662,9 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
         }
     }
 
+    // CBSWEEP: set per pass in goInternal, before the loop starts; read by processElement on the workers
+    private volatile boolean typesInSecondPassOnly;
+
     private void processElement(Info info, boolean activateCycleBreaking, boolean firstIteration,
                                 Set<TypeInfo> abstractTypes) {
         // G43: OUTSIDE the fault-tolerant try below — a spent budget is not this element's crash, and must not be
@@ -651,7 +728,7 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
                 }
                 fieldAnalyzer.go(fieldInfo, activateCycleBreaking);
             } else if (info instanceof TypeInfo typeInfo) {
-                runTypeAnalyzers(activateCycleBreaking, typeInfo);
+                if (!typesInSecondPassOnly) runTypeAnalyzers(activateCycleBreaking, typeInfo);
             }
         } catch (RuntimeException | AssertionError | StackOverflowError e) {
             LOGGER.error("Caught exception processing {}", info, e);
