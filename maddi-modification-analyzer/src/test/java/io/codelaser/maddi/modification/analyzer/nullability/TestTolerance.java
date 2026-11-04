@@ -733,4 +733,50 @@ public class TestTolerance extends NullabilityFixtures {
             Switches.offForNextPasses(Set.of());
         }
     }
+
+    /*
+     The #85 overrule in a cycle of delegating overrides (guava's Ordering / ReverseOrdering min and max): each override
+     hands the parameter to the other method, whose demand the other override "overrules". Nothing in the family reads
+     null, so the demand stands. The control adds an override that does read it.
+     */
+    @DisplayName("#85: a cycle of delegating overrides does not overrule a demand")
+    @Test
+    public void toleranceNotThroughCycleOfDelegatingOverrides() {
+        String input = """
+                package a.b;
+                import java.util.Objects;
+                public class OR {
+                    public static class Ordering {
+                        public int min(Iterable<Object> it) { Objects.requireNonNull(it); return it.hashCode(); }
+                        public int max(Iterable<Object> it) { Objects.requireNonNull(it); return -it.hashCode(); }
+                    }
+                    public static final class ReverseOrdering extends Ordering {
+                        private final Ordering forward;
+                        public ReverseOrdering(Ordering forward) { this.forward = Objects.requireNonNull(forward); }
+                        @Override public int min(Iterable<Object> it) { return forward.max(it); }
+                        @Override public int max(Iterable<Object> it) { return forward.min(it); }
+                    }
+                }
+                """;
+        Map<String, String> v = byName(run("a.b.OR", input, Policy.KOTLIN));
+        assertEquals("Iterable<Object>", v.get("a.b.OR.Ordering.min(Iterable):0:it"), v.toString());
+        assertEquals("Iterable<Object>", v.get("a.b.OR.Ordering.max(Iterable):0:it"));
+
+        Switches.offForNextPasses(Set.of("NOOVERRIDECYCLES"));
+        try {
+            Map<String, String> off = byName(new NullabilityPass(Policy.KOTLIN).go(analysisOrder));
+            assertEquals("Iterable<Object>?", off.get("a.b.OR.Ordering.min(Iterable):0:it"), off.toString());
+        } finally {
+            Switches.offForNextPasses(Set.of());
+        }
+
+        String withNullsFirst = input.replace("public class OR", "public class ON").replace("""
+                    public static final class ReverseOrdering""", """
+                    public static final class NullsFirstOrdering extends Ordering {
+                        @Override public int min(Iterable<Object> it) { return it == null ? 0 : super.min(it); }
+                    }
+                    public static final class ReverseOrdering""");
+        Map<String, String> control = byName(run("a.b.ON", withNullsFirst, Policy.KOTLIN));
+        assertEquals("Iterable<Object>?", control.get("a.b.ON.Ordering.min(Iterable):0:it"), control.toString());
+    }
 }
