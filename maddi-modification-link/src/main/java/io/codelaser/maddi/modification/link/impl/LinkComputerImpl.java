@@ -453,9 +453,35 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                && !primary.equals(v);
     }
 
+    // DIAGNOSTIC (#23): TRIPDIAG=<fqn substring>. When a matching method trips the work ceiling, print its graph
+    // sizes and a fingerprint of every input summary it read (its own previous METHOD_LINKS included), one line per
+    // callee, so two linkings that cut at different places can be diffed for the input that changed.
+    private static final String TRIP_DIAG = System.getenv("TRIPDIAG");
+    private final java.util.concurrent.atomic.AtomicInteger tripDiagCount = new java.util.concurrent.atomic.AtomicInteger();
+
+    private void tripDiag(MethodInfo methodInfo, Graph graph) {
+        int n = tripDiagCount.incrementAndGet();
+        StringBuilder sb = new StringBuilder();
+        sb.append("TRIPDIAG#").append(n).append(" graph=").append(graph.size()).append(" closure=")
+                .append(graph.sizeOfClosure()).append(" method=").append(methodInfo.fullyQualifiedName()).append('\n');
+        java.util.Set<MethodInfo> inputs = new java.util.TreeSet<>(java.util.Comparator.comparing(MethodInfo::fullyQualifiedName));
+        inputs.addAll(consumedSummaries.getOrDefault(methodInfo, java.util.Set.of()));
+        inputs.add(methodInfo);
+        for (MethodInfo callee : inputs) {
+            MethodLinkedVariables mlv = callee.analysis().getOrNull(METHOD_LINKS, MethodLinkedVariablesImpl.class);
+            String text = String.valueOf(mlv);
+            sb.append("TRIPDIAG#").append(n).append("   ").append(Integer.toHexString(text.hashCode()))
+                    .append(" len=").append(text.length()).append(' ').append(callee.fullyQualifiedName()).append('\n');
+        }
+        System.out.print(sb);
+    }
+
     private void reportWork(MethodInfo methodInfo, SourceMethodComputer computer, boolean tripped) {
         Graph graph = computer.linkGraph.graph();
         long work = graph.engine().work();
+        if (tripped && TRIP_DIAG != null && methodInfo.fullyQualifiedName().contains(TRIP_DIAG)) {
+            tripDiag(methodInfo, graph);
+        }
         if (WORK_DUMP != null && methodInfo.fullyQualifiedName().contains(WORK_DUMP)) {
             LOGGER.info("LINKDUMP method={} work={} variables={}\n{}", methodInfo.fullyQualifiedName(), work,
                     graph.size(), graph.engine().printClosure());
