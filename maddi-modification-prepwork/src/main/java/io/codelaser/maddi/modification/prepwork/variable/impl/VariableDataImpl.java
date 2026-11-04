@@ -157,6 +157,13 @@ public class VariableDataImpl implements VariableData {
         return vicByFqn.get(fullyQualifiedName);
     }
 
+    /** {@link VariableInfoContainerImpl#clearDerived} on every container. */
+    public void clearDerived(java.util.function.Predicate<io.codelaser.maddi.cst.api.analysis.Property> derived) {
+        vicByFqn.values().forEach(vic -> {
+            if (vic instanceof VariableInfoContainerImpl impl) impl.clearDerived(derived);
+        });
+    }
+
     @Override
     public Stream<VariableInfoContainer> variableInfoContainerStream() {
         return vicByFqn.values().stream();

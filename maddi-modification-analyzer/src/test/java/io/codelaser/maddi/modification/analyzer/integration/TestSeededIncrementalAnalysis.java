@@ -87,7 +87,7 @@ public class TestSeededIncrementalAnalysis extends CommonTest {
         return a;
     }
 
-    @DisplayName("a seeded worklist analyses only the seed (+propagation) and stops without a verification pass")
+    @DisplayName("a seeded worklist analyses only the seed (+propagation), its verification pass included")
     @Test
     public void test() {
         TypeInfo X = javaInspector.parse("a.b.X", INPUT);
@@ -105,14 +105,15 @@ public class TestSeededIncrementalAnalysis extends CommonTest {
         // incremental reload starts from: most types carried, a dirty subset to re-check.
 
         // (2) seed with a single element. Iteration 1 analyses ONLY that element; being already at the fixpoint it
-        // changes nothing, so the worklist stays dry and the run stops — no full verification pass appended.
+        // changes nothing, so the worklist is dry. The verification pass that follows covers the run's scope, the
+        // elements it analysed, which is the seed alone: never the whole order.
         Info seed = analysisOrder.getFirst();
         Recording seeded = new Recording();
         newAnalyzer(seeded.feed()).analyze(analysisOrder, graph, Set.of(seed));
 
-        assertEquals(1, seeded.passSizes().size(), "one pass only: seed re-checked, worklist dry, stop");
-        assertFalse(seeded.fullPasses().getFirst(), "the seeded pass is a subset pass, never a full pass");
-        assertEquals(1, seeded.passSizes().getFirst(), "exactly the seed was analysed");
+        assertEquals(2, seeded.passSizes().size(), "the seed, then the verification pass over the scope");
+        assertTrue(seeded.fullPasses().stream().noneMatch(b -> b), "every pass is a subset pass, never a full pass");
+        assertEquals(List.of(1, 1), seeded.passSizes(), "exactly the seed was analysed, each time");
         assertEquals(List.of(seed), seeded.lastAnalyzed());
         // crucially, NO full verification pass ever ran: no pass covered the whole order.
         assertTrue(seeded.passSizes().stream().noneMatch(s -> s == analysisOrder.size()),

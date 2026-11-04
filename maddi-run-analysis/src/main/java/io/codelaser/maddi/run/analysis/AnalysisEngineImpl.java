@@ -138,6 +138,12 @@ public class AnalysisEngineImpl implements AnalysisEngine {
     }
 
     @Override
+    public String outputDump(io.codelaser.maddi.cst.api.runtime.Runtime runtime, TypeInfo primaryType) {
+        return AnalysisFingerprint.normalize(AnalysisFingerprint.dump(runtime, primaryType,
+                AnalysisFingerprint.ANALYZER_OUTPUT_ONLY), AnalysisFingerprint.DEFAULT);
+    }
+
+    @Override
     public Set<Property> bookkeepingProperties() {
         return Set.of(PrepAnalyzer.PREPPED);
     }
@@ -222,17 +228,16 @@ public class AnalysisEngineImpl implements AnalysisEngine {
                     new File(checkpointDir)));
             LOGGER.info("CHECKPOINT: writing pass-boundary deltas to {}", checkpointDir);
         }
-        Set<Info> initialDirty = o.environmentGates() ? incrementalSeed(request, analyzer) : null;
+        // a seeded request is a warm analysis of the objects an earlier analysis left; the environment gate is the
+        // CLI's INCREMENTAL=<checkpoint dir>, a cold parse with restored values
+        Set<Info> initialDirty = request.seed() != null ? request.seed()
+                : o.environmentGates() ? incrementalSeed(request, analyzer) : null;
 
         if (initialDirty != null) {
             // clear-before-recompute: a dirtied element's carried cross-type-derived values
             // must not block the fresh, possibly-lowering re-analysis
-            Consumer<Info> clearHook = info -> {
-                info.analysis().removeIf(AnalysisFingerprint.CROSS_TYPE_DERIVED_ONLY);
-                if (info instanceof MethodInfo mi) {
-                    mi.parameters().forEach(p -> p.analysis().removeIf(AnalysisFingerprint.CROSS_TYPE_DERIVED_ONLY));
-                }
-            };
+            // (statement- and variable-level values included: see ClearDerived)
+            Consumer<Info> clearHook = io.codelaser.maddi.modification.prepwork.ClearDerived::element;
             analyzer.analyze(order, request.callGraph(), initialDirty, clearHook);
         } else if (request.callGraph() != null) {
             analyzer.analyze(order, request.callGraph()); // graph enables worklist narrowing (default ON, NOWORKLIST=1 opts out)

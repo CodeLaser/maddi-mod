@@ -397,6 +397,39 @@ public class PrepAnalyzer {
         });
     }
 
+    // every constructor and method of the type, its nested types, and the anonymous, lambda and local types
+    // declared in their bodies and field initializers, recursively
+    private static void forEachMethod(TypeInfo typeInfo, java.util.function.Consumer<MethodInfo> consumer) {
+        typeInfo.recursiveSubTypeStream().forEach(type -> {
+            type.constructorAndMethodStream().forEach(mi -> {
+                consumer.accept(mi);
+                if (mi.methodBody() != null) forEachMethodInBody(mi.methodBody(), consumer);
+            });
+            type.fields().forEach(fi -> {
+                if (fi.initializer() != null) forEachMethodInBody(fi.initializer(), consumer);
+            });
+        });
+    }
+
+    private static void forEachMethodInBody(io.codelaser.maddi.cst.api.element.Element root,
+                                            java.util.function.Consumer<MethodInfo> consumer) {
+        root.visit(e -> {
+            if (e instanceof io.codelaser.maddi.cst.api.expression.ConstructorCall cc && cc.anonymousClass() != null) {
+                forEachMethod(cc.anonymousClass(), consumer);
+                return false;
+            }
+            if (e instanceof io.codelaser.maddi.cst.api.expression.Lambda lambda) {
+                forEachMethod(lambda.methodInfo().typeInfo(), consumer);
+                return false;
+            }
+            if (e instanceof io.codelaser.maddi.cst.api.statement.LocalTypeDeclaration ltd) {
+                forEachMethod(ltd.typeInfo(), consumer);
+                return false;
+            }
+            return true;
+        });
+    }
+
     private static void clearElements(io.codelaser.maddi.cst.api.element.Element root) {
         root.visit(e -> {
             if (e instanceof io.codelaser.maddi.cst.api.statement.Statement
@@ -441,9 +474,9 @@ public class PrepAnalyzer {
         // initializers. Setting the marker here covers those too.
         if (typeInfo.analysis().haveAnalyzedValueFor(PREPPED)) {
             if (typeInfo.isPrimaryType()) skipped.add(typeInfo);
-            // kept, or rewired with its prep data carried: only the side effect on other types is repeated
-            typeInfo.recursiveSubTypeStream().flatMap(TypeInfo::constructorAndMethodStream)
-                    .forEach(MethodAnalyzer::registerImplementation);
+            // kept, or rewired with its prep data carried: only the side effect on other types is repeated, for
+            // every method doMethod would have registered, the anonymous, lambda and local types' included
+            forEachMethod(typeInfo, MethodAnalyzer::registerImplementation);
             return;
         }
         boolean collecting = methodAnalyzer.startGetSetAssumptions();
