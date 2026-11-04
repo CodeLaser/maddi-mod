@@ -17,16 +17,16 @@
 
 package io.codelaser.maddi.modification.analyzer.clonebench;
 
-import io.codelaser.maddi.modification.analyzer.CommonTest;
-import io.codelaser.maddi.cst.api.info.Info;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.DisplayName;
-
 import java.math.BigInteger;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+import io.codelaser.maddi.cst.api.info.Info;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.modification.analyzer.CommonTest;
 
 
 public class TestHCTNotYetLoaded extends CommonTest {
@@ -51,7 +51,7 @@ public class TestHCTNotYetLoaded extends CommonTest {
             """;
 
     @DisplayName("test HCT not yet loaded")
-    @org.junit.jupiter.api.Test
+    @Test
     public void test1() {
         TypeInfo B = javaInspector.parse("Function17122361_file1119884", INPUT1);
         List<Info> ao = prepWork(B);

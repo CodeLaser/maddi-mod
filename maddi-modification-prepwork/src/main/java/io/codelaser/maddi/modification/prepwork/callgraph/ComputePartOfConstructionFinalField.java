@@ -17,11 +17,15 @@
 
 package io.codelaser.maddi.modification.prepwork.callgraph;
 
-import io.codelaser.maddi.callgraph.ComputeCallGraph;
+import java.util.*;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
-import io.codelaser.maddi.modification.prepwork.variable.VariableData;
-import io.codelaser.maddi.modification.prepwork.variable.VariableInfoContainer;
-import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import io.codelaser.maddi.callgraph.ComputeCallGraph;
 import io.codelaser.maddi.cst.api.analysis.Property;
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.info.FieldInfo;
@@ -35,13 +39,9 @@ import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 import io.codelaser.maddi.graph.G;
 import io.codelaser.maddi.graph.V;
 import io.codelaser.maddi.graph.util.TimedLogger;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.util.*;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Predicate;
-import java.util.stream.Collectors;
+import io.codelaser.maddi.modification.prepwork.variable.VariableData;
+import io.codelaser.maddi.modification.prepwork.variable.VariableInfoContainer;
+import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
 
 public class ComputePartOfConstructionFinalField {
     private static final Logger LOGGER = LoggerFactory.getLogger(ComputePartOfConstructionFinalField.class);

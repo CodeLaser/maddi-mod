@@ -18,8 +18,12 @@
 package io.codelaser.maddi.aapi.parser;
 
 
-import io.codelaser.maddi.modification.common.defaults.ShallowAnalyzer;
-import io.codelaser.maddi.modification.prepwork.io.DecoratorImpl;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Stream;
+
 import io.codelaser.maddi.cst.api.analysis.Property;
 import io.codelaser.maddi.cst.api.element.Comment;
 import io.codelaser.maddi.cst.api.element.Element;
@@ -30,16 +34,12 @@ import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.output.Qualification;
 import io.codelaser.maddi.cst.api.runtime.Runtime;
-
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.function.Function;
-import java.util.stream.Stream;
+import io.codelaser.maddi.modification.common.defaults.ShallowAnalyzer;
+import io.codelaser.maddi.modification.prepwork.io.DecoratorImpl;
 
 class DecoratorWithComments extends DecoratorImpl {
 
-    private final io.codelaser.maddi.cst.api.runtime.Runtime runtime;
+    private final Runtime runtime;
     private final Map<Element, Element> translationMap;
     private final Function<Element, AnalysisHintsParser.Data> dataProvider;
     private final Function<Element, ShallowAnalyzer.InfoData> infoDataProvider;

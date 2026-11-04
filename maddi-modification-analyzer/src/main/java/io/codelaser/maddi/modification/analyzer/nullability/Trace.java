@@ -17,12 +17,12 @@
 
 package io.codelaser.maddi.modification.analyzer.nullability;
 
-import io.codelaser.maddi.cst.api.element.Element;
-import io.codelaser.maddi.cst.api.info.Info;
-
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+
+import io.codelaser.maddi.cst.api.element.Element;
+import io.codelaser.maddi.cst.api.info.Info;
 
 /**
  * The nullability pass's debugging output: every part prints through this one object, and only it reads the filter.

@@ -17,26 +17,28 @@
 
 package io.codelaser.maddi.modification.analyzer.impl;
 
-import io.codelaser.maddi.modification.common.defaults.ContractReader;
-import io.codelaser.maddi.modification.common.util.TolerantWrite;
-import io.codelaser.maddi.cst.api.analysis.Property;
-import io.codelaser.maddi.cst.api.analysis.Value;
-import io.codelaser.maddi.cst.api.expression.AnnotationExpression;
-import io.codelaser.maddi.cst.api.info.FieldInfo;
-import io.codelaser.maddi.cst.api.info.Info;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.api.runtime.Runtime;
-import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
-
-import java.util.concurrent.atomic.AtomicInteger;
-
 import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.IGNORE_MODIFICATIONS_FIELD;
 import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.IMMUTABLE_FIELD;
 import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.IMMUTABLE_METHOD;
 import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.INDEPENDENT_METHOD;
 import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.NON_MODIFYING_METHOD;
 import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.STATIC_SIDE_EFFECTS_METHOD;
+
+import java.util.concurrent.atomic.AtomicInteger;
+
+import io.codelaser.maddi.cst.api.analysis.Property;
+import io.codelaser.maddi.cst.api.analysis.Value;
+import io.codelaser.maddi.cst.api.expression.AnnotationExpression;
+import io.codelaser.maddi.cst.api.info.FieldInfo;
+import io.codelaser.maddi.cst.api.info.Info;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.ParameterInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.runtime.Runtime;
+import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
+import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
+import io.codelaser.maddi.modification.common.defaults.ContractReader;
+import io.codelaser.maddi.modification.common.util.TolerantWrite;
 
 /**
  * Writes a user's <em>dynamic type</em> contract on a SOURCE field or method into {@code analysis()}.
@@ -111,11 +113,11 @@ public class SourceContractMaterializer {
             // @Modified(hc=true) (#25): the structural twin is a pure contract on a bodiless declaration -- the
             // deep arm above reads the @Modified, this writes the "hidden content only" refinement beside it, on
             // the method and on each parameter. Absent, readers fall back to the deep value.
-            materializeTrueBool(methodInfo, io.codelaser.maddi.cst.impl.analysis.PropertyImpl.STRUCTURALLY_NON_MODIFYING_METHOD);
+            materializeTrueBool(methodInfo, PropertyImpl.STRUCTURALLY_NON_MODIFYING_METHOD);
             // @UnmodifiableView (#52): a pure contract on a bodiless declaration; a method with a body is computed
-            materializeTrueBool(methodInfo, io.codelaser.maddi.cst.impl.analysis.PropertyImpl.UNMODIFIABLE_VIEW_METHOD);
-            for (io.codelaser.maddi.cst.api.info.ParameterInfo pi : methodInfo.parameters()) {
-                materializeTrueBool(pi, io.codelaser.maddi.cst.impl.analysis.PropertyImpl.STRUCTURALLY_UNMODIFIED_PARAMETER);
+            materializeTrueBool(methodInfo, PropertyImpl.UNMODIFIABLE_VIEW_METHOD);
+            for (ParameterInfo pi : methodInfo.parameters()) {
+                materializeTrueBool(pi, PropertyImpl.STRUCTURALLY_UNMODIFIED_PARAMETER);
             }
         }
         // @StaticSideEffects is the global-escape twin of @IgnoreModifications: a pure contract on the safe
@@ -127,11 +129,11 @@ public class SourceContractMaterializer {
         // @Finalizer is a pure contract too: nothing computes it, and without materialization a SOURCE method's
         // annotation is read by nothing (MethodInfo.isFinalizer() reads analysis()). The Rust printer turns it into
         // a method taking self by value (CodeLaser/maddi#167).
-        materializeTrueBool(methodInfo, io.codelaser.maddi.cst.impl.analysis.PropertyImpl.FINALIZER_METHOD);
+        materializeTrueBool(methodInfo, PropertyImpl.FINALIZER_METHOD);
         // @IgnoreModifications on a SOURCE method (a log method writing a buffer): the same pure contract as on a
         // parameter or field below. Its callers do not count a call to it as a modification (the reachability
         // pass, ShallowMethodLinkComputer); the method's own NON_MODIFYING_METHOD stays computed.
-        materializeTrueBool(methodInfo, io.codelaser.maddi.cst.impl.analysis.PropertyImpl.IGNORE_MODIFICATION_METHOD);
+        materializeTrueBool(methodInfo, PropertyImpl.IGNORE_MODIFICATION_METHOD);
         // @IgnoreModifications on a SOURCE parameter is the same pure-contract gap as the field arm below:
         // the author disclaims what the argument object does (typically a functional parameter applied to
         // this — Element.visit(@IgnoreModifications Predicate)); it cannot be computed, and without
@@ -140,19 +142,19 @@ public class SourceContractMaterializer {
         // disclaimer filters consume it. A contract on a declaration binds every override: the annotation
         // is written once, on the interface (the shallow analyzer gives jar methods the same inheritance),
         // so an implementation's parameter inherits the disclaimer from any overridden declaration.
-        for (io.codelaser.maddi.cst.api.info.ParameterInfo pi : methodInfo.parameters()) {
-            materializeTrueBool(pi, io.codelaser.maddi.cst.impl.analysis.PropertyImpl.IGNORE_MODIFICATIONS_PARAMETER);
+        for (ParameterInfo pi : methodInfo.parameters()) {
+            materializeTrueBool(pi, PropertyImpl.IGNORE_MODIFICATIONS_PARAMETER);
             if (!pi.analysis().haveAnalyzedValueFor(
-                    io.codelaser.maddi.cst.impl.analysis.PropertyImpl.IGNORE_MODIFICATIONS_PARAMETER)) {
+                    PropertyImpl.IGNORE_MODIFICATIONS_PARAMETER)) {
                 for (MethodInfo overridden : methodInfo.overrides()) {
                     if (pi.index() >= overridden.parameters().size()) continue;
-                    io.codelaser.maddi.cst.api.info.ParameterInfo opi = overridden.parameters().get(pi.index());
+                    ParameterInfo opi = overridden.parameters().get(pi.index());
                     if (opi.annotations().isEmpty()) continue;
                     if (contractReader.contracts(opi).get(
-                            io.codelaser.maddi.cst.impl.analysis.PropertyImpl.IGNORE_MODIFICATIONS_PARAMETER)
+                            PropertyImpl.IGNORE_MODIFICATIONS_PARAMETER)
                                 instanceof Value.Bool bool && bool.isTrue()) {
                         pi.analysis().set(
-                                io.codelaser.maddi.cst.impl.analysis.PropertyImpl.IGNORE_MODIFICATIONS_PARAMETER, bool);
+                                PropertyImpl.IGNORE_MODIFICATIONS_PARAMETER, bool);
                         CommonAnalyzerImpl.DECIDE.debug("SCM: Inherited @IgnoreModifications on {} from {}", pi, opi);
                         propertyChanges.incrementAndGet();
                         break;

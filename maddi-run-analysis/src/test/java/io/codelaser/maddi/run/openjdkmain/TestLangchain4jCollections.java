@@ -1,5 +1,24 @@
 package io.codelaser.maddi.run.openjdkmain;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.TreeMap;
+
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
+
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
 import io.codelaser.maddi.analysis.api.PrepOutcome;
 import io.codelaser.maddi.analysis.api.PrepRequest;
 import io.codelaser.maddi.callgraph.ComputeAnalysisOrder;
@@ -10,28 +29,19 @@ import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.statement.Statement;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
+import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 import io.codelaser.maddi.inspection.api.integration.JavaInspector;
 import io.codelaser.maddi.modification.analyzer.IteratingAnalyzer;
 import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
+import io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl;
+import io.codelaser.maddi.modification.prepwork.io.LoadAnalysisResults;
+import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
+import io.codelaser.maddi.modification.prepwork.variable.impl.VariableInfoImpl;
 import io.codelaser.maddi.run.analysis.AnalysisEngineImpl;
 import io.codelaser.maddi.run.j2k.JavaToKotlinRatchet;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.api.Test;
-import org.slf4j.LoggerFactory;
-
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.TreeMap;
-
-import static org.junit.jupiter.api.Assertions.assertFalse;
 
 /**
  * The modification analysis on langchain4j-core, without printing: every collection-typed field, parameter and
@@ -51,8 +61,8 @@ public class TestLangchain4jCollections {
 
     @BeforeAll
     public static void beforeAll() {
-        ((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME))
-                .setLevel(ch.qos.logback.classic.Level.INFO);
+        ((Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME))
+                .setLevel(Level.INFO);
     }
 
     @Test
@@ -64,7 +74,7 @@ public class TestLangchain4jCollections {
         // the JDK alone, this test's setup before 2026-10-11. The tests' `assertThat(list)` made fields modified
         // until AssertJ had hints (CodeLaser/maddi#116).
         List<String> hints = System.getenv("LC_JDK_ONLY") != null ? List.of(JDK_HINTS)
-                : io.codelaser.maddi.modification.prepwork.io.LoadAnalysisResults.ANALYZED_RESULTS;
+                : LoadAnalysisResults.ANALYZED_RESULTS;
         engine.resultsLoader(javaInspector.runtime(), javaInspector.mainSources()).load(hints);
         var parseResult = corpus.summary().parseResult();
         PrepOutcome prep = engine.prep(new PrepRequest(javaInspector.runtime(), Set.copyOf(parseResult.primaryTypes()),
@@ -116,15 +126,15 @@ public class TestLangchain4jCollections {
         });
         Collections.sort(lines);
         // -Dprobe.method=<name> (or PROBE_METHOD, which a --no-daemon build passes on): per statement of that method, each parameter's UNMODIFIED_VARIABLE and links
-        String probe = System.getProperty("probe.method", java.util.Objects.requireNonNullElse(System.getenv("PROBE_METHOD"), ""));
+        String probe = System.getProperty("probe.method", Objects.requireNonNullElse(System.getenv("PROBE_METHOD"), ""));
         if (!probe.isEmpty()) {
             corpus.types().stream().flatMap(TypeInfo::recursiveSubTypeStream)
                     .flatMap(TypeInfo::constructorAndMethodStream)
                     .filter(mi -> mi.name().equals(probe) && mi.methodBody() != null)
                     .peek(mi -> {
                         var mlv = mi.analysis().getOrNull(
-                                io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl.METHOD_LINKS,
-                                io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl.class);
+                                MethodLinkedVariablesImpl.METHOD_LINKS,
+                                MethodLinkedVariablesImpl.class);
                         lines.add("PROBE " + mi.fullyQualifiedName() + " modified=" + (mlv == null ? "-" : mlv.modified()));
                         for (ParameterInfo pi : mi.parameters()) {
                             lines.add("PROBE " + pi.name() + " throughPassedFunction=" + pi.analysis().getOrNull(
@@ -132,15 +142,15 @@ public class TestLangchain4jCollections {
                         }
                     })
                     .forEach(mi -> mi.methodBody().visit(e -> {
-                        if (e instanceof io.codelaser.maddi.cst.api.statement.Statement st) {
-                            var vd = io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl.of(st);
+                        if (e instanceof Statement st) {
+                            var vd = VariableDataImpl.of(st);
                             if (vd != null) {
                                 for (ParameterInfo pi : mi.parameters()) {
                                     if (!vd.isKnown(pi.fullyQualifiedName())) continue;
                                     var vi = vd.variableInfo(pi.fullyQualifiedName());
                                     lines.add("PROBE " + mi.name() + " @" + st.source().compact2() + " "
                                               + pi.name() + " unmodified=" + vi.analysis().getOrNull(
-                                            io.codelaser.maddi.modification.prepwork.variable.impl.VariableInfoImpl.UNMODIFIED_VARIABLE,
+                                            VariableInfoImpl.UNMODIFIED_VARIABLE,
                                             Value.class) + " links=" + vi.linkedVariablesOrEmpty());
                                 }
                             }
@@ -167,7 +177,7 @@ public class TestLangchain4jCollections {
     // a method whose analysis gave up (fault tolerance): its parameters keep the conservative 'modified'
     private static String degraded(MethodInfo mi) {
         return mi.analysis().getOrDefault(PropertyImpl.DEGRADED_ANALYSIS_METHOD,
-                io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.FALSE).isTrue() ? " DEGRADED" : "";
+                ValueImpl.BoolImpl.FALSE).isTrue() ? " DEGRADED" : "";
     }
 
     private static String values(Info info, Property... properties) {

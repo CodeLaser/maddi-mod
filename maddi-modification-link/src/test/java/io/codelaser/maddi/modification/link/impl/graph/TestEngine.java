@@ -1,15 +1,16 @@
 package io.codelaser.maddi.modification.link.impl.graph;
 
-import io.codelaser.maddi.modification.link.impl.LinkNatureImpl;
-import io.codelaser.maddi.modification.prepwork.variable.LinkNature;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-
-import java.util.Set;
-
 import static io.codelaser.maddi.modification.link.impl.LinkNatureImpl.IS_ELEMENT_OF;
 import static io.codelaser.maddi.modification.link.impl.LinkNatureImpl.SHARES_ELEMENTS;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import java.util.Set;
+
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+import io.codelaser.maddi.modification.link.impl.LinkNatureImpl;
+import io.codelaser.maddi.modification.prepwork.variable.LinkNature;
 
 public class TestEngine {
     LinkNature IS_IDENTICAL_TO = LinkNatureImpl.makeIdenticalTo(null);

@@ -1,10 +1,10 @@
 package io.codelaser.maddi.modification.analyzer.nullability;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
 import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * {@link OutsideCallers}: the world policy, and the parameters code outside the analysis can call with null.

@@ -17,23 +17,52 @@
 
 package io.codelaser.maddi.modification.analyzer.impl;
 
-import io.codelaser.maddi.modification.analyzer.nullability.Policy;
-import io.codelaser.maddi.modification.analyzer.nullability.World;
-import io.codelaser.maddi.modification.common.util.TolerantWrite;
-import io.codelaser.maddi.modification.analyzer.CycleBreakingStrategy;
-import io.codelaser.maddi.modification.analyzer.IteratingAnalyzer;
-import io.codelaser.maddi.modification.analyzer.SingleIterationAnalyzer;
-import io.codelaser.maddi.cst.api.analysis.Message;
-import io.codelaser.maddi.cst.api.info.Info;
-import io.codelaser.maddi.inspection.api.integration.JavaInspector;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
+import java.io.IOException;
+import java.io.PrintWriter;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
+import java.util.function.Consumer;
+import java.util.function.Predicate;
 import java.util.stream.Stream;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import io.codelaser.maddi.analysis.api.AnalysisValueFeed;
+import io.codelaser.maddi.callgraph.ComputeAnalysisOrder;
+import io.codelaser.maddi.cst.api.analysis.Message;
+import io.codelaser.maddi.cst.api.element.ModuleInfo;
+import io.codelaser.maddi.cst.api.info.FieldInfo;
+import io.codelaser.maddi.cst.api.info.Info;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.ParameterInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.impl.analysis.ConsumptionEdgeRecorder;
+import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
+import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
+import io.codelaser.maddi.graph.G;
+import io.codelaser.maddi.inspection.api.integration.JavaInspector;
+import io.codelaser.maddi.modification.analyzer.CycleBreakingStrategy;
+import io.codelaser.maddi.modification.analyzer.IteratingAnalyzer;
+import io.codelaser.maddi.modification.analyzer.SingleIterationAnalyzer;
+import io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass;
+import io.codelaser.maddi.modification.analyzer.nullability.Policy;
+import io.codelaser.maddi.modification.analyzer.nullability.World;
+import io.codelaser.maddi.modification.analyzer.shadow.ShadowModificationPass;
+import io.codelaser.maddi.modification.common.util.Culprits;
+import io.codelaser.maddi.modification.common.util.TolerantWrite;
+import io.codelaser.maddi.modification.link.impl.Gate;
+import io.codelaser.maddi.modification.link.impl.LinkComputerImpl;
 
 public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements IteratingAnalyzer {
     private static final Logger LOGGER = LoggerFactory.getLogger(IteratingAnalyzerImpl.class);
@@ -56,14 +85,16 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
     // is the sole starting-state-dependent step, so if it never fired the framework is confluent. See
     // ModificationAnalysisResource#incrementalAnalyze.
     private boolean certifiedWithoutFrozenValues;
+    /* the scope of the last seeded analysis, see lastScope(); null after a cold one */
+    private Set<Info> lastScope;
     // how many reachability rounds threw and were skipped: the run goes on with the fixpoint's verdicts, so without
     // this count a corpus A/B of a MODREACH change compares fixpoint verdicts on both sides (CodeLaser/maddi-mod#75)
     private int modReachFailures;
 
-    private io.codelaser.maddi.analysis.api.AnalysisValueFeed valueFeed;
+    private AnalysisValueFeed valueFeed;
 
     @Override
-    public void setValueFeed(io.codelaser.maddi.analysis.api.AnalysisValueFeed feed) {
+    public void setValueFeed(AnalysisValueFeed feed) {
         this.valueFeed = feed;
     }
 
@@ -73,14 +104,14 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
     // no syntactic call edge) is not in the fresh call graph, and in incremental mode there is no
     // verification pass to catch the resulting stale value — the persisted edge wakes the
     // consumer directly.
-    private java.util.Map<Info, java.util.Set<Info>> externalWakeEdges;
+    private Map<Info, Set<Info>> externalWakeEdges;
 
-    public void setExternalWakeEdges(java.util.Map<Info, java.util.Set<Info>> externalWakeEdges) {
+    public void setExternalWakeEdges(Map<Info, Set<Info>> externalWakeEdges) {
         this.externalWakeEdges = externalWakeEdges;
     }
 
     // feed exceptions must never disturb the analysis
-    private void feed(java.util.function.Consumer<io.codelaser.maddi.analysis.api.AnalysisValueFeed> action) {
+    private void feed(Consumer<AnalysisValueFeed> action) {
         if (valueFeed != null) {
             try {
                 action.accept(valueFeed);
@@ -210,31 +241,31 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
      * not-null) are modification-independent and stay; the three modification properties are frozen.
      */
     private static int clearDerivedFamily(List<Info> analysisOrder) {
-        java.util.Set<String> keys = new java.util.HashSet<>(java.util.Set.of(
-                io.codelaser.maddi.cst.impl.analysis.PropertyImpl.IMMUTABLE_TYPE.key(),
-                io.codelaser.maddi.cst.impl.analysis.PropertyImpl.INDEPENDENT_TYPE.key(),
-                io.codelaser.maddi.cst.impl.analysis.PropertyImpl.CONTAINER_TYPE.key(),
-                io.codelaser.maddi.cst.impl.analysis.PropertyImpl.IMMUTABLE_FIELD.key(),
-                io.codelaser.maddi.cst.impl.analysis.PropertyImpl.INDEPENDENT_FIELD.key(),
-                io.codelaser.maddi.cst.impl.analysis.PropertyImpl.IMMUTABLE_METHOD.key(),
-                io.codelaser.maddi.cst.impl.analysis.PropertyImpl.INDEPENDENT_METHOD.key(),
-                io.codelaser.maddi.cst.impl.analysis.PropertyImpl.IMMUTABLE_PARAMETER.key(),
-                io.codelaser.maddi.cst.impl.analysis.PropertyImpl.INDEPENDENT_PARAMETER.key(),
-                io.codelaser.maddi.cst.impl.analysis.PropertyImpl.CONTAINER_METHOD.key(),
-                io.codelaser.maddi.cst.impl.analysis.PropertyImpl.CONTAINER_PARAMETER.key(),
-                io.codelaser.maddi.cst.impl.analysis.PropertyImpl.CONTAINER_FIELD.key(),
-                io.codelaser.maddi.cst.impl.analysis.PropertyImpl.UNMODIFIABLE_TYPE.key(),
-                io.codelaser.maddi.cst.impl.analysis.PropertyImpl.UNMODIFIABLE_VIEW_METHOD.key()));
+        Set<String> keys = new HashSet<>(Set.of(
+                PropertyImpl.IMMUTABLE_TYPE.key(),
+                PropertyImpl.INDEPENDENT_TYPE.key(),
+                PropertyImpl.CONTAINER_TYPE.key(),
+                PropertyImpl.IMMUTABLE_FIELD.key(),
+                PropertyImpl.INDEPENDENT_FIELD.key(),
+                PropertyImpl.IMMUTABLE_METHOD.key(),
+                PropertyImpl.INDEPENDENT_METHOD.key(),
+                PropertyImpl.IMMUTABLE_PARAMETER.key(),
+                PropertyImpl.INDEPENDENT_PARAMETER.key(),
+                PropertyImpl.CONTAINER_METHOD.key(),
+                PropertyImpl.CONTAINER_PARAMETER.key(),
+                PropertyImpl.CONTAINER_FIELD.key(),
+                PropertyImpl.UNMODIFIABLE_TYPE.key(),
+                PropertyImpl.UNMODIFIABLE_VIEW_METHOD.key()));
         if (EventualCluster.ENABLED) {
             // EVENTUALCLUSTER: the eventual layer derives from modification exactly like the immutability
             // family. Computed pre-cutover, an abstract enm union freezes on optimistic TRUEs and survives
             // the downgrade (the measured Element.complexity race: honest 9-label vs stale 2-label union
             // depending on the run). Clear it with the family; contracts re-materialize on the next pass,
             // and the cluster ledger is reset alongside (the witnessed edges belong to cleared computations).
-            keys.add(io.codelaser.maddi.cst.impl.analysis.PropertyImpl.EVENTUAL_METHOD.key());
-            keys.add(io.codelaser.maddi.cst.impl.analysis.PropertyImpl.EVENTUALLY_NON_MODIFYING_METHOD.key());
-            keys.add(io.codelaser.maddi.cst.impl.analysis.PropertyImpl.EVENTUALLY_UNMODIFIED_PARAMETER.key());
-            keys.add(io.codelaser.maddi.cst.impl.analysis.PropertyImpl.EVENTUALLY_IMMUTABLE_TYPE.key());
+            keys.add(PropertyImpl.EVENTUAL_METHOD.key());
+            keys.add(PropertyImpl.EVENTUALLY_NON_MODIFYING_METHOD.key());
+            keys.add(PropertyImpl.EVENTUALLY_UNMODIFIED_PARAMETER.key());
+            keys.add(PropertyImpl.EVENTUALLY_IMMUTABLE_TYPE.key());
         }
         int[] cleared = {0};
         for (Info info : analysisOrder) {
@@ -243,8 +274,8 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                 if (remove) cleared[0]++;
                 return remove;
             });
-            if (info instanceof io.codelaser.maddi.cst.api.info.MethodInfo mi) {
-                for (io.codelaser.maddi.cst.api.info.ParameterInfo pi : mi.parameters()) {
+            if (info instanceof MethodInfo mi) {
+                for (ParameterInfo pi : mi.parameters()) {
                     pi.analysis().removeIf(p -> {
                         boolean remove = keys.contains(p.key());
                         if (remove) cleared[0]++;
@@ -265,11 +296,11 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
      * re-derivation passes; contracts re-materialize exactly as after {@link #clearDerivedFamily}.
      */
     private static int clearEventualFamily(List<Info> analysisOrder) {
-        java.util.Set<String> keys = java.util.Set.of(
-                io.codelaser.maddi.cst.impl.analysis.PropertyImpl.EVENTUAL_METHOD.key(),
-                io.codelaser.maddi.cst.impl.analysis.PropertyImpl.EVENTUALLY_NON_MODIFYING_METHOD.key(),
-                io.codelaser.maddi.cst.impl.analysis.PropertyImpl.EVENTUALLY_UNMODIFIED_PARAMETER.key(),
-                io.codelaser.maddi.cst.impl.analysis.PropertyImpl.EVENTUALLY_IMMUTABLE_TYPE.key());
+        Set<String> keys = Set.of(
+                PropertyImpl.EVENTUAL_METHOD.key(),
+                PropertyImpl.EVENTUALLY_NON_MODIFYING_METHOD.key(),
+                PropertyImpl.EVENTUALLY_UNMODIFIED_PARAMETER.key(),
+                PropertyImpl.EVENTUALLY_IMMUTABLE_TYPE.key());
         int[] cleared = {0};
         for (Info info : analysisOrder) {
             info.analysis().removeIf(p -> {
@@ -277,8 +308,8 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                 if (remove) cleared[0]++;
                 return remove;
             });
-            if (info instanceof io.codelaser.maddi.cst.api.info.MethodInfo mi) {
-                for (io.codelaser.maddi.cst.api.info.ParameterInfo pi : mi.parameters()) {
+            if (info instanceof MethodInfo mi) {
+                for (ParameterInfo pi : mi.parameters()) {
                     pi.analysis().removeIf(p -> {
                         boolean remove = keys.contains(p.key());
                         if (remove) cleared[0]++;
@@ -295,20 +326,20 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
      * all analysis-order elements. Two runs with identical fingerprints (very likely) computed identical verdicts.
      */
     private static void logVerdictFingerprint(List<Info> analysisOrder) {
-        java.util.Map<String, Integer> counts = new java.util.TreeMap<>();
+        Map<String, Integer> counts = new TreeMap<>();
         for (Info info : analysisOrder) {
             String key;
-            if (info instanceof io.codelaser.maddi.cst.api.info.MethodInfo) {
-                var v = info.analysis().getOrNull(io.codelaser.maddi.cst.impl.analysis.PropertyImpl.NON_MODIFYING_METHOD,
-                        io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.class);
+            if (info instanceof MethodInfo) {
+                var v = info.analysis().getOrNull(PropertyImpl.NON_MODIFYING_METHOD,
+                        ValueImpl.BoolImpl.class);
                 key = "method.nonModifying=" + (v == null ? "?" : v);
-            } else if (info instanceof io.codelaser.maddi.cst.api.info.FieldInfo) {
-                var v = info.analysis().getOrNull(io.codelaser.maddi.cst.impl.analysis.PropertyImpl.UNMODIFIED_FIELD,
-                        io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.class);
+            } else if (info instanceof FieldInfo) {
+                var v = info.analysis().getOrNull(PropertyImpl.UNMODIFIED_FIELD,
+                        ValueImpl.BoolImpl.class);
                 key = "field.unmodified=" + (v == null ? "?" : v);
-            } else if (info instanceof io.codelaser.maddi.cst.api.info.TypeInfo) {
-                var v = info.analysis().getOrNull(io.codelaser.maddi.cst.impl.analysis.PropertyImpl.IMMUTABLE_TYPE,
-                        io.codelaser.maddi.cst.impl.analysis.ValueImpl.ImmutableImpl.class);
+            } else if (info instanceof TypeInfo) {
+                var v = info.analysis().getOrNull(PropertyImpl.IMMUTABLE_TYPE,
+                        ValueImpl.ImmutableImpl.class);
                 key = "type.immutable=" + (v == null ? "?" : v);
             } else {
                 key = "other";
@@ -317,78 +348,83 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
         }
         LOGGER.info("Verdict fingerprint: {}", counts);
         if (System.getenv("VL2OTIER") != null) {
-            LOGGER.info(io.codelaser.maddi.modification.link.impl.LinkComputerImpl.vl2oTierStats());
+            LOGGER.info(LinkComputerImpl.vl2oTierStats());
         }
         // task #35 Phase A: consumption-edge sparsity report (CONSEDGES gate; GO/NO-GO for the
         // giant-SCC incremental design, see DESIGN-incremental-v2.md)
-        if (io.codelaser.maddi.cst.impl.analysis.ConsumptionEdgeRecorder.ENABLED) {
-            LOGGER.info(io.codelaser.maddi.cst.impl.analysis.ConsumptionEdgeRecorder.statistics());
+        if (ConsumptionEdgeRecorder.ENABLED) {
+            LOGGER.info(ConsumptionEdgeRecorder.statistics());
         }
         String dump = System.getenv("FPDUMP");
         if (dump != null) {
-            try (java.io.PrintWriter pw = new java.io.PrintWriter(dump)) {
+            try (PrintWriter pw = new PrintWriter(dump)) {
                 for (Info info : analysisOrder) {
                     String v;
-                    if (info instanceof io.codelaser.maddi.cst.api.info.MethodInfo) {
-                        var b = info.analysis().getOrNull(io.codelaser.maddi.cst.impl.analysis.PropertyImpl.NON_MODIFYING_METHOD,
-                                io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.class);
-                        var gs = info.analysis().getOrNull(io.codelaser.maddi.cst.impl.analysis.PropertyImpl.GET_SET_FIELD,
-                                io.codelaser.maddi.cst.impl.analysis.ValueImpl.GetSetValueImpl.class);
+                    if (info instanceof MethodInfo) {
+                        var b = info.analysis().getOrNull(PropertyImpl.NON_MODIFYING_METHOD,
+                                ValueImpl.BoolImpl.class);
+                        var gs = info.analysis().getOrNull(PropertyImpl.GET_SET_FIELD,
+                                ValueImpl.GetSetValueImpl.class);
                         String getset = gs != null && gs.field() != null
                                 ? " getset=" + gs.field().name() + (gs.setter() ? "(set)" : "(get)") : "";
                         // eventual-cluster diagnostic: the after-mark non-modification label (why a read-through
                         // accessor is excused after the mark) and the @Mark/@Only verdict, to see why an interface
                         // does or does not surface an eventual type-level verdict
-                        var enm = info.analysis().getOrNull(io.codelaser.maddi.cst.impl.analysis.PropertyImpl.EVENTUALLY_NON_MODIFYING_METHOD,
-                                io.codelaser.maddi.cst.impl.analysis.ValueImpl.SetOfStringsImpl.class);
+                        var enm = info.analysis().getOrNull(PropertyImpl.EVENTUALLY_NON_MODIFYING_METHOD,
+                                ValueImpl.SetOfStringsImpl.class);
                         String evNonMod = enm != null && !enm.set().isEmpty()
-                                ? " eventuallyNonMod=" + new java.util.TreeSet<>(enm.set()) : "";
-                        var evm = info.analysis().getOrNull(io.codelaser.maddi.cst.impl.analysis.PropertyImpl.EVENTUAL_METHOD,
-                                io.codelaser.maddi.cst.impl.analysis.ValueImpl.EventualImpl.class);
+                                ? " eventuallyNonMod=" + new TreeSet<>(enm.set()) : "";
+                        var evm = info.analysis().getOrNull(PropertyImpl.EVENTUAL_METHOD,
+                                ValueImpl.EventualImpl.class);
                         String evMethod = evm != null && evm.isEventual() ? " eventual=" + evm : "";
                         v = "method nonModifying=" + b + getset + evNonMod + evMethod;
-                    } else if (info instanceof io.codelaser.maddi.cst.api.info.FieldInfo) {
-                        var b = info.analysis().getOrNull(io.codelaser.maddi.cst.impl.analysis.PropertyImpl.UNMODIFIED_FIELD,
-                                io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.class);
-                        var ind = info.analysis().getOrNull(io.codelaser.maddi.cst.impl.analysis.PropertyImpl.INDEPENDENT_FIELD,
-                                io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.class);
-                        var igm = info.analysis().getOrNull(io.codelaser.maddi.cst.impl.analysis.PropertyImpl.IGNORE_MODIFICATIONS_FIELD,
-                                io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.class);
+                    } else if (info instanceof FieldInfo) {
+                        var b = info.analysis().getOrNull(PropertyImpl.UNMODIFIED_FIELD,
+                                ValueImpl.BoolImpl.class);
+                        var ind = info.analysis().getOrNull(PropertyImpl.INDEPENDENT_FIELD,
+                                ValueImpl.IndependentImpl.class);
+                        var igm = info.analysis().getOrNull(PropertyImpl.IGNORE_MODIFICATIONS_FIELD,
+                                ValueImpl.BoolImpl.class);
                         v = "field unmodified=" + b + " independent=" + ind + " ignoreMod=" + igm;
-                    } else if (info instanceof io.codelaser.maddi.cst.api.info.TypeInfo) {
-                        var b = info.analysis().getOrNull(io.codelaser.maddi.cst.impl.analysis.PropertyImpl.IMMUTABLE_TYPE,
-                                io.codelaser.maddi.cst.impl.analysis.ValueImpl.ImmutableImpl.class);
-                        var ev = info.analysis().getOrNull(io.codelaser.maddi.cst.impl.analysis.PropertyImpl.EVENTUALLY_IMMUTABLE_TYPE,
-                                io.codelaser.maddi.cst.impl.analysis.ValueImpl.EventuallyImmutableImpl.class);
-                        var ind = info.analysis().getOrNull(io.codelaser.maddi.cst.impl.analysis.PropertyImpl.INDEPENDENT_TYPE,
-                                io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.class);
+                    } else if (info instanceof TypeInfo) {
+                        var b = info.analysis().getOrNull(PropertyImpl.IMMUTABLE_TYPE,
+                                ValueImpl.ImmutableImpl.class);
+                        var ev = info.analysis().getOrNull(PropertyImpl.EVENTUALLY_IMMUTABLE_TYPE,
+                                ValueImpl.EventuallyImmutableImpl.class);
+                        var ind = info.analysis().getOrNull(PropertyImpl.INDEPENDENT_TYPE,
+                                ValueImpl.IndependentImpl.class);
                         v = "type immutable=" + b + " eventual=" + ev + " independent=" + ind;
                     } else continue;
                     pw.println(v + " " + info.fullyQualifiedName());
                     // FPDUMP_PARAMS: parameter-level lines (separate gate so the A/B corpus format is unchanged)
                     if (System.getenv("FPDUMP_PARAMS") != null
-                        && info instanceof io.codelaser.maddi.cst.api.info.MethodInfo mi) {
-                        for (io.codelaser.maddi.cst.api.info.ParameterInfo pi : mi.parameters()) {
+                        && info instanceof MethodInfo mi) {
+                        for (ParameterInfo pi : mi.parameters()) {
                             var um = pi.analysis().getOrNull(
-                                    io.codelaser.maddi.cst.impl.analysis.PropertyImpl.UNMODIFIED_PARAMETER,
-                                    io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.class);
+                                    PropertyImpl.UNMODIFIED_PARAMETER,
+                                    ValueImpl.BoolImpl.class);
                             var ind = pi.analysis().getOrNull(
-                                    io.codelaser.maddi.cst.impl.analysis.PropertyImpl.INDEPENDENT_PARAMETER,
-                                    io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.class);
+                                    PropertyImpl.INDEPENDENT_PARAMETER,
+                                    ValueImpl.IndependentImpl.class);
                             var eup = pi.analysis().getOrNull(
-                                    io.codelaser.maddi.cst.impl.analysis.PropertyImpl.EVENTUALLY_UNMODIFIED_PARAMETER,
-                                    io.codelaser.maddi.cst.impl.analysis.ValueImpl.SetOfStringsImpl.class);
+                                    PropertyImpl.EVENTUALLY_UNMODIFIED_PARAMETER,
+                                    ValueImpl.SetOfStringsImpl.class);
                             String evUnmod = eup != null && !eup.set().isEmpty()
-                                    ? " eventuallyUnmod=" + new java.util.TreeSet<>(eup.set()) : "";
+                                    ? " eventuallyUnmod=" + new TreeSet<>(eup.set()) : "";
                             pw.println("param unmodified=" + um + " independent=" + ind + evUnmod
                                        + " " + pi.fullyQualifiedName());
                         }
                     }
                 }
-            } catch (java.io.IOException e) {
+            } catch (IOException e) {
                 LOGGER.error("FPDUMP failed", e);
             }
         }
+    }
+
+    @Override
+    public Set<Info> lastScope() {
+        return lastScope;
     }
 
     @Override
@@ -408,7 +444,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
         return certifiedWithoutFrozenValues;
     }
 
-    private java.util.Map<String, String> priorSummaries;
+    private Map<String, String> priorSummaries;
     private boolean cutoffFellBack;
 
     /** Whether the last seeded {@link #analyze} with prior summaries fell back to the cold analysis. */
@@ -425,7 +461,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
      * change reaches, from carried values, settles elsewhere than a cold run does. Read by the next {@link #analyze}.
      */
     @Override
-    public void setPriorSummaries(java.util.Map<String, String> priorSummaries) {
+    public void setPriorSummaries(Map<String, String> priorSummaries) {
         this.priorSummaries = priorSummaries;
     }
 
@@ -448,40 +484,40 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
     // CodeLaser/maddi-mod#76: a MODREACH round that only strengthened re-derives through the worklist instead of
     // clearing the derived family. Gate NOINCREDERIVE restores the full clear (the A/B baseline).
     private static final boolean INCREMENTAL_REDERIVATION =
-            !io.codelaser.maddi.modification.link.impl.Gate.isSet("NOINCREDERIVE");
+            !Gate.isSet("NOINCREDERIVE");
 
     @Override
-    public void analyze(List<Info> analysisOrder, io.codelaser.maddi.graph.G<Info> dependencyGraph) {
+    public void analyze(List<Info> analysisOrder, G<Info> dependencyGraph) {
         analyze(analysisOrder, dependencyGraph, null, null);
     }
 
     @Override
-    public void analyze(List<Info> analysisOrder, io.codelaser.maddi.graph.G<Info> dependencyGraph,
-                        java.util.Set<Info> initialDirty) {
+    public void analyze(List<Info> analysisOrder, G<Info> dependencyGraph,
+                        Set<Info> initialDirty) {
         analyze(analysisOrder, dependencyGraph, initialDirty, null);
     }
 
     @Override
-    public void analyze(List<Info> analysisOrder, io.codelaser.maddi.graph.G<Info> dependencyGraph,
-                        java.util.Set<Info> initialDirty, java.util.function.Consumer<Info> beforeFirstRecompute) {
+    public void analyze(List<Info> analysisOrder, G<Info> dependencyGraph,
+                        Set<Info> initialDirty, Consumer<Info> beforeFirstRecompute) {
         iterate(analysisOrder, dependencyGraph, initialDirty, beforeFirstRecompute);
         if (configuration.nullability()) {
             // docs/design/nullability.md M3/B2: one-shot, over the converged link facts. The stored verdicts are the
             // Java annotations' (NullabilityDecorator): a parameter its method needs non-null is @NonNull, which
             // changes nothing at run time (CodeLaser/maddi#125)
-            var policy = io.codelaser.maddi.modification.analyzer.nullability.Policy.NULL_MARKED
+            var policy = Policy.NULL_MARKED
                     .withPreconditionsNonNull();
             if (configuration.nullabilityOpenWorld()) {
-                policy = policy.withWorld(io.codelaser.maddi.modification.analyzer.nullability.World.OPEN);
+                policy = policy.withWorld(World.OPEN);
             }
             feed(f -> f.stage("nullability"));
-            var pass = new io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass(policy);
-            io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass.write(pass.go(analysisOrder));
+            var pass = new NullabilityPass(policy);
+            NullabilityPass.write(pass.go(analysisOrder));
         }
     }
 
-    private void iterate(List<Info> analysisOrder, io.codelaser.maddi.graph.G<Info> dependencyGraph,
-                         java.util.Set<Info> initialDirty, java.util.function.Consumer<Info> beforeFirstRecompute) {
+    private void iterate(List<Info> analysisOrder, G<Info> dependencyGraph,
+                         Set<Info> initialDirty, Consumer<Info> beforeFirstRecompute) {
         // incremental (early-cutoff) mode: seed the worklist with initialDirty and stop the moment it runs dry,
         // WITHOUT the full verification / cycle-breaking passes — those re-touch the untouched (carried) elements
         // and would defeat the skip. See docs/design/analysis-rewiring.md and IteratingAnalyzer#analyze(List,G,Set).
@@ -494,14 +530,15 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
         // checkpoint (the changed types' OLD values), which must be cleared like any carried element's; on fresh
         // source the clear is a no-op (docs/design/incremental-and-overlay.md §1, "stale values on the seed"). Also
         // the scope of the incremental verification pass and cycle breaking: see scopePass.
-        java.util.Set<Info> everAnalyzed = incremental ? new java.util.HashSet<>() : java.util.Set.of();
+        Set<Info> everAnalyzed = incremental ? new HashSet<>() : Set.of();
+        this.lastScope = incremental ? Collections.unmodifiableSet(everAnalyzed) : null;
         // the early cutoff (setPriorSummaries): the worklist stays inside the seed, and a seed element whose change
         // would reach outside it waits in 'pending' until the seed is certified; see the cutoff block below
-        java.util.Map<String, String> priors = priorSummaries;
+        Map<String, String> priors = priorSummaries;
         priorSummaries = null;
         boolean cutoff = incremental && priors != null;
-        java.util.Set<Info> cutoffScope = cutoff ? java.util.Set.copyOf(initialDirty) : java.util.Set.of();
-        java.util.Set<Info> pending = new java.util.HashSet<>();
+        Set<Info> cutoffScope = cutoff ? Set.copyOf(initialDirty) : Set.of();
+        Set<Info> pending = new HashSet<>();
         if (cutoff) cutoffFellBack = false;
         int iterations = 0;
         int maxIterations = configuration.maxIterations(); // extended per MODREACH re-derivation round
@@ -524,7 +561,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
             // wave-barrier above fires only once (at the end). Method ref = no per-element allocation; feed()
             // keeps the exception-swallowing contract. Runs on parallel workers, so the feed must be cheap.
             sia.setElementCompletedCallback(() ->
-                    feed(io.codelaser.maddi.analysis.api.AnalysisValueFeed::elementCompleted));
+                    feed(AnalysisValueFeed::elementCompleted));
         }
         // a stale warm-up window from a previous run on the same universe (the seeded incremental entry
         // point) would withhold this run's type-level writes: close it before the first iteration
@@ -534,7 +571,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
         boolean cycleBreakingActive = false;
         int previousPropertiesChanged = Integer.MAX_VALUE;
         // reverse adjacency: dependersOf(Y) = { X | X depends on Y } — the elements to re-analyze when Y changes
-        java.util.Map<Info, java.util.Set<Info>> dependersOf;
+        Map<Info, Set<Info>> dependersOf;
         if (WORKLIST && dependencyGraph != null) {
             // SYMMETRIC closure: the analyzers' true information flow runs along graph edges in BOTH
             // directions — the AbstractMethodAnalyzer derives an abstract method's verdicts from its
@@ -543,24 +580,24 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
             // 23 field verdicts at conservative values (fpdump diffs, runs 16-18). Symmetric is a correct
             // superset wherever the graph has at least one edge per real dependency; tighten later if the
             // dirty-set growth ever matters (late-iteration sets are tiny).
-            dependersOf = new java.util.HashMap<>();
+            dependersOf = new HashMap<>();
             dependencyGraph.edgeStream().forEach(e -> {
-                dependersOf.computeIfAbsent(e.to().t(), _ -> new java.util.HashSet<>()).add(e.from().t());
-                dependersOf.computeIfAbsent(e.from().t(), _ -> new java.util.HashSet<>()).add(e.to().t());
+                dependersOf.computeIfAbsent(e.to().t(), _ -> new HashSet<>()).add(e.from().t());
+                dependersOf.computeIfAbsent(e.from().t(), _ -> new HashSet<>()).add(e.to().t());
             });
             // overrides may span source sets beyond the graph's vertex subset: keep the explicit relation
             for (Info info : analysisOrder) {
-                if (info instanceof io.codelaser.maddi.cst.api.info.MethodInfo mi) {
-                    for (io.codelaser.maddi.cst.api.info.MethodInfo overridden : mi.overrides()) {
-                        dependersOf.computeIfAbsent(mi, _ -> new java.util.HashSet<>()).add(overridden);
-                        dependersOf.computeIfAbsent(overridden, _ -> new java.util.HashSet<>()).add(mi);
+                if (info instanceof MethodInfo mi) {
+                    for (MethodInfo overridden : mi.overrides()) {
+                        dependersOf.computeIfAbsent(mi, _ -> new HashSet<>()).add(overridden);
+                        dependersOf.computeIfAbsent(overridden, _ -> new HashSet<>()).add(mi);
                     }
                 }
             }
             if (externalWakeEdges != null) {
                 int added = 0;
                 for (var e : externalWakeEdges.entrySet()) {
-                    java.util.Set<Info> deps = dependersOf.computeIfAbsent(e.getKey(), _ -> new java.util.HashSet<>());
+                    Set<Info> deps = dependersOf.computeIfAbsent(e.getKey(), _ -> new HashSet<>());
                     for (Info consumer : e.getValue()) {
                         if (deps.add(consumer)) added++;
                     }
@@ -571,17 +608,17 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
         } else {
             dependersOf = null;
         }
-        java.util.Set<Info> dirty = initialDirty; // null = analyze everything; a seed = incremental early-cutoff
-        java.util.Set<Info> orderSet = java.util.Set.copyOf(analysisOrder);
+        Set<Info> dirty = initialDirty; // null = analyze everything; a seed = incremental early-cutoff
+        Set<Info> orderSet = Set.copyOf(analysisOrder);
         boolean verifying = false; // worklist ran dry -> one full pass certifies (0 changes = true fixpoint)
         // for the feed's passStarted: why the next pass runs, when its dirty set and flags do not say it
         String nextPassKind = incremental ? "incremental" : null;
         // strata-parallel first iteration (PARALLEL=n): dependency waves from the same call graph
-        java.util.List<java.util.List<java.util.List<Info>>> firstIterationWaves;
+        List<List<List<Info>>> firstIterationWaves;
         if (SingleIterationAnalyzerImpl.PARALLEL_THREADS > 1 && dependencyGraph != null
             && (incremental ? initialDirty.size() : analysisOrder.size())
                >= SingleIterationAnalyzerImpl.MIN_ELEMENTS_FOR_PARALLEL) {
-            java.util.List<java.util.List<java.util.List<Info>>> waves = io.codelaser.maddi.callgraph.ComputeAnalysisOrder
+            List<List<List<Info>>> waves = ComputeAnalysisOrder
                     .waves(dependencyGraph);
             // incremental: the seed's first pass runs as a cold first iteration does, over the seed only. The
             // sequential fallback recursed into the seed's cleared callees in another order, and tripped the link
@@ -601,7 +638,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
             if (dirty == null) {
                 subset = analysisOrder;
             } else {
-                java.util.Set<Info> d = dirty;
+                Set<Info> d = dirty;
                 subset = analysisOrder.stream().filter(d::contains).toList();
                 LOGGER.info("Worklist: {} of {} elements dirty", subset.size(), analysisOrder.size());
             }
@@ -621,7 +658,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                 // clear-before-recompute: newly-dirtied elements (never analysed before in this run) may be carried
                 // types whose stale cross-type-derived values must be cleared before the fresh, possibly-lowering
                 // re-analysis. Fire the hook once per element, before it enters go().
-                java.util.Set<Info> firstVisits = new java.util.HashSet<>();
+                Set<Info> firstVisits = new HashSet<>();
                 for (Info info : subset) {
                     if (everAnalyzed.add(info)) {
                         firstVisits.add(info);
@@ -631,6 +668,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                 // what a cold run does in its first iteration only, for the elements cleared just now
                 if (iterations > 1) singleIterationAnalyzer.setFirstVisits(firstVisits);
             }
+            if (singleIterationAnalyzer instanceof SingleIterationAnalyzerImpl s) s.setFullPass(dirty == null || verifying);
             Instant start = Instant.now();
             singleIterationAnalyzer.go(subset, cycleBreakingActive, iterations == 1,
                     iterations == 1 ? firstIterationWaves : null);
@@ -646,7 +684,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                 feed(f -> f.passCompleted(it, fullPass, analyzed));
             }
             // convergence diagnosis: which properties are still moving? (value-changing writes per property)
-            java.util.Map<String, Long> changeCounts = TolerantWrite.changeCounts();
+            Map<String, Long> changeCounts = TolerantWrite.changeCounts();
             String topChanges = changeCounts.entrySet().stream()
                     .filter(e -> !e.getKey().startsWith(TolerantWrite.RECOMPUTED))
                     .sorted((a, b) -> Long.compare(b.getValue(), a.getValue()))
@@ -688,7 +726,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
             // to the change count, so "no changes" can certify prematurely-frozen optimistic values. Surface
             // them; setting STRICTCERT (PRESENCE-only, any value — house convention for all engine gates)
             // additionally refuses certification (the run then ends at maxIterations, honestly uncertified).
-            java.util.Map<String, Long> refused = TolerantWrite.refusedDowngrades();
+            Map<String, Long> refused = TolerantWrite.refusedDowngrades();
             long refusedSum = refused.values().stream().mapToLong(Long::longValue).sum();
             if (done && !refused.isEmpty()) {
                 LOGGER.error("Certification reached with {} refused downgrade attempt(s) — frozen optimistic "
@@ -706,10 +744,10 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
             if (done && !cycleBreakingActive && System.getenv("NOCYCLEBREAKING") == null) {
                 // incremental: the scope this run touched, see scopePass
                 long undecided = (incremental ? scopePass(everAnalyzed, analysisOrder) : analysisOrder).stream()
-                        .filter(i -> i instanceof io.codelaser.maddi.cst.api.info.TypeInfo t
+                        .filter(i -> i instanceof TypeInfo t
                                      && t.analysis().getOrNull(
-                                io.codelaser.maddi.cst.impl.analysis.PropertyImpl.IMMUTABLE_TYPE,
-                                io.codelaser.maddi.cst.impl.analysis.ValueImpl.ImmutableImpl.class) == null)
+                                PropertyImpl.IMMUTABLE_TYPE,
+                                ValueImpl.ImmutableImpl.class) == null)
                         .count();
                 if (undecided > 0) {
                     LOGGER.info("Certification point, but {} types immutability-undecided: activating cycle breaking",
@@ -718,11 +756,11 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                     nextPassKind = "cycle breaking";
                     {
                         int it = iterations;
-                        feed(f -> f.phase(io.codelaser.maddi.analysis.api.AnalysisValueFeed.Phase
+                        feed(f -> f.phase(AnalysisValueFeed.Phase
                                 .CYCLE_BREAKING_ACTIVATED, it));
                     }
                     // one more FULL pass, now with cycle breaking; incremental: over the scope
-                    dirty = incremental ? new java.util.HashSet<>(scopePass(everAnalyzed, analysisOrder)) : null;
+                    dirty = incremental ? new HashSet<>(scopePass(everAnalyzed, analysisOrder)) : null;
                     if (dependersOf != null) verifying = true;
                     previousPropertiesChanged = propertiesChanged;
                     continue;
@@ -790,7 +828,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                         feed(f -> f.stage("MODREACH round " + round));
                     }
                     try {
-                        var pass = new io.codelaser.maddi.modification.analyzer.shadow.ShadowModificationPass();
+                        var pass = new ShadowModificationPass();
                         var report = pass.go(analysisOrder);
                         // MODREACH_DEBUG (presence-only): dump the reverse-divergence class — fixpoint says
                         // modified, reachability finds no modifying frontier. Zero on the certified corpora;
@@ -805,8 +843,8 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                         String explain = System.getenv("MODREACH_EXPLAIN");
                         if (explain != null) {
                             for (Object node : report.reached()) {
-                                if (node instanceof io.codelaser.maddi.cst.api.info.Info info
-                                    && java.util.Arrays.stream(explain.split(","))
+                                if (node instanceof Info info
+                                    && Arrays.stream(explain.split(","))
                                             .anyMatch(part -> !part.isBlank()
                                                               && info.fullyQualifiedName().contains(part))) {
                                     System.out.println("MODREACH_EXPLAIN " + report.explain(node));
@@ -818,13 +856,13 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                         // implementations, which is exactly the path by which this pass reaches it. The same
                         // holds for that method's PARAMETERS, folded over the implementations' parameter at the
                         // same index. UNMODIFIED_FIELD has no such case: see writeVerdicts' javadoc.
-                        java.util.function.Predicate<Info> contracted =
+                        Predicate<Info> contracted =
                                 singleIterationAnalyzer instanceof SingleIterationAnalyzerImpl s
                                         ? info -> switch (info) {
-                                    case io.codelaser.maddi.cst.api.info.MethodInfo mi -> mi.isAbstract()
+                                    case MethodInfo mi -> mi.isAbstract()
                                             && s.contractResolution().resolve(mi, io.codelaser.maddi.cst.impl
                                             .analysis.PropertyImpl.NON_MODIFYING_METHOD).decided();
-                                    case io.codelaser.maddi.cst.api.info.ParameterInfo pi ->
+                                    case ParameterInfo pi ->
                                             pi.methodInfo().isAbstract()
                                             && s.contractResolution().resolve(pi, io.codelaser.maddi.cst.impl
                                             .analysis.PropertyImpl.UNMODIFIED_PARAMETER).decided();
@@ -842,13 +880,13 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                             // allows, so nothing needs clearing: the worklist re-derives from the changed elements and
                             // their dependents, and the full verification pass still certifies. A full clear cost a
                             // whole re-derivation (12-13 full iterations) for a round of 5 or 23 upgrades.
-                            java.util.Set<Info> seeds = new java.util.HashSet<>();
+                            Set<Info> seeds = new HashSet<>();
                             for (Info c : counts.changed()) {
-                                Info owner = c instanceof io.codelaser.maddi.cst.api.info.ParameterInfo pi
+                                Info owner = c instanceof ParameterInfo pi
                                         ? pi.methodInfo() : c;
                                 Info mc = mapToOrderElement(owner, orderSet);
                                 if (mc != null) seeds.add(mc);
-                                java.util.Set<Info> deps = dependersOf.get(owner);
+                                Set<Info> deps = dependersOf.get(owner);
                                 if (deps != null) {
                                     for (Info d : deps) {
                                         Info md = mapToOrderElement(d, orderSet);
@@ -929,10 +967,10 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                 try {
                     {
                         var terminal = done
-                                ? io.codelaser.maddi.analysis.api.AnalysisValueFeed.Phase.TERMINAL_CERTIFIED
+                                ? AnalysisValueFeed.Phase.TERMINAL_CERTIFIED
                                 : plateau
-                                ? io.codelaser.maddi.analysis.api.AnalysisValueFeed.Phase.TERMINAL_PLATEAU
-                                : io.codelaser.maddi.analysis.api.AnalysisValueFeed.Phase.TERMINAL_MAX_ITERATIONS;
+                                ? AnalysisValueFeed.Phase.TERMINAL_PLATEAU
+                                : AnalysisValueFeed.Phase.TERMINAL_MAX_ITERATIONS;
                         int it = iterations;
                         feed(f -> f.phase(terminal, it));
                     }
@@ -947,7 +985,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                     }
                     logVerdictFingerprint(analysisOrder);
                     if (configuration.guardContracts() || configuration.warnNearMisses()
-                        || io.codelaser.maddi.modification.common.util.Culprits.ENABLED) {
+                        || Culprits.ENABLED) {
                         // values are final now: verify user-written contracts, and/or warn on near-misses
                         feed(f -> f.stage("contract checks"));
                         new GuardAnalyzerImpl(javaInspector.runtime(), configuration, guardMessages).go(analysisOrder);
@@ -966,21 +1004,21 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                 // when a summary it ACTUALLY READ changes. Catches value-mediated flows (functional-
                 // interface application) with no syntactic call-graph edge — the measured source of the
                 // verification passes' residue (timefold: 142 modified-set changes per full pass).
-                for (java.util.Map.Entry<io.codelaser.maddi.cst.api.info.MethodInfo,
-                        java.util.Set<io.codelaser.maddi.cst.api.info.MethodInfo>> e
+                for (Map.Entry<MethodInfo,
+                        Set<MethodInfo>> e
                         : singleIterationAnalyzer.consumedSummaries().entrySet()) {
                     Info consumer = mapToOrderElement(e.getKey(), orderSet);
                     if (consumer == null) continue;
-                    for (io.codelaser.maddi.cst.api.info.MethodInfo consumed : e.getValue()) {
-                        dependersOf.computeIfAbsent(consumed, _ -> new java.util.HashSet<>()).add(consumer);
+                    for (MethodInfo consumed : e.getValue()) {
+                        dependersOf.computeIfAbsent(consumed, _ -> new HashSet<>()).add(consumer);
                     }
                 }
                 // v2: only SUMMARY changes propagate — dependents cannot observe element-internal changes.
                 // The changed element itself IS re-run: a self-recursive method's summary feeds its own next
                 // analysis, and the call graph does not guarantee a self-edge (v2's first cut excluded self and
                 // froze recursive methods at their early conservative verdicts).
-                java.util.Set<Info> changed = singleIterationAnalyzer.summaryChangedInfos();
-                java.util.Set<Info> next = new java.util.HashSet<>();
+                Set<Info> changed = singleIterationAnalyzer.summaryChangedInfos();
+                Set<Info> next = new HashSet<>();
                 for (Info c : changed) {
                     // an anonymous-class/lambda method is a graph vertex but NOT an analysis-order element:
                     // it only recomputes when its ENCLOSING method re-runs. Unmapped, such dirty elements
@@ -989,7 +1027,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                     Info mc = mapToOrderElement(c, orderSet);
                     if (mc != null) next.add(mc);
                     boolean confined = cutoff && mc != null && cutoffScope.contains(mc);
-                    java.util.Set<Info> deps = dependersOf.get(c); // adjacency stays keyed by the raw vertex
+                    Set<Info> deps = dependersOf.get(c); // adjacency stays keyed by the raw vertex
                     if (deps != null) {
                         for (Info d : deps) {
                             Info md = mapToOrderElement(d, orderSet);
@@ -1019,7 +1057,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                     // the full pass found changes the worklist missed: resume narrowing from them
                     LOGGER.info("Verification pass found {} changes; resuming worklist", propertiesChanged);
                     // residue diagnosis: WHO changed on a settled state? (adjacency-gap root-causing)
-                    java.util.Set<Info> residue = singleIterationAnalyzer.summaryChangedInfos();
+                    Set<Info> residue = singleIterationAnalyzer.summaryChangedInfos();
                     LOGGER.info("Verification-pass residue ({} elements): {}", residue.size(), residue.stream()
                             .map(Info::fullyQualifiedName).sorted().limit(12)
                             .reduce((a, b) -> a + ", " + b).orElse("-"));
@@ -1031,10 +1069,10 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                         // SCOPE: the elements this run analysed, the seed and what the worklist pulled in. Those
                         // the worklist never reached keep their values and are not re-touched. Without this, part
                         // of the cold result was never reached (TestWarmAnalysisAfterPartialReparse).
-                        java.util.List<Info> scope = scopePass(everAnalyzed, analysisOrder);
+                        List<Info> scope = scopePass(everAnalyzed, analysisOrder);
                         LOGGER.info("Incremental worklist dry after {} iterations; verification pass over the {} "
                                     + "element(s) of this run's scope", iterations, scope.size());
-                        dirty = new java.util.HashSet<>(scope);
+                        dirty = new HashSet<>(scope);
                         verifying = true;
                         nextPassKind = "incremental verification";
                         LOGGER.info("Run again, properties changed {}", propertiesChanged);
@@ -1053,8 +1091,8 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
     }
 
     // the waves with only the elements of the seed, empty units and waves dropped: a wave stays a barrier
-    private static java.util.List<java.util.List<java.util.List<Info>>> restrictWaves(
-            java.util.List<java.util.List<java.util.List<Info>>> waves, java.util.Set<Info> seed) {
+    private static List<List<List<Info>>> restrictWaves(
+            List<List<List<Info>>> waves, Set<Info> seed) {
         return waves.stream()
                 .map(wave -> wave.stream().map(unit -> unit.stream().filter(seed::contains).toList())
                         .filter(unit -> !unit.isEmpty()).toList())
@@ -1067,7 +1105,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
      worklist pulled in, which everAnalyzed collects as the clear-before-recompute fires). A cold run's full passes run
      over this instead.
      */
-    private static List<Info> scopePass(java.util.Set<Info> everAnalyzed, List<Info> analysisOrder) {
+    private static List<Info> scopePass(Set<Info> everAnalyzed, List<Info> analysisOrder) {
         return analysisOrder.stream().filter(everAnalyzed::contains).toList();
     }
 
@@ -1075,7 +1113,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
      * Map an element to its analysis-order element: an anonymous-class or lambda method (and its members)
      * is not itself an order element — walk up through the enclosing methods until one is.
      */
-    private static Info mapToOrderElement(Info info, java.util.Set<Info> orderSet) {
+    private static Info mapToOrderElement(Info info, Set<Info> orderSet) {
         Info c = info;
         int guard = 0;
         while (c != null && !orderSet.contains(c) && guard++ < 10) {
@@ -1089,9 +1127,9 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
             member, so no value analysis depends on it and nothing downstream can be lost by leaving it out
             of the dirty set.
              */
-            if (c instanceof io.codelaser.maddi.cst.api.element.ModuleInfo) return null;
-            io.codelaser.maddi.cst.api.info.TypeInfo t =
-                    c instanceof io.codelaser.maddi.cst.api.info.TypeInfo ti ? ti : c.typeInfo();
+            if (c instanceof ModuleInfo) return null;
+            TypeInfo t =
+                    c instanceof TypeInfo ti ? ti : c.typeInfo();
             c = t == null ? null : t.enclosingMethod();
         }
         return c != null && orderSet.contains(c) ? c : null;

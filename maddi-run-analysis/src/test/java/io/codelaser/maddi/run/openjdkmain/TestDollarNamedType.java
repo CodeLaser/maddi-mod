@@ -17,13 +17,13 @@
 
 package io.codelaser.maddi.run.openjdkmain;
 
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 /**
  * A type whose simple name ends in {@code $} is not, by that fact alone, an analysis-hints shadow.

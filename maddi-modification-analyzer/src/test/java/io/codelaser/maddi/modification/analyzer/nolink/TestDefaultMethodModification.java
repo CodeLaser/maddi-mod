@@ -17,16 +17,19 @@
 
 package io.codelaser.maddi.modification.analyzer.nolink;
 
-import io.codelaser.maddi.modification.analyzer.CommonTest;
-import io.codelaser.maddi.cst.api.info.Info;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+import io.codelaser.maddi.cst.api.info.Info;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.modification.analyzer.CommonTest;
+import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
 
 /**
  * Modification of an implementation's field that reaches the field only through an inherited interface <em>default
@@ -90,8 +93,8 @@ public class TestDefaultMethodModification extends CommonTest {
         String name = modReach ? "XR" : "XI";
         TypeInfo X = javaInspector.parse("a.b." + name, INHERITED_DEFAULT.replace("class X", "class " + name));
         List<Info> ao = prepWork(X);
-        new io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl(javaInspector,
-                new io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl.ConfigurationBuilder()
+        new IteratingAnalyzerImpl(javaInspector,
+                new IteratingAnalyzerImpl.ConfigurationBuilder()
                         .setMaxIterations(10).setModificationViaReachability(modReach).build()).analyze(ao);
         assertTrue(X.findSubType("Impl").getFieldByName("list", true).isModified(),
                 "Impl.list is modifiable via the inherited add(), modReach=" + modReach);
@@ -108,7 +111,7 @@ public class TestDefaultMethodModification extends CommonTest {
      cutover on (every corpus run), modification of Impl.list through the inherited default add() -> items().add(s)
      is lost -- the fixpoint has it, reachability does not. Another optimistic shape in the O1/O4 family.
      */
-    @org.junit.jupiter.api.Disabled("MODREACH loses modification through an inherited default method via an accessor")
+    @Disabled("MODREACH loses modification through an inherited default method via an accessor")
     @DisplayName("as inheritedDefaultMethod, under the iterating analyzer with the MODREACH cutover")
     @Test
     public void inheritedDefaultMethodIteratingModReach() {

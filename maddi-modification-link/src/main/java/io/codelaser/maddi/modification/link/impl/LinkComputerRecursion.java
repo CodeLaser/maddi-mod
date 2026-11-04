@@ -1,8 +1,8 @@
 package io.codelaser.maddi.modification.link.impl;
 
-import io.codelaser.maddi.modification.prepwork.variable.MethodLinkedVariables;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.modification.prepwork.variable.MethodLinkedVariables;
 
 interface LinkComputerRecursion {
     void doAnonymousType(TypeInfo typeInfo);

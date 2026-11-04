@@ -1,35 +1,36 @@
 package io.codelaser.maddi.modification.analyzer.shadow;
 
-import io.codelaser.maddi.modification.common.CloneBenchCorpus;
+import static io.codelaser.maddi.inspection.resource.SourceSetImpl.testProtocolSourceSet;
+import static io.codelaser.maddi.modification.prepwork.io.LoadAnalysisResults.ANALYZED_RESULTS;
+
+import java.io.IOException;
+import java.net.URI;
+import java.nio.file.Path;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import ch.qos.logback.classic.Level;
-import io.codelaser.maddi.modification.analyzer.CommonTest;
-import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
-import io.codelaser.maddi.modification.analyzer.impl.ModAnalyzerForTesting;
-import io.codelaser.maddi.modification.analyzer.impl.SingleIterationAnalyzerImpl;
-import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
-import io.codelaser.maddi.modification.prepwork.io.LoadAnalysisResults;
 import io.codelaser.maddi.cst.api.element.SourceSet;
 import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.inspection.api.integration.JavaInspector;
 import io.codelaser.maddi.inspection.api.parser.Summary;
 import io.codelaser.maddi.inspection.resource.SourceSetImpl;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.io.IOException;
-import java.net.URI;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.*;
-import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicInteger;
-
-import static io.codelaser.maddi.modification.prepwork.io.LoadAnalysisResults.ANALYZED_RESULTS;
-import static io.codelaser.maddi.inspection.resource.SourceSetImpl.testProtocolSourceSet;
-import org.junit.jupiter.api.Tag;
+import io.codelaser.maddi.modification.analyzer.CommonTest;
+import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
+import io.codelaser.maddi.modification.analyzer.impl.ModAnalyzerForTesting;
+import io.codelaser.maddi.modification.analyzer.impl.SingleIterationAnalyzerImpl;
+import io.codelaser.maddi.modification.common.CloneBenchCorpus;
+import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
+import io.codelaser.maddi.modification.prepwork.io.LoadAnalysisResults;
 
 /**
  * PLAN-modification-reachability phase 1: the shadow diff over the clone-bench corpus (testarchive,
@@ -116,7 +117,7 @@ public class TestShadowCloneBench extends CommonTest {
         LOGGER.warn("Parsed {} types to analyze", types.size());
 
         int parallelism = Integer.getInteger("clonebench.parallelism",
-                Math.max(1, Math.min(java.lang.Runtime.getRuntime().availableProcessors(), 4)));
+                Math.max(1, Math.min(Runtime.getRuntime().availableProcessors(), 4)));
         AtomicInteger counter = new AtomicInteger();
         ConcurrentLinkedQueue<TypeInfo> queue = new ConcurrentLinkedQueue<>(types);
         ConcurrentLinkedQueue<TypeResult> results = new ConcurrentLinkedQueue<>();
@@ -340,7 +341,7 @@ public class TestShadowCloneBench extends CommonTest {
         //     args), 9 closed (for-each/while over a collection parameter: ArrayList_AddAt_Copy, Map_Foreach,
         //     toNameClassMap, listToString, cutVectors, ...), 1 divergence opened (Function739845.listeners); by
         //     10-27 one more closed; and one opened between maddi 2d18e29b9 and 35184db60 (getFileAsString's Charset).
-        org.junit.jupiter.api.Assertions.assertEquals(348, totalRev,
+        Assertions.assertEquals(348, totalRev,
                 "reverse divergences are expected since design A (110695ece) retired the "
                 + "walkable-summary seed channel; re-baseline deliberately, and reclassify");
         // Re-baselined 2026-09-22 for the RECEIVER-DISCLAIMER rule (@IgnoreModifications on a parameter now
@@ -358,10 +359,10 @@ public class TestShadowCloneBench extends CommonTest {
         // classified with the reverse re-baseline above.
         // 2026-10-30: unmodifiedField 12 -> 13, unmodifiedParameter 43 -> 34, {propagated 46 -> 38, seed 10};
         // classified with the reverse re-baseline above.
-        org.junit.jupiter.api.Assertions.assertEquals(
+        Assertions.assertEquals(
                 Map.of("nonModifyingMethod", 1, "unmodifiedField", 13, "unmodifiedParameter", 34),
                 byProperty);
-        org.junit.jupiter.api.Assertions.assertEquals(Map.of("propagated", 38, "seed", 10), byClass);
+        Assertions.assertEquals(Map.of("propagated", 38, "seed", 10), byClass);
     }
 
     private volatile int totalMethods, totalSeeds, totalEdges, totalMissingArgLinks, totalUnprojectedReceivers;

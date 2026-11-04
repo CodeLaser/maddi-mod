@@ -1,11 +1,15 @@
 package io.codelaser.maddi.modification.common;
 
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import java.util.Collections;
+import java.util.EnumMap;
+
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
 
 // bytecode models a type-parameter bound 'T extends X' with an EXTENDS wildcard on the bound; the printer must
 // not render that as the invalid '<T extends ? extends X>' (this surfaced when IsolateMethod stubbed such a
@@ -16,11 +20,11 @@ public class TestTypeBoundWildcardPrinting extends CommonIsolateMethodTest {
     @Test
     public void boundWildcardNotPrinted() {
         parse("a.b.X", "package a.b; class X {}"); // initialize the inspector
-        TypeInfo enumMap = javaInspector.compiledTypesManager().type(java.util.EnumMap.class);
+        TypeInfo enumMap = javaInspector.compiledTypesManager().type(EnumMap.class);
         assertEquals("K extends Enum<K>", enumMap.typeParameters().getFirst()
                 .print(javaInspector.runtime().qualificationSimpleNames(), true).toString());
 
-        TypeInfo collections = javaInspector.compiledTypesManager().type(java.util.Collections.class);
+        TypeInfo collections = javaInspector.compiledTypesManager().type(Collections.class);
         MethodInfo sort = collections.methodStream()
                 .filter(m -> m.name().equals("sort") && m.parameters().size() == 1)
                 .findFirst().orElseThrow();

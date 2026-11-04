@@ -17,11 +17,7 @@
 
 package io.codelaser.maddi.modification.analyzer;
 
-import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
-
-import java.util.Map;
-import java.util.Set;
 
 /*
 Phase 3:

@@ -17,14 +17,14 @@
 
 package io.codelaser.maddi.modification.analyzer.nullability;
 
-import io.codelaser.maddi.cst.api.info.FieldInfo;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
+import static io.codelaser.maddi.modification.analyzer.nullability.Types.isSubtype;
 
 import java.util.Map;
 import java.util.Set;
 
-import static io.codelaser.maddi.modification.analyzer.nullability.Types.isSubtype;
+import io.codelaser.maddi.cst.api.info.FieldInfo;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
 
 /**
  * Per final instance field, the concrete classes whose instances may hold null in it; per getter, its field.

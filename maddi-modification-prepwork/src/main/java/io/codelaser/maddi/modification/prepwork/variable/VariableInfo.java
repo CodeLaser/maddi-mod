@@ -17,14 +17,13 @@
 
 package io.codelaser.maddi.modification.prepwork.variable;
 
-import io.codelaser.maddi.modification.prepwork.variable.impl.Assignments;
-import io.codelaser.maddi.modification.prepwork.variable.impl.Reads;
+import java.util.Set;
+
 import io.codelaser.maddi.cst.api.analysis.PropertyValueMap;
-import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.variable.Variable;
-
-import java.util.Set;
+import io.codelaser.maddi.modification.prepwork.variable.impl.Assignments;
+import io.codelaser.maddi.modification.prepwork.variable.impl.Reads;
 
 public interface VariableInfo {
 

@@ -17,18 +17,21 @@
 
 package io.codelaser.maddi.modification.common;
 
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.FALSE;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.TRUE;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.*;
+
+import java.util.AbstractMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
+
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.element.SourceSet;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
-
-import java.util.Map;
-
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.FALSE;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.TRUE;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.*;
 
 public class AnalysisHelper {
 
@@ -99,12 +102,64 @@ public class AnalysisHelper {
             Value.Bool ignoreTypeParameters = bestType.analysis().getOrDefault(PropertyImpl.IMMUTABLE_TYPE_INDEPENDENT_OF_TYPE_PARAMETERS,
                     FALSE);
             if (ignoreTypeParameters.isFalse()) {
-                return parameterizedType.parameters().stream()
+                Value.Immutable ofArguments = parameterizedType.parameters().stream()
                         .map(pt -> typeImmutable(pt, dynamicValues))
                         .reduce(ValueImpl.ImmutableImpl.IMMUTABLE, Value.Immutable::min);
+                // #81: hidden content beyond the type parameters stays, but a mutable type argument still lowers
+                // the value (Lazy<StringBuilder>: the StringBuilder is reachable, and not hidden from the holder)
+                return hiddenContentOnlyFromTypeParameters(bestType) ? ofArguments : ofArguments.min(dynamicBaseValue);
             }
         }
         return dynamicBaseValue;
+    }
+
+    /*
+     CodeLaser/maddi-mod#81: the type arguments replace a parameterized type's hidden content only when that hidden
+     content comes from the type parameters alone. An extensible type (an interface, a non-final non-sealed class) is
+     hidden content whatever its type arguments are: a field of type Wrap<String> may hold any implementation of Wrap,
+     and what that implementation carries is hidden content (road-to-immutability: "extensible => hidden content").
+     A non-extensible source type keeps the substitution when every instance field is typed by a type parameter, or
+     is deeply immutable once the type parameters are (Optional<T>, Box<T>); a field that is hidden content otherwise
+     (Object, an interface) makes it hc whatever T is. A non-extensible library type keeps it: its fields are not
+     visible. Gate NOEXTENSIBLEHC: the substitution for every type, as before.
+     */
+    private static final boolean EXTENSIBLE_HC_OFF = System.getenv("NOEXTENSIBLEHC") != null;
+    private static final ThreadLocal<Set<TypeInfo>> HC_VISITING =
+            ThreadLocal.withInitial(HashSet::new);
+
+    private boolean hiddenContentOnlyFromTypeParameters(TypeInfo typeInfo) {
+        if (EXTENSIBLE_HC_OFF) return true;
+        if (typeInfo.isExtensible()) return false;
+        if (!isPartOfSourceCode(typeInfo)) return true;
+        Set<TypeInfo> visiting = HC_VISITING.get();
+        if (!visiting.add(typeInfo)) return true; // a recursive type: decided by its other fields
+        try {
+            // the type's own type parameters read as deeply immutable, at any depth (Optional<T>'s T); matched on the
+            // type parameter, not on ParameterizedType equality, which includes annotations and nullability
+            Set<?> own = Set.copyOf(typeInfo.typeParameters());
+            Map<ParameterizedType, Value.Immutable> typeParametersImmutable = new AbstractMap<>() {
+                @Override
+                public Value.Immutable get(Object key) {
+                    return key instanceof ParameterizedType pt && pt.arrays() == 0 && pt.typeParameter() != null
+                           && own.contains(pt.typeParameter()) ? ValueImpl.ImmutableImpl.IMMUTABLE : null;
+                }
+
+                @Override
+                public Set<Entry<ParameterizedType, Value.Immutable>> entrySet() {
+                    return Set.of();
+                }
+            };
+            for (var fieldInfo : typeInfo.fields()) {
+                if (fieldInfo.isStatic()) continue;
+                ParameterizedType type = fieldInfo.type();
+                if (type.typeParameter() != null && type.arrays() == 0) continue;
+                Value.Immutable immutable = typeImmutable(type, typeParametersImmutable, false);
+                if (immutable == null || !immutable.isImmutable()) return false;
+            }
+            return true;
+        } finally {
+            visiting.remove(typeInfo);
+        }
     }
 
     private Value.Immutable containerTypeImmutable(TypeInfo containerType,
@@ -158,11 +213,18 @@ public class AnalysisHelper {
             Value.Bool tpBool = bestType.analysis().getOrDefault(PropertyImpl.IMMUTABLE_TYPE_INDEPENDENT_OF_TYPE_PARAMETERS,
                     FALSE);
             if (tpBool.isFalse()) {
-                return parameterizedType.parameters().stream()
+                Value.Independent ofArguments = parameterizedType.parameters().stream()
                         .map(this::typeIndependent)
                         .reduce(ValueImpl.IndependentImpl.INDEPENDENT, Value.Independent::min);
+                // #81: as typeImmutable, the arguments can lower the value, never raise it past the hidden content
+                if (hiddenContentOnlyFromTypeParameters(bestType)) return ofArguments;
+                return ofArguments.min(independentOfType(bestType));
             }
         }
+        return independentOfType(bestType);
+    }
+
+    private static Value.Independent independentOfType(TypeInfo bestType) {
         Value.Independent independent = bestType.analysis().getOrNull(PropertyImpl.INDEPENDENT_TYPE,
                 ValueImpl.IndependentImpl.class);
         if (independent != null) return independent;

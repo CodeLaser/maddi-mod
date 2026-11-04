@@ -1,17 +1,18 @@
 package io.codelaser.maddi.run.openjdkmain;
 
-import io.codelaser.maddi.util.corpus.Corpora;
-import ch.qos.logback.classic.Level;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import java.io.IOException;
+
 import org.apache.commons.cli.ParseException;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import org.junit.jupiter.api.Tag;
+import ch.qos.logback.classic.Level;
+import io.codelaser.maddi.util.corpus.Corpora;
 
 @Tag("slow")
 public class TestLangchain4j {

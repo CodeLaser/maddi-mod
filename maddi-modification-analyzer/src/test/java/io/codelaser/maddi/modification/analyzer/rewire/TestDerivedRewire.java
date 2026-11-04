@@ -17,11 +17,18 @@
 
 package io.codelaser.maddi.modification.analyzer.rewire;
 
-import io.codelaser.maddi.modification.analyzer.CommonTest;
-import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
-import io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl;
-import io.codelaser.maddi.modification.prepwork.io.AnalysisFingerprint;
-import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
+import static org.junit.jupiter.api.Assertions.*;
+
+import java.io.IOException;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+import io.codelaser.maddi.cst.api.analysis.PropertyValueMap;
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.info.FieldInfo;
 import io.codelaser.maddi.cst.api.info.Info;
@@ -30,16 +37,11 @@ import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-
-import java.io.IOException;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
-
-import static org.junit.jupiter.api.Assertions.*;
+import io.codelaser.maddi.modification.analyzer.CommonTest;
+import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
+import io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl;
+import io.codelaser.maddi.modification.prepwork.io.AnalysisFingerprint;
+import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
 
 /**
  * The derived-tier {@code Value.rewire} implementations (previously NYI): {@code IMPLEMENTATIONS}
@@ -134,9 +136,9 @@ public class TestDerivedRewire extends CommonTest {
 
         // the analyzer-output rewire must not throw (every kept property implements rewire) and carries strictly more than
         // the carryOnRewire-filtered rewire.
-        io.codelaser.maddi.cst.api.analysis.PropertyValueMap full =
+        PropertyValueMap full =
                 assertDoesNotThrow(() -> getMethod.analysis().rewire(infoMap, AnalysisFingerprint.ANALYZER_OUTPUT_ONLY));
-        io.codelaser.maddi.cst.api.analysis.PropertyValueMap filtered = getMethod.analysis().rewire(infoMap);
+        PropertyValueMap filtered = getMethod.analysis().rewire(infoMap);
         assertTrue(full.propertyValueStream().count() > filtered.propertyValueStream().count(),
                 "the analyzer-output rewire carries verdicts + links; the plain rewire keeps only carryOnRewire");
 
@@ -147,7 +149,7 @@ public class TestDerivedRewire extends CommonTest {
                 "rewire drops METHOD_LINKS (not carryOnRewire)");
 
         // the abstract method's IMPLEMENTATIONS survive a full carry, re-pointed to the rewired implementation
-        io.codelaser.maddi.cst.api.analysis.PropertyValueMap abstractFull =
+        PropertyValueMap abstractFull =
                 assertDoesNotThrow(() -> abstractM.analysis().rewire(infoMap, AnalysisFingerprint.ANALYZER_OUTPUT_ONLY));
         ValueImpl.SetOfMethodInfoImpl impls = abstractFull
                 .getOrNull(PropertyImpl.IMPLEMENTATIONS, ValueImpl.SetOfMethodInfoImpl.class);

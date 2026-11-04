@@ -17,6 +17,23 @@
 
 package io.codelaser.maddi.run.kotlinmain;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import java.io.File;
+import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import io.codelaser.maddi.annotation.ImmutableContainer;
+import io.codelaser.maddi.callgraph.ComputeAnalysisOrder;
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.element.SourceSet;
 import io.codelaser.maddi.cst.api.info.FieldInfo;
@@ -34,22 +51,7 @@ import io.codelaser.maddi.inspection.resource.SourceSetImpl;
 import io.codelaser.maddi.modification.analyzer.IteratingAnalyzer;
 import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
 import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
-import io.codelaser.maddi.callgraph.ComputeAnalysisOrder;
 import io.codelaser.maddi.modification.prepwork.io.LoadAnalysisResults;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-
-import java.io.File;
-import java.net.URI;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.List;
-import java.util.Set;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 /**
  * A lazily initialised value, written twice: once in Kotlin and once in Java, through
@@ -68,12 +70,13 @@ import java.util.stream.Stream;
  * and {@code @Immutable(hc=true)(after="slot")}. Not "both immutable in some sense": the same verdict, at the
  * same precision, on the same lattice. That is the cross-language claim §12.6 rests on.
  * <p>
- * Over an <em>immutable</em> payload the Kotlin side goes one better, and the reason is worth reading twice.
- * {@code a.KotlinExplicit} and {@code a.KotlinDelegated} hold a {@code Lazy<String>} and are plain
- * {@code IMMUTABLE} — substituting {@code T=String} into an {@code @ImmutableContainer(hc=true)} leaves no
- * hidden content, so nothing mutable remains to reach. {@code a.KotlinMutable} is the control that shows this
- * is the substitution talking and not a blanket verdict: identical code over {@code Lazy<StringBuilder>}
- * drops straight back to {@code FINAL_FIELDS}. The Java side stays at {@code FINAL_FIELDS} even for
+ * Over an <em>immutable</em> payload the Kotlin side goes one better. {@code a.KotlinExplicit} and
+ * {@code a.KotlinDelegated} hold a {@code Lazy<String>} and are {@code IMMUTABLE_HC}, unconditionally. Not plain
+ * {@code IMMUTABLE}, as they were before CodeLaser/maddi-mod#81: {@code kotlin.Lazy} is an interface, so the
+ * field may hold any implementation, and what that implementation carries beyond {@code T} is hidden content
+ * whatever {@code T} is ("extensible => hidden content"). Substituting {@code T=String} can no longer remove the
+ * hidden content, but a mutable type argument still lowers the verdict: {@code a.KotlinMutable} is the control,
+ * identical code over {@code Lazy<StringBuilder>}, and it drops straight back to {@code FINAL_FIELDS}. The Java side stays at {@code FINAL_FIELDS} even for
  * {@code Lazy<String>}, because {@code b.Lazy}'s own unconditional verdict is {@code MUTABLE} and its
  * immutability is carried in the eventual property instead. <b>That gap is the contract, not the language</b>
  * — {@code b.Lazy} is contracted eventually immutable and {@code kotlin.Lazy} unconditionally so.
@@ -101,8 +104,8 @@ import java.util.stream.Stream;
  * <p>
  * The delegated form agrees with the explicit one, and that is also new. {@code val expensive: String by lazy
  * { … }} used to produce no backing field and an empty accessor body, so the analyzer saw a class whose only
- * field was an {@code int}. It concluded plain {@code @Immutable} — the right answer for the wrong reason, and
- * one that would have stayed right-looking here. Since {@code d980df509} a delegated property is modelled as
+ * field was an {@code int}. It concluded plain {@code @Immutable}, for the wrong reason, and
+ * would have kept doing so whatever {@code kotlin.Lazy} was contracted as. Since {@code d980df509} a delegated property is modelled as
  * the JVM has it, a private final {@code <name>$delegate} field of the delegate's type, and
  * {@code a.KotlinDelegated} now tracks {@code a.KotlinExplicit} exactly, field name apart.
  * <p>
@@ -115,12 +118,12 @@ public class TestKotlinLazyVsJavaLazy {
 
     /** See the class javadoc for what each line means, and which of them are findings. */
     private static final String EXPECTED = """
-            a.KotlinDelegated  type=IMMUTABLE  eventual=<not eventual>
+            a.KotlinDelegated  type=IMMUTABLE_HC  eventual=<not eventual>
                 field n : Type int
                 field expensive$delegate : Type kotlin.Lazy<String>
                 method getExpensive/0  independent=INDEPENDENT_HC  eventual=<not eventual>
                 ANNOTATIONS SEEN: []
-            a.KotlinExplicit  type=IMMUTABLE  eventual=<not eventual>
+            a.KotlinExplicit  type=IMMUTABLE_HC  eventual=<not eventual>
                 field n : Type int
                 field slot : Type kotlin.Lazy<String>
                 method get/0  independent=INDEPENDENT_HC  eventual=<not eventual>
@@ -167,8 +170,8 @@ public class TestKotlinLazyVsJavaLazy {
 
             // 3. THE CONTROL: the same shape over a MUTABLE payload. The annotated API contracts
             // kotlin.Lazy as @ImmutableContainer(hc=true) -- immutable MODULO hidden content -- and 1 and 2
-            // land on plain IMMUTABLE only because String is deeply immutable, so the substitution leaves no
-            // hidden content. If the contract were a blanket "immutable" this class would say IMMUTABLE too.
+            // land on IMMUTABLE_HC because String is deeply immutable (an interface keeps its hidden content,
+            // maddi-mod#81). If the contract were a blanket "immutable" this class would say so too.
             class KotlinMutable(private val n: Int) {
                 private val slot: Lazy<StringBuilder> = lazy { StringBuilder("v" + n) }
                 fun get(): StringBuilder = slot.value
@@ -299,7 +302,7 @@ public class TestKotlinLazyVsJavaLazy {
         // loaded 'jar:file:...!/...' class file by looking the JAR'S FILE NAME up among the source-set names,
         // and sourceSetOf is what derives that name (tail(uri)). Naming the set anything friendlier makes every
         // annotation type resolve to "off-classpath", after which the contract silently never arrives.
-        SourceSet annotations = SourceSetImpl.sourceSetOf(io.codelaser.maddi.annotation.ImmutableContainer.class);
+        SourceSet annotations = SourceSetImpl.sourceSetOf(ImmutableContainer.class);
         SourceSet javaSet = new SourceSetImpl.Builder().setName("java/main")
                 .setSourceDirectories(List.of(jDir)).setUri(jDir.toUri())
                 .setDependencies(List.of(annotations)).build();

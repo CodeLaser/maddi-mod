@@ -1,21 +1,22 @@
 package io.codelaser.maddi.modification.prepwork.kotlin;
 
+import static io.codelaser.maddi.modification.prepwork.callgraph.ComputePartOfConstructionFinalField.PART_OF_CONSTRUCTION;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import java.util.stream.Collectors;
+
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+
+import io.codelaser.maddi.callgraph.ComputeAnalysisOrder;
+import io.codelaser.maddi.callgraph.ComputeCallGraph;
 import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 import io.codelaser.maddi.graph.G;
-import io.codelaser.maddi.callgraph.ComputeAnalysisOrder;
-import io.codelaser.maddi.callgraph.ComputeCallGraph;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Test;
-
-import java.util.stream.Collectors;
-
-import static io.codelaser.maddi.modification.prepwork.callgraph.ComputePartOfConstructionFinalField.PART_OF_CONSTRUCTION;
-import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /*
  The type-level half of prep on Kotlin declarations: the call graph and analysis order, part of construction and

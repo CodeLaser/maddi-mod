@@ -17,12 +17,16 @@
 
 package io.codelaser.maddi.modification.prepwork.variable.impl;
 
+import java.util.function.Consumer;
+import java.util.function.Predicate;
+
+import io.codelaser.maddi.cst.api.analysis.Property;
 import io.codelaser.maddi.cst.api.info.InfoMapView;
+import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.modification.prepwork.variable.Stage;
 import io.codelaser.maddi.modification.prepwork.variable.VariableInfo;
 import io.codelaser.maddi.modification.prepwork.variable.VariableInfoContainer;
 import io.codelaser.maddi.modification.prepwork.variable.VariableNature;
-import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.support.Either;
 import io.codelaser.maddi.support.SetOnce;
 
@@ -49,14 +53,14 @@ public class VariableInfoContainerImpl implements VariableInfoContainer {
     }
 
     /** {@link VariableInfoImpl#clearDerived} on the infos this container owns: the initial, the evaluation, the merge. */
-    public void clearDerived(java.util.function.Predicate<io.codelaser.maddi.cst.api.analysis.Property> derived) {
+    public void clearDerived(Predicate<Property> derived) {
         if (previousOrInitial.isRight()) previousOrInitial.getRight().clearDerived(derived);
         if (evaluation != null) evaluation.clearDerived(derived);
         if (merge != null && merge.isSet()) merge.get().clearDerived(derived);
     }
 
     /** The infos this container owns, as {@link #clearDerived} visits them: the initial, the evaluation, the merge. */
-    public void forEachOwnInfo(java.util.function.Consumer<VariableInfoImpl> consumer) {
+    public void forEachOwnInfo(Consumer<VariableInfoImpl> consumer) {
         if (previousOrInitial.isRight()) consumer.accept(previousOrInitial.getRight());
         if (evaluation != null) consumer.accept(evaluation);
         if (merge != null && merge.isSet()) consumer.accept(merge.get());

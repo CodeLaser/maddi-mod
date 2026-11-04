@@ -1,21 +1,23 @@
 package io.codelaser.maddi.modification.link.vf;
 
-import io.codelaser.maddi.modification.link.CommonTest;
-import io.codelaser.maddi.modification.prepwork.Util;
-import io.codelaser.maddi.cst.api.info.FieldInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.api.info.TypeParameter;
-import io.codelaser.maddi.cst.api.type.ParameterizedType;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
-import static org.junit.jupiter.api.Assertions.*;
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+import io.codelaser.maddi.cst.api.info.FieldInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.info.TypeParameter;
+import io.codelaser.maddi.cst.api.type.ParameterizedType;
+import io.codelaser.maddi.modification.link.CommonTest;
+import io.codelaser.maddi.modification.prepwork.Util;
 
 /**
  * Companion to {@link TestVirtualFieldComputer} / {@link TestVirtualFieldComputer2}; covers aspects that were not
@@ -103,7 +105,7 @@ public class TestVirtualFieldComputer3 extends CommonTest {
     @Test
     public void needsVirtualFunctionInJavaUtilFunction() {
         VirtualFieldComputer vfc = new VirtualFieldComputer(javaInspector);
-        TypeInfo function = javaInspector.compiledTypesManager().type(java.util.function.Function.class);
+        TypeInfo function = javaInspector.compiledTypesManager().type(Function.class);
         assertEquals(VirtualFields.NONE, vfc.compute(function));
         assertFalse(Util.needsVirtual(function.asParameterizedType()));
     }
@@ -113,7 +115,7 @@ public class TestVirtualFieldComputer3 extends CommonTest {
     public void functionalInterfaceInJavaUtilFunction() {
         VirtualFieldComputer vfc = new VirtualFieldComputer(javaInspector);
         TypeInfo function = javaInspector.compiledTypesManager()
-                .type(java.util.function.Function.class);
+                .type(Function.class);
         assertEquals(VirtualFields.NONE, vfc.compute(function));
     }
 

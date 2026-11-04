@@ -17,13 +17,14 @@
 
 package io.codelaser.maddi.modification.analyzer.impl;
 
-import io.codelaser.maddi.modification.analyzer.IteratingAnalyzer;
-import io.codelaser.maddi.cst.api.analysis.Message;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
+import io.codelaser.maddi.cst.api.analysis.Message;
+import io.codelaser.maddi.modification.analyzer.IteratingAnalyzer;
 
 public abstract class CommonAnalyzerImpl {
     public static final Logger DECIDE = LoggerFactory.getLogger("maddi.modanalyzer.decide");

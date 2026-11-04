@@ -17,15 +17,16 @@
 
 package io.codelaser.maddi.run.kotlinmain;
 
-import io.codelaser.maddi.modification.common.AnalyzerException;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import io.codelaser.maddi.modification.common.AnalyzerException;
 
 /**
  * The two shapes prep could not analyse on detekt (CodeLaser/maddi#32), each written down as the source that made it fail. Prep

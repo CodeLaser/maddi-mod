@@ -17,29 +17,28 @@
 
 package io.codelaser.maddi.run.main;
 
-import ch.qos.logback.classic.Level;
-import io.codelaser.maddi.inspection.integration.ToolChain;
-import io.codelaser.maddi.inspection.resource.InputConfigurationImpl;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.io.File;
+import java.util.Arrays;
+
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.File;
-import java.io.IOException;
-import java.util.Arrays;
-import java.util.Objects;
-
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import ch.qos.logback.classic.Level;
+import io.codelaser.maddi.inspection.integration.ToolChain;
+import io.codelaser.maddi.inspection.resource.InputConfigurationImpl;
 
 public class TestRunShallowAnalyzer {
     private static final Logger LOGGER = LoggerFactory.getLogger(TestRunShallowAnalyzer.class);
 
     @BeforeAll
     public static void beforeAll() {
-        ((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME)).setLevel(Level.INFO);
+        ((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME)).setLevel(Level.INFO);
         ((ch.qos.logback.classic.Logger) LoggerFactory.getLogger("io.codelaser.maddi.shallow")).setLevel(Level.DEBUG);
     }
 

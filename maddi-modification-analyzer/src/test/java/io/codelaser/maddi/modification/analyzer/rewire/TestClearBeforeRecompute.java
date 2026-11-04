@@ -17,14 +17,15 @@
 
 package io.codelaser.maddi.modification.analyzer.rewire;
 
+import static org.junit.jupiter.api.Assertions.*;
+
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
 import io.codelaser.maddi.cst.api.analysis.PropertyValueMap;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.PropertyValueMapImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-
-import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * The early-cutoff skip's <em>clear-before-recompute</em> primitive ({@code PropertyValueMap.removeIf}). When the

@@ -1,10 +1,10 @@
 package io.codelaser.maddi.modification.prepwork.kotlin;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
 import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /*
  Assignments and reads through the conditional constructs: if/else (statement and value), when (statement, value,

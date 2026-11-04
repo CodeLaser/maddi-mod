@@ -3,6 +3,13 @@ package io.codelaser.maddi.modification.common.util;
 import io.codelaser.maddi.cst.api.analysis.Property;
 import io.codelaser.maddi.cst.api.analysis.PropertyValueMap;
 import io.codelaser.maddi.cst.api.analysis.Value;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.LongAdder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -26,11 +33,11 @@ public final class TolerantWrite {
     // convergence diagnosis: successful (value-changing) writes per property key, reset per iteration by the
     // iterating analyzer. Covers every setAllowControlledOverwrite in link+analyzer (they all route through
     // here); plain set() sites (write-once) do not oscillate and are not counted.
-    private static final java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.LongAdder>
-            CHANGES = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, LongAdder>
+            CHANGES = new ConcurrentHashMap<>();
 
-    public static java.util.Map<String, Long> changeCounts() {
-        java.util.Map<String, Long> result = new java.util.TreeMap<>();
+    public static Map<String, Long> changeCounts() {
+        Map<String, Long> result = new TreeMap<>();
         CHANGES.forEach((k, v) -> result.put(k, v.sum()));
         return result;
     }
@@ -44,11 +51,11 @@ public final class TolerantWrite {
     // "no change" = invisible to the verification passes, so a fixpoint can certify prematurely-frozen
     // optimistic values. Count refusals per property so the iterating analyzer can surface (and, under
     // STRICTCERT=1, refuse) such a certification.
-    private static final java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.LongAdder>
-            REFUSED_DOWNGRADES = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, LongAdder>
+            REFUSED_DOWNGRADES = new ConcurrentHashMap<>();
 
-    public static java.util.Map<String, Long> refusedDowngrades() {
-        java.util.Map<String, Long> result = new java.util.TreeMap<>();
+    public static Map<String, Long> refusedDowngrades() {
+        Map<String, Long> result = new TreeMap<>();
         REFUSED_DOWNGRADES.forEach((k, v) -> result.put(k, v.sum()));
         return result;
     }
@@ -61,7 +68,7 @@ public final class TolerantWrite {
     public static final String RECOMPUTED = "recomputed:";
 
     public static void count(String key) {
-        CHANGES.computeIfAbsent(key, _ -> new java.util.concurrent.atomic.LongAdder()).increment();
+        CHANGES.computeIfAbsent(key, _ -> new LongAdder()).increment();
     }
 
     /**
@@ -73,7 +80,7 @@ public final class TolerantWrite {
                                                  Object context) {
         if (MODIFICATION_FROZEN && MODIFICATION_PROPERTIES.contains(property.key())) return;
         analysis.set(property, value);
-        CHANGES.computeIfAbsent(property.key(), _ -> new java.util.concurrent.atomic.LongAdder()).increment();
+        CHANGES.computeIfAbsent(property.key(), _ -> new LongAdder()).increment();
         if (context != null && !(context instanceof String) && !INTERNAL_PROPERTIES.contains(property.key())) {
             CHANGED_TARGETS.add(context);
         }
@@ -118,7 +125,7 @@ public final class TolerantWrite {
             if (RETAINTRACE) System.out.println("RT latest " + context);
             if (!analysis.overwrite(property, value)) return false;
         }
-        CHANGES.computeIfAbsent(property.key(), _ -> new java.util.concurrent.atomic.LongAdder()).increment();
+        CHANGES.computeIfAbsent(property.key(), _ -> new LongAdder()).increment();
         if (context != null && !(context instanceof String) && !INTERNAL_PROPERTIES.contains(property.key())) {
             CHANGED_TARGETS.add(context);
         }
@@ -130,19 +137,19 @@ public final class TolerantWrite {
 
     // element-INTERNAL (statement-level) properties: their changes are invisible to dependents and must not
     // propagate through the worklist (a ParameterInfo context can reach here via UNMODIFIED_VARIABLE)
-    private static final java.util.Set<String> INTERNAL_PROPERTIES =
-            java.util.Set.of("unmodifiedVariable", "structurallyUnmodifiedVariable", "downcastVariable",
+    private static final Set<String> INTERNAL_PROPERTIES =
+            Set.of("unmodifiedVariable", "structurallyUnmodifiedVariable", "downcastVariable",
                     "variablesLinkedToObject", "linkedVariablesArguments");
 
     // worklist support: the targets (Info / ParameterInfo contexts) of value-CHANGING writes this iteration.
     // Captures writes that land on an element OTHER than the one currently being processed (the link computer's
     // on-demand recursion writing a callee's METHOD_LINKS) — counter-delta attribution alone misses those.
-    private static final java.util.Set<Object> CHANGED_TARGETS =
-            java.util.Collections.synchronizedSet(new java.util.HashSet<>());
+    private static final Set<Object> CHANGED_TARGETS =
+            Collections.synchronizedSet(new HashSet<>());
 
-    public static java.util.Set<Object> changedTargets() {
+    public static Set<Object> changedTargets() {
         synchronized (CHANGED_TARGETS) {
-            return new java.util.HashSet<>(CHANGED_TARGETS);
+            return new HashSet<>(CHANGED_TARGETS);
         }
     }
 
@@ -167,7 +174,7 @@ public final class TolerantWrite {
     // gate UNMODOWN=1: allow the true->false / weakening direction for the evidence-accumulating modification
     // properties (see the downgrade branch below); OFF by default pending the verdict A/B
     private static final boolean UNMODOWN = System.getenv("UNMODOWN") != null;
-    private static final java.util.Set<String> EVIDENCE_ACCUMULATING = java.util.Set.of(
+    private static final Set<String> EVIDENCE_ACCUMULATING = Set.of(
             "unmodifiedVariable", "unmodifiedParameter", "unmodifiedField", "nonModifyingMethod",
             "structurallyUnmodifiedVariable", "structurallyUnmodifiedParameter", "structurallyUnmodifiedField",
             "structurallyNonModifyingMethod");
@@ -178,7 +185,7 @@ public final class TolerantWrite {
     // could silently undo a pass downgrade. Set by the iterating analyzer after the pass, RESET at the
     // start of every analyze() (JVM-wide static; tests run several analyses per JVM).
     private static volatile boolean MODIFICATION_FROZEN;
-    private static final java.util.Set<String> MODIFICATION_PROPERTIES = java.util.Set.of(
+    private static final Set<String> MODIFICATION_PROPERTIES = Set.of(
             "unmodifiedParameter", "unmodifiedField", "nonModifyingMethod",
             // their structural twins (#25), written by the same pass
             "structurallyUnmodifiedParameter", "structurallyUnmodifiedField", "structurallyNonModifyingMethod");
@@ -232,7 +239,7 @@ public final class TolerantWrite {
                     if (RETAINTRACE) System.out.println("RT upgrade " + context);
                     boolean upgraded = analysis.overwrite(property, value);
                     if (upgraded) {
-                        CHANGES.computeIfAbsent(property.key(), _ -> new java.util.concurrent.atomic.LongAdder())
+                        CHANGES.computeIfAbsent(property.key(), _ -> new LongAdder())
                                 .increment();
                         if (context != null && !(context instanceof String) && !INTERNAL_PROPERTIES.contains(property.key())) {
                             CHANGED_TARGETS.add(context);
@@ -256,7 +263,7 @@ public final class TolerantWrite {
                         LOGGER.debug("Downgrading {} {} -> {} on {}", property.key(), current, value, context);
                         boolean downgraded = analysis.overwrite(property, value);
                         if (downgraded) {
-                            CHANGES.computeIfAbsent(property.key(), _ -> new java.util.concurrent.atomic.LongAdder())
+                            CHANGES.computeIfAbsent(property.key(), _ -> new LongAdder())
                                     .increment();
                             if (context != null && !(context instanceof String) && !INTERNAL_PROPERTIES.contains(property.key())) {
                                 CHANGED_TARGETS.add(context);
@@ -266,14 +273,14 @@ public final class TolerantWrite {
                     }
                     LOGGER.warn("Keeping {}={}, refusing downgrade to {} on {}", property.key(), current, value, context);
                     REFUSED_DOWNGRADES.computeIfAbsent(property.key(),
-                            _ -> new java.util.concurrent.atomic.LongAdder()).increment();
+                            _ -> new LongAdder()).increment();
                     return false;
                 }
             }
             changed = analysis.setAllowControlledOverwrite(property, value);
         }
         if (changed) {
-            CHANGES.computeIfAbsent(property.key(), _ -> new java.util.concurrent.atomic.LongAdder()).increment();
+            CHANGES.computeIfAbsent(property.key(), _ -> new LongAdder()).increment();
             if (context != null && !(context instanceof String) && !INTERNAL_PROPERTIES.contains(property.key())) {
                 CHANGED_TARGETS.add(context);
             }

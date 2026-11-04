@@ -17,11 +17,7 @@
 
 package io.codelaser.maddi.modification.analyzer;
 
-import io.codelaser.maddi.analysis.api.AnalysisValueFeed;
-
-import io.codelaser.maddi.cst.api.info.Info;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
+import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.File;
 import java.nio.file.Files;
@@ -29,7 +25,11 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.*;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import io.codelaser.maddi.analysis.api.AnalysisValueFeed;
+import io.codelaser.maddi.cst.api.info.Info;
 
 /**
  * Verify the instrument before trusting its numbers: the feed must sample heap and GC beans without

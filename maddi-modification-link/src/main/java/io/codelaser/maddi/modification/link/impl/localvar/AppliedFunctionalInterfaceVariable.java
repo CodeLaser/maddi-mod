@@ -1,13 +1,13 @@
 package io.codelaser.maddi.modification.link.impl.localvar;
 
-import io.codelaser.maddi.modification.link.impl.LinkVariable;
-import io.codelaser.maddi.modification.link.impl.Result;
+import java.util.List;
+
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.runtime.Runtime;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.api.variable.LocalVariable;
-
-import java.util.List;
+import io.codelaser.maddi.modification.link.impl.LinkVariable;
+import io.codelaser.maddi.modification.link.impl.Result;
 
 public class AppliedFunctionalInterfaceVariable extends MarkerVariable implements LocalVariable, LinkVariable {
     public static final String LABEL = "afi";

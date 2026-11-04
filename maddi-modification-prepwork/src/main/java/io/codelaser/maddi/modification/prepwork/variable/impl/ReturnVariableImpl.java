@@ -17,9 +17,12 @@
 
 package io.codelaser.maddi.modification.prepwork.variable.impl;
 
-import io.codelaser.maddi.modification.prepwork.variable.ReturnVariable;
+import java.util.List;
+import java.util.Objects;
+import java.util.function.Predicate;
+import java.util.stream.Stream;
+
 import io.codelaser.maddi.cst.api.element.*;
-import io.codelaser.maddi.cst.api.info.InfoMap;
 import io.codelaser.maddi.cst.api.info.InfoMapView;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.output.OutputBuilder;
@@ -33,11 +36,7 @@ import io.codelaser.maddi.cst.impl.output.KeywordImpl;
 import io.codelaser.maddi.cst.impl.output.OutputBuilderImpl;
 import io.codelaser.maddi.cst.impl.output.SpaceEnum;
 import io.codelaser.maddi.cst.impl.output.TextImpl;
-
-import java.util.List;
-import java.util.Objects;
-import java.util.function.Predicate;
-import java.util.stream.Stream;
+import io.codelaser.maddi.modification.prepwork.variable.ReturnVariable;
 
 
 public class ReturnVariableImpl implements ReturnVariable {

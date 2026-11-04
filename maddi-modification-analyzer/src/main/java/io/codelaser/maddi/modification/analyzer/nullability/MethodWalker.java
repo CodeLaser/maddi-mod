@@ -17,9 +17,22 @@
 
 package io.codelaser.maddi.modification.analyzer.nullability;
 
+import static io.codelaser.maddi.modification.analyzer.nullability.Types.*;
+
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.IdentityHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+
+import io.codelaser.maddi.cst.api.analysis.PropertyValueMap;
+import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.element.Element;
 import io.codelaser.maddi.cst.api.expression.And;
 import io.codelaser.maddi.cst.api.expression.ArrayInitializer;
+import io.codelaser.maddi.cst.api.expression.ArrayLength;
 import io.codelaser.maddi.cst.api.expression.Assignment;
 import io.codelaser.maddi.cst.api.expression.BinaryOperator;
 import io.codelaser.maddi.cst.api.expression.ConstantExpression;
@@ -44,6 +57,7 @@ import io.codelaser.maddi.cst.api.statement.ExpressionAsStatement;
 import io.codelaser.maddi.cst.api.statement.ForEachStatement;
 import io.codelaser.maddi.cst.api.statement.ForStatement;
 import io.codelaser.maddi.cst.api.statement.LocalVariableCreation;
+import io.codelaser.maddi.cst.api.statement.LoopStatement;
 import io.codelaser.maddi.cst.api.statement.ReturnStatement;
 import io.codelaser.maddi.cst.api.statement.Statement;
 import io.codelaser.maddi.cst.api.statement.TryStatement;
@@ -67,15 +81,6 @@ import io.codelaser.maddi.modification.prepwork.variable.VariableData;
 import io.codelaser.maddi.modification.prepwork.variable.VariableInfo;
 import io.codelaser.maddi.modification.prepwork.variable.VariableInfoContainer;
 import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
-
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.IdentityHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-
-import static io.codelaser.maddi.modification.analyzer.nullability.Types.*;
 
 /**
  * Phase 4 of {@link NullabilityPass}: builds the graph for one method at a time. It walks the statements in their
@@ -290,7 +295,7 @@ final class MethodWalker {
             // and its statement carries no variable data, so nothing tied the component to the accessor's return.
             // Fernflower SwitchPatternHelper: 'initializer.instance' read as non-null while 'Initializer.instance'
             // was nullable (SwitchPatternHelper.kt:109). The getter/setter association says what it returns.
-            io.codelaser.maddi.cst.api.analysis.Value.FieldValue getter = mi.getSetField();
+            Value.FieldValue getter = mi.getSetField();
             if (getter != null && getter.field() != null && !getter.setter() && !getter.hasIndex()) {
                 graph.addEdge(getter.field(), mi);
             }
@@ -493,7 +498,7 @@ final class MethodWalker {
         }
         Expression value = assignedValue(statement, recipientVar);
         Guard guard;
-        if (value == null && statement instanceof io.codelaser.maddi.cst.api.statement.ForStatement fs) {
+        if (value == null && statement instanceof ForStatement fs) {
             // 'for (ClassNode c = child; c != null; c = c.parent)': the loop assigns its variable in its init clause
             // and in its updaters, statements of their own that the walk does not visit. fernflower
             // NestedClassProcessor.insertLocalVars printed 'classNode = classNode.parent!!' once the pass read direct
@@ -561,7 +566,7 @@ final class MethodWalker {
      parent's null on the loop variable itself (23f8bf65).
      */
     private static boolean updaterLink(Statement statement, Link link) {
-        if (!(statement instanceof io.codelaser.maddi.cst.api.statement.ForStatement fs)) return false;
+        if (!(statement instanceof ForStatement fs)) return false;
         for (Expression updater : fs.updaters()) {
             if (NonNullFacts.unwrap(updater) instanceof Assignment a && a.assignmentOperator() == null
                 && (a.variableTarget().equals(link.to()) || a.variableTarget().equals(link.from()))) {
@@ -572,13 +577,13 @@ final class MethodWalker {
     }
 
     // the values a for loop's init clause and updaters assign to 'recipient'
-    private static List<Expression> forAssignedValues(io.codelaser.maddi.cst.api.statement.ForStatement fs,
+    private static List<Expression> forAssignedValues(ForStatement fs,
                                                       Variable recipient) {
         List<Expression> values = new ArrayList<>();
         for (Element init : fs.initializers()) {
             if (init instanceof LocalVariableCreation lvc) {
                 lvc.localVariableStream().filter(lv -> lv.equals(recipient))
-                        .map(LocalVariable::assignmentExpression).filter(java.util.Objects::nonNull).forEach(values::add);
+                        .map(LocalVariable::assignmentExpression).filter(Objects::nonNull).forEach(values::add);
             } else if (init instanceof Assignment a && recipient.equals(a.variableTarget()) && a.assignmentOperator() == null) {
                 values.add(a.value());
             }
@@ -623,13 +628,13 @@ final class MethodWalker {
                 if (sameVariable(ve.variable(), source)) {
                     return known.contains(source) ? Guard.GUARDED : Guard.UNGUARDED;
                 }
-                return ve.variable() instanceof io.codelaser.maddi.cst.api.variable.FieldReference fr
+                return ve.variable() instanceof FieldReference fr
                        && !fr.scopeIsRecursivelyThis() ? Guard.OPAQUE : Guard.ABSENT;
             }
             case InlineConditional ic -> {
-                Set<Variable> whenTrue = new java.util.HashSet<>(known);
+                Set<Variable> whenTrue = new HashSet<>(known);
                 whenTrue.addAll(facts.whenTrue(ic.condition()));
-                Set<Variable> whenFalse = new java.util.HashSet<>(known);
+                Set<Variable> whenFalse = new HashSet<>(known);
                 whenFalse.addAll(facts.whenFalse(ic.condition()));
                 return combine(guard(ic.ifTrue(), source, whenTrue), guard(ic.ifFalse(), source, whenFalse));
             }
@@ -678,7 +683,7 @@ final class MethodWalker {
                 assertCandidates(mi, lvc, statements, index);
             }
             // a loop that assigns a parameter: every read inside it may see the assigned value (a later iteration)
-            if (statement instanceof io.codelaser.maddi.cst.api.statement.LoopStatement) {
+            if (statement instanceof LoopStatement) {
                 nodes.shadowed.addAll(Nodes.parametersAssignedIn(statement, mi));
             }
             // the statement's own expression is evaluated before its sub-blocks: what they assign does not shadow it
@@ -910,7 +915,7 @@ final class MethodWalker {
                                                 && fr.scope() != null && isVariable(fr.scope(), lv) -> found[0] = true;
                 case VariableExpression ve when ve.variable() instanceof DependentVariable dv
                                                 && isVariable(dv.arrayExpression(), lv) -> found[0] = true;
-                case io.codelaser.maddi.cst.api.expression.ArrayLength al when isVariable(al.scope(), lv) ->
+                case ArrayLength al when isVariable(al.scope(), lv) ->
                         found[0] = true;
                 default -> {
                 }
@@ -1043,7 +1048,7 @@ final class MethodWalker {
     private static final Switches.Gate ANONYMOUS_SUPER_OFF = Switches.gate("NOANONYMOUSSUPER");
 
     private void callSite(MethodInfo mi, Scope scope, Statement statement, Expression call, MethodInfo callee,
-                          io.codelaser.maddi.cst.api.analysis.PropertyValueMap analysis, List<Expression> arguments) {
+                          PropertyValueMap analysis, List<Expression> arguments) {
         List<ParameterInfo> parameters = callee.parameters();
         if (parameters.isEmpty()) return;
         LinkComputer.ListOfLinks list = analysis.getOrNull(LinkComputerImpl.LINKED_VARIABLES_ARGUMENTS,
@@ -1241,7 +1246,7 @@ final class MethodWalker {
         }
         ParameterizedType argumentType = receiver.parameters().get(index);
         if (argumentType.typeInfo() == null || argumentType.typeInfo().isJavaLangObject()) return List.of(pi);
-        List<ParameterInfo> targets = new java.util.ArrayList<>(List.of(pi));
+        List<ParameterInfo> targets = new ArrayList<>(List.of(pi));
         for (MethodInfo implementation : this.index.implementations.getOrDefault(callee, List.of())) {
             ParameterizedType type = implementation.parameters().get(pi.index()).parameterizedType();
             if (type.typeInfo() == argumentType.typeInfo() && type.arrays() == argumentType.arrays()) {

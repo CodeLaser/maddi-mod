@@ -17,36 +17,42 @@
 
 package io.codelaser.maddi.modification.analyzer.nullability;
 
-import io.codelaser.maddi.cst.api.element.Element;
-import io.codelaser.maddi.cst.api.expression.Assignment;
-import io.codelaser.maddi.cst.api.expression.ConstructorCall;
-import io.codelaser.maddi.cst.api.expression.Lambda;
-import io.codelaser.maddi.cst.api.expression.MethodCall;
-import io.codelaser.maddi.cst.api.expression.VariableExpression;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.api.statement.LocalVariableCreation;
-import io.codelaser.maddi.cst.api.type.NullableState;
-import io.codelaser.maddi.cst.api.variable.DependentVariable;
-import io.codelaser.maddi.cst.api.expression.Expression;
-import io.codelaser.maddi.cst.api.info.FieldInfo;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.ParameterInfo;
-import io.codelaser.maddi.cst.api.type.ParameterizedType;
-import io.codelaser.maddi.cst.api.variable.LocalVariable;
+import static io.codelaser.maddi.modification.analyzer.nullability.Types.*;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Predicate;
 
-import static io.codelaser.maddi.modification.analyzer.nullability.Types.*;
+import io.codelaser.maddi.cst.api.element.Element;
+import io.codelaser.maddi.cst.api.expression.Assignment;
+import io.codelaser.maddi.cst.api.expression.ConstructorCall;
+import io.codelaser.maddi.cst.api.expression.Expression;
+import io.codelaser.maddi.cst.api.expression.Lambda;
+import io.codelaser.maddi.cst.api.expression.MethodCall;
+import io.codelaser.maddi.cst.api.expression.VariableExpression;
+import io.codelaser.maddi.cst.api.info.FieldInfo;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.ParameterInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.statement.LocalVariableCreation;
+import io.codelaser.maddi.cst.api.type.NullableState;
+import io.codelaser.maddi.cst.api.type.ParameterizedType;
+import io.codelaser.maddi.cst.api.variable.DependentVariable;
+import io.codelaser.maddi.cst.api.variable.LocalVariable;
+import io.codelaser.maddi.modification.common.util.Culprits;
 
 /**
  * The graph of one round of the nullability pass: its nodes (fields, parameters, methods standing for their return,
@@ -85,7 +91,7 @@ final class NullGraph {
     final Map<FieldInfo, List<Arg>> pendingHolders = new LinkedHashMap<>();
     final Map<Object, Set<Object>> successors = new LinkedHashMap<>();
 
-    final boolean recordSites = io.codelaser.maddi.modification.common.util.Culprits.ENABLED;
+    final boolean recordSites = Culprits.ENABLED;
     final Map<Object, Map<Object, Site>> edgeSites = new HashMap<>();
     // the analysed method a local belongs to (a lambda's local: the method the lambda is in)
     final Map<Local, MethodInfo> localOwner = new HashMap<>();
@@ -348,8 +354,8 @@ final class NullGraph {
         }
         if (why != null) {
             try {
-                java.nio.file.Files.write(java.nio.file.Path.of(TypeUses.NULL_MARKED_DEBUG + ".tied"), why);
-            } catch (java.io.IOException ignored) {
+                Files.write(Path.of(TypeUses.NULL_MARKED_DEBUG + ".tied"), why);
+            } catch (IOException ignored) {
             }
         }
         return tiedToNonNull;
@@ -408,6 +414,16 @@ final class NullGraph {
     // gate NOTYPEVARSLOTS: a slot holding a type variable takes null as any other (A/B)
     private static final Switches.Gate TYPE_VARIABLE_SLOTS_OFF = Switches.gate("NOTYPEVARSLOTS");
 
+    /*
+     #85: an anonymous class's override handing out its object's element (GraphCompletion.overrideReturnsIntoSlots)
+     returns the superclass's type argument, so what it returns is the slot, not a write into it: asserting there would
+     leave 'get(): Any?' overriding 'AbstractList<Any>.get(): Any'.
+     */
+    private static boolean elementHandedOut(Object n, Object s) {
+        return n instanceof MethodInfo m && s instanceof Arg a && a.of() instanceof AnonymousThis at
+               && at.type().isAnonymous() && m.typeInfo() == at.type();
+    }
+
     // strict: when not null, an edge from a value into a slot is followed only from a node in it
     Set<Object> closure(Map<Object, Object> cause, Set<Object> seeds, Set<Object> strict) {
         // a seed on a non-null contract is the caller's error (an M5 finding), not a source of null
@@ -420,7 +436,8 @@ final class NullGraph {
             while (!queue.isEmpty()) {
                 Object n = queue.removeFirst();
                 for (Object s : successors.getOrDefault(n, Set.of())) {
-                    if (strict != null && isSlot(s) && !isSlot(n) && !strict.contains(n) && !isVarargElements(s)) continue;
+                    if (strict != null && isSlot(s) && !isSlot(n) && !strict.contains(n) && !isVarargElements(s)
+                        && !elementHandedOut(n, s)) continue;
                     if (optionalValue(s) || boundedSlot(s)) continue;
                     if (!contracts.nonNullContracts.contains(s) && reached.add(s)) {
                         cause.put(s, n);
@@ -449,7 +466,7 @@ final class NullGraph {
      getInteger(key) calls getInteger(key, null): only that call's result is nullable, not 'getInteger(KEY, 5)'.
      */
     boolean callResultNullable(MethodInfo callee, int call, Set<Object> reached,
-                               java.util.function.Predicate<Object> isReached,
+                               Predicate<Object> isReached,
                                Map<MethodInfo, Boolean> intrinsicMemo) {
         if (GAP9_OFF.get() || !argumentsSeen.contains(call)) return true;
         Set<ParameterInfo> through = passThrough(callee);
@@ -615,7 +632,7 @@ final class NullGraph {
         boolean changed = true;
         while (changed) {
             changed = false;
-            for (java.util.Iterator<ParameterInfo> it = candidates.iterator(); it.hasNext(); ) {
+            for (Iterator<ParameterInfo> it = candidates.iterator(); it.hasNext(); ) {
                 ParameterInfo pi = it.next();
                 for (Object to : out.getOrDefault(pi, Set.of())) {
                     if (to instanceof ParameterInfo target && (candidates.contains(target) || index.library(target))) continue;

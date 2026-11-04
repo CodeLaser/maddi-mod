@@ -1,10 +1,10 @@
 package io.codelaser.maddi.modification.analyzer.kotlin;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
 import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /*
  How a Kotlin object is constructed, and what that does to the verdicts: a constructor property, a property

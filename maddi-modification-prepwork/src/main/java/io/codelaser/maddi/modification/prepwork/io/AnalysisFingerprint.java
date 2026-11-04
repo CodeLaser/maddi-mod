@@ -17,17 +17,6 @@
 
 package io.codelaser.maddi.modification.prepwork.io;
 
-import io.codelaser.maddi.modification.prepwork.MethodAnalyzer;
-import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
-import io.codelaser.maddi.cst.api.analysis.Codec;
-import io.codelaser.maddi.cst.api.analysis.Property;
-import io.codelaser.maddi.cst.api.element.FingerPrint;
-import io.codelaser.maddi.cst.api.element.SourceSet;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.api.runtime.Runtime;
-import io.codelaser.maddi.cst.io.CodecImpl;
-import io.codelaser.maddi.inspection.api.resource.MD5FingerPrint;
-
 import java.io.IOException;
 import java.io.StringWriter;
 import java.io.UncheckedIOException;
@@ -40,6 +29,17 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Predicate;
+
+import io.codelaser.maddi.cst.api.analysis.Codec;
+import io.codelaser.maddi.cst.api.analysis.Property;
+import io.codelaser.maddi.cst.api.element.FingerPrint;
+import io.codelaser.maddi.cst.api.element.SourceSet;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.runtime.Runtime;
+import io.codelaser.maddi.cst.io.CodecImpl;
+import io.codelaser.maddi.inspection.api.resource.MD5FingerPrint;
+import io.codelaser.maddi.modification.prepwork.MethodAnalyzer;
+import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
 
 /**
  * The <em>analysisFingerprint</em>: an MD5 over the canonical cst-io codec dump of a primary type's <em>analyzer

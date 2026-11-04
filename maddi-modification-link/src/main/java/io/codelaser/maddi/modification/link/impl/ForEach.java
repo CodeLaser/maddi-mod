@@ -1,16 +1,16 @@
 package io.codelaser.maddi.modification.link.impl;
 
-import io.codelaser.maddi.modification.prepwork.variable.Stage;
-import io.codelaser.maddi.modification.prepwork.variable.VariableData;
+import java.util.Iterator;
+import java.util.List;
+
 import io.codelaser.maddi.cst.api.expression.Expression;
 import io.codelaser.maddi.cst.api.expression.MethodCall;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.runtime.Runtime;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
-
-import java.util.Iterator;
-import java.util.List;
+import io.codelaser.maddi.modification.prepwork.variable.Stage;
+import io.codelaser.maddi.modification.prepwork.variable.VariableData;
 
 public record ForEach(Runtime runtime, ExpressionVisitor expressionVisitor) {
 

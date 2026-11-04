@@ -17,26 +17,10 @@
 
 package io.codelaser.maddi.aapi.parser;
 
-import ch.qos.logback.classic.Level;
-import ch.qos.logback.classic.Logger;
-import io.codelaser.maddi.modification.common.defaults.ShallowAnalyzer;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.ParameterInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
-import io.codelaser.maddi.inspection.api.integration.JavaInspector;
-import io.codelaser.maddi.util.Trie;
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.function.Executable;
-import org.junit.jupiter.api.function.ThrowingSupplier;
-import org.slf4j.ILoggerFactory;
-import org.slf4j.LoggerFactory;
+import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.*;
+import static io.codelaser.maddi.modification.common.defaults.ShallowAnalyzer.AnnotationOrigin.*;
+import static org.junit.jupiter.api.Assertions.*;
 
-import javax.swing.*;
-import javax.swing.table.TableColumn;
-import javax.swing.text.JTextComponent;
 import java.awt.*;
 import java.io.*;
 import java.lang.annotation.Annotation;
@@ -59,9 +43,27 @@ import java.util.random.RandomGenerator;
 import java.util.stream.Stream;
 import java.util.zip.ZipOutputStream;
 
-import static io.codelaser.maddi.modification.common.defaults.ShallowAnalyzer.AnnotationOrigin.*;
-import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.*;
-import static org.junit.jupiter.api.Assertions.*;
+import javax.swing.*;
+import javax.swing.table.TableColumn;
+import javax.swing.text.JTextComponent;
+
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
+import org.junit.jupiter.api.function.ThrowingSupplier;
+import org.slf4j.ILoggerFactory;
+import org.slf4j.LoggerFactory;
+
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.ParameterInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
+import io.codelaser.maddi.inspection.api.integration.JavaInspector;
+import io.codelaser.maddi.modification.common.defaults.ShallowAnalyzer;
+import io.codelaser.maddi.util.Trie;
 
 public class TestParseAnalyzeWrite extends CommonTest {
     private static final org.slf4j.Logger LOGGER = LoggerFactory.getLogger(TestParseAnalyzeWrite.class);
@@ -100,7 +102,7 @@ public class TestParseAnalyzeWrite extends CommonTest {
         // KotlinCollections, KotlinProperties, KotlinSequences, KotlinText) survive on 27 only. Measured on 27 (9 of 9)
         // and on the JDK 26 gate (4) before KotlinJvm; KotlinJvm and KotlinIoPath (2026-10-10) measured on 27 only, and
         // counted on 26 as KotlinReflect is.
-        int kotlinUnits = java.lang.Runtime.version().feature() >= 27 ? 11 : 6;
+        int kotlinUnits = Runtime.version().feature() >= 27 ? 11 : 6;
         // The hints of the libraries whose jar is not on the shared factory (the side-loaded libs/eclipsecollections,
         // 43 units naming org.eclipse.collections types; libs/guava, in libs.jar since 2026-10-12 but compiled through
         // its own factory, naming com.google.common.collect ones) are in the same position as the Kotlin ones: no library jar on the

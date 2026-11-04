@@ -1,14 +1,14 @@
 package io.codelaser.maddi.modification.link.impl.linkgraph;
 
+import static io.codelaser.maddi.modification.link.impl.LinkNatureImpl.*;
+
+import java.util.*;
+
+import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.modification.link.impl.localvar.AppliedFunctionalInterfaceVariable;
 import io.codelaser.maddi.modification.link.impl.localvar.FunctionalInterfaceVariable;
 import io.codelaser.maddi.modification.prepwork.variable.LinkNature;
 import io.codelaser.maddi.modification.prepwork.variable.Links;
-import io.codelaser.maddi.cst.api.variable.Variable;
-
-import java.util.*;
-
-import static io.codelaser.maddi.modification.link.impl.LinkNatureImpl.*;
 
 /*
  Ported from the pre-sv engine (openjdk branch, graph/RedundantLinks): a cross-variable, per-statement

@@ -17,6 +17,16 @@
 
 package io.codelaser.maddi.modification.analyzer.nullability;
 
+import static io.codelaser.maddi.modification.analyzer.nullability.Types.*;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
 import io.codelaser.maddi.cst.api.expression.Assignment;
 import io.codelaser.maddi.cst.api.expression.ConstructorCall;
 import io.codelaser.maddi.cst.api.expression.Expression;
@@ -35,16 +45,6 @@ import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.modification.prepwork.variable.VariableData;
 import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
-
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-
-import static io.codelaser.maddi.modification.analyzer.nullability.Types.*;
 
 /**
  * Phase 5 of {@link NullabilityPass}: the edges and seeds added once every method's body was walked: the keyed maps'
@@ -360,10 +360,45 @@ final class GraphCompletion {
         assignedParameterSlots(methods);
         enumValueOfContracts(methods);
         nullFilteredParameters(methods);
+        overrideReturnsIntoSlots(methods);
         callResults.resolveTypeVariableArguments();
         graph.coupleContent();
         invariantTies();
     }
+
+    /*
+     CodeLaser/maddi-mod#85: an anonymous class's override of its generic library superclass's method returning a type
+     parameter hands out an element of the object: guava's Joiner.iterable(first, second, rest) returns 'new
+     AbstractList<Object>() { get(i) { … return first; … } }', whose elements the caller's iterator reads. The return
+     flows into the anonymous 'this''s slot of that type parameter, which reaches what the creation is assigned to
+     (MethodWalker.anonymousThisTarget). Without it the walk stopped at get's return (#68, NOLIBRARYRETURN). Gate
+     NOOVERRIDERETURNSLOTS.
+     */
+    private void overrideReturnsIntoSlots(List<MethodInfo> methods) {
+        for (MethodInfo mi : methods) {
+            int i = anonymousSlotOfReturn(policy, index, mi);
+            if (i >= 0) graph.addEdge(mi, new Arg(new AnonymousThis(mi.typeInfo()), i));
+        }
+    }
+
+    // the index of the anonymous superclass's type parameter mi's return hands out (overrideReturnsIntoSlots); -1
+    static int anonymousSlotOfReturn(Policy policy, Index index, MethodInfo mi) {
+        if (OVERRIDE_RETURN_SLOTS_OFF.get() || Nodes.ANONYMOUS_THIS_OFF.get() || !policy.callResults()) return -1;
+        TypeInfo anonymous = mi.typeInfo();
+        ParameterizedType parent = anonymous.parentClass();
+        if (!anonymous.isAnonymous() || mi.isStatic() || mi.isConstructor() || parent == null
+            || parent.typeInfo() == null || parent.parameters().isEmpty() || mi.returnType().isVoid()) return -1;
+        for (MethodInfo overridden : mi.overrides()) {
+            if (index.analysed.contains(overridden) || overridden.typeInfo() != parent.typeInfo()) continue;
+            ParameterizedType rt = overridden.returnType();
+            if (rt.typeParameter() == null || rt.arrays() != 0 || rt.typeParameter().isMethodTypeParameter()) continue;
+            int i = rt.typeParameter().getIndex();
+            if (i < parent.parameters().size()) return i;
+        }
+        return -1;
+    }
+
+    private static final Switches.Gate OVERRIDE_RETURN_SLOTS_OFF = Switches.gate("NOOVERRIDERETURNSLOTS");
 
     // the link edges counted by the walk become edges, or flows only
     private void linkEdges() {

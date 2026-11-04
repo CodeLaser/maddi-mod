@@ -17,19 +17,9 @@
 
 package io.codelaser.maddi.modification.analyzer.impl;
 
-import io.codelaser.maddi.modification.analyzer.CycleBreakingStrategy;
-import io.codelaser.maddi.modification.analyzer.IteratingAnalyzer;
-import io.codelaser.maddi.modification.analyzer.TypeImmutableAnalyzer;
-import io.codelaser.maddi.modification.analyzer.TypeIndependentAnalyzer;
-import io.codelaser.maddi.cst.api.analysis.Value;
-import io.codelaser.maddi.modification.common.AnalysisHelper;
-import io.codelaser.maddi.modification.common.util.TolerantWrite;
-import io.codelaser.maddi.cst.api.analysis.Message;
-import io.codelaser.maddi.cst.api.info.FieldInfo;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.api.type.ParameterizedType;
-import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
+import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.*;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.ImmutableImpl.*;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.DEPENDENT;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -38,9 +28,20 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.*;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.ImmutableImpl.*;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.DEPENDENT;
+import io.codelaser.maddi.cst.api.analysis.Message;
+import io.codelaser.maddi.cst.api.analysis.Value;
+import io.codelaser.maddi.cst.api.info.FieldInfo;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.type.ParameterizedType;
+import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
+import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
+import io.codelaser.maddi.modification.analyzer.CycleBreakingStrategy;
+import io.codelaser.maddi.modification.analyzer.IteratingAnalyzer;
+import io.codelaser.maddi.modification.analyzer.TypeImmutableAnalyzer;
+import io.codelaser.maddi.modification.analyzer.TypeIndependentAnalyzer;
+import io.codelaser.maddi.modification.common.AnalysisHelper;
+import io.codelaser.maddi.modification.common.util.TolerantWrite;
 
 /*
 Phase 4.2 Primary type immutable
@@ -392,6 +393,10 @@ public class TypeImmutableAnalyzerImpl extends CommonAnalyzerImpl implements Typ
             for (FieldInfo fieldInfo : type.fields()) {
                 if (typeInfo.equals(fieldInfo.type().bestTypeInfo())) continue; // self-reference
                 Immutable immutable = analysisHelper.typeImmutableNullIfUndecided(fieldInfo.type());
+                // CodeLaser/maddi-mod#81: what the field holds, when it is hc-free where its declared type is not
+                // (a field of type Wrap<String> only ever assigned 'new Constant<>(..)'); DynamicImmutabilityInference
+                Immutable dynamic = DynamicImmutability.ofField(fieldInfo);
+                if (dynamic != null && dynamic.isImmutable()) continue;
                 if (immutable == null) {
                     undecided = true;
                 } else if (!immutable.isImmutable()) {
@@ -473,7 +478,7 @@ public class TypeImmutableAnalyzerImpl extends CommonAnalyzerImpl implements Typ
         }
         Value.Bool value = ValueImpl.BoolImpl.from(unmodifiable);
         if (TolerantWrite.setAllowControlledOverwrite(typeInfo.analysis(),
-                io.codelaser.maddi.cst.impl.analysis.PropertyImpl.UNMODIFIABLE_TYPE, value, typeInfo)) {
+                PropertyImpl.UNMODIFIABLE_TYPE, value, typeInfo)) {
             DECIDE.debug("TI: Decide unmodifiable of type {} = {}", typeInfo, value);
             propertyChanges.incrementAndGet();
         }
@@ -492,7 +497,7 @@ public class TypeImmutableAnalyzerImpl extends CommonAnalyzerImpl implements Typ
             Immutable superImmutable = superType.analysis().getOrNull(IMMUTABLE_TYPE, ValueImpl.ImmutableImpl.class);
             if (superImmutable != null && superImmutable.isAtLeastImmutableHC()) continue;
             Value.Bool superUnmodifiable = superType.analysis().getOrNull(
-                    io.codelaser.maddi.cst.impl.analysis.PropertyImpl.UNMODIFIABLE_TYPE, ValueImpl.BoolImpl.class);
+                    PropertyImpl.UNMODIFIABLE_TYPE, ValueImpl.BoolImpl.class);
             if (superUnmodifiable == null) {
                 boolean source = superType.compilationUnit() != null && superType.compilationUnit().sourceSet() != null
                                  && !superType.compilationUnit().sourceSet().externalLibrary();
@@ -508,7 +513,7 @@ public class TypeImmutableAnalyzerImpl extends CommonAnalyzerImpl implements Typ
             Immutable fieldTypeImmutable = analysisHelper.typeImmutableNullIfUndecided(fieldInfo.type());
             if (fieldTypeImmutable != null && fieldTypeImmutable.isAtLeastImmutableHC()) continue;
             Bool unmodified = fieldInfo.analysis().getOrNull(
-                    io.codelaser.maddi.cst.impl.analysis.PropertyImpl.STRUCTURALLY_UNMODIFIED_FIELD, ValueImpl.BoolImpl.class);
+                    PropertyImpl.STRUCTURALLY_UNMODIFIED_FIELD, ValueImpl.BoolImpl.class);
             if (unmodified == null) unmodified = fieldInfo.analysis().getOrNull(UNMODIFIED_FIELD, ValueImpl.BoolImpl.class);
             if (unmodified == null) {
                 result = null;
@@ -519,7 +524,7 @@ public class TypeImmutableAnalyzerImpl extends CommonAnalyzerImpl implements Typ
         for (MethodInfo methodInfo : typeInfo.methods()) {
             if (!methodInfo.isAbstract()) continue; // a concrete method counts through the fields it modifies
             Bool nonModifying = methodInfo.analysis().getOrNull(
-                    io.codelaser.maddi.cst.impl.analysis.PropertyImpl.STRUCTURALLY_NON_MODIFYING_METHOD, ValueImpl.BoolImpl.class);
+                    PropertyImpl.STRUCTURALLY_NON_MODIFYING_METHOD, ValueImpl.BoolImpl.class);
             if (nonModifying == null) nonModifying = methodInfo.analysis().getOrNull(NON_MODIFYING_METHOD, ValueImpl.BoolImpl.class);
             if (nonModifying == null) {
                 result = null;

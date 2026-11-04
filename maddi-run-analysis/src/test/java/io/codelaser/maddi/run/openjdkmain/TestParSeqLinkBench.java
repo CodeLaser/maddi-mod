@@ -1,25 +1,27 @@
 package io.codelaser.maddi.run.openjdkmain;
 
-import ch.qos.logback.classic.Level;
-import io.codelaser.maddi.modification.link.impl.LinkComputerImpl;
-import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
-import io.codelaser.maddi.run.config.javac.ParseJavacList;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.inspection.api.integration.JavaInspector;
-import io.codelaser.maddi.inspection.api.parser.ParseResult;
-import io.codelaser.maddi.inspection.api.parser.Summary;
-import io.codelaser.maddi.inspection.api.resource.InputConfiguration;
-import io.codelaser.maddi.inspection.openjdk.JavaInspectorImpl;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Set;
+
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.List;
-import java.util.Set;
+import ch.qos.logback.classic.Level;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.inspection.api.integration.JavaInspector;
+import io.codelaser.maddi.inspection.api.parser.ParseResult;
+import io.codelaser.maddi.inspection.api.parser.Summary;
+import io.codelaser.maddi.inspection.api.resource.InputConfiguration;
+import io.codelaser.maddi.inspection.openjdk.JavaInspectorImpl;
+import io.codelaser.maddi.modification.link.LinkComputer;
+import io.codelaser.maddi.modification.link.impl.LinkComputerImpl;
+import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
+import io.codelaser.maddi.run.config.javac.ParseJavacList;
 
 /*
  Faithful linking benchmark on the real io.codelaser...parseq code (deep recursive generic structures that the
@@ -71,7 +73,7 @@ public class TestParSeqLinkBench {
 
         // PRODUCTION disables the checkDuplicateNames debug assertion so linking runs to completion (we are
         // measuring time on deep structures, not asserting graph invariants).
-        LinkComputerImpl link = new LinkComputerImpl(javaInspector, io.codelaser.maddi.modification.link.LinkComputer.Options.PRODUCTION);
+        LinkComputerImpl link = new LinkComputerImpl(javaInspector, LinkComputer.Options.PRODUCTION);
         // first link the production parseq types so their method summaries (callees of the tests) are available
         for (TypeInfo t : parseqTypes) {
             if (t.simpleName().startsWith("Test") || t.simpleName().startsWith("Common")) continue;

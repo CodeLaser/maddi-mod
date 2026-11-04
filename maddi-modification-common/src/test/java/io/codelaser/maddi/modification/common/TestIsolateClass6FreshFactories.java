@@ -1,5 +1,25 @@
 package io.codelaser.maddi.modification.common;
 
+import static io.codelaser.maddi.modification.common.CommonTest.javaInspectorFactory;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.io.IOException;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
+
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
@@ -8,24 +28,6 @@ import io.codelaser.maddi.inspection.api.integration.JavaInspector;
 import io.codelaser.maddi.inspection.resource.SourceSetImpl;
 import io.codelaser.maddi.modification.common.util.IsolateClass;
 import io.codelaser.maddi.modification.common.util.ProgramHierarchy;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-import org.slf4j.LoggerFactory;
-
-import java.io.IOException;
-import java.util.LinkedHashMap;
-import java.util.Map;
-import java.util.Set;
-import java.util.stream.Collectors;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-
-import static io.codelaser.maddi.modification.common.CommonTest.javaInspectorFactory;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * A stub of a factory says {@code return new T();} when the original <b>constructs what it returns</b>, and
@@ -270,7 +272,7 @@ public class TestIsolateClass6FreshFactories {
         var parsed = javaInspector.parse(sources,
                 new JavaInspector.ParseOptions.Builder().setDetailedSources(true).setFailFast(true).build());
         // the group isolate: Use AND Item verbatim, the way a corpus driver carries a DTO beside its host
-        IsolateClass.Result r = isolateClass.isolate(java.util.List.of(parsed.parseResult().findType("a.b.Use"),
+        IsolateClass.Result r = isolateClass.isolate(List.of(parsed.parseResult().findType("a.b.Use"),
                 parsed.parseResult().findType("p.q.Item")));
         Map<MethodInfo, String> memberSources = new LinkedHashMap<>();
         for (MethodInfo original : r.markers().values()) {

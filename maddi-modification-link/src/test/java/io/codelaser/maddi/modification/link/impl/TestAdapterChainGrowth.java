@@ -17,18 +17,20 @@
 
 package io.codelaser.maddi.modification.link.impl;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.modification.link.CommonTest;
 import io.codelaser.maddi.modification.link.LinkComputer;
 import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
+import io.codelaser.maddi.modification.prepwork.Util;
 import io.codelaser.maddi.modification.prepwork.variable.MethodLinkedVariables;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Eclipse Collections' {@code CollectionAdapter.wrapList(Iterable)} (2026-09-26): a chain of {@code instanceof}
@@ -183,8 +185,8 @@ public class TestAdapterChainGrowth extends CommonTest {
             int r = round;
             mlv.ofReturnValue().forEach(link -> assertTrue(
                     !link.from().equals(link.to())
-                    && !io.codelaser.maddi.modification.prepwork.Util.scopeVariables(link.to()).contains(link.from())
-                    && !io.codelaser.maddi.modification.prepwork.Util.scopeVariables(link.from()).contains(link.to()),
+                    && !Util.scopeVariables(link.to()).contains(link.from())
+                    && !Util.scopeVariables(link.from()).contains(link.to()),
                     "round " + r + ": self-field link " + link));
             // and the two alternatives both survive: rv may be the argument, or hold it
             assertTrue(s.contains("wrapList←Λ0:iterable"), "rv may be the argument: " + s);

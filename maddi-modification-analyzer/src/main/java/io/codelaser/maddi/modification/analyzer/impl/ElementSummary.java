@@ -17,16 +17,16 @@
 
 package io.codelaser.maddi.modification.analyzer.impl;
 
+import java.util.HashMap;
+import java.util.Map;
+import java.util.TreeMap;
+
 import io.codelaser.maddi.cst.api.analysis.Property;
 import io.codelaser.maddi.cst.api.analysis.PropertyValueMap;
 import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
-
-import java.util.HashMap;
-import java.util.Map;
-import java.util.TreeMap;
 
 /**
  * What a dependent can see of an element: its cross-type-derived values, and a method's parameters' values, as text
