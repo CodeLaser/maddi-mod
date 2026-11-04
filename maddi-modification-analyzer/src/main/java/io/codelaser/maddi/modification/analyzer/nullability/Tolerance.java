@@ -203,7 +203,20 @@ final class Tolerance {
             switch (n) {
                 case ParameterInfo pi -> {
                     MethodInfo m = pi.methodInfo();
-                    if (!hasBody(m) || demanded(m, v -> pi.equals(v))) return trace.tolerance(from, n, "demanded");
+                    if (!hasBody(m)) return trace.tolerance(from, n, "demanded");
+                    if (demanded(m, v -> pi.equals(v))) {
+                        // the declaring body throws on null; the walk goes on in the overrides that take it
+                        List<ParameterInfo> tolerating = toleratingOverrides(m, pi);
+                        if (tolerating.isEmpty()) return trace.tolerance(from, n, "demanded");
+                        trace.tolerance(from, n, "demanded, tolerated by an override");
+                        for (ParameterInfo op : tolerating) {
+                            if (seen.add(op)) {
+                                queue.addLast(op);
+                                if (from != null) from.put(op, n);
+                            }
+                        }
+                        continue;
+                    }
                     // passed on to a parameter its @NullMarked scope declares non-null: a demand, as a contract is
                     // (timefold's Joiners.equal(l, r) hands both to DefaultBiJoiner's @NullMarked constructor)
                     if (pi != start && !isTypeVariable(pi.parameterizedType()) && nullMarked(m)
@@ -234,11 +247,17 @@ final class Tolerance {
                     // first and second are @Nullable (useForNull), and the walk failed at get's return. Not the
                     // parameter's own method: 's -> s' hands the library back what the library gave it, which says
                     // nothing about null (guava's identity lambdas). Gate NOLIBRARYRETURN.
-                    if (!LIBRARY_RETURN_OFF.get() && !m.equals(start.methodInfo()) && overridesLibraryOnly(m)) {
+                    // #85: an anonymous class's override handing out its object's element: follow it into the slot
+                    // (GraphCompletion.overrideReturnsIntoSlots), and on to who reads the object's elements
+                    if (graph.successors.getOrDefault(m, Set.of()).stream()
+                            .anyMatch(s -> s instanceof Arg a && a.of() instanceof AnonymousThis)) {
+                        trace.tolerance(from, n, "into the object's slot");
+                    } else if (!LIBRARY_RETURN_OFF.get() && !m.equals(start.methodInfo()) && overridesLibraryOnly(m)) {
                         trace.tolerance(from, n, "library return");
                         continue;
+                    } else {
+                        return trace.tolerance(from, n, "non-null sink");
                     }
-                    return trace.tolerance(from, n, "non-null sink");
                 }
                 case Content _, Arg _ when declaredSlot(n) && !TOLERANT_SLOTS_OFF.get() -> {
                     if (!before.contains(n)) return trace.tolerance(from, n, "non-null slot");
@@ -258,6 +277,25 @@ final class Tolerance {
         if (from != null) trace.print("NULLWHY tolerates " + Trace.name(start) + " visited=" + seen.size());
         return true;
     }
+
+    /*
+     CodeLaser/maddi-mod#85: the call may be virtual. guava's Joiner.appendTo calls toString(part), which demands part
+     (requireNonNull); the useForNull override reads it and demands nothing ('part == null ? nullText : …'). A dispatch
+     target that accepts null makes the parameter nullable for the family, which Kotlin wants as one. Not an override
+     that ignores the parameter (an empty hook is no evidence), nor one without a body. Gate NOOVERRIDETOLERATES.
+     */
+    private List<ParameterInfo> toleratingOverrides(MethodInfo m, ParameterInfo pi) {
+        if (OVERRIDE_TOLERATES_OFF.get()) return List.of();
+        List<ParameterInfo> out = new java.util.ArrayList<>();
+        for (MethodInfo o : index.implementations.getOrDefault(m, List.of())) {
+            if (!hasBody(o) || o.parameters().size() <= pi.index()) continue;
+            ParameterInfo op = o.parameters().get(pi.index());
+            if (read(o, op) && !demanded(o, v -> op.equals(v))) out.add(op);
+        }
+        return out;
+    }
+
+    private static final Switches.Gate OVERRIDE_TOLERATES_OFF = Switches.gate("NOOVERRIDETOLERATES");
 
     // gate NOLIBRARYRETURN: the return of an override of a library method ends the tolerance, as any other (A/B)
     private static final Switches.Gate LIBRARY_RETURN_OFF = Switches.gate("NOLIBRARYRETURN");
@@ -287,8 +325,17 @@ final class Tolerance {
             else if (holder instanceof Arg a) holder = a.of();
             else break;
         }
+        if (!INTERNAL_SLOTS_OFF.get()) {
+            // #85: an anonymous class's type argument is its creation's, a private method's return slot its class's:
+            // neither is a declaration a caller sees, and the walk follows on to where the object goes
+            if (holder instanceof AnonymousThis at && at.type().isAnonymous()) return false;
+            if (holder instanceof MethodInfo m && m.access().isPrivate()) return false;
+        }
         return holder instanceof FieldInfo || holder instanceof MethodInfo || holder instanceof AnonymousThis;
     }
+
+    // gate NOINTERNALSLOTS: an anonymous class's type argument and a private method's return slot end the walk (A/B)
+    private static final Switches.Gate INTERNAL_SLOTS_OFF = Switches.gate("NOINTERNALSLOTS");
 
     private static final Switches.Gate TOLERANT_SLOTS_OFF = Switches.gate("NOTOLERANTSLOTS");
 
