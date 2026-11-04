@@ -292,6 +292,11 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
         // thread timing, and a sequential sweep over it decides the same defaults in every run.
         boolean sweepMode = activateCycleBreaking && CYCLE_BREAKING_SWEEP;
         boolean loopCycleBreaking = activateCycleBreaking && !sweepMode;
+        // and the type analyzers leave the loop for the sequential second type pass: the eventual family is
+        // write-once, and its assumption ledger records whether a candidate already had its verdict when a member
+        // leaned on it. In a parallel loop that depends on thread timing (guava: CaseFormat.$0/$1 retracted by
+        // cascade at 8 threads, kept sequentially).
+        typesInSecondPassOnly = sweepMode;
         long startLoop = System.currentTimeMillis();
         if (PARALLEL_THREADS > 1 && firstIteration && firstIterationWaves != null
             && analysisOrder.size() >= MIN_ELEMENTS_FOR_PARALLEL) {
@@ -622,6 +627,9 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
         }
     }
 
+    // CBSWEEP: set per pass in goInternal, before the loop starts; read by processElement on the workers
+    private volatile boolean typesInSecondPassOnly;
+
     private void processElement(Info info, boolean activateCycleBreaking, boolean firstIteration,
                                 Set<TypeInfo> abstractTypes) {
         // G43: OUTSIDE the fault-tolerant try below — a spent budget is not this element's crash, and must not be
@@ -685,7 +693,7 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
                 }
                 fieldAnalyzer.go(fieldInfo, activateCycleBreaking);
             } else if (info instanceof TypeInfo typeInfo) {
-                runTypeAnalyzers(activateCycleBreaking, typeInfo);
+                if (!typesInSecondPassOnly) runTypeAnalyzers(activateCycleBreaking, typeInfo);
             }
         } catch (RuntimeException | AssertionError | StackOverflowError e) {
             LOGGER.error("Caught exception processing {}", info, e);
