@@ -17,11 +17,11 @@
 
 package io.codelaser.maddi.aapi.parser.example.jdk;
 
+import io.codelaser.maddi.annotation.*;
+
 import java.util.Iterator;
 import java.util.Spliterator;
 import java.util.function.Consumer;
-
-import io.codelaser.maddi.annotation.*;
 
 public class JavaLang {
 

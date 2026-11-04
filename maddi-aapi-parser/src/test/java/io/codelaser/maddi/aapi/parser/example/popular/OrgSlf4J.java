@@ -17,9 +17,6 @@
 
 package io.codelaser.maddi.aapi.parser.example.popular;
 
-import org.slf4j.ILoggerFactory;
-import org.slf4j.Logger;
-
 import io.codelaser.maddi.annotation.*;
 
 public class OrgSlf4J {
@@ -65,7 +62,7 @@ public class OrgSlf4J {
         @NotNull
         @NotModified
         @ImmutableContainer
-        Logger getLogger(String name);
+        org.slf4j.Logger getLogger(String name);
     }
 
     @Container
@@ -74,16 +71,16 @@ public class OrgSlf4J {
         @NotNull
         @NotModified
         @ImmutableContainer
-        Logger getLogger(@NotNull Class<?> clazz);
+        org.slf4j.Logger getLogger(@NotNull Class<?> clazz);
 
         @NotNull
         @ImmutableContainer
         @NotModified
-        Logger getLogger(@NotNull String string);
+        org.slf4j.Logger getLogger(@NotNull String string);
 
         @NotNull
         @NotModified
-        ILoggerFactory getILoggerFactory();
+        org.slf4j.ILoggerFactory getILoggerFactory();
     }
 
     @Container
