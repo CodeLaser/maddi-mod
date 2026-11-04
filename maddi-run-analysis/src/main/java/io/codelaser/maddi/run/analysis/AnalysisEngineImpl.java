@@ -17,6 +17,22 @@
 
 package io.codelaser.maddi.run.analysis;
 
+import java.io.File;
+import java.io.IOException;
+import java.util.Collection;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.Consumer;
+import java.util.function.Function;
+import java.util.function.Predicate;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import io.codelaser.maddi.aapi.parser.AnalysisHints;
 import io.codelaser.maddi.aapi.parser.AnalysisHintsCompiler;
 import io.codelaser.maddi.aapi.parser.AnalysisHintsComposer;
@@ -40,12 +56,15 @@ import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.output.Qualification;
 import io.codelaser.maddi.cst.api.runtime.Runtime;
+import io.codelaser.maddi.cst.impl.analysis.ConsumptionEdgeRecorder;
+import io.codelaser.maddi.cst.impl.analysis.LinkFacts;
+import io.codelaser.maddi.cst.impl.analysis.NullabilityFacts;
 import io.codelaser.maddi.inspection.api.integration.JavaInspector;
 import io.codelaser.maddi.inspection.api.integration.JavaInspectorFactory;
 import io.codelaser.maddi.modification.analyzer.CheckpointWriter;
 import io.codelaser.maddi.modification.analyzer.IteratingAnalyzer;
-import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
 import io.codelaser.maddi.modification.analyzer.impl.EventualCluster;
+import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
 import io.codelaser.maddi.modification.analyzer.impl.StaticSideEffectAnalyzerImpl;
 import io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass;
 import io.codelaser.maddi.modification.analyzer.nullability.Policy;
@@ -61,25 +80,7 @@ import io.codelaser.maddi.modification.prepwork.io.IncrementalState;
 import io.codelaser.maddi.modification.prepwork.io.LoadAnalysisResults;
 import io.codelaser.maddi.modification.prepwork.io.PrepWorkCodec;
 import io.codelaser.maddi.modification.prepwork.io.WriteAnalysisResults;
-import io.codelaser.maddi.cst.impl.analysis.ConsumptionEdgeRecorder;
-import io.codelaser.maddi.cst.impl.analysis.LinkFacts;
-import io.codelaser.maddi.cst.impl.analysis.NullabilityFacts;
 import io.codelaser.maddi.util.Trie;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.io.File;
-import java.io.IOException;
-import java.util.Collection;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.function.Consumer;
-import java.util.function.Function;
-import java.util.function.Predicate;
 
 /**
  * The implementation of {@link AnalysisEngine}, registered for {@link java.util.ServiceLoader} both in

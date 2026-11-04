@@ -17,23 +17,23 @@
 
 package io.codelaser.maddi.modification.analyzer;
 
-import io.codelaser.maddi.analysis.api.AnalysisValueFeed;
-
-import io.codelaser.maddi.modification.prepwork.io.WriteAnalysisResults;
-import io.codelaser.maddi.cst.api.analysis.Codec;
-import io.codelaser.maddi.cst.api.info.Info;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.api.runtime.Runtime;
-import io.codelaser.maddi.util.Trie;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.Set;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import io.codelaser.maddi.analysis.api.AnalysisValueFeed;
+import io.codelaser.maddi.cst.api.analysis.Codec;
+import io.codelaser.maddi.cst.api.info.Info;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.runtime.Runtime;
+import io.codelaser.maddi.modification.prepwork.io.WriteAnalysisResults;
+import io.codelaser.maddi.util.Trie;
 
 /**
  * Checkpoint half of task #34 (checkpoint/resume v1): an {@link AnalysisValueFeed} that persists the

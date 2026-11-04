@@ -1,20 +1,13 @@
 package io.codelaser.maddi.modification.analyzer.shadow;
 
-import io.codelaser.maddi.modification.common.AnalysisHelper;
-import io.codelaser.maddi.modification.common.util.Culprits;
-import io.codelaser.maddi.modification.common.util.OwnStaticState;
-import io.codelaser.maddi.modification.link.LinkComputer;
-import io.codelaser.maddi.modification.link.impl.LinkVariable;
-import io.codelaser.maddi.modification.link.impl.LinkComputerImpl;
-import io.codelaser.maddi.modification.link.impl.LinkNatureImpl;
-import io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl;
-import io.codelaser.maddi.modification.prepwork.Util;
-import io.codelaser.maddi.modification.link.impl.PassedFunction;
-import io.codelaser.maddi.modification.link.impl.ReceiverLevel;
-import io.codelaser.maddi.modification.prepwork.variable.*;
-import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
-import io.codelaser.maddi.modification.prepwork.variable.impl.VariableInfoImpl;
-import io.codelaser.maddi.modification.prepwork.variable.ObjectCreationVariable;
+import static io.codelaser.maddi.modification.prepwork.callgraph.ComputePartOfConstructionFinalField.EMPTY_PART_OF_CONSTRUCTION;
+import static io.codelaser.maddi.modification.prepwork.callgraph.ComputePartOfConstructionFinalField.PART_OF_CONSTRUCTION;
+
+import java.util.*;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import io.codelaser.maddi.cst.api.analysis.PropertyValueMap;
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.element.Element;
@@ -35,16 +28,24 @@ import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.cst.api.variable.LocalVariable;
 import io.codelaser.maddi.cst.api.variable.This;
 import io.codelaser.maddi.cst.api.variable.Variable;
-import io.codelaser.maddi.modification.prepwork.variable.Stage;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.util.*;
-
-import static io.codelaser.maddi.modification.prepwork.callgraph.ComputePartOfConstructionFinalField.EMPTY_PART_OF_CONSTRUCTION;
-import static io.codelaser.maddi.modification.prepwork.callgraph.ComputePartOfConstructionFinalField.PART_OF_CONSTRUCTION;
+import io.codelaser.maddi.modification.common.AnalysisHelper;
+import io.codelaser.maddi.modification.common.util.Culprits;
+import io.codelaser.maddi.modification.common.util.OwnStaticState;
+import io.codelaser.maddi.modification.link.LinkComputer;
+import io.codelaser.maddi.modification.link.impl.LinkComputerImpl;
+import io.codelaser.maddi.modification.link.impl.LinkNatureImpl;
+import io.codelaser.maddi.modification.link.impl.LinkVariable;
+import io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl;
+import io.codelaser.maddi.modification.link.impl.PassedFunction;
+import io.codelaser.maddi.modification.link.impl.ReceiverLevel;
+import io.codelaser.maddi.modification.prepwork.Util;
+import io.codelaser.maddi.modification.prepwork.variable.*;
+import io.codelaser.maddi.modification.prepwork.variable.ObjectCreationVariable;
+import io.codelaser.maddi.modification.prepwork.variable.Stage;
+import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
+import io.codelaser.maddi.modification.prepwork.variable.impl.VariableInfoImpl;
 
 /**
  * PLAN-modification-reachability phase 1: the shadow pass. Computes modification as one-shot

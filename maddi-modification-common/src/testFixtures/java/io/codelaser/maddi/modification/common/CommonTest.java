@@ -1,13 +1,9 @@
 package io.codelaser.maddi.modification.common;
 
-import io.codelaser.maddi.annotation.Immutable;
-import io.codelaser.maddi.support.SetOnce;
-import io.codelaser.maddi.cst.api.element.SourceSet;
-import io.codelaser.maddi.inspection.api.integration.JavaInspector;
-import io.codelaser.maddi.inspection.api.integration.JavaInspectorFactory;
-import io.codelaser.maddi.inspection.api.resource.InputConfiguration;
-import io.codelaser.maddi.inspection.resource.InputConfigurationImpl;
-import io.codelaser.maddi.inspection.resource.SourceSetImpl;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+
 import org.jetbrains.annotations.NotNull;
 import org.jspecify.annotations.NonNull;
 import org.junit.jupiter.api.Test;
@@ -15,9 +11,14 @@ import org.junit.platform.commons.JUnitException;
 import org.opentest4j.AssertionFailedError;
 import org.slf4j.Logger;
 
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
+import io.codelaser.maddi.annotation.Immutable;
+import io.codelaser.maddi.cst.api.element.SourceSet;
+import io.codelaser.maddi.inspection.api.integration.JavaInspector;
+import io.codelaser.maddi.inspection.api.integration.JavaInspectorFactory;
+import io.codelaser.maddi.inspection.api.resource.InputConfiguration;
+import io.codelaser.maddi.inspection.resource.InputConfigurationImpl;
+import io.codelaser.maddi.inspection.resource.SourceSetImpl;
+import io.codelaser.maddi.support.SetOnce;
 
 public class CommonTest {
 

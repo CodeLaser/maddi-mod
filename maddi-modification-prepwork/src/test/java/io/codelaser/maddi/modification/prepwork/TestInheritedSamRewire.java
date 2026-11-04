@@ -17,15 +17,16 @@
 
 package io.codelaser.maddi.modification.prepwork;
 
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
+import static org.junit.jupiter.api.Assertions.*;
+
+import java.util.Set;
+
 import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import java.util.Set;
-
-import static org.junit.jupiter.api.Assertions.*;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
 
 /**
  * A functional interface may INHERIT its single abstract method from a type that is not being rewired, a JDK

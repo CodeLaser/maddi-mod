@@ -17,11 +17,16 @@
 
 package io.codelaser.maddi.aapi.parser.archive;
 
-import io.codelaser.maddi.aapi.parser.CommonTest;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.ParameterInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import org.junit.jupiter.api.Test;
+import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.CONTAINER_TYPE;
+import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.INDEPENDENT_PARAMETER;
+import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.INDEPENDENT_TYPE;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.FALSE;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.TRUE;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.DEPENDENT;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.INDEPENDENT_HC;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -33,16 +38,12 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadFactory;
 
-import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.CONTAINER_TYPE;
-import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.INDEPENDENT_PARAMETER;
-import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.INDEPENDENT_TYPE;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.FALSE;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.TRUE;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.DEPENDENT;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.INDEPENDENT_HC;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
+
+import io.codelaser.maddi.aapi.parser.CommonTest;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.ParameterInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
 
 public class TestJavaUtilConcurrent extends CommonTest {
 

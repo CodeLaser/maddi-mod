@@ -17,6 +17,11 @@
 
 package io.codelaser.maddi.modification.link.impl;
 
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
+
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.expression.Expression;
 import io.codelaser.maddi.cst.api.expression.Lambda;
@@ -37,11 +42,6 @@ import io.codelaser.maddi.modification.prepwork.variable.Links;
 import io.codelaser.maddi.modification.prepwork.variable.Stage;
 import io.codelaser.maddi.modification.prepwork.variable.VariableData;
 import io.codelaser.maddi.modification.prepwork.variable.VariableInfo;
-
-import java.util.ArrayList;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Set;
 
 /**
  * Call-site specialisation of a parameter that a method modifies only by handing it to one of its own functional

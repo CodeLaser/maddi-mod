@@ -17,19 +17,20 @@
 
 package io.codelaser.maddi.run.openjdkmain;
 
-import ch.qos.logback.classic.Level;
-import io.codelaser.maddi.inspection.resource.InputConfigurationImpl;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.io.File;
+import java.util.Arrays;
+
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.File;
-import java.util.Arrays;
-
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import ch.qos.logback.classic.Level;
+import io.codelaser.maddi.inspection.resource.InputConfigurationImpl;
 
 public class TestRunShallowAnalyzer {
     private static final Logger LOGGER = LoggerFactory.getLogger(TestRunShallowAnalyzer.class);

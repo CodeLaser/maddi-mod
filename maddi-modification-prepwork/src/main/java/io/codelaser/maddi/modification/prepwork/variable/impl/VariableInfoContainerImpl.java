@@ -18,11 +18,11 @@
 package io.codelaser.maddi.modification.prepwork.variable.impl;
 
 import io.codelaser.maddi.cst.api.info.InfoMapView;
+import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.modification.prepwork.variable.Stage;
 import io.codelaser.maddi.modification.prepwork.variable.VariableInfo;
 import io.codelaser.maddi.modification.prepwork.variable.VariableInfoContainer;
 import io.codelaser.maddi.modification.prepwork.variable.VariableNature;
-import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.support.Either;
 import io.codelaser.maddi.support.SetOnce;
 

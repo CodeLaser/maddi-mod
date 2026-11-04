@@ -18,8 +18,25 @@
 package io.codelaser.maddi.aapi.parser;
 
 
+import static org.junit.jupiter.api.Assertions.*;
+
+import java.io.File;
+import java.io.IOException;
+import java.lang.invoke.TypeDescriptor;
+import java.net.URISyntaxException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.*;
+import java.util.stream.Stream;
+
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import ch.qos.logback.classic.Level;
-import io.codelaser.maddi.modification.prepwork.io.DecoratorImpl;
 import io.codelaser.maddi.annotation.Immutable;
 import io.codelaser.maddi.cst.api.element.Element;
 import io.codelaser.maddi.cst.api.element.SourceSet;
@@ -32,23 +49,7 @@ import io.codelaser.maddi.inspection.api.resource.InputConfiguration;
 import io.codelaser.maddi.inspection.integration.JavaInspectorImpl;
 import io.codelaser.maddi.inspection.resource.InputConfigurationImpl;
 import io.codelaser.maddi.inspection.resource.SourceSetImpl;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.io.File;
-import java.io.IOException;
-import java.lang.invoke.TypeDescriptor;
-import java.net.URISyntaxException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.*;
-import java.util.stream.Stream;
-
-import static org.junit.jupiter.api.Assertions.*;
+import io.codelaser.maddi.modification.prepwork.io.DecoratorImpl;
 
 public class TestAnalysisHintsComposer extends CommonTest {
     private static final Logger LOGGER = LoggerFactory.getLogger(TestAnalysisHintsComposer.class);

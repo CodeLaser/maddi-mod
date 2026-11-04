@@ -17,6 +17,15 @@
 
 package io.codelaser.maddi.modification.analyzer.nullability;
 
+import static io.codelaser.maddi.modification.analyzer.nullability.Types.*;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
 import io.codelaser.maddi.cst.api.element.Element;
 import io.codelaser.maddi.cst.api.expression.Assignment;
 import io.codelaser.maddi.cst.api.expression.Expression;
@@ -34,15 +43,6 @@ import io.codelaser.maddi.cst.api.variable.This;
 import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.modification.prepwork.Util;
 import io.codelaser.maddi.modification.prepwork.variable.ReturnVariable;
-
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-
-import static io.codelaser.maddi.modification.analyzer.nullability.Types.*;
 
 /**
  * What a variable or an expression of the walk stands for in the graph: a parameter (or a reassigned parameter's

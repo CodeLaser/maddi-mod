@@ -1,9 +1,7 @@
 package io.codelaser.maddi.modification.link.impl.translate;
 
-import io.codelaser.maddi.modification.link.vf.VirtualFieldComputer;
-import io.codelaser.maddi.modification.link.vf.VirtualFieldTranslationMapImpl;
-import io.codelaser.maddi.modification.link.vf.VirtualFields;
-import io.codelaser.maddi.modification.prepwork.variable.VirtualFieldTranslationMap;
+import java.util.Map;
+
 import io.codelaser.maddi.cst.api.expression.MethodCall;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeParameter;
@@ -14,8 +12,10 @@ import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 import io.codelaser.maddi.inspection.api.parser.GenericsHelper;
 import io.codelaser.maddi.inspection.impl.parser.GenericsHelperImpl;
-
-import java.util.Map;
+import io.codelaser.maddi.modification.link.vf.VirtualFieldComputer;
+import io.codelaser.maddi.modification.link.vf.VirtualFieldTranslationMapImpl;
+import io.codelaser.maddi.modification.link.vf.VirtualFields;
+import io.codelaser.maddi.modification.prepwork.variable.VirtualFieldTranslationMap;
 
 public class VirtualFieldTranslationMapForMethodParameters {
     private final VirtualFieldComputer virtualFieldComputer;

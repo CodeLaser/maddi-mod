@@ -1,12 +1,13 @@
 package io.codelaser.maddi.modification.prepwork.kotlin;
 
-import io.codelaser.maddi.cst.api.statement.Block;
-import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
 import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import io.codelaser.maddi.cst.api.statement.Block;
+import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
 
 /*
  try/catch/finally, a try used as a value, and the other Kotlin expressions K2 lowers into a declaration followed

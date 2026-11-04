@@ -17,13 +17,7 @@
 
 package io.codelaser.maddi.modification.link.impl;
 
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.modification.link.CommonTest;
-import io.codelaser.maddi.modification.link.LinkComputer;
-import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -32,7 +26,14 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.modification.link.CommonTest;
+import io.codelaser.maddi.modification.link.LinkComputer;
+import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
 
 /**
  * Two worker threads may compute the links of the same method at the same time: RecursionPrevention's in-progress

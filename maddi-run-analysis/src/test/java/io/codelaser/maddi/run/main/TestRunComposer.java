@@ -17,17 +17,18 @@
 
 package io.codelaser.maddi.run.main;
 
-import ch.qos.logback.classic.Level;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.io.File;
+
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.File;
-
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import ch.qos.logback.classic.Level;
 
 public class TestRunComposer {
     private static final Logger LOGGER = LoggerFactory.getLogger(TestRunComposer.class);

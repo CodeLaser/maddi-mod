@@ -1,12 +1,13 @@
 package io.codelaser.maddi.modification.common;
 
-import io.codelaser.maddi.cst.api.info.TypeInfo;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+
 import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
 
 // method references: a referenced method must be stubbed just like a regular call
 public class TestIsolateMethod5MethodReferences extends CommonIsolateMethodTest {

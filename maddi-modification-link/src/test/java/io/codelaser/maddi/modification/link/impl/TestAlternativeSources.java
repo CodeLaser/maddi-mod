@@ -17,29 +17,30 @@
 
 package io.codelaser.maddi.modification.link.impl;
 
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.modification.prepwork.variable.impl.ObjectCreationVariableImpl;
-import io.codelaser.maddi.cst.api.variable.Variable;
-import io.codelaser.maddi.cst.api.info.ParameterInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
-import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
-import io.codelaser.maddi.modification.link.impl.linkgraph.Graph;
-import io.codelaser.maddi.modification.link.CommonTest;
-import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
-import io.codelaser.maddi.modification.prepwork.variable.MethodLinkedVariables;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.TestInstance;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInstance;
+
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.ParameterInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.variable.Variable;
+import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
+import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
+import io.codelaser.maddi.modification.link.CommonTest;
+import io.codelaser.maddi.modification.link.impl.linkgraph.Graph;
+import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
+import io.codelaser.maddi.modification.prepwork.variable.MethodLinkedVariables;
+import io.codelaser.maddi.modification.prepwork.variable.impl.ObjectCreationVariableImpl;
 
 /**
  * Alternatives are not aliases: a recipient assigned one of several values in one statement may hold either, but

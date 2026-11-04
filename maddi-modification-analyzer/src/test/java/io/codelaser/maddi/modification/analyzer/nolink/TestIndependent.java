@@ -17,22 +17,23 @@
 
 package io.codelaser.maddi.modification.analyzer.nolink;
 
-import io.codelaser.maddi.modification.analyzer.CommonTest;
+import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.*;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.DEPENDENT;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.util.List;
+
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-
-import java.util.List;
-
-import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.*;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.DEPENDENT;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import io.codelaser.maddi.modification.analyzer.CommonTest;
 
 /**
  * Independent @Independent tests. A type is dependent when it exposes its mutable internals to the outside: a

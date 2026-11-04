@@ -1,14 +1,15 @@
 package io.codelaser.maddi.modification.prepwork.variable.impl;
 
-import io.codelaser.maddi.modification.prepwork.Util;
-import io.codelaser.maddi.modification.prepwork.variable.Link;
-import io.codelaser.maddi.modification.prepwork.variable.LinkNature;
-import io.codelaser.maddi.modification.prepwork.variable.Links;
-import io.codelaser.maddi.modification.prepwork.variable.VirtualFieldTranslationMap;
+import java.util.*;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import org.jetbrains.annotations.NotNull;
+
 import io.codelaser.maddi.cst.api.analysis.Codec;
 import io.codelaser.maddi.cst.api.analysis.Property;
 import io.codelaser.maddi.cst.api.analysis.Value;
-import io.codelaser.maddi.cst.api.info.InfoMap;
 import io.codelaser.maddi.cst.api.info.InfoMapView;
 import io.codelaser.maddi.cst.api.runtime.Runtime;
 import io.codelaser.maddi.cst.api.translate.TranslationMap;
@@ -16,12 +17,11 @@ import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.cst.api.variable.This;
 import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
-import org.jetbrains.annotations.NotNull;
-
-import java.util.*;
-import java.util.function.Predicate;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
+import io.codelaser.maddi.modification.prepwork.Util;
+import io.codelaser.maddi.modification.prepwork.variable.Link;
+import io.codelaser.maddi.modification.prepwork.variable.LinkNature;
+import io.codelaser.maddi.modification.prepwork.variable.Links;
+import io.codelaser.maddi.modification.prepwork.variable.VirtualFieldTranslationMap;
 
 public class LinksImpl implements Links {
 

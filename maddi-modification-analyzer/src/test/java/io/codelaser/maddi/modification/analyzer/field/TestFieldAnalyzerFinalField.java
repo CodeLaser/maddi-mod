@@ -1,19 +1,20 @@
 package io.codelaser.maddi.modification.analyzer.field;
 
-import io.codelaser.maddi.modification.analyzer.CommonTest;
-import io.codelaser.maddi.modification.prepwork.variable.Links;
-import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
-import io.codelaser.maddi.cst.api.analysis.Value;
-import io.codelaser.maddi.cst.api.info.*;
-import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
-import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
+import static org.junit.jupiter.api.Assertions.*;
+
+import java.util.List;
+
 import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import java.util.List;
-
-import static org.junit.jupiter.api.Assertions.*;
+import io.codelaser.maddi.cst.api.analysis.Value;
+import io.codelaser.maddi.cst.api.info.*;
+import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
+import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
+import io.codelaser.maddi.modification.analyzer.CommonTest;
+import io.codelaser.maddi.modification.prepwork.variable.Links;
+import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
 
 public class TestFieldAnalyzerFinalField extends CommonTest {
 

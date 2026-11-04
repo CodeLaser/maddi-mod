@@ -17,26 +17,9 @@
 
 package io.codelaser.maddi.modification.analyzer.clonebench;
 
-import io.codelaser.maddi.modification.common.CloneBenchCorpus;
-import ch.qos.logback.classic.Level;
-import io.codelaser.maddi.modification.analyzer.CommonTest;
-import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
-import io.codelaser.maddi.modification.analyzer.impl.ModAnalyzerForTesting;
-import io.codelaser.maddi.modification.analyzer.impl.SingleIterationAnalyzerImpl;
-import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
-import io.codelaser.maddi.modification.prepwork.io.LoadAnalysisResults;
-import io.codelaser.maddi.cst.api.element.SourceSet;
-import io.codelaser.maddi.cst.api.expression.MethodCall;
-import io.codelaser.maddi.cst.api.info.Info;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.inspection.api.integration.JavaInspector;
-import io.codelaser.maddi.inspection.api.parser.Summary;
-import io.codelaser.maddi.inspection.resource.SourceSetImpl;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import static io.codelaser.maddi.inspection.resource.SourceSetImpl.testProtocolSourceSet;
+import static io.codelaser.maddi.modification.prepwork.io.LoadAnalysisResults.ANALYZED_RESULTS;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 import java.io.IOException;
 import java.net.URI;
@@ -56,10 +39,28 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import static io.codelaser.maddi.modification.prepwork.io.LoadAnalysisResults.ANALYZED_RESULTS;
-import static io.codelaser.maddi.inspection.resource.SourceSetImpl.testProtocolSourceSet;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import ch.qos.logback.classic.Level;
+import io.codelaser.maddi.cst.api.element.SourceSet;
+import io.codelaser.maddi.cst.api.expression.MethodCall;
+import io.codelaser.maddi.cst.api.info.Info;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.inspection.api.integration.JavaInspector;
+import io.codelaser.maddi.inspection.api.parser.Summary;
+import io.codelaser.maddi.inspection.resource.SourceSetImpl;
+import io.codelaser.maddi.modification.analyzer.CommonTest;
+import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
+import io.codelaser.maddi.modification.analyzer.impl.ModAnalyzerForTesting;
+import io.codelaser.maddi.modification.analyzer.impl.SingleIterationAnalyzerImpl;
+import io.codelaser.maddi.modification.common.CloneBenchCorpus;
+import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
+import io.codelaser.maddi.modification.prepwork.io.LoadAnalysisResults;
 
 /*
 Corpus: "testarchive" (the former "analyzed" branch was merged into main on 2026-07-26).

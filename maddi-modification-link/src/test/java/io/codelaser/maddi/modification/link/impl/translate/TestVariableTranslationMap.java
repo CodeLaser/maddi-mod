@@ -1,9 +1,15 @@
 package io.codelaser.maddi.modification.link.impl.translate;
 
-import io.codelaser.maddi.modification.link.CommonTest;
-import io.codelaser.maddi.modification.link.impl.translate.VariableTranslationMap;
-import io.codelaser.maddi.modification.link.vf.VirtualFieldComputer;
-import io.codelaser.maddi.modification.link.vf.VirtualFields;
+import static org.junit.jupiter.api.Assertions.*;
+
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
 import io.codelaser.maddi.cst.api.info.FieldInfo;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
@@ -12,15 +18,9 @@ import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.cst.api.variable.LocalVariable;
 import io.codelaser.maddi.cst.api.variable.This;
 import io.codelaser.maddi.cst.api.variable.Variable;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-
-import static org.junit.jupiter.api.Assertions.*;
+import io.codelaser.maddi.modification.link.CommonTest;
+import io.codelaser.maddi.modification.link.vf.VirtualFieldComputer;
+import io.codelaser.maddi.modification.link.vf.VirtualFields;
 
 public class TestVariableTranslationMap extends CommonTest {
 

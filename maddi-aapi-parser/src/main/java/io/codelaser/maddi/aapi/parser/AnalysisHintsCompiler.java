@@ -17,9 +17,15 @@
 
 package io.codelaser.maddi.aapi.parser;
 
-import io.codelaser.maddi.modification.common.defaults.ShallowAnalyzer;
-import io.codelaser.maddi.modification.prepwork.io.LoadAnalysisResults;
-import io.codelaser.maddi.modification.prepwork.io.WriteAnalysisResults;
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+
+import org.slf4j.LoggerFactory;
+
 import io.codelaser.maddi.cst.api.analysis.Message;
 import io.codelaser.maddi.cst.api.element.Element;
 import io.codelaser.maddi.cst.api.info.Info;
@@ -31,15 +37,10 @@ import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 import io.codelaser.maddi.inspection.api.integration.JavaInspector;
 import io.codelaser.maddi.inspection.api.integration.JavaInspectorFactory;
+import io.codelaser.maddi.modification.common.defaults.ShallowAnalyzer;
+import io.codelaser.maddi.modification.prepwork.io.LoadAnalysisResults;
+import io.codelaser.maddi.modification.prepwork.io.WriteAnalysisResults;
 import io.codelaser.maddi.util.Trie;
-import org.slf4j.LoggerFactory;
-
-import java.io.File;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
 
 /*
 From analysis hints to machine-readable analysis results in json format.

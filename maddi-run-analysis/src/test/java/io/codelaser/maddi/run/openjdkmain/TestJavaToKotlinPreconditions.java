@@ -1,16 +1,17 @@
 package io.codelaser.maddi.run.openjdkmain;
 
-import io.codelaser.maddi.cst.print.kotlin.KotlinPrintOptions;
-import io.codelaser.maddi.modification.analyzer.nullability.Policy;
-import io.codelaser.maddi.modification.analyzer.nullability.Report;
-import io.codelaser.maddi.run.j2k.JavaToKotlinRatchet;
+import java.util.List;
+import java.util.Objects;
+
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 
-import java.util.List;
-import java.util.Objects;
+import io.codelaser.maddi.cst.print.kotlin.KotlinPrintOptions;
+import io.codelaser.maddi.modification.analyzer.nullability.Policy;
+import io.codelaser.maddi.modification.analyzer.nullability.Report;
+import io.codelaser.maddi.run.j2k.JavaToKotlinRatchet;
 
 /**
  * The Kotlin side of CodeLaser/maddi#125, a measurement for Bart's decision: one corpus analysed once, as the

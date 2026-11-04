@@ -1,21 +1,22 @@
 package io.codelaser.maddi.modification.link.vf;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import java.util.List;
+
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+import io.codelaser.maddi.cst.api.element.Element;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.modification.common.defaults.ShallowAnalyzer;
 import io.codelaser.maddi.modification.link.CommonTest;
 import io.codelaser.maddi.modification.link.LinkComputer;
 import io.codelaser.maddi.modification.link.impl.LinkComputerImpl;
 import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
 import io.codelaser.maddi.modification.prepwork.variable.MethodLinkedVariables;
-import io.codelaser.maddi.cst.api.element.Element;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-
-import java.util.List;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * Evidence for virtual-fields.md inconsistency #1 (flat vs pairwise container for >=3 type parameters).

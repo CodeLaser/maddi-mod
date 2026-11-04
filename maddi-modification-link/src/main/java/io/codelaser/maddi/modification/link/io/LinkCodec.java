@@ -1,17 +1,17 @@
 package io.codelaser.maddi.modification.link.io;
 
-import io.codelaser.maddi.modification.link.impl.LinkedVariablesImpl;
-import io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl;
-import io.codelaser.maddi.modification.link.impl.Result;
-import io.codelaser.maddi.modification.link.impl.localvar.AppliedFunctionalInterfaceVariable;
-import io.codelaser.maddi.modification.link.impl.localvar.FunctionalInterfaceVariable;
-import io.codelaser.maddi.modification.link.impl.localvar.MarkerVariable;
-import io.codelaser.maddi.modification.link.vf.VirtualFieldComputer;
-import io.codelaser.maddi.modification.prepwork.Util;
-import io.codelaser.maddi.modification.prepwork.variable.Links;
-import io.codelaser.maddi.modification.prepwork.variable.ReturnVariable;
-import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
-import io.codelaser.maddi.modification.prepwork.variable.impl.ReturnVariableImpl;
+import static io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl.METHOD_LINKS;
+import static io.codelaser.maddi.modification.prepwork.callgraph.ComputePartOfConstructionFinalField.PART_OF_CONSTRUCTION;
+
+import java.util.*;
+import java.util.function.BiFunction;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import org.jetbrains.annotations.NotNull;
+import org.parsers.json.Node;
+import org.parsers.json.ast.StringLiteral;
+
 import io.codelaser.maddi.cst.api.analysis.Codec;
 import io.codelaser.maddi.cst.api.analysis.Property;
 import io.codelaser.maddi.cst.api.analysis.Value;
@@ -27,17 +27,18 @@ import io.codelaser.maddi.cst.impl.analysis.PropertyProviderImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 import io.codelaser.maddi.cst.io.CodecImpl;
 import io.codelaser.maddi.inspection.api.integration.JavaInspector;
-import org.jetbrains.annotations.NotNull;
-import org.parsers.json.Node;
-import org.parsers.json.ast.StringLiteral;
-
-import java.util.*;
-import java.util.function.BiFunction;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
-
-import static io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl.METHOD_LINKS;
-import static io.codelaser.maddi.modification.prepwork.callgraph.ComputePartOfConstructionFinalField.PART_OF_CONSTRUCTION;
+import io.codelaser.maddi.modification.link.impl.LinkedVariablesImpl;
+import io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl;
+import io.codelaser.maddi.modification.link.impl.Result;
+import io.codelaser.maddi.modification.link.impl.localvar.AppliedFunctionalInterfaceVariable;
+import io.codelaser.maddi.modification.link.impl.localvar.FunctionalInterfaceVariable;
+import io.codelaser.maddi.modification.link.impl.localvar.MarkerVariable;
+import io.codelaser.maddi.modification.link.vf.VirtualFieldComputer;
+import io.codelaser.maddi.modification.prepwork.Util;
+import io.codelaser.maddi.modification.prepwork.variable.Links;
+import io.codelaser.maddi.modification.prepwork.variable.ReturnVariable;
+import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
+import io.codelaser.maddi.modification.prepwork.variable.impl.ReturnVariableImpl;
 
 public class LinkCodec {
 

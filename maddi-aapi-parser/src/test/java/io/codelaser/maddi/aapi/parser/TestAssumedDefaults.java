@@ -17,13 +17,9 @@
 
 package io.codelaser.maddi.aapi.parser;
 
-import io.codelaser.maddi.cst.api.analysis.Property;
-import io.codelaser.maddi.cst.api.info.Info;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.ParameterInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
-import org.junit.jupiter.api.Test;
+import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -31,9 +27,14 @@ import java.nio.file.Path;
 import java.util.*;
 import java.util.stream.Collectors;
 
-import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.*;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
+import org.junit.jupiter.api.Test;
+
+import io.codelaser.maddi.cst.api.analysis.Property;
+import io.codelaser.maddi.cst.api.info.Info;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.ParameterInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 
 /*
 What the JDK hints leave open: the methods that are modifying, and the parameters that are modified, only because no

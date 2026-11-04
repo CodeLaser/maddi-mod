@@ -17,6 +17,12 @@
 
 package io.codelaser.maddi.modification.prepwork.io;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.stream.Stream;
+
 import io.codelaser.maddi.cst.api.analysis.Property;
 import io.codelaser.maddi.cst.api.element.Comment;
 import io.codelaser.maddi.cst.api.element.CompilationUnit;
@@ -34,12 +40,6 @@ import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.impl.analysis.NullAnnotations;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
-
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Set;
-import java.util.TreeSet;
-import java.util.stream.Stream;
 
 /**
  * Annotated Java output for the inferred nullability (maddi-mod docs/design/nullability.md D1): reads the B2

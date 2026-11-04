@@ -1,15 +1,15 @@
 package io.codelaser.maddi.modification.link.impl.localvar;
 
-import io.codelaser.maddi.modification.link.impl.LinkVariable;
-import io.codelaser.maddi.cst.api.runtime.Runtime;
-import io.codelaser.maddi.cst.api.type.ParameterizedType;
-import io.codelaser.maddi.cst.api.variable.Variable;
-import io.codelaser.maddi.cst.impl.variable.LocalVariableImpl;
-
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+
+import io.codelaser.maddi.cst.api.runtime.Runtime;
+import io.codelaser.maddi.cst.api.type.ParameterizedType;
+import io.codelaser.maddi.cst.api.variable.Variable;
+import io.codelaser.maddi.cst.impl.variable.LocalVariableImpl;
+import io.codelaser.maddi.modification.link.impl.LinkVariable;
 
 public class SharedVariable extends LocalVariableImpl implements LinkVariable {
     public static final String PREFIX = "$__sv_";

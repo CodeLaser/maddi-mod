@@ -1,39 +1,9 @@
 package io.codelaser.maddi.run.openjdkmain;
 
-import io.codelaser.maddi.cst.api.expression.AnnotationExpression;
-import io.codelaser.maddi.analysis.api.PrepOutcome;
-import io.codelaser.maddi.analysis.api.PrepRequest;
-import io.codelaser.maddi.callgraph.ComputeAnalysisOrder;
-import io.codelaser.maddi.cst.api.info.FieldInfo;
-import io.codelaser.maddi.cst.api.info.Info;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.ParameterInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.api.type.NullableState;
-import io.codelaser.maddi.cst.api.type.ParameterizedType;
-import io.codelaser.maddi.cst.impl.type.DeclaredNullability;
-import io.codelaser.maddi.inspection.api.integration.JavaInspector;
-import io.codelaser.maddi.inspection.api.parser.Summary;
-import io.codelaser.maddi.inspection.openjdk.JavaInspectorImpl;
-import io.codelaser.maddi.inspection.resource.InputConfigurationImpl;
-import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
-import io.codelaser.maddi.modification.analyzer.nullability.Arg;
-import io.codelaser.maddi.modification.analyzer.nullability.Content;
-import io.codelaser.maddi.modification.analyzer.nullability.NullabilityComparison;
-import io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass;
-import io.codelaser.maddi.modification.analyzer.nullability.Policy;
-import io.codelaser.maddi.modification.analyzer.nullability.Report;
-import io.codelaser.maddi.modification.analyzer.nullability.World;
-import io.codelaser.maddi.run.analysis.AnalysisEngineImpl;
-import io.codelaser.maddi.modification.analyzer.nullability.NullabilityComparison.Kind;
-import io.codelaser.maddi.modification.analyzer.nullability.NullabilityComparison.Outcome;
-import io.codelaser.maddi.run.config.util.JsonStreaming;
-import io.codelaser.maddi.util.corpus.Corpora;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.api.Test;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -47,10 +17,40 @@ import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.fail;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import io.codelaser.maddi.analysis.api.PrepOutcome;
+import io.codelaser.maddi.analysis.api.PrepRequest;
+import io.codelaser.maddi.callgraph.ComputeAnalysisOrder;
+import io.codelaser.maddi.cst.api.expression.AnnotationExpression;
+import io.codelaser.maddi.cst.api.info.FieldInfo;
+import io.codelaser.maddi.cst.api.info.Info;
+import io.codelaser.maddi.cst.api.info.ParameterInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.type.NullableState;
+import io.codelaser.maddi.cst.api.type.ParameterizedType;
+import io.codelaser.maddi.cst.impl.type.DeclaredNullability;
+import io.codelaser.maddi.inspection.api.integration.JavaInspector;
+import io.codelaser.maddi.inspection.api.parser.Summary;
+import io.codelaser.maddi.inspection.openjdk.JavaInspectorImpl;
+import io.codelaser.maddi.inspection.resource.InputConfigurationImpl;
+import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
+import io.codelaser.maddi.modification.analyzer.nullability.Arg;
+import io.codelaser.maddi.modification.analyzer.nullability.Content;
+import io.codelaser.maddi.modification.analyzer.nullability.NullabilityComparison;
+import io.codelaser.maddi.modification.analyzer.nullability.NullabilityComparison.Kind;
+import io.codelaser.maddi.modification.analyzer.nullability.NullabilityComparison.Outcome;
+import io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass;
+import io.codelaser.maddi.modification.analyzer.nullability.Policy;
+import io.codelaser.maddi.modification.analyzer.nullability.Report;
+import io.codelaser.maddi.modification.analyzer.nullability.World;
+import io.codelaser.maddi.run.analysis.AnalysisEngineImpl;
+import io.codelaser.maddi.run.config.util.JsonStreaming;
+import io.codelaser.maddi.util.corpus.Corpora;
 
 /**
  * The nullability oracle (maddi-mod {@code docs/design/nullability.md} §6, T6), first stage: guava's own JSpecify

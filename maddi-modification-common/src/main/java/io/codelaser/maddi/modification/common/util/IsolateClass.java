@@ -1,5 +1,19 @@
 package io.codelaser.maddi.modification.common.util;
 
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Stream;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import io.codelaser.maddi.cst.api.element.CompilationUnit;
 import io.codelaser.maddi.cst.api.element.DetailedSources;
 import io.codelaser.maddi.cst.api.info.FieldInfo;
@@ -13,19 +27,6 @@ import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.print.FormattingOptionsImpl;
 import io.codelaser.maddi.cst.print.formatter2.Formatter2Impl;
 import io.codelaser.maddi.inspection.api.integration.JavaInspector;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.stream.Stream;
 
 /**
  * Lifts one <b>type</b>, or a small set of them, out of its project into a standalone source tree that compiles

@@ -1,5 +1,14 @@
 package io.codelaser.maddi.modification.analyzer.shadow;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import java.util.*;
+import java.util.stream.Collectors;
+
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.DynamicTest;
+import org.junit.jupiter.api.TestFactory;
+
 import io.codelaser.maddi.cst.api.analysis.Property;
 import io.codelaser.maddi.cst.api.analysis.PropertyValueMap;
 import io.codelaser.maddi.cst.api.info.Info;
@@ -7,19 +16,10 @@ import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.graph.G;
-import io.codelaser.maddi.graph.V;
 import io.codelaser.maddi.inspection.api.parser.ParseResult;
 import io.codelaser.maddi.modification.analyzer.CommonTest;
 import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
 import io.codelaser.maddi.modification.prepwork.io.AnalysisFingerprint;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.DynamicTest;
-import org.junit.jupiter.api.TestFactory;
-
-import java.util.*;
-import java.util.stream.Collectors;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * An incremental analysis recomputes the verdict closure of the changed types, against the carried verdicts of all

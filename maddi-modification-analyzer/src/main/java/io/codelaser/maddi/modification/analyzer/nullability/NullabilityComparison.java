@@ -17,12 +17,12 @@
 
 package io.codelaser.maddi.modification.analyzer.nullability;
 
-import io.codelaser.maddi.cst.api.type.NullableState;
-import io.codelaser.maddi.cst.api.type.ParameterizedType;
-
 import java.util.EnumMap;
 import java.util.Map;
 import java.util.stream.Collectors;
+
+import io.codelaser.maddi.cst.api.type.NullableState;
+import io.codelaser.maddi.cst.api.type.ParameterizedType;
 
 /**
  * Scores a nullability verdict against a reference, position by position: the type itself and, recursively, each

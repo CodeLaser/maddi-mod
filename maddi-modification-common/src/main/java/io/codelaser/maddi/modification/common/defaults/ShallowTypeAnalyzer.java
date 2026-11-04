@@ -17,8 +17,23 @@
 
 package io.codelaser.maddi.modification.common.defaults;
 
-import io.codelaser.maddi.modification.common.util.TolerantWrite;
-import io.codelaser.maddi.modification.common.AnalysisHelper;
+import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.*;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.FALSE;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.TRUE;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.ImmutableImpl.IMMUTABLE_HC;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.ImmutableImpl.MUTABLE;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.DEPENDENT;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.INDEPENDENT;
+import static io.codelaser.maddi.modification.common.defaults.ShallowAnalyzer.AnnotationOrigin.*;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import io.codelaser.maddi.annotation.Independent;
 import io.codelaser.maddi.cst.api.analysis.Message;
 import io.codelaser.maddi.cst.api.analysis.Property;
@@ -29,27 +44,13 @@ import io.codelaser.maddi.cst.api.info.FieldInfo;
 import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.info.TypeParameter;
 import io.codelaser.maddi.cst.api.runtime.Runtime;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
-import io.codelaser.maddi.cst.api.info.TypeParameter;
 import io.codelaser.maddi.cst.impl.analysis.MessageImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-
-import static io.codelaser.maddi.modification.common.defaults.ShallowAnalyzer.AnnotationOrigin.*;
-import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.*;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.FALSE;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.TRUE;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.ImmutableImpl.IMMUTABLE_HC;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.ImmutableImpl.MUTABLE;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.DEPENDENT;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.INDEPENDENT;
+import io.codelaser.maddi.modification.common.AnalysisHelper;
+import io.codelaser.maddi.modification.common.util.TolerantWrite;
 
 public class ShallowTypeAnalyzer extends AnnotationToProperty {
     private static final Logger LOGGER = LoggerFactory.getLogger(ShallowTypeAnalyzer.class);

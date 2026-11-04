@@ -17,6 +17,15 @@
 
 package io.codelaser.maddi.modification.analyzer.nullability;
 
+import static io.codelaser.maddi.modification.analyzer.nullability.Types.*;
+
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.IdentityHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
 import io.codelaser.maddi.cst.api.element.Element;
 import io.codelaser.maddi.cst.api.expression.And;
 import io.codelaser.maddi.cst.api.expression.ArrayInitializer;
@@ -67,15 +76,6 @@ import io.codelaser.maddi.modification.prepwork.variable.VariableData;
 import io.codelaser.maddi.modification.prepwork.variable.VariableInfo;
 import io.codelaser.maddi.modification.prepwork.variable.VariableInfoContainer;
 import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
-
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.IdentityHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-
-import static io.codelaser.maddi.modification.analyzer.nullability.Types.*;
 
 /**
  * Phase 4 of {@link NullabilityPass}: builds the graph for one method at a time. It walks the statements in their

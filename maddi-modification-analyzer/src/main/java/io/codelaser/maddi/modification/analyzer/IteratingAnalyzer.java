@@ -17,14 +17,12 @@
 
 package io.codelaser.maddi.modification.analyzer;
 
-import io.codelaser.maddi.modification.analyzer.nullability.World;
-import io.codelaser.maddi.analysis.api.AnalysisValueFeed;
+import java.util.List;
 
-import io.codelaser.maddi.modification.link.LinkComputer;
+import io.codelaser.maddi.analysis.api.AnalysisValueFeed;
 import io.codelaser.maddi.cst.api.analysis.Message;
 import io.codelaser.maddi.cst.api.info.Info;
-
-import java.util.List;
+import io.codelaser.maddi.modification.link.LinkComputer;
 
 public interface IteratingAnalyzer {
 

@@ -17,6 +17,14 @@
 
 package io.codelaser.maddi.modification.prepwork.variable;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import java.util.Comparator;
+import java.util.stream.Collectors;
+
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.Test;
+
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
@@ -24,14 +32,6 @@ import io.codelaser.maddi.cst.api.variable.This;
 import io.codelaser.maddi.modification.prepwork.CommonTest;
 import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
 import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
-import io.codelaser.maddi.modification.prepwork.variable.VariableData;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.Test;
-
-import java.util.Comparator;
-import java.util.stream.Collectors;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * CodeLaser/maddi#74: a local assigned or read inside a switch EXPRESSION's arms is assigned or read in the statement that holds

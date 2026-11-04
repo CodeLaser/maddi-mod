@@ -1,15 +1,16 @@
 package io.codelaser.maddi.modification.link.impl;
 
-import io.codelaser.maddi.modification.link.CommonTest;
-import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
-import io.codelaser.maddi.cst.api.expression.ConstructorCall;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.api.statement.ReturnStatement;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+
 import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.assertNotNull;
+import io.codelaser.maddi.cst.api.expression.ConstructorCall;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.statement.ReturnStatement;
+import io.codelaser.maddi.modification.link.CommonTest;
+import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
 
 /**
  * Task #33, OPENJDK front (this module's CommonTest uses the openjdk inspector): the elasticsearch

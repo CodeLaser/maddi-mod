@@ -1,22 +1,23 @@
 package io.codelaser.maddi.modification.link.typelink;
 
-import io.codelaser.maddi.modification.link.CommonTest;
-import io.codelaser.maddi.modification.link.impl.LinkComputerImpl;
-import io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl;
-import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
-import io.codelaser.maddi.modification.prepwork.variable.MethodLinkedVariables;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.TestInstance;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.util.HashMap;
 import java.util.Map;
 import java.util.stream.Stream;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInstance;
+
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.modification.link.CommonTest;
+import io.codelaser.maddi.modification.link.impl.LinkComputerImpl;
+import io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl;
+import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
+import io.codelaser.maddi.modification.prepwork.variable.MethodLinkedVariables;
 
 /**
  * Specification-by-example for {@code Stream.map(...)} (and closely related {@code Optional.map}) linking — the

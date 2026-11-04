@@ -1,16 +1,17 @@
 package io.codelaser.maddi.modification.analyzer.modification;
 
-import io.codelaser.maddi.cst.api.info.Info;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.api.element.SourceSet;
-import io.codelaser.maddi.inspection.resource.SourceSetImpl;
-import io.codelaser.maddi.modification.analyzer.CommonTest;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.*;
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.Test;
+
+import io.codelaser.maddi.cst.api.element.SourceSet;
+import io.codelaser.maddi.cst.api.info.Info;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.inspection.resource.SourceSetImpl;
+import io.codelaser.maddi.modification.analyzer.CommonTest;
 
 /**
  * What Mockito's verification calls do to the mock, as the analysis reads them (libs/mockito). Verifying an

@@ -17,6 +17,13 @@
 
 package io.codelaser.maddi.modification.analyzer.impl;
 
+import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.*;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.ImmutableImpl.*;
+
+import java.net.URI;
+import java.util.ArrayList;
+import java.util.List;
+
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.element.Element;
 import io.codelaser.maddi.cst.api.element.Source;
@@ -28,17 +35,9 @@ import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
-import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 import io.codelaser.maddi.modification.common.AnalysisHelper;
 import io.codelaser.maddi.modification.common.util.Culprits;
-
-import java.net.URI;
-import java.util.ArrayList;
-import java.util.List;
-
-import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.*;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.ImmutableImpl.*;
 
 /**
  * Why a type stops below {@code @Immutable}: {@code IMMUTABLE_CULPRIT}, the first rule it fails at the member that

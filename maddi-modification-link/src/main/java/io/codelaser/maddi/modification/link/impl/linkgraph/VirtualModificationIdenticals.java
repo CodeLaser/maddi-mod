@@ -1,11 +1,5 @@
 package io.codelaser.maddi.modification.link.impl.linkgraph;
 
-import io.codelaser.maddi.modification.prepwork.Util;
-import io.codelaser.maddi.modification.prepwork.variable.Link;
-import io.codelaser.maddi.modification.prepwork.variable.LinkNature;
-import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
-import io.codelaser.maddi.cst.api.variable.Variable;
-
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
@@ -14,6 +8,12 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+
+import io.codelaser.maddi.cst.api.variable.Variable;
+import io.codelaser.maddi.modification.prepwork.Util;
+import io.codelaser.maddi.modification.prepwork.variable.Link;
+import io.codelaser.maddi.modification.prepwork.variable.LinkNature;
+import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
 
 public class VirtualModificationIdenticals {
 

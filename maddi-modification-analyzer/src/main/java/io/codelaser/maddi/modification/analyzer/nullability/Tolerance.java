@@ -17,15 +17,7 @@
 
 package io.codelaser.maddi.modification.analyzer.nullability;
 
-import io.codelaser.maddi.cst.api.expression.VariableExpression;
-import io.codelaser.maddi.cst.api.info.FieldInfo;
-import io.codelaser.maddi.cst.impl.analysis.NullAnnotations;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.ParameterInfo;
-import io.codelaser.maddi.cst.api.type.NullableState;
-import io.codelaser.maddi.cst.api.type.ParameterizedType;
-import io.codelaser.maddi.cst.api.variable.LocalVariable;
-import io.codelaser.maddi.cst.api.variable.Variable;
+import static io.codelaser.maddi.modification.analyzer.nullability.Types.*;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
@@ -36,7 +28,15 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.IntStream;
 
-import static io.codelaser.maddi.modification.analyzer.nullability.Types.*;
+import io.codelaser.maddi.cst.api.expression.VariableExpression;
+import io.codelaser.maddi.cst.api.info.FieldInfo;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.ParameterInfo;
+import io.codelaser.maddi.cst.api.type.NullableState;
+import io.codelaser.maddi.cst.api.type.ParameterizedType;
+import io.codelaser.maddi.cst.api.variable.LocalVariable;
+import io.codelaser.maddi.cst.api.variable.Variable;
+import io.codelaser.maddi.cst.impl.analysis.NullAnnotations;
 
 /**
  * CodeLaser/maddi-mod#68: a parameter callable from outside whose body tolerates null on every path is nullable,

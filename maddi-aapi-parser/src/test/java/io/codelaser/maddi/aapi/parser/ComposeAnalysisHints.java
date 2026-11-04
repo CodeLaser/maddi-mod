@@ -17,6 +17,15 @@
 
 package io.codelaser.maddi.aapi.parser;
 
+import java.io.IOException;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import ch.qos.logback.classic.Level;
 import io.codelaser.maddi.annotation.Immutable;
 import io.codelaser.maddi.cst.api.analysis.PropertyValueMap;
@@ -34,14 +43,6 @@ import io.codelaser.maddi.inspection.resource.InputConfigurationImpl;
 import io.codelaser.maddi.inspection.resource.SourceSetImpl;
 import io.codelaser.maddi.modification.prepwork.io.DecoratorImpl;
 import io.codelaser.maddi.modification.prepwork.io.LoadAnalysisResults;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.io.IOException;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.List;
-import java.util.Map;
 
 /**
  * Writes first-cut analysis hint sources for a whole library, from its JAR: one {@code PACKAGE_NAME} class per

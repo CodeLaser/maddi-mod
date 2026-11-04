@@ -17,6 +17,25 @@
 
 package io.codelaser.maddi.run.openjdkmain;
 
+import static io.codelaser.maddi.inspection.api.integration.JavaInspector.InvalidationState.*;
+import static org.junit.jupiter.api.Assertions.*;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.function.Consumer;
+import java.util.function.Predicate;
+
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
 import io.codelaser.maddi.callgraph.CallGraphContributions;
 import io.codelaser.maddi.callgraph.ComputeAnalysisOrder;
 import io.codelaser.maddi.callgraph.ComputeCallGraph;
@@ -33,24 +52,6 @@ import io.codelaser.maddi.inspection.resource.SourceSetImpl;
 import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
 import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
 import io.codelaser.maddi.modification.prepwork.io.AnalysisFingerprint;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
-
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.TreeMap;
-import java.util.function.Consumer;
-import java.util.function.Predicate;
-
-import static io.codelaser.maddi.inspection.api.integration.JavaInspector.InvalidationState.*;
-import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * The analysis on the objects a partial re-parse leaves, in one warm inspector: prep over the whole universe (the

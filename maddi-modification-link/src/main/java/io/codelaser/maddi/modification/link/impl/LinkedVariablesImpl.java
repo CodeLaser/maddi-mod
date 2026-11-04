@@ -1,15 +1,16 @@
 package io.codelaser.maddi.modification.link.impl;
 
-import io.codelaser.maddi.modification.prepwork.Util;
-import io.codelaser.maddi.modification.prepwork.variable.LinkedVariables;
-import io.codelaser.maddi.modification.prepwork.variable.Links;
-import io.codelaser.maddi.cst.api.variable.Variable;
-import org.jetbrains.annotations.NotNull;
-
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.stream.Collectors;
+
+import org.jetbrains.annotations.NotNull;
+
+import io.codelaser.maddi.cst.api.variable.Variable;
+import io.codelaser.maddi.modification.prepwork.Util;
+import io.codelaser.maddi.modification.prepwork.variable.LinkedVariables;
+import io.codelaser.maddi.modification.prepwork.variable.Links;
 
 public record LinkedVariablesImpl(Map<Variable, Links> links) implements LinkedVariables {
 

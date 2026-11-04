@@ -17,14 +17,28 @@
 
 package io.codelaser.maddi.modification.analyzer.impl;
 
-import io.codelaser.maddi.modification.prepwork.variable.MethodLinkedVariables;
-import io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl;
-import io.codelaser.maddi.modification.prepwork.variable.Link;
-import io.codelaser.maddi.modification.prepwork.Util;
-import io.codelaser.maddi.modification.analyzer.IteratingAnalyzer;
-import io.codelaser.maddi.modification.analyzer.TypeEventualAnalyzer;
-import io.codelaser.maddi.modification.analyzer.TypeImmutableAnalyzer;
-import io.codelaser.maddi.modification.common.defaults.ContractReader;
+import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.EVENTUALLY_IMMUTABLE_TYPE;
+import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.EVENTUALLY_NON_MODIFYING_METHOD;
+import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.EVENTUALLY_UNMODIFIED_PARAMETER;
+import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.EVENTUAL_METHOD;
+import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.FINAL_FIELD;
+import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.IMMUTABLE_TYPE;
+import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.NON_MODIFYING_METHOD;
+import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.UNMODIFIED_PARAMETER;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.EventualImpl.NOT_EVENTUAL;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
+
 import io.codelaser.maddi.cst.api.analysis.Message;
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.expression.Assignment;
@@ -42,7 +56,6 @@ import io.codelaser.maddi.cst.api.info.FieldInfo;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.api.runtime.Runtime;
 import io.codelaser.maddi.cst.api.statement.AssertStatement;
 import io.codelaser.maddi.cst.api.statement.Block;
@@ -50,39 +63,26 @@ import io.codelaser.maddi.cst.api.statement.IfElseStatement;
 import io.codelaser.maddi.cst.api.statement.LocalTypeDeclaration;
 import io.codelaser.maddi.cst.api.statement.LocalVariableCreation;
 import io.codelaser.maddi.cst.api.statement.ReturnStatement;
+import io.codelaser.maddi.cst.api.statement.Statement;
 import io.codelaser.maddi.cst.api.statement.SynchronizedStatement;
 import io.codelaser.maddi.cst.api.statement.ThrowStatement;
 import io.codelaser.maddi.cst.api.statement.TryStatement;
-import io.codelaser.maddi.cst.api.statement.Statement;
 import io.codelaser.maddi.cst.api.statement.YieldStatement;
+import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.api.variable.DependentVariable;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.cst.api.variable.This;
 import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
-
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.TreeSet;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Collectors;
-
-import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.EVENTUAL_METHOD;
-import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.FINAL_FIELD;
-import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.IMMUTABLE_TYPE;
-import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.EVENTUALLY_IMMUTABLE_TYPE;
-import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.EVENTUALLY_NON_MODIFYING_METHOD;
-import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.EVENTUALLY_UNMODIFIED_PARAMETER;
-import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.NON_MODIFYING_METHOD;
-import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.UNMODIFIED_PARAMETER;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.EventualImpl.NOT_EVENTUAL;
+import io.codelaser.maddi.modification.analyzer.IteratingAnalyzer;
+import io.codelaser.maddi.modification.analyzer.TypeEventualAnalyzer;
+import io.codelaser.maddi.modification.analyzer.TypeImmutableAnalyzer;
+import io.codelaser.maddi.modification.common.defaults.ContractReader;
+import io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl;
+import io.codelaser.maddi.modification.prepwork.Util;
+import io.codelaser.maddi.modification.prepwork.variable.Link;
+import io.codelaser.maddi.modification.prepwork.variable.MethodLinkedVariables;
 
 public class TypeEventualAnalyzerImpl extends CommonAnalyzerImpl implements TypeEventualAnalyzer {
 

@@ -17,7 +17,16 @@
 
 package io.codelaser.maddi.modification.common.defaults;
 
-import io.codelaser.maddi.modification.common.CommonTest;
+import static io.codelaser.maddi.modification.common.defaults.ShallowMethodAnalyzer.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import java.io.IOException;
+import java.util.List;
+import java.util.Map;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.type.NullableState;
@@ -25,15 +34,7 @@ import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl.NullabilityImpl;
 import io.codelaser.maddi.inspection.api.integration.JavaInspector;
 import io.codelaser.maddi.inspection.resource.SourceSetImpl;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-
-import java.io.IOException;
-import java.util.List;
-import java.util.Map;
-
-import static io.codelaser.maddi.modification.common.defaults.ShallowMethodAnalyzer.*;
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import io.codelaser.maddi.modification.common.CommonTest;
 
 /**
  * The override rule's type-argument states do not depend on the order of {@code overrides()}, a set (maddi-mod#47):

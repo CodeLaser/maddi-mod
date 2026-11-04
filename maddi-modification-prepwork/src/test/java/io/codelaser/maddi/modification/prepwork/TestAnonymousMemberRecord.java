@@ -1,11 +1,12 @@
 package io.codelaser.maddi.modification.prepwork;
 
-import io.codelaser.maddi.cst.api.info.TypeInfo;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+
 import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.assertNotNull;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
 
 /**
  * elasticsearch first contact: a member record of an anonymous class, forward-referenced from a sibling

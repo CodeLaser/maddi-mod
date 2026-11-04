@@ -17,18 +17,19 @@
 
 package io.codelaser.maddi.modification.analyzer.eventual;
 
-import io.codelaser.maddi.modification.analyzer.CommonTest;
-import io.codelaser.maddi.modification.analyzer.impl.EventualCluster;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
-import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
+import static org.junit.jupiter.api.Assertions.*;
+
+import java.util.Set;
+
 import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import java.util.Set;
-
-import static org.junit.jupiter.api.Assertions.*;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
+import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
+import io.codelaser.maddi.modification.analyzer.CommonTest;
+import io.codelaser.maddi.modification.analyzer.impl.EventualCluster;
 
 /**
  * Greatest-fixpoint, step 1: {@link EventualCluster} <em>witnesses</em> every optimistic decision. When

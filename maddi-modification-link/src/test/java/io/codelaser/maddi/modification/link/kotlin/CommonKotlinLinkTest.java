@@ -1,5 +1,18 @@
 package io.codelaser.maddi.modification.link.kotlin;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import org.junit.jupiter.api.BeforeAll;
+
 import io.codelaser.maddi.cst.api.element.SourceSet;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
@@ -16,18 +29,6 @@ import io.codelaser.maddi.modification.link.impl.LinkComputerImpl;
 import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
 import io.codelaser.maddi.modification.prepwork.io.LoadAnalysisResults;
 import io.codelaser.maddi.modification.prepwork.variable.MethodLinkedVariables;
-import org.junit.jupiter.api.BeforeAll;
-
-import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.List;
-import java.util.Set;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /*
  Linking KOTLIN input, from inside the link module. Every fixture is a pair: a Kotlin class `k.X` and the Java class

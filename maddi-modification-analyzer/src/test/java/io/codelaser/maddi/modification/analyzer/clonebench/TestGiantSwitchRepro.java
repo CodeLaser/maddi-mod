@@ -1,14 +1,15 @@
 package io.codelaser.maddi.modification.analyzer.clonebench;
 
-import io.codelaser.maddi.modification.common.CloneBenchCorpus;
-import io.codelaser.maddi.modification.analyzer.CommonTest;
-import io.codelaser.maddi.cst.api.info.Info;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import org.junit.jupiter.api.Test;
-
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+
+import org.junit.jupiter.api.Test;
+
+import io.codelaser.maddi.cst.api.info.Info;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.modification.analyzer.CommonTest;
+import io.codelaser.maddi.modification.common.CloneBenchCorpus;
 
 /*
 Performance regression guard for the Function18752956_file2311713 grind-to-halt (a ~100-arm switch in a loop:

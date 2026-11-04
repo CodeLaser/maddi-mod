@@ -1,14 +1,16 @@
 package io.codelaser.maddi.modification.link.impl;
 
-import io.codelaser.maddi.modification.link.impl.translate.VariableTranslationMap;
-import io.codelaser.maddi.modification.link.vf.VirtualFieldComputer;
-import io.codelaser.maddi.modification.link.vf.VirtualFields;
-import io.codelaser.maddi.modification.prepwork.Util;
-import io.codelaser.maddi.modification.prepwork.variable.Link;
-import io.codelaser.maddi.modification.prepwork.variable.LinkNature;
-import io.codelaser.maddi.modification.prepwork.variable.Links;
-import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
-import io.codelaser.maddi.modification.prepwork.variable.ReturnVariable;
+import static io.codelaser.maddi.modification.link.impl.LinkNatureImpl.CONTAINS_AS_MEMBER;
+import static io.codelaser.maddi.modification.prepwork.Util.virtual;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import io.codelaser.maddi.cst.api.info.FieldInfo;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
@@ -20,16 +22,15 @@ import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.api.variable.DependentVariable;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.cst.api.variable.Variable;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Set;
-import java.util.stream.Collectors;
-
-import static io.codelaser.maddi.modification.link.impl.LinkNatureImpl.CONTAINS_AS_MEMBER;
-import static io.codelaser.maddi.modification.prepwork.Util.virtual;
+import io.codelaser.maddi.modification.link.impl.translate.VariableTranslationMap;
+import io.codelaser.maddi.modification.link.vf.VirtualFieldComputer;
+import io.codelaser.maddi.modification.link.vf.VirtualFields;
+import io.codelaser.maddi.modification.prepwork.Util;
+import io.codelaser.maddi.modification.prepwork.variable.Link;
+import io.codelaser.maddi.modification.prepwork.variable.LinkNature;
+import io.codelaser.maddi.modification.prepwork.variable.Links;
+import io.codelaser.maddi.modification.prepwork.variable.ReturnVariable;
+import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
 
 /**
  * The FI <em>lifting engine</em>: given the links of the lambda/method-reference bound to an FI parameter (the wrapped

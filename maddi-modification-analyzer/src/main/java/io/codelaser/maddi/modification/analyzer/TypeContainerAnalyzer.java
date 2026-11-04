@@ -18,10 +18,7 @@
 package io.codelaser.maddi.modification.analyzer;
 
 import io.codelaser.maddi.annotation.Modified;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
-
-import java.util.Set;
 
 /*
 Level 4.2.

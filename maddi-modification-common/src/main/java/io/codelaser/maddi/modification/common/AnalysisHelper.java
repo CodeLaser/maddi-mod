@@ -17,18 +17,18 @@
 
 package io.codelaser.maddi.modification.common;
 
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.FALSE;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.TRUE;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.*;
+
+import java.util.Map;
+
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.element.SourceSet;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
-
-import java.util.Map;
-
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.FALSE;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.TRUE;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.*;
 
 public class AnalysisHelper {
 

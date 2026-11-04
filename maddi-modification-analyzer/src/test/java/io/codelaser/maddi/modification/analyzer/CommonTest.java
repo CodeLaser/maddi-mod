@@ -1,24 +1,7 @@
 package io.codelaser.maddi.modification.analyzer;
 
-import ch.qos.logback.classic.Level;
-import ch.qos.logback.classic.Logger;
-import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
-import io.codelaser.maddi.modification.analyzer.impl.ModAnalyzerForTesting;
-import io.codelaser.maddi.modification.analyzer.impl.SingleIterationAnalyzerImpl;
-import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
-import io.codelaser.maddi.modification.prepwork.io.LoadAnalysisResults;
-import io.codelaser.maddi.cst.api.element.SourceSet;
-import io.codelaser.maddi.cst.api.info.Info;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.api.runtime.Runtime;
-import io.codelaser.maddi.cst.api.statement.Statement;
-import io.codelaser.maddi.inspection.api.integration.JavaInspector;
-import io.codelaser.maddi.inspection.resource.SourceSetImpl;
-import io.codelaser.maddi.support.SetOnceMap;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.BeforeEach;
-import org.slf4j.LoggerFactory;
+import static io.codelaser.maddi.inspection.resource.SourceSetImpl.testProtocolSourceSet;
+import static io.codelaser.maddi.modification.prepwork.io.LoadAnalysisResults.ANALYZED_RESULTS;
 
 import java.io.IOException;
 import java.net.URI;
@@ -28,8 +11,26 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import static io.codelaser.maddi.modification.prepwork.io.LoadAnalysisResults.ANALYZED_RESULTS;
-import static io.codelaser.maddi.inspection.resource.SourceSetImpl.testProtocolSourceSet;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.slf4j.LoggerFactory;
+
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import io.codelaser.maddi.cst.api.element.SourceSet;
+import io.codelaser.maddi.cst.api.info.Info;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.runtime.Runtime;
+import io.codelaser.maddi.cst.api.statement.Statement;
+import io.codelaser.maddi.inspection.api.integration.JavaInspector;
+import io.codelaser.maddi.inspection.resource.SourceSetImpl;
+import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
+import io.codelaser.maddi.modification.analyzer.impl.ModAnalyzerForTesting;
+import io.codelaser.maddi.modification.analyzer.impl.SingleIterationAnalyzerImpl;
+import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
+import io.codelaser.maddi.modification.prepwork.io.LoadAnalysisResults;
+import io.codelaser.maddi.support.SetOnceMap;
 
 
 public abstract class CommonTest {

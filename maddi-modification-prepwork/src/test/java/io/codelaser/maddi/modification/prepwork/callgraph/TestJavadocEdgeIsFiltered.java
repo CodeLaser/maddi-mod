@@ -17,18 +17,19 @@
 
 package io.codelaser.maddi.modification.prepwork.callgraph;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import java.util.List;
+
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
 import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.graph.G;
 import io.codelaser.maddi.graph.V;
 import io.codelaser.maddi.modification.prepwork.CommonTest;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-
-import java.util.List;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * <b>A javadoc link obeys the same {@code accept()} as every other edge.</b> {@code doJavadoc} used to merge an edge

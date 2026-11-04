@@ -17,6 +17,15 @@
 
 package io.codelaser.maddi.modification.analyzer.nullability;
 
+import static io.codelaser.maddi.modification.analyzer.nullability.Types.*;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
 import io.codelaser.maddi.cst.api.element.Element;
 import io.codelaser.maddi.cst.api.expression.Cast;
 import io.codelaser.maddi.cst.api.expression.ConstructorCall;
@@ -31,15 +40,6 @@ import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.statement.LocalVariableCreation;
 import io.codelaser.maddi.cst.api.type.NullableState;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
-
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-
-import static io.codelaser.maddi.modification.analyzer.nullability.Types.*;
 
 /**
  * Kotlin: the type parameters the null-marked code holds non-null ({@link Report#nonNullTypeParameter}),

@@ -1,12 +1,12 @@
 package io.codelaser.maddi.modification.prepwork.variable;
 
-import io.codelaser.maddi.cst.api.analysis.Value;
-import io.codelaser.maddi.cst.api.translate.TranslationMap;
-import io.codelaser.maddi.cst.api.variable.Variable;
-
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
+
+import io.codelaser.maddi.cst.api.analysis.Value;
+import io.codelaser.maddi.cst.api.translate.TranslationMap;
+import io.codelaser.maddi.cst.api.variable.Variable;
 
 public interface MethodLinkedVariables extends Value {
     // content

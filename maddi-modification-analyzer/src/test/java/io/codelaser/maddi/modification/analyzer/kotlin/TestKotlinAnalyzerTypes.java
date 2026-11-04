@@ -1,10 +1,10 @@
 package io.codelaser.maddi.modification.analyzer.kotlin;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
 import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /*
  Type-level verdicts on Kotlin's type shapes: an immutable value class, a mutable counter, a collection holder, a

@@ -1,17 +1,18 @@
 package io.codelaser.maddi.modification.analyzer.nullability;
 
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-import io.codelaser.maddi.cst.api.expression.MethodCall;
-import io.codelaser.maddi.cst.api.expression.VariableExpression;
-import io.codelaser.maddi.cst.api.variable.Variable;
-import io.codelaser.maddi.cst.api.statement.Statement;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+import io.codelaser.maddi.cst.api.expression.MethodCall;
+import io.codelaser.maddi.cst.api.expression.VariableExpression;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.statement.Statement;
+import io.codelaser.maddi.cst.api.variable.Variable;
 
 /**
  * {@link ReadNarrowing}: a read narrowed by the classes that can reach it.

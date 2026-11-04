@@ -1,5 +1,14 @@
 package io.codelaser.maddi.modification.link.impl.linkgraph;
 
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Stream;
+
+import io.codelaser.maddi.cst.api.variable.This;
+import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.modification.link.impl.Gate;
 import io.codelaser.maddi.modification.link.impl.LinkNatureImpl;
 import io.codelaser.maddi.modification.link.impl.localvar.MarkerVariable;
@@ -10,15 +19,6 @@ import io.codelaser.maddi.modification.prepwork.variable.LinkNature;
 import io.codelaser.maddi.modification.prepwork.variable.Links;
 import io.codelaser.maddi.modification.prepwork.variable.ReturnVariable;
 import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
-import io.codelaser.maddi.cst.api.variable.This;
-import io.codelaser.maddi.cst.api.variable.Variable;
-
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.stream.Stream;
 
 public record FollowGraph(Graph graph) {
     // sorting is needed to consistently take the same direction for tests

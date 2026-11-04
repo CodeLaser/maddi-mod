@@ -17,11 +17,11 @@
 
 package io.codelaser.maddi.modification.prepwork.variable.impl;
 
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.*;
+import org.junit.jupiter.api.Test;
 
 public class TestAssignments {
 

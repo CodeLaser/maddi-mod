@@ -17,21 +17,6 @@
 
 package io.codelaser.maddi.modification.prepwork.io;
 
-import io.codelaser.maddi.cst.api.analysis.Codec;
-import io.codelaser.maddi.cst.api.element.SourceSet;
-import io.codelaser.maddi.cst.api.info.Info;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.api.runtime.Runtime;
-import io.codelaser.maddi.cst.io.CodecImpl;
-import io.codelaser.maddi.inspection.api.integration.JavaInspector;
-import org.parsers.json.JSONParser;
-import org.parsers.json.Node;
-import org.parsers.json.ast.Array;
-import org.parsers.json.ast.JSONObject;
-import org.parsers.json.ast.KeyValuePair;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.*;
 import java.net.URL;
 import java.nio.file.Files;
@@ -45,6 +30,22 @@ import java.util.jar.JarInputStream;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
+
+import org.parsers.json.JSONParser;
+import org.parsers.json.Node;
+import org.parsers.json.ast.Array;
+import org.parsers.json.ast.JSONObject;
+import org.parsers.json.ast.KeyValuePair;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import io.codelaser.maddi.cst.api.analysis.Codec;
+import io.codelaser.maddi.cst.api.element.SourceSet;
+import io.codelaser.maddi.cst.api.info.Info;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.runtime.Runtime;
+import io.codelaser.maddi.cst.io.CodecImpl;
+import io.codelaser.maddi.inspection.api.integration.JavaInspector;
 
 /**
  * Loads analysis-result ("annotated API") archives, applying each stored hint to the corresponding {@link Info}.

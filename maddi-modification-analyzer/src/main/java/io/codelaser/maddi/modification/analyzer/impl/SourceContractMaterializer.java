@@ -17,8 +17,15 @@
 
 package io.codelaser.maddi.modification.analyzer.impl;
 
-import io.codelaser.maddi.modification.common.defaults.ContractReader;
-import io.codelaser.maddi.modification.common.util.TolerantWrite;
+import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.IGNORE_MODIFICATIONS_FIELD;
+import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.IMMUTABLE_FIELD;
+import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.IMMUTABLE_METHOD;
+import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.INDEPENDENT_METHOD;
+import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.NON_MODIFYING_METHOD;
+import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.STATIC_SIDE_EFFECTS_METHOD;
+
+import java.util.concurrent.atomic.AtomicInteger;
+
 import io.codelaser.maddi.cst.api.analysis.Property;
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.expression.AnnotationExpression;
@@ -28,15 +35,8 @@ import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.runtime.Runtime;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
-
-import java.util.concurrent.atomic.AtomicInteger;
-
-import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.IGNORE_MODIFICATIONS_FIELD;
-import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.IMMUTABLE_FIELD;
-import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.IMMUTABLE_METHOD;
-import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.INDEPENDENT_METHOD;
-import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.NON_MODIFYING_METHOD;
-import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.STATIC_SIDE_EFFECTS_METHOD;
+import io.codelaser.maddi.modification.common.defaults.ContractReader;
+import io.codelaser.maddi.modification.common.util.TolerantWrite;
 
 /**
  * Writes a user's <em>dynamic type</em> contract on a SOURCE field or method into {@code analysis()}.

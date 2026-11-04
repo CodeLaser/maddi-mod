@@ -17,15 +17,16 @@
 
 package io.codelaser.maddi.modification.link.impl;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.Test;
+
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.modification.link.CommonTest;
 import io.codelaser.maddi.modification.link.LinkComputer;
 import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.Test;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * Linking a method again, with nothing it reads changed, must give the same summary. The first statement of a

@@ -17,6 +17,17 @@
 
 package io.codelaser.maddi.modification.analyzer.nullability;
 
+import static io.codelaser.maddi.modification.analyzer.nullability.Types.*;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
 import io.codelaser.maddi.cst.api.expression.ArrayInitializer;
 import io.codelaser.maddi.cst.api.expression.Assignment;
 import io.codelaser.maddi.cst.api.expression.BinaryOperator;
@@ -42,17 +53,6 @@ import io.codelaser.maddi.cst.api.variable.DependentVariable;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.cst.api.variable.LocalVariable;
 import io.codelaser.maddi.cst.api.variable.Variable;
-
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-
-import static io.codelaser.maddi.modification.analyzer.nullability.Types.*;
 
 /**
  * Where null enters the graph: a seed is a node that may be null by itself, with its origin (the cause chains end

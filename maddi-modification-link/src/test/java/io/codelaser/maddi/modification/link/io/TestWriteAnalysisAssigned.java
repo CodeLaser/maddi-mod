@@ -17,21 +17,8 @@
 
 package io.codelaser.maddi.modification.link.io;
 
-import io.codelaser.maddi.modification.link.CommonTest;
-import io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl;
-import io.codelaser.maddi.modification.prepwork.variable.MethodLinkedVariables;
-import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
-import io.codelaser.maddi.cst.api.analysis.Codec;
-import io.codelaser.maddi.cst.api.info.FieldInfo;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.api.variable.Variable;
-import io.codelaser.maddi.modification.prepwork.io.LoadAnalysisResults;
-import io.codelaser.maddi.modification.prepwork.io.WriteAnalysisResults;
-import io.codelaser.maddi.util.Trie;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
+import static io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl.METHOD_LINKS;
+import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.File;
 import java.io.IOException;
@@ -39,8 +26,22 @@ import java.nio.file.Files;
 import java.util.List;
 import java.util.Set;
 
-import static io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl.METHOD_LINKS;
-import static org.junit.jupiter.api.Assertions.*;
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+import io.codelaser.maddi.cst.api.analysis.Codec;
+import io.codelaser.maddi.cst.api.info.FieldInfo;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.variable.Variable;
+import io.codelaser.maddi.modification.link.CommonTest;
+import io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl;
+import io.codelaser.maddi.modification.prepwork.io.LoadAnalysisResults;
+import io.codelaser.maddi.modification.prepwork.io.WriteAnalysisResults;
+import io.codelaser.maddi.modification.prepwork.variable.MethodLinkedVariables;
+import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
+import io.codelaser.maddi.util.Trie;
 
 /**
  * The 'assigned' own-field set survives the write/read round-trip. The wire format appends an

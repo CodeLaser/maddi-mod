@@ -17,7 +17,10 @@
 
 package io.codelaser.maddi.modification.analyzer.impl;
 
-import io.codelaser.maddi.modification.common.AnalysisHelper;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.expression.Assignment;
 import io.codelaser.maddi.cst.api.expression.ConstructorCall;
@@ -31,10 +34,7 @@ import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
-
-import java.util.ArrayList;
-import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
+import io.codelaser.maddi.modification.common.AnalysisHelper;
 
 /**
  * Infers what a field HOLDS, as opposed to what its declared type says it may hold — the producer for

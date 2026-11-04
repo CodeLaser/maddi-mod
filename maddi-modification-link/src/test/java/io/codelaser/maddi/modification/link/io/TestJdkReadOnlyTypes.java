@@ -17,19 +17,10 @@
 
 package io.codelaser.maddi.modification.link.io;
 
-import io.codelaser.maddi.cst.api.analysis.Value;
-import io.codelaser.maddi.cst.api.element.SourceSet;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.ParameterInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.api.type.ParameterizedType;
-import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
-import io.codelaser.maddi.inspection.api.integration.JavaInspector;
-import io.codelaser.maddi.inspection.resource.SourceSetImpl;
-import io.codelaser.maddi.modification.common.CommonTest;
-import io.codelaser.maddi.modification.prepwork.io.LoadAnalysisResults;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Test;
+import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.IMMUTABLE_TYPE;
+import static io.codelaser.maddi.modification.prepwork.io.LoadAnalysisResults.ANALYZED_RESULTS_JDK;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.lang.annotation.Annotation;
@@ -62,10 +53,20 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.IMMUTABLE_TYPE;
-import static io.codelaser.maddi.modification.prepwork.io.LoadAnalysisResults.ANALYZED_RESULTS_JDK;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+
+import io.codelaser.maddi.cst.api.analysis.Value;
+import io.codelaser.maddi.cst.api.element.SourceSet;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.ParameterInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.type.ParameterizedType;
+import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
+import io.codelaser.maddi.inspection.api.integration.JavaInspector;
+import io.codelaser.maddi.inspection.resource.SourceSetImpl;
+import io.codelaser.maddi.modification.common.CommonTest;
+import io.codelaser.maddi.modification.prepwork.io.LoadAnalysisResults;
 
 /**
  * The JDK hints of two families of types the JDK itself marks as unchangeable, the step after

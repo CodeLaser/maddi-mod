@@ -17,12 +17,12 @@
 
 package io.codelaser.maddi.modification.analyzer;
 
+import java.util.Set;
+
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.info.FieldInfo;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
-
-import java.util.Set;
 
 /*
 Phase 4.1

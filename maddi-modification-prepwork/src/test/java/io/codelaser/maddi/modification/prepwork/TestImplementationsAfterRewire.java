@@ -17,6 +17,22 @@
 
 package io.codelaser.maddi.modification.prepwork;
 
+import static io.codelaser.maddi.inspection.integration.JavaInspectorImpl.JAR_WITH_PATH_PREFIX;
+import static io.codelaser.maddi.inspection.integration.JavaInspectorImpl.TEST_PROTOCOL_PREFIX;
+import static org.junit.jupiter.api.Assertions.*;
+
+import java.io.IOException;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
+
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.info.InfoMap;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
@@ -29,21 +45,6 @@ import io.codelaser.maddi.inspection.api.parser.Summary;
 import io.codelaser.maddi.inspection.api.resource.InputConfiguration;
 import io.codelaser.maddi.inspection.integration.JavaInspectorImpl;
 import io.codelaser.maddi.inspection.resource.InputConfigurationImpl;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-
-import java.io.IOException;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.stream.Collectors;
-import java.util.stream.StreamSupport;
-
-import static io.codelaser.maddi.inspection.integration.JavaInspectorImpl.JAR_WITH_PATH_PREFIX;
-import static io.codelaser.maddi.inspection.integration.JavaInspectorImpl.TEST_PROTOCOL_PREFIX;
-import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * {@code IMPLEMENTATIONS} is the one analysis value that points <em>against</em> the direction of rewiring:

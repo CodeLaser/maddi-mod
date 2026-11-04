@@ -1,14 +1,14 @@
 package io.codelaser.maddi.modification.link.impl.translate;
 
+import java.util.HashMap;
+import java.util.Map;
+
 import io.codelaser.maddi.cst.api.info.FieldInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.runtime.Runtime;
 import io.codelaser.maddi.cst.api.translate.TranslationMap;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.cst.api.variable.Variable;
-
-import java.util.HashMap;
-import java.util.Map;
 
 /*
  see e.g. TestStaticValuesRecord,7, interface inbetween

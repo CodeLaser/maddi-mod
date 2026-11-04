@@ -16,6 +16,17 @@
  */
 package io.codelaser.maddi.modification.analyzer.modification;
 
+import static io.codelaser.maddi.inspection.resource.SourceSetImpl.testProtocolSourceSet;
+import static io.codelaser.maddi.modification.common.CommonTest.javaInspectorWithExtras;
+import static org.junit.jupiter.api.Assertions.*;
+
+import java.util.List;
+import java.util.Map;
+
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
@@ -28,16 +39,6 @@ import io.codelaser.maddi.modification.analyzer.CycleBreakingStrategy;
 import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
 import io.codelaser.maddi.modification.common.util.TolerantWrite;
 import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-
-import java.util.List;
-import java.util.Map;
-
-import static io.codelaser.maddi.inspection.resource.SourceSetImpl.testProtocolSourceSet;
-import static io.codelaser.maddi.modification.common.CommonTest.javaInspectorWithExtras;
-import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * The shape of refactor-base's {@code Loop.LoopData}/{@code Try.TryData}: a bodiless method returning

@@ -17,8 +17,17 @@
 
 package io.codelaser.maddi.modification.analyzer.integration;
 
-import io.codelaser.maddi.modification.analyzer.CommonTest;
-import io.codelaser.maddi.modification.link.vf.VirtualFieldComputer;
+import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.*;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.ImmutableImpl.MUTABLE;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.DEPENDENT;
+import static org.junit.jupiter.api.Assertions.*;
+
+import java.util.List;
+
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.info.FieldInfo;
 import io.codelaser.maddi.cst.api.info.Info;
@@ -26,16 +35,7 @@ import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-
-import java.util.List;
-
-import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.*;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.ImmutableImpl.MUTABLE;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.DEPENDENT;
-import static org.junit.jupiter.api.Assertions.*;
+import io.codelaser.maddi.modification.analyzer.CommonTest;
 
 public class TestImmutable extends CommonTest {
 

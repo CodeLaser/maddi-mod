@@ -17,19 +17,6 @@
 
 package io.codelaser.maddi.modification.analyzer.nullability;
 
-import io.codelaser.maddi.cst.api.expression.*;
-import io.codelaser.maddi.cst.api.info.FieldInfo;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.ParameterInfo;
-import io.codelaser.maddi.cst.api.statement.*;
-import io.codelaser.maddi.cst.api.type.NullableState;
-import io.codelaser.maddi.cst.api.variable.DependentVariable;
-import io.codelaser.maddi.cst.api.variable.FieldReference;
-import io.codelaser.maddi.cst.api.variable.LocalVariable;
-import io.codelaser.maddi.cst.api.variable.Variable;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.api.type.ParameterizedType;
-
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
@@ -37,6 +24,19 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
+
+import io.codelaser.maddi.cst.api.expression.*;
+import io.codelaser.maddi.cst.api.info.FieldInfo;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.ParameterInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.statement.*;
+import io.codelaser.maddi.cst.api.type.NullableState;
+import io.codelaser.maddi.cst.api.type.ParameterizedType;
+import io.codelaser.maddi.cst.api.variable.DependentVariable;
+import io.codelaser.maddi.cst.api.variable.FieldReference;
+import io.codelaser.maddi.cst.api.variable.LocalVariable;
+import io.codelaser.maddi.cst.api.variable.Variable;
 
 /**
  * The use-site pass (docs/design/nullability.md M4), first cut: per statement, the locals and parameters KNOWN

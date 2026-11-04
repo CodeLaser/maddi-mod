@@ -17,6 +17,9 @@
 
 package io.codelaser.maddi.modification.analyzer.impl;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.element.Element;
 import io.codelaser.maddi.cst.api.expression.Assignment;
@@ -39,9 +42,6 @@ import io.codelaser.maddi.modification.common.AnalysisHelper;
 import io.codelaser.maddi.modification.common.util.Culprits;
 import io.codelaser.maddi.modification.prepwork.variable.Links;
 import io.codelaser.maddi.modification.prepwork.variable.MethodLinkedVariables;
-
-import java.util.ArrayList;
-import java.util.List;
 
 /**
  * The culprit of a DEPENDENT verdict ({@link PropertyImpl#DEPENDENT_CULPRIT}), written beside it when a run asks for

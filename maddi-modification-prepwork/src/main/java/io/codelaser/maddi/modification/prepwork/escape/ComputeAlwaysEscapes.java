@@ -17,6 +17,8 @@
 
 package io.codelaser.maddi.modification.prepwork.escape;
 
+import java.util.List;
+
 import io.codelaser.maddi.cst.api.expression.ConstructorCall;
 import io.codelaser.maddi.cst.api.expression.Expression;
 import io.codelaser.maddi.cst.api.expression.Lambda;
@@ -24,8 +26,6 @@ import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.statement.*;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
-
-import java.util.List;
 
 
 public class ComputeAlwaysEscapes {

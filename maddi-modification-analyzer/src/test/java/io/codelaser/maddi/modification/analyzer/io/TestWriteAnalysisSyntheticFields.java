@@ -17,6 +17,25 @@
 
 package io.codelaser.maddi.modification.analyzer.io;
 
+import static io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl.METHOD_LINKS;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.util.List;
+
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import io.codelaser.maddi.cst.api.analysis.Codec;
+import io.codelaser.maddi.cst.api.info.FieldInfo;
+import io.codelaser.maddi.cst.api.info.Info;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.modification.analyzer.CommonTest;
 import io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl;
 import io.codelaser.maddi.modification.link.io.LinkCodec;
@@ -24,25 +43,7 @@ import io.codelaser.maddi.modification.prepwork.io.LoadAnalysisResults;
 import io.codelaser.maddi.modification.prepwork.io.WriteAnalysisResults;
 import io.codelaser.maddi.modification.prepwork.variable.MethodLinkedVariables;
 import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
-import io.codelaser.maddi.cst.api.analysis.Codec;
-import io.codelaser.maddi.cst.api.info.FieldInfo;
-import io.codelaser.maddi.cst.api.info.Info;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.util.Trie;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.Test;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.io.File;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.util.List;
-
-import static io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl.METHOD_LINKS;
-import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class TestWriteAnalysisSyntheticFields extends CommonTest {
     private static final Logger LOGGER = LoggerFactory.getLogger(TestWriteAnalysisSyntheticFields.class);

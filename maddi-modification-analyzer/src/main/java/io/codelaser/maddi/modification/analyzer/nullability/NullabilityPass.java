@@ -17,24 +17,7 @@
 
 package io.codelaser.maddi.modification.analyzer.nullability;
 
-import io.codelaser.maddi.cst.api.analysis.Property;
-import io.codelaser.maddi.cst.api.element.Element;
-import io.codelaser.maddi.cst.api.expression.Expression;
-import io.codelaser.maddi.cst.api.expression.MethodCall;
-import io.codelaser.maddi.cst.api.expression.MethodReference;
-import io.codelaser.maddi.cst.api.info.FieldInfo;
-import io.codelaser.maddi.cst.api.info.Info;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.ParameterInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.api.analysis.Value;
-import io.codelaser.maddi.cst.api.type.NullableState;
-import io.codelaser.maddi.cst.api.type.ParameterizedType;
-import io.codelaser.maddi.cst.api.variable.LocalVariable;
-import io.codelaser.maddi.cst.api.variable.Variable;
-import io.codelaser.maddi.cst.impl.analysis.NullAnnotations;
-import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
-import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
+import static io.codelaser.maddi.modification.analyzer.nullability.Types.*;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -45,7 +28,24 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import static io.codelaser.maddi.modification.analyzer.nullability.Types.*;
+import io.codelaser.maddi.cst.api.analysis.Property;
+import io.codelaser.maddi.cst.api.analysis.Value;
+import io.codelaser.maddi.cst.api.element.Element;
+import io.codelaser.maddi.cst.api.expression.Expression;
+import io.codelaser.maddi.cst.api.expression.MethodCall;
+import io.codelaser.maddi.cst.api.expression.MethodReference;
+import io.codelaser.maddi.cst.api.info.FieldInfo;
+import io.codelaser.maddi.cst.api.info.Info;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.ParameterInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.type.NullableState;
+import io.codelaser.maddi.cst.api.type.ParameterizedType;
+import io.codelaser.maddi.cst.api.variable.LocalVariable;
+import io.codelaser.maddi.cst.api.variable.Variable;
+import io.codelaser.maddi.cst.impl.analysis.NullAnnotations;
+import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
+import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 
 /**
  * Declaration nullability as reachability over the converged link facts (docs/design/nullability.md §4.1, M3).

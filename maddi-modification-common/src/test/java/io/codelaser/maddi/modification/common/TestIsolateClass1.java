@@ -1,12 +1,12 @@
 package io.codelaser.maddi.modification.common;
 
-import ch.qos.logback.classic.Level;
-import ch.qos.logback.classic.Logger;
-import io.codelaser.maddi.modification.common.util.IsolateClass;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.inspection.api.integration.JavaInspector;
-import io.codelaser.maddi.inspection.resource.SourceSetImpl;
+import static io.codelaser.maddi.modification.common.CommonTest.javaInspectorFactory;
+import static org.junit.jupiter.api.Assertions.*;
+
+import java.io.IOException;
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -14,12 +14,13 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
-import java.util.LinkedHashMap;
-import java.util.Map;
-
-import static io.codelaser.maddi.modification.common.CommonTest.javaInspectorFactory;
-import static org.junit.jupiter.api.Assertions.*;
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.inspection.api.integration.JavaInspector;
+import io.codelaser.maddi.inspection.resource.SourceSetImpl;
+import io.codelaser.maddi.modification.common.util.IsolateClass;
 
 /**
  * A class isolate emits a small source tree rather than one file: the isolated type in its own package, and one

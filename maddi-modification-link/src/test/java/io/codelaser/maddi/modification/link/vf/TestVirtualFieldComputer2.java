@@ -1,20 +1,21 @@
 package io.codelaser.maddi.modification.link.vf;
 
-import io.codelaser.maddi.modification.link.CommonTest;
-import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import java.io.File;
+import java.nio.file.Path;
+
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
 import io.codelaser.maddi.cst.api.expression.Assignment;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-
-import java.io.File;
-import java.nio.file.Path;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import io.codelaser.maddi.modification.link.CommonTest;
+import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
 
 public class TestVirtualFieldComputer2 extends CommonTest {
 

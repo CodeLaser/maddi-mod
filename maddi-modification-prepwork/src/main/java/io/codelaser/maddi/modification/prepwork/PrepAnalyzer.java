@@ -17,31 +17,6 @@
 
 package io.codelaser.maddi.modification.prepwork;
 
-import io.codelaser.maddi.callgraph.CallGraphContributions;
-import io.codelaser.maddi.cst.api.analysis.Value;
-import io.codelaser.maddi.modification.common.getset.ApplyGetSetTranslation;
-import io.codelaser.maddi.modification.common.AnalyzerException;
-import io.codelaser.maddi.modification.common.getset.GetSetHelper;
-import io.codelaser.maddi.inspection.api.parser.ParseResult;
-import io.codelaser.maddi.inspection.api.byname.ByNameReference;
-import io.codelaser.maddi.inspection.api.byname.ByNameSink;
-import io.codelaser.maddi.callgraph.ComputeAnalysisOrder;
-import io.codelaser.maddi.callgraph.ComputeCallGraph;
-import io.codelaser.maddi.modification.prepwork.callgraph.ComputePartOfConstructionFinalField;
-import io.codelaser.maddi.cst.api.analysis.Property;
-import io.codelaser.maddi.cst.api.element.ModuleInfo;
-import io.codelaser.maddi.cst.api.info.Info;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.api.runtime.Runtime;
-import io.codelaser.maddi.cst.api.statement.Block;
-import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
-import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
-import io.codelaser.maddi.graph.G;
-import io.codelaser.maddi.graph.util.TimedLogger;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -53,6 +28,32 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import io.codelaser.maddi.callgraph.CallGraphContributions;
+import io.codelaser.maddi.callgraph.ComputeAnalysisOrder;
+import io.codelaser.maddi.callgraph.ComputeCallGraph;
+import io.codelaser.maddi.cst.api.analysis.Property;
+import io.codelaser.maddi.cst.api.analysis.Value;
+import io.codelaser.maddi.cst.api.element.ModuleInfo;
+import io.codelaser.maddi.cst.api.info.Info;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.runtime.Runtime;
+import io.codelaser.maddi.cst.api.statement.Block;
+import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
+import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
+import io.codelaser.maddi.graph.G;
+import io.codelaser.maddi.graph.util.TimedLogger;
+import io.codelaser.maddi.inspection.api.byname.ByNameReference;
+import io.codelaser.maddi.inspection.api.byname.ByNameSink;
+import io.codelaser.maddi.inspection.api.parser.ParseResult;
+import io.codelaser.maddi.modification.common.AnalyzerException;
+import io.codelaser.maddi.modification.common.getset.ApplyGetSetTranslation;
+import io.codelaser.maddi.modification.common.getset.GetSetHelper;
+import io.codelaser.maddi.modification.prepwork.callgraph.ComputePartOfConstructionFinalField;
 
 /*
 do all the analysis of this phase

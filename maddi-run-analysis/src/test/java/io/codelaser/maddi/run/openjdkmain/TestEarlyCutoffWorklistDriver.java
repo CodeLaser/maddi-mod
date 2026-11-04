@@ -17,14 +17,35 @@
 
 package io.codelaser.maddi.run.openjdkmain;
 
-import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
-import io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl;
-import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
+import static io.codelaser.maddi.inspection.api.integration.JavaInspector.InvalidationState.*;
+import static org.junit.jupiter.api.Assertions.*;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
+import java.util.function.Function;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
+
+import javax.tools.JavaCompiler;
+import javax.tools.JavaFileObject;
+import javax.tools.StandardJavaFileManager;
+import javax.tools.StandardLocation;
+import javax.tools.ToolProvider;
+
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
 import io.codelaser.maddi.callgraph.ComputeAnalysisOrder;
 import io.codelaser.maddi.callgraph.ComputeCallGraph;
-import io.codelaser.maddi.modification.prepwork.callgraph.EarlyCutoffWorklist;
 import io.codelaser.maddi.callgraph.PrimaryTypeUseGraph;
-import io.codelaser.maddi.modification.prepwork.io.AnalysisFingerprint;
 import io.codelaser.maddi.cst.api.analysis.Property;
 import io.codelaser.maddi.cst.api.element.FingerPrint;
 import io.codelaser.maddi.cst.api.info.FieldInfo;
@@ -41,30 +62,11 @@ import io.codelaser.maddi.inspection.api.resource.InputConfiguration;
 import io.codelaser.maddi.inspection.openjdk.JavaInspectorImpl;
 import io.codelaser.maddi.inspection.resource.InputConfigurationImpl;
 import io.codelaser.maddi.inspection.resource.SourceSetImpl;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
-
-import javax.tools.JavaCompiler;
-import javax.tools.JavaFileObject;
-import javax.tools.StandardJavaFileManager;
-import javax.tools.StandardLocation;
-import javax.tools.ToolProvider;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.TreeMap;
-import java.util.TreeSet;
-import java.util.function.Function;
-import java.util.function.Predicate;
-import java.util.stream.Collectors;
-
-import static io.codelaser.maddi.inspection.api.integration.JavaInspector.InvalidationState.*;
-import static org.junit.jupiter.api.Assertions.*;
+import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
+import io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl;
+import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
+import io.codelaser.maddi.modification.prepwork.callgraph.EarlyCutoffWorklist;
+import io.codelaser.maddi.modification.prepwork.io.AnalysisFingerprint;
 
 /**
  * The early-cutoff capstone: the {@link EarlyCutoffWorklist} driving the <em>real</em> per-type recompute (prep +

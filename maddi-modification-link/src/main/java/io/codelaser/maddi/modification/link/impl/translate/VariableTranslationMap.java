@@ -1,7 +1,9 @@
 package io.codelaser.maddi.modification.link.impl.translate;
 
-import io.codelaser.maddi.modification.link.impl.SliceFactory;
-import io.codelaser.maddi.modification.prepwork.Util;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Objects;
+
 import io.codelaser.maddi.cst.api.expression.Expression;
 import io.codelaser.maddi.cst.api.expression.IntConstant;
 import io.codelaser.maddi.cst.api.expression.VariableExpression;
@@ -11,10 +13,8 @@ import io.codelaser.maddi.cst.api.runtime.Runtime;
 import io.codelaser.maddi.cst.api.translate.TranslationMap;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.api.variable.*;
-
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Objects;
+import io.codelaser.maddi.modification.link.impl.SliceFactory;
+import io.codelaser.maddi.modification.prepwork.Util;
 
 public class VariableTranslationMap implements TranslationMap {
     private final Runtime runtime;

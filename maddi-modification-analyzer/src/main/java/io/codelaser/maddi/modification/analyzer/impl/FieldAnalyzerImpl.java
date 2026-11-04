@@ -1,16 +1,18 @@
 package io.codelaser.maddi.modification.analyzer.impl;
 
-import io.codelaser.maddi.modification.common.util.TolerantWrite;
-import io.codelaser.maddi.modification.analyzer.FieldAnalyzer;
-import io.codelaser.maddi.modification.analyzer.IteratingAnalyzer;
-import io.codelaser.maddi.modification.common.AnalysisHelper;
-import io.codelaser.maddi.modification.link.impl.LinkNatureImpl;
-import io.codelaser.maddi.modification.link.impl.LinkVariable;
-import io.codelaser.maddi.modification.prepwork.Util;
-import io.codelaser.maddi.modification.prepwork.variable.*;
-import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
-import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
-import io.codelaser.maddi.modification.prepwork.variable.impl.VariableInfoImpl;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.FALSE;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.TRUE;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.INDEPENDENT;
+import static io.codelaser.maddi.modification.prepwork.callgraph.ComputePartOfConstructionFinalField.EMPTY_PART_OF_CONSTRUCTION;
+import static io.codelaser.maddi.modification.prepwork.callgraph.ComputePartOfConstructionFinalField.PART_OF_CONSTRUCTION;
+
+import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import io.codelaser.maddi.cst.api.analysis.Message;
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.expression.MethodReference;
@@ -24,18 +26,17 @@ import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.util.List;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
-
-import static io.codelaser.maddi.modification.prepwork.callgraph.ComputePartOfConstructionFinalField.EMPTY_PART_OF_CONSTRUCTION;
-import static io.codelaser.maddi.modification.prepwork.callgraph.ComputePartOfConstructionFinalField.PART_OF_CONSTRUCTION;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.FALSE;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.TRUE;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.INDEPENDENT;
+import io.codelaser.maddi.modification.analyzer.FieldAnalyzer;
+import io.codelaser.maddi.modification.analyzer.IteratingAnalyzer;
+import io.codelaser.maddi.modification.common.AnalysisHelper;
+import io.codelaser.maddi.modification.common.util.TolerantWrite;
+import io.codelaser.maddi.modification.link.impl.LinkNatureImpl;
+import io.codelaser.maddi.modification.link.impl.LinkVariable;
+import io.codelaser.maddi.modification.prepwork.Util;
+import io.codelaser.maddi.modification.prepwork.variable.*;
+import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
+import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
+import io.codelaser.maddi.modification.prepwork.variable.impl.VariableInfoImpl;
 
 public class FieldAnalyzerImpl extends CommonAnalyzerImpl implements FieldAnalyzer {
 

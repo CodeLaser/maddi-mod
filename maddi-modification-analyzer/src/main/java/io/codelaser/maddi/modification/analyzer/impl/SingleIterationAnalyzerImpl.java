@@ -17,31 +17,7 @@
 
 package io.codelaser.maddi.modification.analyzer.impl;
 
-import io.codelaser.maddi.modification.common.util.TolerantWrite;
-import io.codelaser.maddi.modification.analyzer.*;
-import io.codelaser.maddi.modification.common.defaults.ShallowTypeAnalyzer;
-import io.codelaser.maddi.modification.link.LinkComputer;
-import io.codelaser.maddi.modification.link.impl.Gate;
-import io.codelaser.maddi.modification.link.impl.LinkComputerImpl;
-import io.codelaser.maddi.modification.link.impl.ReceiverLevel;
-import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
-import io.codelaser.maddi.modification.prepwork.variable.MethodLinkedVariables;
-import io.codelaser.maddi.modification.prepwork.variable.VariableData;
-import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
-import io.codelaser.maddi.cst.api.analysis.Message;
-import io.codelaser.maddi.cst.api.analysis.PropertyValueMap;
-import io.codelaser.maddi.cst.api.element.Element;
-import io.codelaser.maddi.cst.api.statement.Statement;
-import io.codelaser.maddi.cst.api.info.FieldInfo;
-import io.codelaser.maddi.cst.api.info.Info;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.api.runtime.Runtime;
-import io.codelaser.maddi.cst.impl.analysis.AnalysisAccessRecorder;
-import io.codelaser.maddi.cst.impl.analysis.MessageImpl;
-import io.codelaser.maddi.inspection.api.integration.JavaInspector;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import static io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl.METHOD_LINKS;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -52,7 +28,32 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
-import static io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl.METHOD_LINKS;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import io.codelaser.maddi.cst.api.analysis.Message;
+import io.codelaser.maddi.cst.api.analysis.PropertyValueMap;
+import io.codelaser.maddi.cst.api.element.Element;
+import io.codelaser.maddi.cst.api.info.FieldInfo;
+import io.codelaser.maddi.cst.api.info.Info;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.runtime.Runtime;
+import io.codelaser.maddi.cst.api.statement.Statement;
+import io.codelaser.maddi.cst.impl.analysis.AnalysisAccessRecorder;
+import io.codelaser.maddi.cst.impl.analysis.MessageImpl;
+import io.codelaser.maddi.inspection.api.integration.JavaInspector;
+import io.codelaser.maddi.modification.analyzer.*;
+import io.codelaser.maddi.modification.common.defaults.ShallowTypeAnalyzer;
+import io.codelaser.maddi.modification.common.util.TolerantWrite;
+import io.codelaser.maddi.modification.link.LinkComputer;
+import io.codelaser.maddi.modification.link.impl.Gate;
+import io.codelaser.maddi.modification.link.impl.LinkComputerImpl;
+import io.codelaser.maddi.modification.link.impl.ReceiverLevel;
+import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
+import io.codelaser.maddi.modification.prepwork.variable.MethodLinkedVariables;
+import io.codelaser.maddi.modification.prepwork.variable.VariableData;
+import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
 
 public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, ModAnalyzerForTesting {
     private static final Logger LOGGER = LoggerFactory.getLogger(SingleIterationAnalyzerImpl.class);

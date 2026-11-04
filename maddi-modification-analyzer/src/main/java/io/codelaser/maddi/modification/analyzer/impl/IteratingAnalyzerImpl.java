@@ -17,23 +17,24 @@
 
 package io.codelaser.maddi.modification.analyzer.impl;
 
-import io.codelaser.maddi.modification.analyzer.nullability.Policy;
-import io.codelaser.maddi.modification.analyzer.nullability.World;
-import io.codelaser.maddi.modification.common.util.TolerantWrite;
-import io.codelaser.maddi.modification.analyzer.CycleBreakingStrategy;
-import io.codelaser.maddi.modification.analyzer.IteratingAnalyzer;
-import io.codelaser.maddi.modification.analyzer.SingleIterationAnalyzer;
-import io.codelaser.maddi.cst.api.analysis.Message;
-import io.codelaser.maddi.cst.api.info.Info;
-import io.codelaser.maddi.inspection.api.integration.JavaInspector;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import io.codelaser.maddi.cst.api.analysis.Message;
+import io.codelaser.maddi.cst.api.info.Info;
+import io.codelaser.maddi.inspection.api.integration.JavaInspector;
+import io.codelaser.maddi.modification.analyzer.CycleBreakingStrategy;
+import io.codelaser.maddi.modification.analyzer.IteratingAnalyzer;
+import io.codelaser.maddi.modification.analyzer.SingleIterationAnalyzer;
+import io.codelaser.maddi.modification.analyzer.nullability.Policy;
+import io.codelaser.maddi.modification.analyzer.nullability.World;
+import io.codelaser.maddi.modification.common.util.TolerantWrite;
 
 public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements IteratingAnalyzer {
     private static final Logger LOGGER = LoggerFactory.getLogger(IteratingAnalyzerImpl.class);

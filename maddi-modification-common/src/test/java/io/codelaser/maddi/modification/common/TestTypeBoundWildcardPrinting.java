@@ -1,11 +1,12 @@
 package io.codelaser.maddi.modification.common;
 
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
 
 // bytecode models a type-parameter bound 'T extends X' with an EXTENDS wildcard on the bound; the printer must
 // not render that as the invalid '<T extends ? extends X>' (this surfaced when IsolateMethod stubbed such a

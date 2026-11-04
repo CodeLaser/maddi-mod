@@ -17,27 +17,25 @@
 
 package io.codelaser.maddi.modification.prepwork.callgraph;
 
-import io.codelaser.maddi.modification.prepwork.CommonTest;
-import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
-import io.codelaser.maddi.cst.api.analysis.Value;
-import io.codelaser.maddi.cst.api.info.FieldInfo;
-import io.codelaser.maddi.cst.api.info.Info;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
-import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
-import io.codelaser.maddi.graph.G;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.FALSE;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.TRUE;
+import static io.codelaser.maddi.modification.prepwork.callgraph.ComputePartOfConstructionFinalField.EMPTY_PART_OF_CONSTRUCTION;
+import static io.codelaser.maddi.modification.prepwork.callgraph.ComputePartOfConstructionFinalField.PART_OF_CONSTRUCTION;
+import static org.junit.jupiter.api.Assertions.*;
+
+import java.util.List;
+
 import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import java.util.List;
-import java.util.stream.Collectors;
-
-import static io.codelaser.maddi.modification.prepwork.callgraph.ComputePartOfConstructionFinalField.EMPTY_PART_OF_CONSTRUCTION;
-import static io.codelaser.maddi.modification.prepwork.callgraph.ComputePartOfConstructionFinalField.PART_OF_CONSTRUCTION;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.FALSE;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.TRUE;
-import static org.junit.jupiter.api.Assertions.*;
+import io.codelaser.maddi.cst.api.analysis.Value;
+import io.codelaser.maddi.cst.api.info.FieldInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
+import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
+import io.codelaser.maddi.modification.prepwork.CommonTest;
+import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
 
 public class TestComputePartOfConstruction extends CommonTest {
     // A copy of TestCallGraph.INPUT3: that test moved to maddi-callgraph with the call graph (split stage 2),

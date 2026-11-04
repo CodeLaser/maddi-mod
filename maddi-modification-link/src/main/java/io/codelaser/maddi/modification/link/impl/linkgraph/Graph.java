@@ -1,26 +1,6 @@
 package io.codelaser.maddi.modification.link.impl.linkgraph;
 
-import io.codelaser.maddi.modification.link.impl.Gate;
-import io.codelaser.maddi.modification.link.impl.LinkNatureImpl;
-import io.codelaser.maddi.modification.link.impl.graph.Fact;
-import io.codelaser.maddi.modification.link.impl.graph.IncrementalFixpointEngine;
-import io.codelaser.maddi.modification.link.impl.graph.LabeledGraph;
-import io.codelaser.maddi.modification.prepwork.variable.ObjectCreationVariable;
-import io.codelaser.maddi.modification.prepwork.variable.ReturnVariable;
-import io.codelaser.maddi.modification.link.impl.graph.DegradedAnalysisException;
-import io.codelaser.maddi.modification.link.impl.localvar.IntermediateVariable;
-import io.codelaser.maddi.modification.link.impl.localvar.MarkerVariable;
-import io.codelaser.maddi.modification.link.impl.localvar.SharedVariable;
-import io.codelaser.maddi.modification.link.impl.translate.VariableTranslationMap;
-import io.codelaser.maddi.modification.prepwork.Util;
-import io.codelaser.maddi.modification.prepwork.variable.Link;
-import io.codelaser.maddi.modification.prepwork.variable.LinkNature;
-import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
-import io.codelaser.maddi.cst.api.runtime.Runtime;
-import io.codelaser.maddi.cst.api.variable.DependentVariable;
-import io.codelaser.maddi.cst.api.variable.FieldReference;
-import io.codelaser.maddi.cst.api.variable.This;
-import io.codelaser.maddi.cst.api.variable.Variable;
+import static io.codelaser.maddi.modification.link.impl.LinkNatureImpl.CONTAINS_AS_FIELD;
 
 import java.util.*;
 import java.util.function.Function;
@@ -28,7 +8,27 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static io.codelaser.maddi.modification.link.impl.LinkNatureImpl.CONTAINS_AS_FIELD;
+import io.codelaser.maddi.cst.api.runtime.Runtime;
+import io.codelaser.maddi.cst.api.variable.DependentVariable;
+import io.codelaser.maddi.cst.api.variable.FieldReference;
+import io.codelaser.maddi.cst.api.variable.This;
+import io.codelaser.maddi.cst.api.variable.Variable;
+import io.codelaser.maddi.modification.link.impl.Gate;
+import io.codelaser.maddi.modification.link.impl.LinkNatureImpl;
+import io.codelaser.maddi.modification.link.impl.graph.DegradedAnalysisException;
+import io.codelaser.maddi.modification.link.impl.graph.Fact;
+import io.codelaser.maddi.modification.link.impl.graph.IncrementalFixpointEngine;
+import io.codelaser.maddi.modification.link.impl.graph.LabeledGraph;
+import io.codelaser.maddi.modification.link.impl.localvar.IntermediateVariable;
+import io.codelaser.maddi.modification.link.impl.localvar.MarkerVariable;
+import io.codelaser.maddi.modification.link.impl.localvar.SharedVariable;
+import io.codelaser.maddi.modification.link.impl.translate.VariableTranslationMap;
+import io.codelaser.maddi.modification.prepwork.Util;
+import io.codelaser.maddi.modification.prepwork.variable.Link;
+import io.codelaser.maddi.modification.prepwork.variable.LinkNature;
+import io.codelaser.maddi.modification.prepwork.variable.ObjectCreationVariable;
+import io.codelaser.maddi.modification.prepwork.variable.ReturnVariable;
+import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
 
 public class Graph {
     private final Runtime runtime;

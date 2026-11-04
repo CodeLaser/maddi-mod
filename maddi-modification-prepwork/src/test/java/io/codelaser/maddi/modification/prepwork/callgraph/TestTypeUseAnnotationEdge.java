@@ -17,24 +17,24 @@
 
 package io.codelaser.maddi.modification.prepwork.callgraph;
 
-import io.codelaser.maddi.callgraph.ComputeCallGraph;
-
-import io.codelaser.maddi.cst.api.info.Info;
-import io.codelaser.maddi.graph.G;
-import io.codelaser.maddi.inspection.api.integration.JavaInspector;
-import io.codelaser.maddi.inspection.api.parser.Summary;
-import io.codelaser.maddi.modification.prepwork.CommonTest;
-import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.net.URISyntaxException;
 import java.util.Map;
 import java.util.Set;
 
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+import io.codelaser.maddi.callgraph.ComputeCallGraph;
+import io.codelaser.maddi.cst.api.info.Info;
+import io.codelaser.maddi.graph.G;
+import io.codelaser.maddi.inspection.api.integration.JavaInspector;
+import io.codelaser.maddi.inspection.api.parser.Summary;
+import io.codelaser.maddi.modification.prepwork.CommonTest;
+import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
 
 /**
  * A TYPE_USE-only annotation (the jspecify shape) is a dependency of the member whose signature carries it.

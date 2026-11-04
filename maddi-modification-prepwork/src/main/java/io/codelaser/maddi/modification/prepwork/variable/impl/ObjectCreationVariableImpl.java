@@ -17,10 +17,13 @@
 
 package io.codelaser.maddi.modification.prepwork.variable.impl;
 
+import java.util.List;
+import java.util.Objects;
+import java.util.function.Predicate;
+import java.util.stream.Stream;
+
 import io.codelaser.maddi.annotation.rare.IgnoreModifications;
-import io.codelaser.maddi.modification.prepwork.variable.ObjectCreationVariable;
 import io.codelaser.maddi.cst.api.element.*;
-import io.codelaser.maddi.cst.api.info.InfoMap;
 import io.codelaser.maddi.cst.api.info.InfoMapView;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
@@ -33,11 +36,7 @@ import io.codelaser.maddi.cst.impl.element.ElementImpl;
 import io.codelaser.maddi.cst.impl.element.SourceImpl;
 import io.codelaser.maddi.cst.impl.output.OutputBuilderImpl;
 import io.codelaser.maddi.cst.impl.output.TextImpl;
-
-import java.util.List;
-import java.util.Objects;
-import java.util.function.Predicate;
-import java.util.stream.Stream;
+import io.codelaser.maddi.modification.prepwork.variable.ObjectCreationVariable;
 
 
 public class ObjectCreationVariableImpl implements ObjectCreationVariable {

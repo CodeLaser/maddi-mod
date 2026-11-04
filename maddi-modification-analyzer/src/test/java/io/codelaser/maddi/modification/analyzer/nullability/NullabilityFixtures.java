@@ -1,5 +1,11 @@
 package io.codelaser.maddi.modification.analyzer.nullability;
 
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+import org.intellij.lang.annotations.Language;
+
 import io.codelaser.maddi.cst.api.info.FieldInfo;
 import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
@@ -10,11 +16,6 @@ import io.codelaser.maddi.modification.analyzer.CommonTest;
 import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
 import io.codelaser.maddi.modification.analyzer.impl.ModAnalyzerForTesting;
 import io.codelaser.maddi.modification.analyzer.impl.SingleIterationAnalyzerImpl;
-import org.intellij.lang.annotations.Language;
-
-import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
 
 /**
  * The harness the per-part test classes share: {@code run} builds a pass per fixture, {@code verdicts} and

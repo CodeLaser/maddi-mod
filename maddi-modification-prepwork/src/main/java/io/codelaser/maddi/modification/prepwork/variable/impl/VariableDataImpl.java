@@ -17,23 +17,22 @@
 
 package io.codelaser.maddi.modification.prepwork.variable.impl;
 
-import io.codelaser.maddi.modification.prepwork.variable.VariableData;
-import io.codelaser.maddi.modification.prepwork.variable.VariableInfoContainer;
-import io.codelaser.maddi.cst.api.analysis.Codec;
-import io.codelaser.maddi.cst.api.analysis.Property;
-import io.codelaser.maddi.cst.api.analysis.Value;
-import io.codelaser.maddi.cst.api.info.InfoMap;
-import io.codelaser.maddi.cst.api.info.InfoMapView;
-import io.codelaser.maddi.cst.api.element.Element;
-import io.codelaser.maddi.cst.api.variable.Variable;
-import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
-
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.SequencedMap;
 import java.util.Set;
 import java.util.stream.Stream;
+
+import io.codelaser.maddi.cst.api.analysis.Codec;
+import io.codelaser.maddi.cst.api.analysis.Property;
+import io.codelaser.maddi.cst.api.analysis.Value;
+import io.codelaser.maddi.cst.api.element.Element;
+import io.codelaser.maddi.cst.api.info.InfoMapView;
+import io.codelaser.maddi.cst.api.variable.Variable;
+import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
+import io.codelaser.maddi.modification.prepwork.variable.VariableData;
+import io.codelaser.maddi.modification.prepwork.variable.VariableInfoContainer;
 
 public class VariableDataImpl implements VariableData {
     // INTRINSIC: prepwork rebuilds the per-variable/per-statement data from the method body on every run.

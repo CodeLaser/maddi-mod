@@ -17,15 +17,16 @@
 
 package io.codelaser.maddi.modification.analyzer.modification;
 
-import io.codelaser.maddi.modification.analyzer.CommonTest;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
-import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
 import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
+import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
+import io.codelaser.maddi.modification.analyzer.CommonTest;
 
 /**
  * The {@code Element.visit(Predicate)} shape of the dogfood (Quest E, 2026-08-03): a visitor method

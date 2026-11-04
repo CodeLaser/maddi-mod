@@ -1,9 +1,9 @@
 package io.codelaser.maddi.modification.link.impl.graph;
 
-import org.jetbrains.annotations.NotNull;
-
 import java.util.Objects;
 import java.util.function.Function;
+
+import org.jetbrains.annotations.NotNull;
 
 /*
 IMPORTANT: equality is on source+target, because of the map in WitnessIndex

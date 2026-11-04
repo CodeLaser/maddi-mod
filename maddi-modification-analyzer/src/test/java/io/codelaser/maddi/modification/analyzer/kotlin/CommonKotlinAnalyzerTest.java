@@ -1,5 +1,19 @@
 package io.codelaser.maddi.modification.analyzer.kotlin;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import org.junit.jupiter.api.BeforeAll;
+
+import io.codelaser.maddi.callgraph.ComputeAnalysisOrder;
 import io.codelaser.maddi.cst.api.analysis.Property;
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.element.SourceSet;
@@ -20,20 +34,7 @@ import io.codelaser.maddi.kotlin.api.KotlinFrontEnds;
 import io.codelaser.maddi.kotlin.api.PlaceholderCensus;
 import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
 import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
-import io.codelaser.maddi.callgraph.ComputeAnalysisOrder;
 import io.codelaser.maddi.modification.prepwork.io.LoadAnalysisResults;
-import org.junit.jupiter.api.BeforeAll;
-
-import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.List;
-import java.util.Set;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /*
  The modification analyzer on KOTLIN input, from inside the analyzer module. Every fixture is a pair: Kotlin sources

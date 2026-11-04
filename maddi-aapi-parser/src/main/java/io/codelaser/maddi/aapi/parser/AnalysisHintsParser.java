@@ -17,26 +17,25 @@
 
 package io.codelaser.maddi.aapi.parser;
 
-import io.codelaser.maddi.analysis.api.AnalysisHintsShadows;
+import java.io.IOException;
+import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
-import io.codelaser.maddi.modification.common.defaults.AnnotationProvider;
-import io.codelaser.maddi.modification.prepwork.io.LoadAnalysisResults;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import io.codelaser.maddi.analysis.api.AnalysisHintsShadows;
 import io.codelaser.maddi.cst.api.element.*;
 import io.codelaser.maddi.cst.api.expression.AnnotationExpression;
-import io.codelaser.maddi.cst.api.expression.StringConstant;
 import io.codelaser.maddi.cst.api.info.*;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.inspection.api.integration.JavaInspector;
 import io.codelaser.maddi.inspection.api.integration.JavaInspectorFactory;
 import io.codelaser.maddi.inspection.api.parser.ParseResult;
 import io.codelaser.maddi.inspection.api.resource.CompiledTypesManager;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.io.IOException;
-import java.util.*;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import io.codelaser.maddi.modification.common.defaults.AnnotationProvider;
+import io.codelaser.maddi.modification.prepwork.io.LoadAnalysisResults;
 
 /*
 Read the analysis hints of a library/JDK.

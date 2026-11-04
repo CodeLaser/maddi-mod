@@ -17,10 +17,10 @@
 
 package io.codelaser.maddi.modification.analyzer;
 
+import java.util.List;
+
 import io.codelaser.maddi.cst.api.analysis.Message;
 import io.codelaser.maddi.cst.api.info.Info;
-
-import java.util.List;
 
 public interface SingleIterationAnalyzer {
 

@@ -1,21 +1,16 @@
 package io.codelaser.maddi.modification.link.impl;
 
-import io.codelaser.maddi.modification.common.FunctionTypes;
+import static io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl.METHOD_LINKS;
 
-import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
+import java.util.*;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
-import io.codelaser.maddi.modification.common.util.TolerantWrite;
-import io.codelaser.maddi.modification.link.LinkComputer;
-import io.codelaser.maddi.modification.link.impl.localvar.FunctionalInterfaceVariable;
-import io.codelaser.maddi.modification.link.impl.localvar.IntermediateVariable;
-import io.codelaser.maddi.modification.link.impl.localvar.MarkerVariable;
-import io.codelaser.maddi.modification.link.impl.translate.VariableTranslationMap;
-import io.codelaser.maddi.modification.link.impl.translate.VirtualFieldTranslationMapForMethodParameters;
-import io.codelaser.maddi.modification.link.vf.VirtualFieldComputer;
-import io.codelaser.maddi.modification.link.vf.VirtualFields;
-import io.codelaser.maddi.modification.prepwork.Util;
-import io.codelaser.maddi.modification.prepwork.variable.*;
-import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
+import org.jetbrains.annotations.NotNull;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.element.RecordPattern;
 import io.codelaser.maddi.cst.api.expression.*;
@@ -28,18 +23,22 @@ import io.codelaser.maddi.cst.api.statement.SwitchEntry;
 import io.codelaser.maddi.cst.api.translate.TranslationMap;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.api.variable.*;
+import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 import io.codelaser.maddi.inspection.api.integration.JavaInspector;
-import org.jetbrains.annotations.NotNull;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.util.*;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
-
-import static io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl.METHOD_LINKS;
+import io.codelaser.maddi.modification.common.FunctionTypes;
+import io.codelaser.maddi.modification.common.util.TolerantWrite;
+import io.codelaser.maddi.modification.link.LinkComputer;
+import io.codelaser.maddi.modification.link.impl.localvar.FunctionalInterfaceVariable;
+import io.codelaser.maddi.modification.link.impl.localvar.IntermediateVariable;
+import io.codelaser.maddi.modification.link.impl.localvar.MarkerVariable;
+import io.codelaser.maddi.modification.link.impl.translate.VariableTranslationMap;
+import io.codelaser.maddi.modification.link.impl.translate.VirtualFieldTranslationMapForMethodParameters;
+import io.codelaser.maddi.modification.link.vf.VirtualFieldComputer;
+import io.codelaser.maddi.modification.link.vf.VirtualFields;
+import io.codelaser.maddi.modification.prepwork.Util;
+import io.codelaser.maddi.modification.prepwork.variable.*;
+import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
 
 public record ExpressionVisitor(Runtime runtime,
                                 JavaInspector javaInspector,

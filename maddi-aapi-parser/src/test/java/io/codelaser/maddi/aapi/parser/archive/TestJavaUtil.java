@@ -17,6 +17,20 @@
 
 package io.codelaser.maddi.aapi.parser.archive;
 
+import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.*;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.FALSE;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.TRUE;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.ImmutableImpl.*;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.ImmutableImpl.NO_VALUE;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.*;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.NullabilityImpl.UNSPECIFIED;
+import static org.junit.jupiter.api.Assertions.*;
+
+import java.util.*;
+import java.util.stream.Collectors;
+
+import org.junit.jupiter.api.Test;
+
 import io.codelaser.maddi.aapi.parser.CommonTest;
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.analysis.Value.Independent;
@@ -24,19 +38,6 @@ import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
-import org.junit.jupiter.api.Test;
-
-import java.util.*;
-import java.util.stream.Collectors;
-
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.NullabilityImpl.UNSPECIFIED;
-import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.*;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.FALSE;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.TRUE;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.ImmutableImpl.*;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.ImmutableImpl.NO_VALUE;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.*;
-import static org.junit.jupiter.api.Assertions.*;
 
 public class TestJavaUtil extends CommonTest {
 

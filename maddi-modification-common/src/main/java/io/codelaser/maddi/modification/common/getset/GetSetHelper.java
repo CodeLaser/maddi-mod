@@ -17,6 +17,8 @@
 
 package io.codelaser.maddi.modification.common.getset;
 
+import static io.codelaser.maddi.inspection.api.util.CreateSyntheticFieldsForGetSet.*;
+
 import io.codelaser.maddi.annotation.Fluent;
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.expression.Assignment;
@@ -38,8 +40,6 @@ import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 import io.codelaser.maddi.modification.common.util.OwnStaticState;
-
-import static io.codelaser.maddi.inspection.api.util.CreateSyntheticFieldsForGetSet.*;
 
 public class GetSetHelper {
 

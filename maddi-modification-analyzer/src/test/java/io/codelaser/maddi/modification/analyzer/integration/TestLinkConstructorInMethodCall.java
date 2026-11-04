@@ -18,29 +18,30 @@
 package io.codelaser.maddi.modification.analyzer.integration;
 
 
-import io.codelaser.maddi.modification.analyzer.CommonTest;
-import io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl;
-import io.codelaser.maddi.modification.prepwork.variable.*;
-import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
-import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
-import io.codelaser.maddi.cst.api.info.*;
-import io.codelaser.maddi.cst.api.statement.Statement;
-import io.codelaser.maddi.cst.api.variable.Variable;
-import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
+import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.*;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.ImmutableImpl.*;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.*;
+import static io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl.METHOD_LINKS;
+import static io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl.LINKS;
+import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl.METHOD_LINKS;
-import static io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl.LINKS;
-import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.*;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.ImmutableImpl.*;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.*;
-import static org.junit.jupiter.api.Assertions.*;
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+import io.codelaser.maddi.cst.api.info.*;
+import io.codelaser.maddi.cst.api.statement.Statement;
+import io.codelaser.maddi.cst.api.variable.Variable;
+import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
+import io.codelaser.maddi.modification.analyzer.CommonTest;
+import io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl;
+import io.codelaser.maddi.modification.prepwork.variable.*;
+import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
+import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
 
 // only difference between test1 and test2 is in the 'withException' method,
 // one 1 line, or on 2 lines

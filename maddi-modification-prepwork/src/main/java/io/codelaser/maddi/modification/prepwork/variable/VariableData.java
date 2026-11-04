@@ -17,12 +17,12 @@
 
 package io.codelaser.maddi.modification.prepwork.variable;
 
-import io.codelaser.maddi.cst.api.analysis.Value;
-import io.codelaser.maddi.cst.api.variable.Variable;
-
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+
+import io.codelaser.maddi.cst.api.analysis.Value;
+import io.codelaser.maddi.cst.api.variable.Variable;
 
 public interface VariableData extends Value {
     Set<String> knownVariableNames();

@@ -17,6 +17,27 @@
 
 package io.codelaser.maddi.modification.link.io;
 
+import static io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl.METHOD_LINKS;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import io.codelaser.maddi.cst.api.analysis.Codec;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.variable.DependentVariable;
+import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.modification.link.CommonTest;
 import io.codelaser.maddi.modification.link.LinkComputer;
 import io.codelaser.maddi.modification.link.impl.LinkComputerImpl;
@@ -27,27 +48,7 @@ import io.codelaser.maddi.modification.prepwork.io.DecoratorImpl;
 import io.codelaser.maddi.modification.prepwork.io.LoadAnalysisResults;
 import io.codelaser.maddi.modification.prepwork.io.WriteAnalysisResults;
 import io.codelaser.maddi.modification.prepwork.variable.MethodLinkedVariables;
-import io.codelaser.maddi.cst.api.analysis.Codec;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.api.variable.DependentVariable;
-import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.util.Trie;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.io.File;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-
-import static io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl.METHOD_LINKS;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class TestWriteAnalysis2 extends CommonTest {
 

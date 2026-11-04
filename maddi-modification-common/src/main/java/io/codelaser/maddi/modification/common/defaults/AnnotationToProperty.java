@@ -17,7 +17,16 @@
 
 package io.codelaser.maddi.modification.common.defaults;
 
-import io.codelaser.maddi.modification.common.getset.GetSetHelper;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.FALSE;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.TRUE;
+import static io.codelaser.maddi.modification.common.defaults.ShallowAnalyzer.AnnotationOrigin.*;
+
+import java.util.*;
+import java.util.stream.Stream;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import io.codelaser.maddi.annotation.*;
 import io.codelaser.maddi.annotation.eventual.Mark;
 import io.codelaser.maddi.annotation.eventual.Only;
@@ -36,16 +45,8 @@ import io.codelaser.maddi.cst.api.runtime.Runtime;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 import io.codelaser.maddi.inspection.api.util.CreateSyntheticFieldsForGetSet;
+import io.codelaser.maddi.modification.common.getset.GetSetHelper;
 import io.codelaser.maddi.util.GetSetNames;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.util.*;
-import java.util.stream.Stream;
-
-import static io.codelaser.maddi.modification.common.defaults.ShallowAnalyzer.AnnotationOrigin.*;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.FALSE;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.TRUE;
 
 class AnnotationToProperty {
     private static final Logger LOGGER = LoggerFactory.getLogger(AnnotationToProperty.class);

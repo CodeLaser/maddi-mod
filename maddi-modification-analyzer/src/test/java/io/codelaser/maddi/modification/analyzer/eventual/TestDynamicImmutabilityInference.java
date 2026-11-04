@@ -17,19 +17,20 @@
 
 package io.codelaser.maddi.modification.analyzer.eventual;
 
-import io.codelaser.maddi.modification.analyzer.CommonTest;
+import static org.junit.jupiter.api.Assertions.*;
+
+import java.util.List;
+
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-
-import java.util.List;
-
-import static org.junit.jupiter.api.Assertions.*;
+import io.codelaser.maddi.modification.analyzer.CommonTest;
 
 /**
  * Part 2: inferring what a field HOLDS by following a defensive copy from the call site, through a constructor

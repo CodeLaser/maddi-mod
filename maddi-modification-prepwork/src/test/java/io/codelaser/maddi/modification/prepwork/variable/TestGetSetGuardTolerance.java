@@ -17,16 +17,17 @@
 
 package io.codelaser.maddi.modification.prepwork.variable;
 
-import io.codelaser.maddi.modification.prepwork.CommonTest;
-import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
-import io.codelaser.maddi.cst.api.info.FieldInfo;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
+import static org.junit.jupiter.api.Assertions.*;
+
 import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.*;
+import io.codelaser.maddi.cst.api.info.FieldInfo;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.modification.prepwork.CommonTest;
+import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
 
 /**
  * {@link io.codelaser.maddi.modification.common.getset.GetSetHelper} leading-guard tolerance: a getter/setter

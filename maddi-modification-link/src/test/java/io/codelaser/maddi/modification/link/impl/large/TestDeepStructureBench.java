@@ -1,11 +1,12 @@
 package io.codelaser.maddi.modification.link.impl.large;
 
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.Test;
+
+import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.modification.link.CommonTest;
 import io.codelaser.maddi.modification.link.impl.LinkComputerImpl;
 import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.Test;
 
 /*
  A self-contained distillation of the io.codelaser...parseq linking pathology (deep recursive generic

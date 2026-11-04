@@ -1,10 +1,11 @@
 package io.codelaser.maddi.modification.link.impl.graph;
 
-import io.codelaser.maddi.modification.link.impl.LinkNatureImpl;
-import io.codelaser.maddi.modification.prepwork.variable.LinkNature;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import io.codelaser.maddi.modification.link.impl.LinkNatureImpl;
+import io.codelaser.maddi.modification.prepwork.variable.LinkNature;
 
 public class TestClosureWitnessIndex {
     

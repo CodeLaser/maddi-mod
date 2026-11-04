@@ -1,26 +1,26 @@
 package io.codelaser.maddi.modification.link.impl;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+import org.jetbrains.annotations.NotNull;
+
+import io.codelaser.maddi.cst.api.analysis.Codec;
+import io.codelaser.maddi.cst.api.analysis.Property;
+import io.codelaser.maddi.cst.api.analysis.Value;
+import io.codelaser.maddi.cst.api.info.InfoMapView;
+import io.codelaser.maddi.cst.api.translate.TranslationMap;
+import io.codelaser.maddi.cst.api.variable.Variable;
+import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.modification.link.impl.localvar.IntermediateVariable;
 import io.codelaser.maddi.modification.link.impl.localvar.MarkerVariable;
 import io.codelaser.maddi.modification.prepwork.variable.LinkNature;
 import io.codelaser.maddi.modification.prepwork.variable.Links;
 import io.codelaser.maddi.modification.prepwork.variable.MethodLinkedVariables;
 import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
-import io.codelaser.maddi.cst.api.analysis.Codec;
-import io.codelaser.maddi.cst.api.analysis.Property;
-import io.codelaser.maddi.cst.api.analysis.Value;
-import io.codelaser.maddi.cst.api.info.InfoMap;
-import io.codelaser.maddi.cst.api.info.InfoMapView;
-import io.codelaser.maddi.cst.api.translate.TranslationMap;
-import io.codelaser.maddi.cst.api.variable.Variable;
-import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
-import org.jetbrains.annotations.NotNull;
-
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Objects;
-import java.util.Set;
-import java.util.stream.Collectors;
 
 public class MethodLinkedVariablesImpl implements MethodLinkedVariables, Value {
     private final static MethodLinkedVariables EMPTY = new MethodLinkedVariablesImpl(LinksImpl.EMPTY, List.of(), Set.of());

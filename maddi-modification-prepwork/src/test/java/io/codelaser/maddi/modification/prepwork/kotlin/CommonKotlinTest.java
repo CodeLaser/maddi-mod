@@ -1,5 +1,19 @@
 package io.codelaser.maddi.modification.prepwork.kotlin;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import org.junit.jupiter.api.BeforeAll;
+
 import io.codelaser.maddi.cst.api.element.SourceSet;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
@@ -17,19 +31,6 @@ import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
 import io.codelaser.maddi.modification.prepwork.variable.VariableData;
 import io.codelaser.maddi.modification.prepwork.variable.VariableInfo;
 import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
-import org.junit.jupiter.api.BeforeAll;
-
-import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.Comparator;
-import java.util.List;
-import java.util.Set;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /*
  Prep on KOTLIN input, from inside prepwork. Every fixture is a pair: a Kotlin class `k.X` and the Java class `j.X`

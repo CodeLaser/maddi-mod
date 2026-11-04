@@ -1,18 +1,19 @@
 package io.codelaser.maddi.run.openjdkmain;
 
-import io.codelaser.maddi.util.corpus.Corpora;
-import ch.qos.logback.classic.Level;
-import org.apache.commons.cli.ParseException;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Test;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.io.IOException;
 import java.nio.file.Path;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import org.apache.commons.cli.ParseException;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import ch.qos.logback.classic.Level;
+import io.codelaser.maddi.util.corpus.Corpora;
 
 /**
  * Guava core (~350k lines, 20k elements): the generics/immutability-depth corpus — recursive self-bounded

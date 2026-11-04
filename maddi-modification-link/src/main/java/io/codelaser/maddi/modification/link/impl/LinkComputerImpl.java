@@ -1,5 +1,39 @@
 package io.codelaser.maddi.modification.link.impl;
 
+import static io.codelaser.maddi.modification.link.impl.ExpressionVisitor.EMPTY;
+import static io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl.METHOD_LINKS;
+import static io.codelaser.maddi.modification.prepwork.variable.impl.VariableInfoImpl.DOWNCAST_VARIABLE;
+import static io.codelaser.maddi.modification.prepwork.variable.impl.VariableInfoImpl.UNMODIFIED_VARIABLE;
+
+import java.util.*;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import org.jetbrains.annotations.NotNull;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import io.codelaser.maddi.cst.api.analysis.Codec;
+import io.codelaser.maddi.cst.api.analysis.Value;
+import io.codelaser.maddi.cst.api.element.Element;
+import io.codelaser.maddi.cst.api.expression.Assignment;
+import io.codelaser.maddi.cst.api.expression.Expression;
+import io.codelaser.maddi.cst.api.expression.MethodCall;
+import io.codelaser.maddi.cst.api.expression.NullConstant;
+import io.codelaser.maddi.cst.api.expression.VariableExpression;
+import io.codelaser.maddi.cst.api.info.InfoMapView;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.ParameterInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.statement.*;
+import io.codelaser.maddi.cst.api.translate.TranslationMap;
+import io.codelaser.maddi.cst.api.variable.*;
+import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
+import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
+import io.codelaser.maddi.graph.util.TimedLogger;
+import io.codelaser.maddi.inspection.api.integration.JavaInspector;
 import io.codelaser.maddi.modification.common.defaults.ShallowMethodAnalyzer;
 import io.codelaser.maddi.modification.common.util.OwnStaticState;
 import io.codelaser.maddi.modification.common.util.TolerantWrite;
@@ -21,40 +55,6 @@ import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
 import io.codelaser.maddi.modification.prepwork.variable.impl.ReturnVariableImpl;
 import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
 import io.codelaser.maddi.modification.prepwork.variable.impl.VariableInfoImpl;
-import io.codelaser.maddi.cst.api.analysis.Codec;
-import io.codelaser.maddi.cst.api.analysis.Value;
-import io.codelaser.maddi.cst.api.element.Element;
-import io.codelaser.maddi.cst.api.expression.Assignment;
-import io.codelaser.maddi.cst.api.expression.Expression;
-import io.codelaser.maddi.cst.api.expression.MethodCall;
-import io.codelaser.maddi.cst.api.expression.NullConstant;
-import io.codelaser.maddi.cst.api.expression.VariableExpression;
-import io.codelaser.maddi.cst.api.info.InfoMap;
-import io.codelaser.maddi.cst.api.info.InfoMapView;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.ParameterInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.api.statement.*;
-import io.codelaser.maddi.cst.api.translate.TranslationMap;
-import io.codelaser.maddi.cst.api.variable.*;
-import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
-import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
-import io.codelaser.maddi.inspection.api.integration.JavaInspector;
-import io.codelaser.maddi.graph.util.TimedLogger;
-import org.jetbrains.annotations.NotNull;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.util.*;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
-
-import static io.codelaser.maddi.modification.link.impl.ExpressionVisitor.EMPTY;
-import static io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl.METHOD_LINKS;
-import static io.codelaser.maddi.modification.prepwork.variable.impl.VariableInfoImpl.DOWNCAST_VARIABLE;
-import static io.codelaser.maddi.modification.prepwork.variable.impl.VariableInfoImpl.UNMODIFIED_VARIABLE;
 
 /*
 convention:

@@ -1,12 +1,12 @@
 package io.codelaser.maddi.modification.link;
 
-import io.codelaser.maddi.modification.prepwork.variable.Links;
-import io.codelaser.maddi.modification.prepwork.variable.MethodLinkedVariables;
+import java.util.List;
+
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
-
-import java.util.List;
+import io.codelaser.maddi.modification.prepwork.variable.Links;
+import io.codelaser.maddi.modification.prepwork.variable.MethodLinkedVariables;
 
 public interface LinkComputer {
     // tests only!

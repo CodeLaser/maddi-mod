@@ -17,19 +17,9 @@
 
 package io.codelaser.maddi.modification.analyzer.impl;
 
-import io.codelaser.maddi.modification.analyzer.CycleBreakingStrategy;
-import io.codelaser.maddi.modification.analyzer.IteratingAnalyzer;
-import io.codelaser.maddi.modification.analyzer.TypeImmutableAnalyzer;
-import io.codelaser.maddi.modification.analyzer.TypeIndependentAnalyzer;
-import io.codelaser.maddi.cst.api.analysis.Value;
-import io.codelaser.maddi.modification.common.AnalysisHelper;
-import io.codelaser.maddi.modification.common.util.TolerantWrite;
-import io.codelaser.maddi.cst.api.analysis.Message;
-import io.codelaser.maddi.cst.api.info.FieldInfo;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.api.type.ParameterizedType;
-import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
+import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.*;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.ImmutableImpl.*;
+import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.DEPENDENT;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -38,9 +28,19 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.*;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.ImmutableImpl.*;
-import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.DEPENDENT;
+import io.codelaser.maddi.cst.api.analysis.Message;
+import io.codelaser.maddi.cst.api.analysis.Value;
+import io.codelaser.maddi.cst.api.info.FieldInfo;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.type.ParameterizedType;
+import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
+import io.codelaser.maddi.modification.analyzer.CycleBreakingStrategy;
+import io.codelaser.maddi.modification.analyzer.IteratingAnalyzer;
+import io.codelaser.maddi.modification.analyzer.TypeImmutableAnalyzer;
+import io.codelaser.maddi.modification.analyzer.TypeIndependentAnalyzer;
+import io.codelaser.maddi.modification.common.AnalysisHelper;
+import io.codelaser.maddi.modification.common.util.TolerantWrite;
 
 /*
 Phase 4.2 Primary type immutable

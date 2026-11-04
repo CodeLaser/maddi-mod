@@ -1,17 +1,18 @@
 package io.codelaser.maddi.modification.common;
 
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.inspection.api.integration.JavaInspector;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.util.Map;
+
 import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import java.util.Map;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.inspection.api.integration.JavaInspector;
 
 /**
  * A type written fully qualified in the pasted text becomes a namespace stub, nested a few levels deep

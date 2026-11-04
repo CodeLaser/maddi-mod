@@ -17,6 +17,9 @@
 
 package io.codelaser.maddi.modification.common.util;
 
+import java.net.URI;
+import java.util.List;
+
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.element.Element;
 import io.codelaser.maddi.cst.api.element.Source;
@@ -27,9 +30,6 @@ import io.codelaser.maddi.cst.api.expression.VariableExpression;
 import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.statement.ExplicitConstructorInvocation;
-
-import java.net.URI;
-import java.util.List;
 
 /**
  * Culprits: beside a verdict, the first statement responsible for it, followed into the callees ({@link

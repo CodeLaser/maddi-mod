@@ -1,7 +1,29 @@
 package io.codelaser.maddi.modification.link.impl;
 
-import io.codelaser.maddi.modification.common.util.TolerantWrite;
+import static io.codelaser.maddi.modification.link.impl.LinkNatureImpl.*;
+import static io.codelaser.maddi.modification.prepwork.variable.impl.VariableInfoImpl.STRUCTURALLY_UNMODIFIED_VARIABLE;
+import static io.codelaser.maddi.modification.prepwork.variable.impl.VariableInfoImpl.UNMODIFIED_VARIABLE;
+
+import java.util.*;
+import java.util.stream.Stream;
+
+import org.jetbrains.annotations.NotNull;
+
+import io.codelaser.maddi.cst.api.analysis.Value;
+import io.codelaser.maddi.cst.api.expression.VariableExpression;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.runtime.Runtime;
+import io.codelaser.maddi.cst.api.statement.Statement;
+import io.codelaser.maddi.cst.api.type.ParameterizedType;
+import io.codelaser.maddi.cst.api.variable.DependentVariable;
+import io.codelaser.maddi.cst.api.variable.FieldReference;
+import io.codelaser.maddi.cst.api.variable.This;
+import io.codelaser.maddi.cst.api.variable.Variable;
+import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
+import io.codelaser.maddi.inspection.api.integration.JavaInspector;
 import io.codelaser.maddi.modification.common.AnalysisHelper;
+import io.codelaser.maddi.modification.common.util.TolerantWrite;
 import io.codelaser.maddi.modification.link.impl.graph.Fact;
 import io.codelaser.maddi.modification.link.impl.linkgraph.FollowGraph;
 import io.codelaser.maddi.modification.link.impl.linkgraph.RedundantLinks;
@@ -13,27 +35,6 @@ import io.codelaser.maddi.modification.link.vf.VirtualFieldComputer;
 import io.codelaser.maddi.modification.prepwork.Util;
 import io.codelaser.maddi.modification.prepwork.variable.*;
 import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
-import io.codelaser.maddi.cst.api.analysis.Value;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.api.runtime.Runtime;
-import io.codelaser.maddi.cst.api.statement.Statement;
-import io.codelaser.maddi.cst.api.type.ParameterizedType;
-import io.codelaser.maddi.cst.api.variable.DependentVariable;
-import io.codelaser.maddi.cst.api.expression.VariableExpression;
-import io.codelaser.maddi.cst.api.variable.FieldReference;
-import io.codelaser.maddi.cst.api.variable.This;
-import io.codelaser.maddi.cst.api.variable.Variable;
-import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
-import io.codelaser.maddi.inspection.api.integration.JavaInspector;
-import org.jetbrains.annotations.NotNull;
-
-import java.util.*;
-import java.util.stream.Stream;
-
-import static io.codelaser.maddi.modification.link.impl.LinkNatureImpl.*;
-import static io.codelaser.maddi.modification.prepwork.variable.impl.VariableInfoImpl.STRUCTURALLY_UNMODIFIED_VARIABLE;
-import static io.codelaser.maddi.modification.prepwork.variable.impl.VariableInfoImpl.UNMODIFIED_VARIABLE;
 
 class WriteLinksAndModification {
     private final Runtime runtime;

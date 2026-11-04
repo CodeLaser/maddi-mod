@@ -1,12 +1,12 @@
 package io.codelaser.maddi.modification.analyzer.kotlin;
 
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 
 /*
  Coroutines as far as kotlin-stdlib reaches (no kotlinx.coroutines on this class path): `suspend` functions, which

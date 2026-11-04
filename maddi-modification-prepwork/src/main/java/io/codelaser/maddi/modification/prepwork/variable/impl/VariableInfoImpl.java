@@ -17,22 +17,22 @@
 
 package io.codelaser.maddi.modification.prepwork.variable.impl;
 
+import java.util.Set;
+
+import io.codelaser.maddi.cst.api.analysis.Property;
+import io.codelaser.maddi.cst.api.analysis.PropertyValueMap;
 import io.codelaser.maddi.cst.api.info.InfoMapView;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.variable.LocalVariable;
+import io.codelaser.maddi.cst.api.variable.Variable;
+import io.codelaser.maddi.cst.impl.analysis.AnalysisAccessRecorder;
+import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
+import io.codelaser.maddi.cst.impl.analysis.PropertyValueMapImpl;
+import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 import io.codelaser.maddi.modification.prepwork.variable.Link;
 import io.codelaser.maddi.modification.prepwork.variable.Links;
 import io.codelaser.maddi.modification.prepwork.variable.ReturnVariable;
 import io.codelaser.maddi.modification.prepwork.variable.VariableInfo;
-import io.codelaser.maddi.cst.api.analysis.Property;
-import io.codelaser.maddi.cst.api.analysis.PropertyValueMap;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.api.variable.LocalVariable;
-import io.codelaser.maddi.cst.api.variable.Variable;
-import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
-import io.codelaser.maddi.cst.impl.analysis.AnalysisAccessRecorder;
-import io.codelaser.maddi.cst.impl.analysis.PropertyValueMapImpl;
-import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
-
-import java.util.Set;
 
 public class VariableInfoImpl implements VariableInfo, AnalysisAccessRecorder.Owner {
     public static final Property UNMODIFIED_VARIABLE = new PropertyImpl("unmodifiedVariable");

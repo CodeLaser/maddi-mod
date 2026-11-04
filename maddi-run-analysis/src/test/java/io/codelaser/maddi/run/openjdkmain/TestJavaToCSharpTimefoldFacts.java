@@ -1,13 +1,14 @@
 package io.codelaser.maddi.run.openjdkmain;
 
-import io.codelaser.maddi.run.j2cs.JavaToCSharpRatchet;
-import io.codelaser.maddi.run.j2k.JavaToKotlinRatchet;
+import java.nio.file.Path;
+
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 
-import java.nio.file.Path;
+import io.codelaser.maddi.run.j2cs.JavaToCSharpRatchet;
+import io.codelaser.maddi.run.j2k.JavaToKotlinRatchet;
 
 /**
  * timefold-solver's core printed as C# with the analysis's facts ({@link CorpusNullability}), the third corpus beside

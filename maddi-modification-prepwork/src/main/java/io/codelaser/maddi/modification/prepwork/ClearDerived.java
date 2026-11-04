@@ -17,6 +17,9 @@
 
 package io.codelaser.maddi.modification.prepwork;
 
+import java.util.function.Consumer;
+import java.util.function.Predicate;
+
 import io.codelaser.maddi.cst.api.analysis.Property;
 import io.codelaser.maddi.cst.api.analysis.PropertyValueMap;
 import io.codelaser.maddi.cst.api.element.Element;
@@ -29,9 +32,6 @@ import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.statement.LocalTypeDeclaration;
 import io.codelaser.maddi.cst.api.statement.Statement;
 import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
-
-import java.util.function.Consumer;
-import java.util.function.Predicate;
 
 /**
  * Clear-before-recompute for a seeded analysis: before an element that holds the values of an earlier analysis is

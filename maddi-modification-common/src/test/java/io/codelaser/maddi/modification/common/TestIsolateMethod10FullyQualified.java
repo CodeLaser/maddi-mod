@@ -1,15 +1,16 @@
 package io.codelaser.maddi.modification.common;
 
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.inspection.api.integration.JavaInspector;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+
+import java.util.Map;
+
 import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import java.util.Map;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.inspection.api.integration.JavaInspector;
 
 // detailed sources distinguish a package-qualified reference from a simple one: a type written fully qualified
 // ('p.q.Helper') must be reproduced as a namespace stub so the verbatim text keeps resolving -- a simple-name

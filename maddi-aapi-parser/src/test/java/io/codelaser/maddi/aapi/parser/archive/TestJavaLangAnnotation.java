@@ -17,17 +17,6 @@
 
 package io.codelaser.maddi.aapi.parser.archive;
 
-import io.codelaser.maddi.aapi.parser.CommonTest;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import org.junit.jupiter.api.Test;
-
-import java.lang.annotation.Annotation;
-import java.lang.annotation.AnnotationTypeMismatchException;
-import java.lang.annotation.ElementType;
-import java.lang.annotation.IncompleteAnnotationException;
-import java.lang.annotation.RetentionPolicy;
-
 import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.CONTAINER_TYPE;
 import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.IMMUTABLE_METHOD;
 import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.IMMUTABLE_TYPE;
@@ -43,6 +32,18 @@ import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.IND
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.lang.annotation.Annotation;
+import java.lang.annotation.AnnotationTypeMismatchException;
+import java.lang.annotation.ElementType;
+import java.lang.annotation.IncompleteAnnotationException;
+import java.lang.annotation.RetentionPolicy;
+
+import org.junit.jupiter.api.Test;
+
+import io.codelaser.maddi.aapi.parser.CommonTest;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
 
 public class TestJavaLangAnnotation extends CommonTest {
 

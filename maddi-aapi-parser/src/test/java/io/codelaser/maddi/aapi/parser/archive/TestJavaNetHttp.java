@@ -17,17 +17,6 @@
 
 package io.codelaser.maddi.aapi.parser.archive;
 
-import io.codelaser.maddi.aapi.parser.CommonTest;
-import io.codelaser.maddi.cst.api.analysis.Value;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
-import io.codelaser.maddi.cst.api.info.TypeInfo;
-import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
-import org.junit.jupiter.api.Test;
-
-import java.net.URI;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-
 import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.*;
 import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.FALSE;
 import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.BoolImpl.TRUE;
@@ -36,6 +25,18 @@ import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.ImmutableImpl.MUTAB
 import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.DEPENDENT;
 import static io.codelaser.maddi.cst.impl.analysis.ValueImpl.IndependentImpl.INDEPENDENT;
 import static org.junit.jupiter.api.Assertions.*;
+
+import java.net.URI;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+
+import org.junit.jupiter.api.Test;
+
+import io.codelaser.maddi.aapi.parser.CommonTest;
+import io.codelaser.maddi.cst.api.analysis.Value;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 
 public class TestJavaNetHttp extends CommonTest {
 

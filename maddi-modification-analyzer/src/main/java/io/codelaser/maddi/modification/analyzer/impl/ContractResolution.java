@@ -17,6 +17,9 @@
 
 package io.codelaser.maddi.modification.analyzer.impl;
 
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
 import io.codelaser.maddi.cst.api.analysis.Property;
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.info.Info;
@@ -26,9 +29,6 @@ import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.runtime.Runtime;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.modification.common.defaults.ContractReader;
-
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Adjudicates the AUTHORED statements bearing on one method + property, across the method itself and the methods

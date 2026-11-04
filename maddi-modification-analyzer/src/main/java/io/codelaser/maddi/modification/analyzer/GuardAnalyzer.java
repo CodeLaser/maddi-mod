@@ -17,9 +17,9 @@
 
 package io.codelaser.maddi.modification.analyzer;
 
-import io.codelaser.maddi.cst.api.info.Info;
-
 import java.util.List;
+
+import io.codelaser.maddi.cst.api.info.Info;
 
 /**
  * The guard: verifies user-written contracts against the analyzer's computed values, after the iterating

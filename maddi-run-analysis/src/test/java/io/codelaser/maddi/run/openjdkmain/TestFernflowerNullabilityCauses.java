@@ -1,5 +1,14 @@
 package io.codelaser.maddi.run.openjdkmain;
 
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Set;
+
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
+
 import io.codelaser.maddi.analysis.api.PrepOutcome;
 import io.codelaser.maddi.analysis.api.PrepRequest;
 import io.codelaser.maddi.callgraph.ComputeAnalysisOrder;
@@ -13,18 +22,10 @@ import io.codelaser.maddi.modification.analyzer.nullability.Content;
 import io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass;
 import io.codelaser.maddi.modification.analyzer.nullability.Policy;
 import io.codelaser.maddi.modification.analyzer.nullability.Report;
-import io.codelaser.maddi.modification.analyzer.nullability.World;
 import io.codelaser.maddi.modification.analyzer.nullability.Switches;
+import io.codelaser.maddi.modification.analyzer.nullability.World;
 import io.codelaser.maddi.run.analysis.AnalysisEngineImpl;
 import io.codelaser.maddi.run.j2k.JavaToKotlinRatchet;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.api.Test;
-import org.slf4j.LoggerFactory;
-
-import java.nio.file.Path;
-import java.util.List;
-import java.util.Set;
 
 /**
  * The nullability pass on fernflower, without printing: every nullable verdict (top level and type arguments) with

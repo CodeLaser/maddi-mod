@@ -17,6 +17,22 @@
 
 package io.codelaser.maddi.modification.prepwork;
 
+import static io.codelaser.maddi.inspection.api.integration.JavaInspector.InvalidationState.*;
+import static org.junit.jupiter.api.Assertions.*;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
 import io.codelaser.maddi.cst.api.element.SourceSet;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
@@ -29,21 +45,6 @@ import io.codelaser.maddi.inspection.resource.InputConfigurationImpl;
 import io.codelaser.maddi.inspection.resource.SourceSetImpl;
 import io.codelaser.maddi.modification.prepwork.variable.VariableData;
 import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
-import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
-
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-
-import static io.codelaser.maddi.inspection.api.integration.JavaInspector.InvalidationState.*;
-import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Prep on the objects a per-file re-parse leaves: re-parsed (INVALID) and rewired (REWIRE) types, next to kept ones.

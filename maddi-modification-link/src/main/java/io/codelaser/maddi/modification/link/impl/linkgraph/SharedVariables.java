@@ -1,5 +1,17 @@
 package io.codelaser.maddi.modification.link.impl.linkgraph;
 
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import io.codelaser.maddi.cst.api.runtime.Runtime;
+import io.codelaser.maddi.cst.api.variable.FieldReference;
+import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.modification.link.impl.Gate;
 import io.codelaser.maddi.modification.link.impl.LinkNatureImpl;
 import io.codelaser.maddi.modification.link.impl.localvar.IntermediateVariable;
@@ -8,18 +20,6 @@ import io.codelaser.maddi.modification.link.impl.translate.VariableTranslationMa
 import io.codelaser.maddi.modification.prepwork.Util;
 import io.codelaser.maddi.modification.prepwork.variable.Link;
 import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
-import io.codelaser.maddi.cst.api.runtime.Runtime;
-import io.codelaser.maddi.cst.api.variable.FieldReference;
-import io.codelaser.maddi.cst.api.variable.Variable;
-
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.List;
-import java.util.LinkedHashMap;
-import java.util.Map;
-import java.util.function.Function;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 // variant on EquivalenceGroup, to be used for equivalent SharedVariable objects
 public class SharedVariables {

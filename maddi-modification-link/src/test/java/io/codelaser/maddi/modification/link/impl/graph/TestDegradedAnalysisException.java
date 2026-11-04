@@ -1,9 +1,9 @@
 package io.codelaser.maddi.modification.link.impl.graph;
 
+import static org.junit.jupiter.api.Assertions.*;
+
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-
-import static org.junit.jupiter.api.Assertions.*;
 
 /*
  The two guards that abandon a method used to throw the SAME UnsupportedOperationException("cycle protection"),

@@ -17,17 +17,18 @@
 
 package io.codelaser.maddi.aapi.parser.archive;
 
+import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.COMMUTABLE_METHODS;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import javax.swing.table.TableColumn;
+
+import org.junit.jupiter.api.Test;
+
 import io.codelaser.maddi.aapi.parser.CommonTest;
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
-import org.junit.jupiter.api.Test;
-
-import javax.swing.table.TableColumn;
-
-import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.COMMUTABLE_METHODS;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class TestJavaxSwingTable extends CommonTest {
 

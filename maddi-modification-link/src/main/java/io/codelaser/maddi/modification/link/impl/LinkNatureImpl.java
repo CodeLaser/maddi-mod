@@ -1,10 +1,11 @@
 package io.codelaser.maddi.modification.link.impl;
 
-import io.codelaser.maddi.modification.prepwork.variable.LinkNature;
-import io.codelaser.maddi.cst.api.info.MethodInfo;
+import java.util.*;
+
 import org.jetbrains.annotations.NotNull;
 
-import java.util.*;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.modification.prepwork.variable.LinkNature;
 
 //https://unicodemap.com/range/47/Mathematical_Operators/
 

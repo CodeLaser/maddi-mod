@@ -17,17 +17,7 @@
 
 package io.codelaser.maddi.aapi.parser;
 
-import ch.qos.logback.classic.Level;
-import io.codelaser.maddi.annotation.Immutable;
-import io.codelaser.maddi.cst.api.analysis.Message;
-import io.codelaser.maddi.cst.api.element.SourceSet;
-import io.codelaser.maddi.inspection.api.integration.JavaInspector;
-import io.codelaser.maddi.inspection.api.integration.JavaInspectorFactory;
-import io.codelaser.maddi.inspection.openjdk.JavaInspectorImpl;
-import io.codelaser.maddi.inspection.resource.InputConfigurationImpl;
-import io.codelaser.maddi.inspection.resource.SourceSetImpl;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import static io.codelaser.maddi.modification.common.CommonTest.javaInspectorFactory;
 
 import java.io.File;
 import java.io.IOException;
@@ -39,7 +29,18 @@ import java.util.List;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
 
-import static io.codelaser.maddi.modification.common.CommonTest.javaInspectorFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import ch.qos.logback.classic.Level;
+import io.codelaser.maddi.annotation.Immutable;
+import io.codelaser.maddi.cst.api.analysis.Message;
+import io.codelaser.maddi.cst.api.element.SourceSet;
+import io.codelaser.maddi.inspection.api.integration.JavaInspector;
+import io.codelaser.maddi.inspection.api.integration.JavaInspectorFactory;
+import io.codelaser.maddi.inspection.openjdk.JavaInspectorImpl;
+import io.codelaser.maddi.inspection.resource.InputConfigurationImpl;
+import io.codelaser.maddi.inspection.resource.SourceSetImpl;
 
 /**
  * Compiles the hand-written analysis hints in {@code maddi-aapi-archive/src/main/java} into the analysis-result

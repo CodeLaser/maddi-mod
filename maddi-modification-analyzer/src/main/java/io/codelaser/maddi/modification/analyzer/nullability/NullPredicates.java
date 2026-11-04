@@ -17,16 +17,16 @@
 
 package io.codelaser.maddi.modification.analyzer.nullability;
 
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
 import io.codelaser.maddi.cst.api.expression.*;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.statement.*;
 import io.codelaser.maddi.cst.api.variable.Variable;
-
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
 
 /**
  * Null-check predicates: boolean methods whose result tells whether an argument is null, such as

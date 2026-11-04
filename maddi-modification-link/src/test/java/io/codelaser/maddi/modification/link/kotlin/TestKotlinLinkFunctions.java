@@ -1,10 +1,10 @@
 package io.codelaser.maddi.modification.link.kotlin;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
 import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /*
  Function types and lambdas. A Kotlin function type is kotlin.jvm.functions.FunctionN: the Java twins that take a
