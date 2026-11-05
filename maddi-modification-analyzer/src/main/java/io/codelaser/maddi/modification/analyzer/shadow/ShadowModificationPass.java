@@ -316,12 +316,10 @@ public class ShadowModificationPass {
         // soundness seeds: a degraded body contributes no reliable evidence
         Value.Bool degraded = mi.analysis().getOrNull(PropertyImpl.DEGRADED_ANALYSIS_METHOD, ValueImpl.BoolImpl.class);
         if (degraded != null && degraded.isTrue()) {
-            seed(mi, true);
-            seedSite(mi, mi, "its analysis was abandoned: taken as modifying");
-            mi.parameters().forEach(pi -> {
-                seed(pi, true);
-                seedSite(pi, mi, "its analysis was abandoned: taken as modifying");
-            });
+            // with their origin: a seed without one took the label of the next method whose summary seeded anything,
+            // and MODREACH_EXPLAIN blamed that method (timefold's PillarSwapMoveSelectorFactory, CodeLaser/maddi-mod#97)
+            seedWithOrigin(mi, mi, "its analysis was abandoned: taken as modifying");
+            mi.parameters().forEach(pi -> seedWithOrigin(pi, mi, "its analysis was abandoned: taken as modifying"));
         }
         MethodLinkedVariables mlv = mi.analysis().getOrNull(MethodLinkedVariablesImpl.METHOD_LINKS,
                 MethodLinkedVariablesImpl.class);
