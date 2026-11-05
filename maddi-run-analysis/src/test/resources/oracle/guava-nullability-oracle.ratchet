@@ -31,6 +31,9 @@
 # were the fixpoint's. Ordering.allEqual()'s return now agrees; five Funnels factory returns leave noise.
 # 2026-10-30, maddi 14cfe0495 / maddi-mod 024e618c (devel with the JDK hints written out, the culprits and #72 4a), on
 # laser1: 229 unsafe, 1,806 noise, 281 undecided. Unchanged with CodeLaser/maddi-mod#84 on top.
+# 2026-11-05, maddi f6f4387a3 / maddi-mod c3ba74bf (devel with #85's two regression fixes and CBSWEEP on by default), on
+# laser1: 229 unsafe, 1,779 noise. 63 noise rows leave, 1 arrives: d5f1cfd1 stops a cycle of delegating overrides
+# (Ordering.min/max and the reverse orderings) from overruling a demand (CodeLaser/maddi-mod#85).
 unsafe	229
-noise	1806
+noise	1779
 noiseSlack	20
