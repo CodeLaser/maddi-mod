@@ -369,14 +369,15 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
     private volatile Set<Info> firstVisits = Set.of();
 
     /*
-     SHALLOWFIELDEVERY (presence-only, experimental): the shallow analysis of an abstract type's field reads the
+     The shallow analysis of an abstract type's field reads the
      field type's immutability and independence as they stand, and writes only upwards. Once (the first iteration, or
      a seeded run's first visit), a cold run reads its field types before they are decided, and MODREACH's
      clearDerivedFamily later removes what it wrote with no pass to write it again; a seeded run reads the carried,
      final values. The two disagree (fernflower's Statement.cancellationManager, endpoints: immutableField only
      warm), and the early cutoff falls back. Every visit, both read the values the field types settle on.
+     NOSHALLOWFIELDEVERY restores the once-only behaviour.
      */
-    private static final boolean SHALLOW_FIELD_EVERY_VISIT = System.getenv("SHALLOWFIELDEVERY") != null;
+    private static final boolean SHALLOW_FIELD_EVERY_VISIT = System.getenv("NOSHALLOWFIELDEVERY") == null;
 
     @Override
     public void setFirstVisits(Set<Info> firstVisits) {
