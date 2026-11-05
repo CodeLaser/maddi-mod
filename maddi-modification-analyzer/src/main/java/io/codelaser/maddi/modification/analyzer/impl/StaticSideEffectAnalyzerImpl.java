@@ -17,12 +17,9 @@
 
 package io.codelaser.maddi.modification.analyzer.impl;
 
-import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Deque;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -73,15 +70,6 @@ import io.codelaser.maddi.modification.common.util.TolerantWrite;
 public class StaticSideEffectAnalyzerImpl {
     // non-final: a run's ModificationOptions can switch it off
     public static boolean ENABLED = true;
-
-    /*
-     Under cycle breaking, a callee of another type still undecided contributed nothing: the caller's set missed what
-     the callee modifies, and a cold run settled below a seeded run, where the callee was decided (fernflower's
-     Statement.collapseNodesToStatement, through Exprent's constructor and DecompilerContext's counter). Instead,
-     the fixpoint group takes the undecided callees' closure across types; only the type's own methods are written.
-     NOCBSTATICCLOSURE restores the old behaviour.
-     */
-    private static final boolean CB_CLOSURE = System.getenv("NOCBSTATICCLOSURE") == null;
     // how far a culprit is followed into the callees
     private static final int CULPRIT_DEPTH = 6;
 
@@ -105,10 +93,9 @@ public class StaticSideEffectAnalyzerImpl {
      */
     public void go(TypeInfo typeInfo, boolean activateCycleBreaking) {
         if (!ENABLED) return;
-        List<MethodInfo> own = typeInfo.constructorAndMethodStream()
+        List<MethodInfo> group = typeInfo.constructorAndMethodStream()
                 .filter(mi -> !decided(mi) && computable(mi)).toList();
-        if (own.isEmpty()) return;
-        List<MethodInfo> group = activateCycleBreaking && CB_CLOSURE ? undecidedClosure(own) : own;
+        if (group.isEmpty()) return;
         Map<MethodInfo, Set<TypeInfo>> sets = new LinkedHashMap<>();
         Set<MethodInfo> waiting = new HashSet<>();
         group.forEach(mi -> sets.put(mi, new HashSet<>()));
@@ -125,7 +112,7 @@ public class StaticSideEffectAnalyzerImpl {
                 }
             }
         }
-        for (MethodInfo mi : own) {
+        for (MethodInfo mi : group) {
             if (waiting.contains(mi)) continue;
             Set<TypeInfo> set = sets.get(mi);
             boolean sse = set.stream().anyMatch(owner -> escapes(mi, owner));
@@ -263,25 +250,6 @@ public class StaticSideEffectAnalyzerImpl {
         // an instance field's initializer runs in every constructor, as if written there ('int id = next++;')
         if (mi.isConstructor()) instanceInitializers(mi.typeInfo()).forEach(i -> i.visit(visitor));
         return waits[0];
-    }
-
-    // own, followed by every undecided, computable method they reach through calls, across types
-    private static List<MethodInfo> undecidedClosure(List<MethodInfo> own) {
-        Set<MethodInfo> seen = new LinkedHashSet<>(own);
-        Deque<MethodInfo> todo = new ArrayDeque<>(own);
-        while (!todo.isEmpty()) {
-            MethodInfo mi = todo.removeFirst();
-            Predicate<Element> visitor = e -> {
-                MethodInfo callee = callee(e);
-                if (callee != null && !decided(callee) && computable(callee) && seen.add(callee)) {
-                    todo.addLast(callee);
-                }
-                return true;
-            };
-            mi.methodBody().visit(visitor);
-            if (mi.isConstructor()) instanceInitializers(mi.typeInfo()).forEach(i -> i.visit(visitor));
-        }
-        return List.copyOf(seen);
     }
 
     // the initializers of the type's instance fields; a static field's is the construction of the static state
