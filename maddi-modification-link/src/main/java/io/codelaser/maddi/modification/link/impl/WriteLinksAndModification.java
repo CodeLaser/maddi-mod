@@ -464,6 +464,7 @@ class WriteLinksAndModification {
         if (rvTrace) {
             System.out.println("RVTRACE " + variable + " b1=" + builder1.linkSet() + " b2=" + builder2.linkSet()
                                + " b=" + builder.linkSet());
+            System.out.println("RVTRACE groups " + followGraph.graph().printShared(Object::toString).replace("\n", " | "));
         }
         dedupReversePairs(builder);
         List<Link> toRemove = new ArrayList<>();
