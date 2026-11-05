@@ -51,11 +51,16 @@ public class ElementSummary {
         return sb.toString();
     }
 
-    /** The summaries of every element of {@code primaryTypes}, theirs and their nested types', by name. */
+    /**
+     * The summaries of every element of {@code primaryTypes}, theirs and their nested types', anonymous and local
+     * classes included, by name. The early cutoff compares each seed element with its entry here, and a missing
+     * entry counts as moved: without the anonymous classes, every edit to a type that declares one fell back to
+     * the cold analysis (fernflower's VarVersionsProcessor.$0, $1 on a comment-only edit).
+     */
     public static Map<String, String> ofTypes(Iterable<TypeInfo> primaryTypes) {
         Map<String, String> map = new HashMap<>();
         for (TypeInfo primaryType : primaryTypes) {
-            primaryType.recursiveSubTypeStream().forEach(type -> {
+            primaryType.recursiveSubTypeStreamIncludingLocal().forEach(type -> {
                 map.put(type.fullyQualifiedName(), of(type));
                 type.constructorAndMethodStream().forEach(m -> map.put(m.fullyQualifiedName(), of(m)));
                 type.fields().forEach(f -> map.put(f.fullyQualifiedName(), of(f)));
