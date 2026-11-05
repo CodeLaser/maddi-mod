@@ -240,6 +240,8 @@ public class AnalysisEngineImpl implements AnalysisEngine {
             for (TypeInfo oldType : request.carryFrom()) {
                 CarryDerived.primaryType(oldType, view);
             }
+            // the carry was the memo's last reader: let the previous generation go
+            view.releaseRewireMemo();
             LOGGER.info("Carried the analyzer output of {} rewired primary type(s)", request.carryFrom().size());
         }
         // a seeded request is a warm analysis of the objects an earlier analysis left; the environment gate is the

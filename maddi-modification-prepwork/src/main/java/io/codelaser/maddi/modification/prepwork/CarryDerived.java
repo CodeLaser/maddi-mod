@@ -121,20 +121,40 @@ public class CarryDerived {
             if (o.getClass() != n.getClass() || !callee(o).equals(callee(n))) return;
         }
         for (int i = 0; i < oldCalls.size(); i++) {
-            PropertyValueMap from = oldCalls.get(i).analysis();
-            PropertyValueMap to = newCalls.get(i).analysis();
-            if (from == to) continue;
-            from.propertyValueStream()
-                    .filter(pv -> ClearDerived.DERIVED.test(pv.property()))
-                    .filter(pv -> !to.haveAnalyzedValueFor(pv.property()))
-                    .forEach(pv -> {
-                        try {
-                            to.set(pv.property(), pv.value().rewire(view));
-                        } catch (UnsupportedOperationException e) {
-                            // a value without a rewire: not carried, the recompute derives it again
-                        }
-                    });
+            copyAbsent(oldCalls.get(i).analysis(), newCalls.get(i).analysis(), view, true);
+            // a callee made per call site (the synthetic constructor of an array creation, 'new byte[n]') is a new
+            // object in the copy, which the rewire does not map, and which nothing analyses: its values, its
+            // parameter's '@Modified' among them, come along with the call (fernflower: 8 MODREACH seeds)
+            MethodInfo oldCallee = calleeInfo(oldCalls.get(i));
+            MethodInfo newCallee = calleeInfo(newCalls.get(i));
+            if (oldCallee != null && newCallee != null && oldCallee != newCallee
+                && view.methodInfo(oldCallee) != newCallee) {
+                copyAbsent(oldCallee.analysis(), newCallee.analysis(), view, false);
+                for (int p = 0; p < oldCallee.parameters().size() && p < newCallee.parameters().size(); p++) {
+                    copyAbsent(oldCallee.parameters().get(p).analysis(), newCallee.parameters().get(p).analysis(),
+                            view, false);
+                }
+            }
         }
+    }
+
+    // what 'to' lacks of 'from', rewired; a value without a rewire is not carried, a recompute derives it again
+    private static void copyAbsent(PropertyValueMap from, PropertyValueMap to, InfoMapView view, boolean derivedOnly) {
+        if (from == to) return;
+        from.propertyValueStream()
+                .filter(pv -> !derivedOnly || ClearDerived.DERIVED.test(pv.property()))
+                .filter(pv -> !to.haveAnalyzedValueFor(pv.property()))
+                .forEach(pv -> {
+                    try {
+                        to.set(pv.property(), pv.value().rewire(view));
+                    } catch (UnsupportedOperationException e) {
+                        // not carried
+                    }
+                });
+    }
+
+    private static MethodInfo calleeInfo(Expression call) {
+        return call instanceof MethodCall mc ? mc.methodInfo() : ((ConstructorCall) call).constructor();
     }
 
     // the calls of a body in visit order, as body() walks it: a lambda's and a local type's are their own methods'
@@ -148,7 +168,7 @@ public class CarryDerived {
     }
 
     private static String callee(Expression call) {
-        MethodInfo mi = call instanceof MethodCall mc ? mc.methodInfo() : ((ConstructorCall) call).constructor();
+        MethodInfo mi = calleeInfo(call);
         return mi == null ? "" : mi.fullyQualifiedName();
     }
 
