@@ -69,10 +69,23 @@ public class ElementSummary {
         return map;
     }
 
+    /*
+     Not compared: the values written after the iteration loop, which a seeded run has not written yet when the cutoff
+     compares, and which are computed over the whole order afterwards anyway: nullability (NullabilityPass) and the
+     culprits, the explanations of a verdict (GuardAnalyzerImpl, TypeCulprit), which feed no other verdict.
+     */
+    private static boolean afterTheLoop(Property property) {
+        String key = property.key();
+        return key.startsWith("nullability") || key.endsWith("Culprit") || key.contains("CulpritMethod");
+    }
+
     private static void append(StringBuilder sb, String prefix, PropertyValueMap map) {
         TreeMap<String, String> sorted = new TreeMap<>();
         map.propertyValueStream()
                 .filter(pv -> pv.property().analysisTier() == Property.AnalysisTier.CROSS_TYPE_DERIVED)
+                .filter(pv -> !afterTheLoop(pv.property()))
+                // a default is what an absent value reads as: a run that wrote it equals one that did not
+                .filter(pv -> !pv.value().equals(pv.property().defaultValue()))
                 .forEach(pv -> sorted.put(pv.property().key(), String.valueOf(pv.value())));
         sorted.forEach((k, v) -> sb.append(prefix).append(k).append('=').append(v).append('\n'));
     }
