@@ -114,8 +114,10 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
     // pass that moment depends on thread timing, and so does the verdict (guava, 8 threads: 6-10 FPDUMP lines
     // differ between runs, 0 sequentially). Opt-in while measuring.
     static final boolean SEQUENTIAL_CYCLE_BREAKING = Gate.isSet("SEQCYCLEBREAKING");
-    // EXPERIMENT (#82): the deterministic alternative to SEQCYCLEBREAKING that keeps the loop parallel; see goInternal
-    static final boolean CYCLE_BREAKING_SWEEP = Gate.isSet("CBSWEEP");
+    // CBSWEEP (#82): the deterministic alternative to SEQCYCLEBREAKING that keeps the loop parallel; see goInternal.
+    // The default since it measured identical outputs on the oracles and corpora, and converges jenkins; NOCBSWEEP
+    // turns it off.
+    static final boolean CYCLE_BREAKING_SWEEP = !Gate.isSet("NOCBSWEEP");
 
     /*
     SCCJOIN (CodeLaser/maddi-mod#23): a method in a recursion cycle (it reads, through other summaries, its own) whose
