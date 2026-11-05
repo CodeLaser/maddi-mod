@@ -130,6 +130,9 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
     improves is shed as before.
      */
     static final boolean SCC_JOIN = Gate.isSet("SCCJOIN");
+    // LINKCHURN=<pass>: from that pass of an analysis on, every method whose summary write changed it (#23)
+    private static final int LINK_CHURN = Gate.get("LINKCHURN") == null ? 0 : Integer.parseInt(Gate.get("LINKCHURN"));
+    private final AtomicInteger churnPass = new AtomicInteger();
     private static final int SCC_JOIN_HISTORY = 4;
     // per method: the content hashes of its last SCC_JOIN_HISTORY computed summaries (ring buffer, slot 0 = count)
     private final java.util.Map<MethodInfo, int[]> linkHistory = new java.util.concurrent.ConcurrentHashMap<>();
@@ -375,6 +378,8 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
 
     private void goInternal(List<Info> analysisOrder, boolean activateCycleBreaking, boolean firstIteration,
                             List<List<List<Info>>> firstIterationWaves) {
+        if (firstIteration) churnPass.set(0);
+        churnPass.incrementAndGet();
         linkComputer.reset();
         elementsDoneInPass.set(0);
         changedInfos.clear();
@@ -784,6 +789,11 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
                                 : TolerantWrite.setAllowControlledOverwrite(methodInfo.analysis(), METHOD_LINKS, mlv,
                                 methodInfo);
                         if (written) propertiesChanged.incrementAndGet();
+                        if (written && LINK_CHURN > 0 && churnPass.get() >= LINK_CHURN) {
+                            System.out.println("LINKCHURN pass=" + churnPass.get() + ' '
+                                               + Integer.toHexString(String.valueOf(mlv).hashCode()) + ' '
+                                               + methodInfo.fullyQualifiedName());
+                        }
                         // flatten-snapshot Phase 5: this method is fully linked (summary written), so flatten
                         // its last-statement VD and drop the intermediates RIGHT HERE — concurrently, inside
                         // the giant SCC wave, which is the only place the peak can actually be bounded. Safe
