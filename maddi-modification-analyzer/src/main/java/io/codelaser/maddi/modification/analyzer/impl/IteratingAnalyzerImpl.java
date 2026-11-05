@@ -240,6 +240,8 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
      * Structural values (links, part-of-construction, get/set, HCT/HCS, final-field, fluent/identity,
      * not-null) are modification-independent and stay; the three modification properties are frozen.
      */
+    private static final boolean CLEAR_STATIC = System.getenv("CLEARSTATIC") != null;
+
     private static int clearDerivedFamily(List<Info> analysisOrder) {
         Set<String> keys = new HashSet<>(Set.of(
                 PropertyImpl.IMMUTABLE_TYPE.key(),
@@ -256,6 +258,14 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                 PropertyImpl.CONTAINER_FIELD.key(),
                 PropertyImpl.UNMODIFIABLE_TYPE.key(),
                 PropertyImpl.UNMODIFIABLE_VIEW_METHOD.key()));
+        if (CLEAR_STATIC) {
+            // CLEARSTATIC (presence-only, experimental): the static side effects are decided once per method, from
+            // the callees' modification as it stands; decided before the cutover, they keep the optimistic
+            // non-modifying values MODREACH downgrades (fernflower's Exprent constructor, through
+            // DecompilerContext.getCounterContainer().getCounterAndIncrement: none cold, DecompilerContext warm)
+            keys.add(PropertyImpl.STATIC_STATE_MODIFIED_METHOD.key());
+            keys.add(PropertyImpl.STATIC_SIDE_EFFECTS_METHOD.key());
+        }
         if (EventualCluster.ENABLED) {
             // EVENTUALCLUSTER: the eventual layer derives from modification exactly like the immutability
             // family. Computed pre-cutover, an abstract enm union freezes on optimistic TRUEs and survives
