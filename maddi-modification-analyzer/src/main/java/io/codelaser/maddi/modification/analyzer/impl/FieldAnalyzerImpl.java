@@ -45,6 +45,8 @@ import io.codelaser.maddi.modification.prepwork.variable.impl.VariableInfoImpl;
 public class FieldAnalyzerImpl extends CommonAnalyzerImpl implements FieldAnalyzer {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(FieldAnalyzerImpl.class);
+    // see computeIndependent
+    private static final boolean CB_FIELD_PESSIMISM = System.getenv("NOCBFIELDPESSIMISM") == null;
 
     private final Runtime runtime;
     private final AnalysisHelper analysisHelper = new AnalysisHelper();
@@ -134,7 +136,8 @@ public class FieldAnalyzerImpl extends CommonAnalyzerImpl implements FieldAnalyz
             }
             if (!currentIndependent.isIndependent()) {
                 Value.Independent independent = computeIndependent(fieldInfo, linkedVariables,
-                        methodsReferringToField.stream().anyMatch(InternalFieldAnalyzer::isDegraded));
+                        methodsReferringToField.stream().anyMatch(InternalFieldAnalyzer::isDegraded),
+                        cycleBreakingActive);
                 if (independent != null) {
                     if (TolerantWrite.setAllowControlledOverwrite(fieldInfo.analysis(), PropertyImpl.INDEPENDENT_FIELD, independent, fieldInfo)) {
                         DECIDE.debug("FI: Decide independent of field {} = {}", fieldInfo, independent);
@@ -341,12 +344,21 @@ public class FieldAnalyzerImpl extends CommonAnalyzerImpl implements FieldAnalyz
             return undecided ? null : TRUE;
         }
 
-        private Value.Independent computeIndependent(FieldInfo fieldInfo, Links links, boolean degradedReferrer) {
+        /*
+         Cycle breaking: the field's content type is still undecided (it waits on this field's own type, or a cycle
+         through it). The content's independence matters only where the field is exposed: non-private, a degraded
+         referrer, or linked to a non-private parameter or return value. So assume it @Dependent and grade the
+         exposure: an unexposed field is still @Independent, an exposed one is @Dependent. Writing @Independent
+         outright (NOCBFIELDPESSIMISM) let a cold run settle above what a seeded run, with the content type decided,
+         computes (fernflower's Statement.endpoints, VarVersionsProcessor.typeProcessor), and the early cutoff fell back.
+         */
+        private Value.Independent computeIndependent(FieldInfo fieldInfo, Links links, boolean degradedReferrer,
+                                                     boolean cycleBreakingActive) {
             TypeInfo owner = fieldInfo.owner();
             Value.Independent independentOfType = independentOfFieldContent(owner, fieldInfo);
             if (independentOfType == null) {
-                // wait
-                return null;
+                if (!cycleBreakingActive || !CB_FIELD_PESSIMISM) return null; // wait
+                independentOfType = ValueImpl.IndependentImpl.DEPENDENT;
             }
             if (independentOfType.isIndependent()) return INDEPENDENT;
             // a non-private field is reached directly: an external modification (road 080, "on a field, directly
