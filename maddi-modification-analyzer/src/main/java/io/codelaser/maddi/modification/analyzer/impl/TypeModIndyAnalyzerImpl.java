@@ -98,10 +98,32 @@ public class TypeModIndyAnalyzerImpl extends CommonAnalyzerImpl implements TypeM
         FieldValue fieldValue = methodInfo.analysis().getOrDefault(GET_SET_FIELD, ValueImpl.GetSetValueImpl.EMPTY);
         if (fieldValue.field() != null) {
             handleGetterSetter(methodInfo, fieldValue);
+            // only a setter ending in 'return this' returns a value (GetSetHelper.checkSetMethodEnsureFluent)
+            accessorOrEmptyFluent(methodInfo, fieldValue.setter() && methodInfo.hasReturnValue());
         } else if (methodInfo.explicitlyEmptyMethod()) {
             handleExplicitlyEmptyMethod(methodInfo);
+            accessorOrEmptyFluent(methodInfo, false);
         } else if (!methodInfo.methodBody().isEmpty()) {
             handleNormalMethod(cycleBreakingActive, methodInfo);
+        } else {
+            accessorOrEmptyFluent(methodInfo, false);
+        }
+    }
+
+    /*
+     Prep (GetSetHelper) decides @Fluent of an accessor and of an empty method, and doFluentAnalysis only sees the
+     others. A seeded analysis clears the derived tier before it re-analyses an element (ClearDerived), fluentMethod
+     included, and prep does not run again on it: the value was gone, the element's summary differed from the
+     previous generation's, and the early cutoff fell back to the cold analysis (fernflower,
+     BytecodeSourceMapper.addTotalOffset, on a comment-only edit). Write the same value prep writes; on a cold run
+     it is already there and nothing changes.
+     */
+    private void accessorOrEmptyFluent(MethodInfo methodInfo, boolean fluent) {
+        if (methodInfo.isConstructor()) return;
+        if (TolerantWrite.setAllowControlledOverwrite(methodInfo.analysis(), FLUENT_METHOD,
+                ValueImpl.BoolImpl.from(fluent), methodInfo)) {
+            DECIDE.debug("MI: Decide @Fluent of accessor or empty method {} = {}", methodInfo, fluent);
+            propertyChanges.incrementAndGet();
         }
     }
 
