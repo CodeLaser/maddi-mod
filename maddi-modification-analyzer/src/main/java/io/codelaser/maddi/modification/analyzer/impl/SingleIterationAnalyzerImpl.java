@@ -65,7 +65,6 @@ import io.codelaser.maddi.modification.common.util.TolerantWrite;
 import io.codelaser.maddi.modification.link.LinkComputer;
 import io.codelaser.maddi.modification.link.impl.Gate;
 import io.codelaser.maddi.modification.link.impl.LinkComputerImpl;
-import io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl;
 import io.codelaser.maddi.modification.link.impl.ReceiverLevel;
 import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
 import io.codelaser.maddi.modification.prepwork.Util;
@@ -119,62 +118,9 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
     // turns it off.
     static final boolean CYCLE_BREAKING_SWEEP = !Gate.isSet("NOCBSWEEP");
 
-    /*
-    SCCJOIN (CodeLaser/maddi-mod#23): a method in a recursion cycle (it reads, through other summaries, its own) whose
-    freshly computed summary is one it already had in an earlier pass, but not the stored one, is oscillating: on
-    elasticsearch, ShardRouting.<init> and initializeTargetRelocatingShard each compute from the other's previous
-    summary and go round a loop of two states for ever, and every caller up to DesiredBalanceComputer.compute
-    inherits the swing. From that moment on, the method's new summary is joined with the stored one instead of
-    replacing it: the summaries can only grow, so the cycle settles. The latest-wins slot write stays in force for
-    every other method, and for this one until it oscillates, so the early pessimism a summary sheds as the analysis
-    improves is shed as before.
-     */
-    static final boolean SCC_JOIN = Gate.isSet("SCCJOIN");
     // LINKCHURN=<pass>: from that pass of an analysis on, every method whose summary write changed it (#23)
     private static final int LINK_CHURN = Gate.get("LINKCHURN") == null ? 0 : Integer.parseInt(Gate.get("LINKCHURN"));
     private final AtomicInteger churnPass = new AtomicInteger();
-    private static final int SCC_JOIN_HISTORY = 4;
-    // per method: the content hashes of its last SCC_JOIN_HISTORY computed summaries (ring buffer, slot 0 = count)
-    private final java.util.Map<MethodInfo, int[]> linkHistory = new java.util.concurrent.ConcurrentHashMap<>();
-    private final Set<MethodInfo> joiningMethods = java.util.concurrent.ConcurrentHashMap.newKeySet();
-
-    private MethodLinkedVariables joinInRecursionCycle(MethodInfo methodInfo, MethodLinkedVariablesImpl computed) {
-        MethodLinkedVariablesImpl stored = methodInfo.analysis().getOrNull(METHOD_LINKS, MethodLinkedVariablesImpl.class);
-        if (stored == null) return computed;
-        if (!joiningMethods.contains(methodInfo)) {
-            int h = computed.contentHash();
-            int[] history = linkHistory.computeIfAbsent(methodInfo, _ -> new int[SCC_JOIN_HISTORY + 1]);
-            boolean revisit;
-            synchronized (history) {
-                int n = Math.min(history[0], SCC_JOIN_HISTORY);
-                boolean seen = false;
-                for (int i = 1; i <= n; i++) if (history[i] == h) seen = true;
-                revisit = seen && stored.contentHash() != h;
-                history[1 + history[0] % SCC_JOIN_HISTORY] = h;
-                history[0]++;
-            }
-            if (!revisit || !inRecursionCycle(methodInfo)) return computed;
-            joiningMethods.add(methodInfo);
-            linkHistory.remove(methodInfo);
-            LOGGER.info("SCCJOIN: summary of {} oscillates in a recursion cycle; joining from now on", methodInfo);
-        }
-        return computed.joinWith(stored);
-    }
-
-    // the method reads its own summary through others: a path back to itself over the summary-consumption edges
-    private boolean inRecursionCycle(MethodInfo methodInfo) {
-        java.util.Map<MethodInfo, Set<MethodInfo>> consumed = linkComputer.consumedSummaries();
-        java.util.ArrayDeque<MethodInfo> todo = new java.util.ArrayDeque<>(consumed.getOrDefault(methodInfo, Set.of()));
-        Set<MethodInfo> seen = new HashSet<>(todo);
-        while (!todo.isEmpty()) {
-            MethodInfo m = todo.poll();
-            if (m == methodInfo) return true;
-            for (MethodInfo next : consumed.getOrDefault(m, Set.of())) {
-                if (seen.add(next)) todo.add(next);
-            }
-        }
-        return false;
-    }
     private static final int MAX_SWEEP_ROUNDS = 25;
 
     // DIAGNOSTIC (#91): PARSHUFFLE=<seed> submits each parallel pass's elements (and each first-iteration wave's
@@ -805,9 +751,6 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
                         // early value for good (EC O4, booleanIterator; dogfood: 29 methods stuck @Dependent).
                         // A library method's shallow links are a function of its annotations: ordinary retention.
                         boolean source = !methodInfo.typeInfo().compilationUnit().externalLibrary();
-                        if (SCC_JOIN && source && mlv instanceof MethodLinkedVariablesImpl computed) {
-                            mlv = joinInRecursionCycle(methodInfo, computed);
-                        }
                         boolean written = source
                                 ? TolerantWrite.setLatestWins(methodInfo.analysis(), METHOD_LINKS, mlv, methodInfo)
                                 : TolerantWrite.setAllowControlledOverwrite(methodInfo.analysis(), METHOD_LINKS, mlv,

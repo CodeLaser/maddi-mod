@@ -306,58 +306,6 @@ public class MethodLinkedVariablesImpl implements MethodLinkedVariables, Value {
                + deepOnlyModified.stream().map(Object::toString).sorted().collect(Collectors.joining(", "));
     }
 
-    /**
-     * CodeLaser/maddi-mod#23: the join of this (newer) summary with an older one of the same method: every link of
-     * either, and the union of the modified and assigned sets. A variable is deep-only when no side modifies it
-     * structurally. Used only for a method in a recursion cycle whose summaries alternate between passes
-     * (SingleIterationAnalyzerImpl, gate SCCJOIN): there the summaries can only grow, so the cycle settles. Where a
-     * part cannot be joined (different primaries, a different parameter count), the newer one is kept.
-     */
-    public MethodLinkedVariablesImpl joinWith(MethodLinkedVariables older) {
-        Links rv = joinLinks(ofReturnValue, older.ofReturnValue());
-        List<Links> params;
-        if (ofParameters.size() == older.ofParameters().size()) {
-            params = new ArrayList<>(ofParameters.size());
-            for (int i = 0; i < ofParameters.size(); i++) {
-                params.add(joinLinks(ofParameters.get(i), older.ofParameters().get(i)));
-            }
-            params = List.copyOf(params);
-        } else {
-            params = ofParameters;
-        }
-        Set<Variable> mod = new java.util.HashSet<>(modified);
-        mod.addAll(older.modified());
-        Set<Variable> asg = new java.util.HashSet<>(assigned);
-        asg.addAll(older.assigned());
-        Set<Variable> structural = new java.util.HashSet<>(modified);
-        structural.removeAll(deepOnlyModified);
-        older.modified().stream().filter(v -> !older.deepOnlyModified().contains(v)).forEach(structural::add);
-        Set<Variable> deep = new java.util.HashSet<>(deepOnlyModified);
-        deep.addAll(older.deepOnlyModified());
-        deep.removeAll(structural);
-        return new MethodLinkedVariablesImpl(rv, params, Set.copyOf(mod), Set.copyOf(asg), Set.copyOf(deep));
-    }
-
-    private static Links joinLinks(Links newer, Links older) {
-        if (older == null || older.primary() == null) return newer;
-        if (newer == null || newer.primary() == null) return older;
-        if (!newer.primary().equals(older.primary())) return newer;
-        LinksImpl.Builder builder = new LinksImpl.Builder(newer);
-        boolean added = false;
-        for (io.codelaser.maddi.modification.prepwork.variable.Link l : older) {
-            if (!builder.contains(l.from(), l.linkNature(), l.to())) {
-                builder.add(l.from(), l.linkNature(), l.to(), l.mediated(), l.derived());
-                added = true;
-            }
-        }
-        return added ? builder.sort().build() : newer;
-    }
-
-    /** a hash of the canonical rendering: equal for two values with the same content (see sameContent) */
-    public int contentHash() {
-        return canonicalRendering().hashCode();
-    }
-
     private static @NotNull Set<Variable> excludeInternal(Set<Variable> variables) {
         return variables.stream()
                 .filter(v -> !(v instanceof IntermediateVariable) && !(v instanceof MarkerVariable))
