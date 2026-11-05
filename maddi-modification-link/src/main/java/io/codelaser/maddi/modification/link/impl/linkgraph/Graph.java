@@ -751,6 +751,20 @@ public class Graph {
                             && LinksImpl.LinkImpl.doNotStackMOnTopOfVirtualField(m)) {
                             if (direct) markDirect(rehomed, link.linkNature(), m);
                             result.add(new LinksImpl.LinkImpl(rehomed, link.linkNature(), m, link.mediated()));
+                            // ... and what that member-field was itself assigned from in its own group: 'h.first ←
+                            // $__rv1' with '$__rv1.id ← 0:x.relocationId' collapsed into {$__rv1.id, 0:x.relocationId,
+                            // ..} gives 'h.first.id ← 0:x.relocationId'. The mirror alone stops at the intermediate,
+                            // which the summary drops: elasticsearch's ShardRouting lost 'ret.allocationId.id ←
+                            // this.allocationId.relocationId' exactly when a richer input collapsed the field into a
+                            // group, and the cycle swung between the two summaries (CodeLaser/maddi-mod#23).
+                            if (!MIRROR_SOURCES_OFF && link.linkNature() == LinkNatureImpl.IS_ASSIGNED_FROM) {
+                                for (Variable s : sharedVariables.assignmentSources(m)) {
+                                    if (s.equals(m) || s.equals(rehomed)) continue;
+                                    if (LinksImpl.LinkImpl.doNotStackMOnTopOfVirtualField(s)) {
+                                        result.add(new LinksImpl.LinkImpl(rehomed, link.linkNature(), s, link.mediated()));
+                                    }
+                                }
+                            }
                         }
                     });
                 }
@@ -831,6 +845,8 @@ public class Graph {
     private static final boolean NOSV = Gate.isSet("NOSV");
     // CodeLaser/maddi-mod#77: gate NOSRCEVICT restores the rep edge for a reassigned source
     private static final boolean NO_SRC_EVICT = Gate.isSet("NOSRCEVICT");
+    // gate NOMIRRORSOURCES: the member-field mirror of a whole-object assignment stops at the member-field (#23)
+    private static final boolean MIRROR_SOURCES_OFF = Gate.isSet("NOMIRRORSOURCES");
 
     /*
      Alternatives are not aliases. A recipient assigned several values in one statement ('m = c ? a : b'; a call
