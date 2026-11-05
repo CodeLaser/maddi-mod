@@ -41,4 +41,17 @@ It writes out results, if any, in the field's analysis() object.
 public interface FieldAnalyzer {
 
     void go(@Modified FieldInfo fieldInfo, boolean cycleBreakingActive);
+
+    /**
+     * As {@link #go(FieldInfo, boolean)}, but when {@code waitForContentType} is set, cycle breaking does not decide
+     * the field's independence while the immutability of the field's content type is still undecided: the
+     * optimistic default (INDEPENDENT) would stick, and the type's verdict, arriving later in the same sweep, can
+     * only lower it.
+     *
+     * @return true when the field's independence was left undecided for that reason
+     */
+    default boolean go(@Modified FieldInfo fieldInfo, boolean cycleBreakingActive, boolean waitForContentType) {
+        go(fieldInfo, cycleBreakingActive);
+        return false;
+    }
 }

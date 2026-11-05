@@ -533,16 +533,24 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
         // implementor's verdict gives its interface the mark labels); one round per pass made every link of such a
         // chain cost a worklist drain plus a full pass, and the dogfood ran out of iterations (120) mid-epoch.
         int sweepRound = 0;
+        // The fields are swept before the types. A field whose independence waits only for its content type's
+        // immutability must not take the optimistic default (INDEPENDENT) yet: that type is usually decided in the
+        // type pass of the same round, and a field once INDEPENDENT is not revisited: a field of an @Immutable(hc=true)
+        // interface type whose implementations hand out their content came out INDEPENDENT, not INDEPENDENT_HC
+        // (TestSweepFieldWaitsForContentType). Such fields wait
+        // while rounds make progress; when the rounds stop with fields still waiting, one last round decides them.
+        boolean waitForContentType = true;
         boolean again;
         do {
             int changesBeforeRound = propertiesChanged.get();
+            int waiting = 0;
             if (sweep) {
                 if (sweepRound == 0) LOGGER.info("Cycle-breaking sweep over {} elements", analysisOrder.size());
                 for (Info info : analysisOrder) {
                     if (!(info instanceof FieldInfo fieldInfo) || faultTolerant && failed.contains(info)) continue;
                     int changesBefore = propertiesChanged.get();
                     try {
-                        fieldAnalyzer.go(fieldInfo, true);
+                        if (fieldAnalyzer.go(fieldInfo, true, waitForContentType)) ++waiting;
                     } catch (RuntimeException | AssertionError | StackOverflowError e) {
                         LOGGER.error("Caught exception (cycle-breaking sweep) on {}", fieldInfo, e);
                         if (!faultTolerant) throw e;
@@ -572,6 +580,11 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
                 }
             }
             again = sweep && propertiesChanged.get() > changesBeforeRound && ++sweepRound < MAX_SWEEP_ROUNDS;
+            if (!again && sweep && waitForContentType && waiting > 0) {
+                // settled (or out of rounds) with fields still waiting: one more round, which decides them
+                waitForContentType = false;
+                again = true;
+            }
         } while (again);
         if (sweepRound > 0) LOGGER.info("Cycle-breaking sweep: {} extra round(s)", sweepRound);
         long end = System.currentTimeMillis();

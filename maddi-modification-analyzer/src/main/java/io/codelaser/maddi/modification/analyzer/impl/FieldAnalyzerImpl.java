@@ -57,12 +57,17 @@ public class FieldAnalyzerImpl extends CommonAnalyzerImpl implements FieldAnalyz
 
     @Override
     public void go(FieldInfo fieldInfo, boolean cycleBreakingActive) {
+        go(fieldInfo, cycleBreakingActive, false);
+    }
+
+    @Override
+    public boolean go(FieldInfo fieldInfo, boolean cycleBreakingActive, boolean waitForContentType) {
         InternalFieldAnalyzer analyzer = new InternalFieldAnalyzer();
-        analyzer.go(fieldInfo, cycleBreakingActive);
+        return analyzer.go(fieldInfo, cycleBreakingActive, waitForContentType);
     }
 
     private class InternalFieldAnalyzer {
-        private void go(FieldInfo fieldInfo, boolean cycleBreakingActive) {
+        private boolean go(FieldInfo fieldInfo, boolean cycleBreakingActive, boolean waitForContentType) {
             LOGGER.debug("Do field {}", fieldInfo);
             Value.Bool unmodifiedDone = fieldInfo.analysis().getOrDefault(PropertyImpl.UNMODIFIED_FIELD, FALSE);
             Value.Independent currentIndependent = fieldInfo.analysis().getOrDefault(PropertyImpl.INDEPENDENT_FIELD,
@@ -125,7 +130,7 @@ public class FieldAnalyzerImpl extends CommonAnalyzerImpl implements FieldAnalyz
                     linkedVariables = fieldInfo.analysis().getOrDefault(LinksImpl.LINKS, LinksImpl.EMPTY);
                 } else {
                     UNDECIDED.debug("FI: Linked variables of field {} undecided", fieldInfo);
-                    return;
+                    return false;
                 }
             }
             if (TolerantWrite.setAllowControlledOverwrite(fieldInfo.analysis(), LinksImpl.LINKS, linkedVariables, fieldInfo)) {
@@ -140,6 +145,10 @@ public class FieldAnalyzerImpl extends CommonAnalyzerImpl implements FieldAnalyz
                         DECIDE.debug("FI: Decide independent of field {} = {}", fieldInfo, independent);
                         propertyChanges.incrementAndGet();
                     }
+                } else if (cycleBreakingActive && waitForContentType) {
+                    // computeIndependent only returns null while the content type's immutability is undecided
+                    UNDECIDED.debug("FI: Independent of field {} waits for its content type", fieldInfo);
+                    return true;
                 } else if (cycleBreakingActive) {
                     boolean write = TolerantWrite.setAllowControlledOverwrite(fieldInfo.analysis(), PropertyImpl.INDEPENDENT_FIELD, INDEPENDENT, fieldInfo);
                     assert write;
@@ -149,6 +158,7 @@ public class FieldAnalyzerImpl extends CommonAnalyzerImpl implements FieldAnalyz
                     UNDECIDED.debug("FI: Independent of field {} undecided", fieldInfo);
                 }
             }
+            return false;
         }
 
         /**
