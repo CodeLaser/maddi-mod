@@ -71,8 +71,8 @@ import io.codelaser.maddi.modification.prepwork.io.AnalysisFingerprint;
  */
 public class TestAnalysisEarlyCutoffPrototype {
 
-    // Data's immutability feeds User (User holds a Data field and hands it out), so a change to Data's verdicts
-    // should propagate to User — a two-type blast radius.
+    // Data is edited from unmodifiable to mutable. User, Holder and Reader all use it structurally; only the first two
+    // keep a Data in a field, so only their output can follow Data's.
     private static final String DATA_V1 = """
             package x;
             public class Data {
@@ -90,8 +90,10 @@ public class TestAnalysisEarlyCutoffPrototype {
                 public void set(int v) { this.v = v; }
             }
             """;
-    // User exposes the Data field via a getter whether Data is mutable or not, so its verdicts do NOT depend on
-    // Data's mutability: the firewall should SPARE it even though it structurally uses Data.
+    // User keeps a Data in a field and hands it out. The field's independence follows Data's modifiability: with the
+    // cycle-breaking sweep (CBSWEEP, maddi-mod#82) it is INDEPENDENT while Data is unmodifiable and not once Data has a
+    // setter, so User's output moves with Data's. (Without the sweep the field stayed undecided either way, which is
+    // why this test once expected User to be spared.)
     private static final String USER = """
             package x;
             public class User {
@@ -100,13 +102,21 @@ public class TestAnalysisEarlyCutoffPrototype {
                 public Data get() { return data; }
             }
             """;
-    // Holder's immutability DOES depend on Data's: a public field of an immutable type keeps Holder immutable, but a
-    // public field of a mutable type breaks rule 2/3 -- so Data's change must propagate to Holder.
+    // Holder exposes its Data field publicly: its field's independence follows Data's in the same way as User's.
     private static final String HOLDER = """
             package x;
             public class Holder {
                 public final Data data;
                 public Holder(Data d) { this.data = d; }
+            }
+            """;
+
+    // Reader only reads a Data argument's value: no field, nothing handed out, and v() is non-modifying whether Data
+    // is mutable or not. Its verdicts cannot depend on Data's mutability: the firewall must SPARE it.
+    private static final String READER = """
+            package x;
+            public class Reader {
+                public static int twice(Data d) { return 2 * d.v(); }
             }
             """;
 
@@ -170,6 +180,7 @@ public class TestAnalysisEarlyCutoffPrototype {
         Files.writeString(pkg.resolve("Data.java"), data);
         Files.writeString(pkg.resolve("User.java"), USER);
         Files.writeString(pkg.resolve("Holder.java"), HOLDER);
+        Files.writeString(pkg.resolve("Reader.java"), READER);
     }
 
     @DisplayName("a comment-only edit changes no analyzer output: the whole run would be cut off")
@@ -177,7 +188,7 @@ public class TestAnalysisEarlyCutoffPrototype {
     public void testCommentEditIsFullyCutOff() throws IOException {
         write(DATA_V1);
         TreeMap<String, FingerPrint> before = analyzeAndFingerprint();
-        assertEquals(Set.of("x.Data", "x.User", "x.Holder"), before.keySet());
+        assertEquals(Set.of("x.Data", "x.User", "x.Holder", "x.Reader"), before.keySet());
 
         // a comment edit that shifts every line, exactly like RunRewireTests' edit
         write("// a leading comment\n\n" + DATA_V1);
@@ -188,7 +199,7 @@ public class TestAnalysisEarlyCutoffPrototype {
                 "a comment edit changes no verdict; the cutoff would spare every type, but these moved: " + changed);
     }
 
-    @DisplayName("a semantic edit (Data becomes mutable) moves Data — and propagates to its dependent User")
+    @DisplayName("a semantic edit (Data becomes mutable) moves Data, and spares Reader, whose output cannot follow it")
     @Test
     public void testSemanticEditBlastRadius() throws IOException {
         write(DATA_V1);
@@ -200,11 +211,11 @@ public class TestAnalysisEarlyCutoffPrototype {
         Set<String> changed = changedTypes(before, after);
         System.out.println("=== compare-half blast radius (types whose analyzer output moved) === " + changed);
         assertTrue(changed.contains("x.Data"), "the edited type's own verdicts must move");
-        // The firewall: User and Holder both structurally use Data, yet neither's *output* moved (User exposes the
-        // field either way; Holder's verdicts didn't change on this analyzer), so the cutoff spares them. This is the
-        // whole point of an output fingerprint over structural reachability — 'reaches Data' would recompute both.
-        assertFalse(changed.contains("x.User"), "User's output is unchanged, so the cutoff must spare it: " + changed);
-        assertFalse(changed.contains("x.Holder"), "Holder's output is unchanged, so the cutoff must spare it: " + changed);
+        // The firewall: Reader structurally uses Data, yet its *output* does not move, so the cutoff spares it. This is
+        // the whole point of an output fingerprint over structural reachability: 'reaches Data' would recompute it.
+        // User and Holder are not pinned either way: their field independence follows Data's when the analyzer
+        // decides it (see USER), so whether they move depends on the engine, not on the cutoff.
+        assertFalse(changed.contains("x.Reader"), "Reader's output is unchanged, so the cutoff must spare it: " + changed);
     }
 
     @DisplayName("through the REAL reload path (reloadSources + Invalidated + reparse), a comment edit still cuts off")
