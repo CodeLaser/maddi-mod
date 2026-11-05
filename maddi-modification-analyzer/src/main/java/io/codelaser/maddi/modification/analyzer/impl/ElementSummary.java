@@ -20,9 +20,14 @@ package io.codelaser.maddi.modification.analyzer.impl;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.function.Consumer;
+import java.util.function.Predicate;
+import java.util.stream.Stream;
 
 import io.codelaser.maddi.cst.api.analysis.Property;
 import io.codelaser.maddi.cst.api.analysis.PropertyValueMap;
+import io.codelaser.maddi.cst.api.element.Element;
+import io.codelaser.maddi.cst.api.expression.Lambda;
 import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
@@ -53,20 +58,43 @@ public class ElementSummary {
 
     /**
      * The summaries of every element of {@code primaryTypes}, theirs and their nested types', anonymous and local
-     * classes included, by name. The early cutoff compares each seed element with its entry here, and a missing
-     * entry counts as moved: without the anonymous classes, every edit to a type that declares one fell back to
+     * classes and lambdas included, by name. The early cutoff compares each seed element with its entry here, and a
+     * missing entry counts as moved: without the lambdas' types, every edit to a type that declares one fell back to
      * the cold analysis (fernflower's VarVersionsProcessor.$0, $1 on a comment-only edit).
      */
     public static Map<String, String> ofTypes(Iterable<TypeInfo> primaryTypes) {
         Map<String, String> map = new HashMap<>();
+        Consumer<TypeInfo> put = type -> {
+            map.put(type.fullyQualifiedName(), of(type));
+            type.constructorAndMethodStream().forEach(m -> map.put(m.fullyQualifiedName(), of(m)));
+            type.fields().forEach(f -> map.put(f.fullyQualifiedName(), of(f)));
+        };
         for (TypeInfo primaryType : primaryTypes) {
             primaryType.recursiveSubTypeStreamIncludingLocal().forEach(type -> {
-                map.put(type.fullyQualifiedName(), of(type));
-                type.constructorAndMethodStream().forEach(m -> map.put(m.fullyQualifiedName(), of(m)));
-                type.fields().forEach(f -> map.put(f.fullyQualifiedName(), of(f)));
+                put.accept(type);
+                lambdaTypes(type).forEach(put);
             });
         }
         return map;
+    }
+
+    /*
+     The types of the lambdas in a type's own code. localTypeStream() visits lambda bodies (it collects the
+     anonymous and local classes declared in them) but not the lambdas themselves; a nested lambda is in the
+     visit too, so this needs no recursion.
+     */
+    private static Stream<TypeInfo> lambdaTypes(TypeInfo type) {
+        Stream.Builder<TypeInfo> builder = Stream.builder();
+        Predicate<Element> collect = e -> {
+            if (e instanceof Lambda lambda && lambda.methodInfo() != null) builder.add(lambda.methodInfo().typeInfo());
+            return true;
+        };
+        type.fields().forEach(f -> {
+            if (f.initializer() != null) f.initializer().visit(collect);
+        });
+        type.constructorAndMethodStream().filter(mi -> mi.methodBody() != null)
+                .forEach(mi -> mi.methodBody().visit(collect));
+        return builder.build();
     }
 
     private static void append(StringBuilder sb, String prefix, PropertyValueMap map) {
