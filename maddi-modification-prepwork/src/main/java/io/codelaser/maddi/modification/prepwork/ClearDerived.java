@@ -98,6 +98,7 @@ public class ClearDerived {
             if (e instanceof ConstructorCall cc && cc.anonymousClass() != null) {
                 declared.accept(cc.anonymousClass());
             } else if (e instanceof Lambda lambda) {
+                lambda.methodInfo().typeInfo().analysis().removeIf(DERIVED);
                 method(lambda.methodInfo());
                 return false;
             } else if (e instanceof LocalTypeDeclaration ltd) {

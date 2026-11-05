@@ -100,6 +100,13 @@ public class CarryDerived {
             if (e instanceof ConstructorCall cc && cc.anonymousClass() != null) {
                 type(cc.anonymousClass(), view);
             } else if (e instanceof Lambda lambda) {
+                // the lambda's type has values of its own (immutableType, independentType, ...); without them the
+                // copy's summary differs from a fresh analysis's, and the early cutoff falls back
+                TypeInfo lambdaType = lambda.methodInfo().typeInfo();
+                TypeInfo newLambdaType = view.typeInfoNullIfAbsent(lambdaType);
+                if (newLambdaType != null && newLambdaType != lambdaType) {
+                    map(lambdaType.analysis(), newLambdaType.analysis(), view);
+                }
                 method(lambda.methodInfo(), view);
                 return false;
             } else if (e instanceof LocalTypeDeclaration ltd) {
