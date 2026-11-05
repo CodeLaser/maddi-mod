@@ -9,8 +9,8 @@ import io.codelaser.maddi.analysis.api.PrepOutcome;
 import io.codelaser.maddi.analysis.api.PrepRequest;
 import io.codelaser.maddi.callgraph.ComputeAnalysisOrder;
 import io.codelaser.maddi.cst.api.info.Info;
-import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.impl.analysis.ModificationFacts;
 import io.codelaser.maddi.cst.impl.analysis.NullabilityFacts;
 import io.codelaser.maddi.cst.print.csharp.CSharpFacts;
 import io.codelaser.maddi.cst.print.csharp.CSharpProgram;
@@ -112,6 +112,6 @@ final class CorpusNullability {
             throws IOException {
         NullabilityFacts facts = report(corpus, types, Policy.KOTLIN.withPreconditionsNonNull())
                 .orElse(NullabilityFacts.STORED);
-        return CSharpProgram.Policy.DEFAULT.withFacts(CSharpFacts.of(facts, ParameterInfo::isUnmodified));
+        return CSharpProgram.Policy.DEFAULT.withFacts(CSharpFacts.of(facts, ModificationFacts.STORED));
     }
 }
