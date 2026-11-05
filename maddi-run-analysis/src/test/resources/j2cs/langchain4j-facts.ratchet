@@ -84,6 +84,10 @@
 # Object[], an array as varargs arguments, getMethod's types, Map.of()'s key notnull: 300 -> 301 compiling files, 198 -> 192 errors, nullable warnings stay 18.
 # 2026-11-04, maddi-mod 0c2f5ebe (#68 in @NullMarked scope) with maddi f6f4387a3 (lambda adapters and IComparable<T>
 # bridges with the analysis's verdicts), on the Mac: nullable warnings 18 -> 12; compiling files and errors unchanged.
+# 2026-11-05: the error total is ratcheted from here on (JavaToCSharpRatchet.DIRECTION): a rise that a mapping
+# earns, by letting the compiler see errors it could not before, is written with a note that says so.
+# 2026-11-05, maddi e65b4878d: a class bounding a type parameter is not sealed (CS0701, and the CS0266 its
+# constraint caused): 192 -> 173 errors, compiling files unchanged (301).
 types	346
 printerCrashes	0
 syntaxErrors	0
@@ -91,3 +95,4 @@ syntaxCleanFiles	346
 compilingFiles	301
 unmappedJdkUses	151
 nullableWarnings	12
+errors	173
