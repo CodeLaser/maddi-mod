@@ -343,6 +343,9 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                                            + (write ? " changed=" + changed : "") + ' '
                                            + Integer.toHexString(text.hashCode()) + " len=" + text.length()
                                            + ' ' + methodInfo.fullyQualifiedName());
+                        // LINKOUTFULL: the summary itself, to diff the phases of an oscillation (#23)
+                        if (LINK_OUT_FULL) System.out.println("LINKOUTFULL " + Integer.toHexString(text.hashCode())
+                                                               + ' ' + text.replace('\n', ' '));
                     }
                 } catch (UnsupportedOperationException uoe) {
                     if (!(uoe instanceof DegradedAnalysisException dae)) throw uoe;
@@ -474,6 +477,7 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
     private static final String TRIP_DIAG_FULL = System.getenv("TRIPDIAG_FULL");
     // LINKINPUTS=<fqn substring>: the same input fingerprint at EVERY linking of a matching method, tripped or not
     private static final String LINK_INPUTS = System.getenv("LINKINPUTS");
+    private static final boolean LINK_OUT_FULL = Gate.isSet("LINKOUTFULL");
     private final AtomicInteger tripDiagCount = new AtomicInteger();
     // the analyzer\'s pass number as seen by the diagnostics: reset() is called once at the start of every pass
     private final AtomicInteger diagPass = new AtomicInteger();
