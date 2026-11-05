@@ -87,6 +87,8 @@
 # was at 17): the printer now gives a lambda adapter its interface method's verdicts, an IComparable<T> bridge to a
 # non-null compareTo, the field's verdict to a getter's property reads, and a covariant bridge the interface's T?.
 # Compiling files (185) and errors (32) unchanged.
+# 2026-11-05: the error total is ratcheted from here on (JavaToCSharpRatchet.DIRECTION): a rise that a mapping
+# earns, by letting the compiler see errors it could not before, is written with a note that says so.
 types	199
 printerCrashes	0
 syntaxErrors	0
@@ -94,3 +96,4 @@ syntaxCleanFiles	199
 compilingFiles	185
 unmappedJdkUses	15
 nullableWarnings	9
+errors	32
