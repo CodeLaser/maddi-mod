@@ -543,6 +543,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
         int iterations = 0;
         int maxIterations = configuration.maxIterations(); // extended per MODREACH re-derivation round
         int modReachRounds = 0; // P2.5: pass <-> re-derivation to joint fixpoint, bounded
+        int cutoffModReachRounds = 0; // the early cutoff's own rounds, over the seed: see cutoffModReach
         modReachFailures = 0;
         int eventualDeferralRounds = 0; // terminal-phase re-derivation of the eventual family, once
         SingleIterationAnalyzer singleIterationAnalyzer = new SingleIterationAnalyzerImpl(javaInspector, configuration);
@@ -781,8 +782,28 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                 // When one moved, re-deriving what it reaches from carried values settles elsewhere than a cold run
                 // (an order the cold schedule never follows; measured on fernflower), so the run falls back to the
                 // cold analysis: every derived value cleared, everything analysed again.
+                boolean modReachOutside = false;
+                if (configuration.modificationViaReachability() && cutoffModReachRounds < MODREACH_MAX_ROUNDS) {
+                    cutoffModReachRounds++;
+                    Set<Info> rederive = cutoffModReach(singleIterationAnalyzer, analysisOrder, cutoffScope,
+                            orderSet, cutoffModReachRounds);
+                    if (rederive == null) {
+                        modReachOutside = true;
+                    } else if (!rederive.isEmpty()) {
+                        // re-derive the seed with modification frozen, then certify it again, as a cold run does
+                        LOGGER.info("Early cutoff: re-deriving the seed after MODREACH changed {} of its element(s)",
+                                rederive.size());
+                        nextPassKind = "re-derivation after MODREACH (early cutoff)";
+                        dirty = new HashSet<>(cutoffScope);
+                        verifying = false;
+                        cycleBreakingActive = false;
+                        previousPropertiesChanged = Integer.MAX_VALUE;
+                        maxIterations += configuration.maxIterations();
+                        continue;
+                    }
+                }
                 cutoff = false;
-                int moved = 0;
+                int moved = modReachOutside ? 1 : 0;
                 for (Info c : pending) {
                     Info mc = mapToOrderElement(c, orderSet);
                     Info element = mc == null ? c : mc;
@@ -798,6 +819,8 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                     LOGGER.info("Early cutoff: falling back to the cold analysis of all {} element(s)",
                             analysisOrder.size());
                     if (beforeFirstRecompute != null) analysisOrder.forEach(beforeFirstRecompute);
+                    // the cutoff's MODREACH froze the modification properties; the cold run decides them afresh
+                    TolerantWrite.unfreezeModificationProperties();
                     iterate(analysisOrder, dependencyGraph, null, null);
                     return;
                 }
@@ -856,20 +879,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                         // implementations, which is exactly the path by which this pass reaches it. The same
                         // holds for that method's PARAMETERS, folded over the implementations' parameter at the
                         // same index. UNMODIFIED_FIELD has no such case: see writeVerdicts' javadoc.
-                        Predicate<Info> contracted =
-                                singleIterationAnalyzer instanceof SingleIterationAnalyzerImpl s
-                                        ? info -> switch (info) {
-                                    case MethodInfo mi -> mi.isAbstract()
-                                            && s.contractResolution().resolve(mi, io.codelaser.maddi.cst.impl
-                                            .analysis.PropertyImpl.NON_MODIFYING_METHOD).decided();
-                                    case ParameterInfo pi ->
-                                            pi.methodInfo().isAbstract()
-                                            && s.contractResolution().resolve(pi, io.codelaser.maddi.cst.impl
-                                            .analysis.PropertyImpl.UNMODIFIED_PARAMETER).decided();
-                                    default -> false;
-                                }
-                                        : _ -> false;
-                        var counts = pass.writeVerdicts(analysisOrder, report, contracted);
+                        var counts = pass.writeVerdicts(analysisOrder, report, contracted(singleIterationAnalyzer));
                         TolerantWrite.freezeModificationProperties();
                         LOGGER.info("MODREACH round {}: {}", modReachRounds, counts.summary());
                         LOGGER.info("MODREACH round {}: {}", modReachRounds, report.summary());
@@ -1088,6 +1098,53 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
             LOGGER.info("Run again, properties changed {}", propertiesChanged);
             // TODO any strategy, e.g. after 3 iterations, activate cycle breaking
         }
+    }
+
+    /*
+     The MODREACH cutover's one exception (see ShadowModificationPass.writeVerdicts): a bodiless method, or its
+     parameter, whose computed value an authored contract decides.
+     */
+    private static Predicate<Info> contracted(SingleIterationAnalyzer singleIterationAnalyzer) {
+        return singleIterationAnalyzer instanceof SingleIterationAnalyzerImpl s
+                ? info -> switch (info) {
+            case MethodInfo mi -> mi.isAbstract()
+                    && s.contractResolution().resolve(mi, PropertyImpl.NON_MODIFYING_METHOD).decided();
+            case ParameterInfo pi -> pi.methodInfo().isAbstract()
+                    && s.contractResolution().resolve(pi, PropertyImpl.UNMODIFIED_PARAMETER).decided();
+            default -> false;
+        }
+                : _ -> false;
+    }
+
+    /*
+     The early cutoff's MODREACH round. The prior summaries come from a cold run, whose modification properties
+     MODREACH decided after the loop; a seed certified without it compares one regime with another, and moves. So the
+     reachability runs over the whole order (the carried link artifacts outside the seed, the fresh ones inside), as a
+     cold run's does. A write outside the seed means the change reaches beyond it: the cutoff fails (null). Otherwise
+     the writes are the seed's own, frozen as a cold run freezes them, and the seed to re-derive is returned: empty
+     when the round wrote nothing, and the comparison can go ahead.
+     */
+    private static Set<Info> cutoffModReach(SingleIterationAnalyzer singleIterationAnalyzer, List<Info> analysisOrder,
+                                            Set<Info> cutoffScope, Set<Info> orderSet, int round) {
+        var pass = new ShadowModificationPass();
+        var report = pass.go(analysisOrder);
+        var counts = pass.writeVerdicts(analysisOrder, report, contracted(singleIterationAnalyzer));
+        TolerantWrite.freezeModificationProperties();
+        LOGGER.info("Early cutoff: MODREACH round {}: {}", round, counts.summary());
+        Set<Info> rederive = new HashSet<>();
+        for (Info c : counts.changed()) {
+            Info owner = c instanceof ParameterInfo pi ? pi.methodInfo() : c;
+            Info mc = mapToOrderElement(owner, orderSet);
+            if (mc == null || !cutoffScope.contains(mc)) {
+                LOGGER.info("Early cutoff: MODREACH changed {} outside the seed", c);
+                return null;
+            }
+            rederive.add(mc);
+        }
+        if (!rederive.isEmpty() && counts.weakened()) {
+            clearDerivedFamily(analysisOrder.stream().filter(cutoffScope::contains).toList());
+        }
+        return rederive;
     }
 
     // the waves with only the elements of the seed, empty units and waves dropped: a wave stays a barrier
