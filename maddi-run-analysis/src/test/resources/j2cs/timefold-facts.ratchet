@@ -185,10 +185,14 @@
 # types other than type parameters; an IComparable<T> bridge for a non-null compareTo), on the Mac: nullableWarnings
 # 229 -> 182, the Joiners' 25 CS8602 and about 20 CS8767 of the program's functional interfaces gone. Compiling files
 # and errors (633) unchanged.
+# 2026-11-05, maddi 0e361073a, 1b89e4123: an inner class of a generic class as Outer<T>.Inner, which a nullable
+# verdict's Outer.Inner<T>? multiplied into CS1061/CS0019/CS7036; an interface method's read-only parameter where the
+# superclass's method that implements it modifies (CS0535); BigInteger a struct, without ? (CS0115, CS0534):
+# 1319 -> 1330 compiling files, 633 -> 596 errors, the same as the plain run's. nullableWarnings unchanged (182).
 types	1583
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	1565
-compilingFiles	1319
+compilingFiles	1330
 unmappedJdkUses	106
 nullableWarnings	182
