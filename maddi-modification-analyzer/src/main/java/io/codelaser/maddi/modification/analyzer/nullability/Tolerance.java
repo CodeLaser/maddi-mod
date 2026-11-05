@@ -30,6 +30,10 @@ import java.util.Set;
 import java.util.function.Predicate;
 import java.util.stream.IntStream;
 
+import io.codelaser.maddi.cst.api.expression.BinaryOperator;
+import io.codelaser.maddi.cst.api.expression.Expression;
+import io.codelaser.maddi.cst.api.expression.MethodCall;
+import io.codelaser.maddi.cst.api.expression.NullConstant;
 import io.codelaser.maddi.cst.api.expression.VariableExpression;
 import io.codelaser.maddi.cst.api.info.FieldInfo;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
@@ -85,6 +89,8 @@ final class Tolerance {
      analysed method (overridesAnalysed).
      */
     void tolerantParameters(List<MethodInfo> methods) {
+        this.methods = methods;
+        overrideTolerates.clear();
         // what null reaches without these seeds: a field or a return that is nullable anyway may take the parameter
         Set<Object> before = graph.closure(new HashMap<>());
         for (MethodInfo mi : methods) {
@@ -208,13 +214,15 @@ final class Tolerance {
                     if (!hasBody(m)) return trace.tolerance(from, n, "demanded");
                     if (demanded(m, v -> pi.equals(v))) {
                         // the declaring body throws on null; the walk goes on in the overrides that take it
-                        List<ParameterInfo> tolerating = toleratingOverrides(m, pi);
+                        List<ParameterInfo> tolerating = toleratingOverrides(m, pi, before);
                         if (tolerating.isEmpty()) return trace.tolerance(from, n, "demanded");
                         trace.tolerance(from, n, "demanded, tolerated by an override");
-                        for (ParameterInfo op : tolerating) {
-                            if (seen.add(op)) {
-                                queue.addLast(op);
-                                if (from != null) from.put(op, n);
+                        if (OVERRIDE_CYCLES_OFF.get()) {
+                            for (ParameterInfo op : tolerating) {
+                                if (seen.add(op)) {
+                                    queue.addLast(op);
+                                    if (from != null) from.put(op, n);
+                                }
                             }
                         }
                         continue;
@@ -263,6 +271,7 @@ final class Tolerance {
                 }
                 case Content _, Arg _ when declaredSlot(n) && !TOLERANT_SLOTS_OFF.get() -> {
                     if (!before.contains(n)) return trace.tolerance(from, n, "non-null slot");
+                    if (dereferencedRead(n)) return trace.tolerance(from, n, "nullable anyway, dereferenced when read");
                     trace.tolerance(from, n, "nullable anyway");
                     continue;
                 }
@@ -286,18 +295,137 @@ final class Tolerance {
      target that accepts null makes the parameter nullable for the family, which Kotlin wants as one. Not an override
      that ignores the parameter (an empty hook is no evidence), nor one without a body. Gate NOOVERRIDETOLERATES.
      */
-    private List<ParameterInfo> toleratingOverrides(MethodInfo m, ParameterInfo pi) {
+    private List<ParameterInfo> toleratingOverrides(MethodInfo m, ParameterInfo pi, Set<Object> before) {
         if (OVERRIDE_TOLERATES_OFF.get()) return List.of();
         List<ParameterInfo> out = new ArrayList<>();
         for (MethodInfo o : index.implementations.getOrDefault(m, List.of())) {
             if (!hasBody(o) || o.parameters().size() <= pi.index()) continue;
             ParameterInfo op = o.parameters().get(pi.index());
-            if (read(o, op) && !demanded(o, v -> op.equals(v))) out.add(op);
+            if (read(o, op) && !demanded(o, v -> op.equals(v))
+                && (OVERRIDE_CYCLES_OFF.get() || comparedWithNull(o, op) || overrideTolerates(op, before))) {
+                out.add(op);
+            }
         }
         return out;
     }
 
+    /*
+     An override overrules a demand only when it tolerates null by itself: its own walk ends tolerant, without counting
+     on the overrule being decided. guava's ReverseOrdering.min(a, b, c, rest) hands rest to forwardOrder.max, whose
+     demand ReverseOrdering.max would overrule by handing rest back to min: a cycle of delegating overrides, every one
+     of them "tolerating", none of them reading null. The walk took the cycle for tolerance (62 noise rows in the guava
+     oracle, ReverseOrdering.kt and ReverseNaturalOrdering.kt out of the J2K bytecode). An override that compares the
+     parameter with null tolerates it by its own word, whatever it hands on behind the check: useForNull's
+     'part == null ? nullText : Joiner.this.toString(part)' calls back into the demand, but only with a part that is not
+     null, which the walk cannot see. Otherwise the override's own walk decides. An override whose overrule is
+     being decided counts as demanding (the least fixpoint). A result is kept for the rest of the run unless it is a
+     "no" that rested on such an assumption: the outcome must not depend on which parameter was asked about first.
+     Gate NOOVERRIDECYCLES.
+     */
+    private boolean overrideTolerates(ParameterInfo op, Set<Object> before) {
+        Boolean known = overrideTolerates.get(op);
+        if (known != null) return known;
+        if (!overrulesInProgress.add(op)) {
+            assumedDemands++;
+            return false;
+        }
+        int assumedBefore = assumedDemands;
+        boolean t;
+        try {
+            t = tolerates(op, before);
+        } finally {
+            overrulesInProgress.remove(op);
+        }
+        if (t || assumedDemands == assumedBefore) overrideTolerates.put(op, t);
+        return t;
+    }
+
+    private static boolean comparedWithNull(MethodInfo mi, ParameterInfo pi) {
+        boolean[] found = {false};
+        mi.methodBody().visit(e -> {
+            if (e instanceof BinaryOperator bo && bo.operator() != null
+                && ("==".equals(bo.operator().name()) || "!=".equals(bo.operator().name()))) {
+                Expression other = bo.lhs() instanceof NullConstant ? bo.rhs()
+                        : bo.rhs() instanceof NullConstant ? bo.lhs() : null;
+                if (other != null && NonNullFacts.unwrap(other) instanceof VariableExpression ve && pi.equals(ve.variable())) {
+                    found[0] = true;
+                }
+            }
+            return !found[0];
+        });
+        return found[0];
+    }
+
+    private final Map<ParameterInfo, Boolean> overrideTolerates = new HashMap<>();
+    private final Set<ParameterInfo> overrulesInProgress = new HashSet<>();
+    private int assumedDemands;
+
     private static final Switches.Gate OVERRIDE_TOLERATES_OFF = Switches.gate("NOOVERRIDETOLERATES");
+    private static final Switches.Gate OVERRIDE_CYCLES_OFF = Switches.gate("NOOVERRIDECYCLES");
+
+    /*
+     CodeLaser/maddi-mod#93: a slot that is nullable anyway takes the parameter without deciding about it, but its
+     readers may still dereference what they read. timefold's Joiners.equal(l, r) stores the mappings as elements of
+     the joiner's mapping arrays, which DummyMemberAccessor.getGetterFunction()'s null makes nullable anyway (through
+     Joiners.lessThan); matches() calls 'getRightMapping(i).apply(b)'. A reader is a getter returning the slot whose
+     call result is dereferenced directly, or a local the slot flows into that a body demands; a few steps from the
+     slot, through slots, locals and returns only. Gate NODEREFERENCEDSLOTS.
+     */
+    private boolean dereferencedRead(Object slot) {
+        if (DEREFERENCED_SLOTS_OFF.get() || methods == null) return false;
+        Set<MethodInfo> dereferenced = dereferencedResults();
+        Set<Object> seen = new HashSet<>();
+        List<Object> frontier = List.of(slot);
+        for (int depth = 0; depth < MAX_READER_DEPTH && !frontier.isEmpty(); depth++) {
+            List<Object> next = new ArrayList<>();
+            for (Object n : frontier) {
+                for (Object s : graph.successors.getOrDefault(n, Set.of())) {
+                    if (!seen.add(s)) continue;
+                    switch (s) {
+                        case MethodInfo m -> {
+                            if (dereferenced.contains(m)) return true;
+                            next.add(m);
+                        }
+                        case Local local -> {
+                            if (demanded(local.methodInfo(), v -> (v instanceof LocalVariable || v instanceof ParameterInfo)
+                                                                  && v.simpleName().equals(local.name()))) {
+                                return true;
+                            }
+                            next.add(local);
+                        }
+                        case Content _, Arg _ -> next.add(s);
+                        default -> {
+                        }
+                    }
+                }
+            }
+            frontier = next;
+        }
+        return false;
+    }
+
+    private static final int MAX_READER_DEPTH = 4;
+    private static final Switches.Gate DEREFERENCED_SLOTS_OFF = Switches.gate("NODEREFERENCEDSLOTS");
+    private List<MethodInfo> methods;
+    private Set<MethodInfo> dereferencedResults;
+
+    // the methods whose call result some body dereferences directly: 'getRightMapping(i).apply(b)'
+    private Set<MethodInfo> dereferencedResults() {
+        if (dereferencedResults != null) return dereferencedResults;
+        Set<MethodInfo> out = new HashSet<>();
+        for (MethodInfo mi : methods) {
+            if (mi.methodBody() == null) continue;
+            mi.methodBody().visit(e -> {
+                if (e instanceof MethodCall mc && mc.methodInfo() != null && !mc.methodInfo().isStatic()
+                    && mc.object() != null && NonNullFacts.unwrap(mc.object()) instanceof MethodCall inner
+                    && inner.methodInfo() != null && index.analysed.contains(inner.methodInfo())) {
+                    out.add(inner.methodInfo());
+                }
+                return true;
+            });
+        }
+        return dereferencedResults = out;
+    }
 
     // gate NOLIBRARYRETURN: the return of an override of a library method ends the tolerance, as any other (A/B)
     private static final Switches.Gate LIBRARY_RETURN_OFF = Switches.gate("NOLIBRARYRETURN");
