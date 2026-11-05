@@ -609,6 +609,37 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
         } else {
             dependersOf = null;
         }
+        // the early cutoff asks a narrower question than the worklist: can an element OUTSIDE the seed see this seed
+        // element's summary? The graph's edges run from the element that needs to the one it needs, so the readers
+        // of Y are the sources of the edges into Y; and, the one reversed flow of a summary, an overridden (abstract)
+        // method derives from its implementations. Not a field the element refers to: the field analyzer reads the
+        // referring method's code, not its summary, and the field's modification is the cutoff's MODREACH round's.
+        // The symmetric map counted a static method's callees as its dependents: an edit to a method nobody calls
+        // fell back to the cold analysis (fernflower, DebugPrinter).
+        Map<Info, Set<Info>> readersOf;
+        if (cutoff && dependersOf != null) {
+            readersOf = new HashMap<>();
+            dependencyGraph.edgeStream().forEach(e -> {
+                readersOf.computeIfAbsent(e.to().t(), _ -> new HashSet<>()).add(e.from().t());
+                if (e.from().t() instanceof MethodInfo from && e.to().t() instanceof MethodInfo to
+                    && from.overrides().contains(to)) {
+                    readersOf.computeIfAbsent(from, _ -> new HashSet<>()).add(to);
+                }
+            });
+            for (Info info : analysisOrder) {
+                if (info instanceof MethodInfo mi) {
+                    for (MethodInfo overridden : mi.overrides()) {
+                        readersOf.computeIfAbsent(mi, _ -> new HashSet<>()).add(overridden);
+                        readersOf.computeIfAbsent(overridden, _ -> new HashSet<>()).add(mi);
+                    }
+                }
+            }
+            if (externalWakeEdges != null) {
+                externalWakeEdges.forEach((k, v) -> readersOf.computeIfAbsent(k, _ -> new HashSet<>()).addAll(v));
+            }
+        } else {
+            readersOf = null;
+        }
         Set<Info> dirty = initialDirty; // null = analyze everything; a seed = incremental early-cutoff
         Set<Info> orderSet = Set.copyOf(analysisOrder);
         boolean verifying = false; // worklist ran dry -> one full pass certifies (0 changes = true fixpoint)
@@ -1021,6 +1052,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                     if (consumer == null) continue;
                     for (MethodInfo consumed : e.getValue()) {
                         dependersOf.computeIfAbsent(consumed, _ -> new HashSet<>()).add(consumer);
+                        if (readersOf != null) readersOf.computeIfAbsent(consumed, _ -> new HashSet<>()).add(consumer);
                     }
                 }
                 // v2: only SUMMARY changes propagate — dependents cannot observe element-internal changes.
@@ -1043,7 +1075,10 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                             Info md = mapToOrderElement(d, orderSet);
                             if (md == null) continue;
                             if (confined && !cutoffScope.contains(md)) {
-                                pending.add(c);
+                                // outside the seed: only a reader waits for the comparison; a callee does not see it
+                                if (readersOf == null || readersOf.getOrDefault(c, Set.of()).contains(d)) {
+                                    pending.add(c);
+                                }
                             } else {
                                 next.add(md);
                             }
