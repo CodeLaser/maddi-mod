@@ -459,8 +459,10 @@ class WriteLinksAndModification {
                 .filter(link -> !builder.contains(link.from(), link.linkNature(), link.to()))
                 .forEach(link -> builder.add(link.from(), link.linkNature(), link.to()));
 
-        if (Gate.isSet("RVTRACE") && variable instanceof ReturnVariable) {
-            System.out.println("RVTRACE b1=" + builder1.linkSet() + " b2=" + builder2.linkSet()
+        // RVTRACE=1: every return variable; RVTRACE=<fqn substring>: those of the matching methods (#23)
+        boolean rvTrace = variable instanceof ReturnVariable rvt && rvTrace(rvt);
+        if (rvTrace) {
+            System.out.println("RVTRACE " + variable + " b1=" + builder1.linkSet() + " b2=" + builder2.linkSet()
                                + " b=" + builder.linkSet());
         }
         dedupReversePairs(builder);
@@ -474,6 +476,7 @@ class WriteLinksAndModification {
             // return variables will always be complete
             handleReturnVariable(rv, builder);
             returnSideModificationCompanions(rv, builder);
+            if (rvTrace) System.out.println("RVTRACE " + variable + " final=" + builder.linkSet());
         } else {
             // cross-variable transitive-redundancy suppression, ported from the pre-sv engine: keep the nearest
             // hop, drop the origin ('stream1.§xs⊆stream.§xs' stays, the transitive 'stream1.§xs⊆0:in.§xs' goes,
@@ -637,6 +640,12 @@ class WriteLinksAndModification {
     // run's CPU was inside dedupReversePairs building these keys (async-profiler round 1). The nature stays
     // keyed on its symbol so pass-variants compare exactly as the old string key did.
     private record LinkKey(Variable from, String nature, Variable to) {
+    }
+
+    private static final String RV_TRACE = Gate.get("RVTRACE");
+
+    private static boolean rvTrace(ReturnVariable rv) {
+        return RV_TRACE != null && ("1".equals(RV_TRACE) || rv.methodInfo().fullyQualifiedName().contains(RV_TRACE));
     }
 
     private void dedupReversePairs(Links.Builder builder) {
