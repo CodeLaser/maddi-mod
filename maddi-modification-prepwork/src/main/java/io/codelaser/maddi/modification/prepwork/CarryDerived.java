@@ -17,9 +17,14 @@
 
 package io.codelaser.maddi.modification.prepwork;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import io.codelaser.maddi.cst.api.analysis.PropertyValueMap;
 import io.codelaser.maddi.cst.api.element.Element;
 import io.codelaser.maddi.cst.api.expression.ConstructorCall;
+import io.codelaser.maddi.cst.api.expression.Expression;
+import io.codelaser.maddi.cst.api.expression.MethodCall;
 import io.codelaser.maddi.cst.api.expression.Lambda;
 import io.codelaser.maddi.cst.api.info.FieldInfo;
 import io.codelaser.maddi.cst.api.info.InfoMapView;
@@ -79,7 +84,10 @@ public class CarryDerived {
         for (ParameterInfo p : oldMethod.parameters()) {
             map(p.analysis(), view.parameterInfo(p).analysis(), view);
         }
-        if (oldMethod.methodBody() != null) body(oldMethod.methodBody(), view);
+        if (oldMethod.methodBody() != null) {
+            body(oldMethod.methodBody(), view);
+            callSites(oldMethod.methodBody(), newMethod.methodBody(), view);
+        }
     }
 
     private static void field(FieldInfo oldField, InfoMapView view) {
@@ -88,7 +96,60 @@ public class CarryDerived {
         map(oldField.analysis(), newField.analysis(), view);
         map(oldField.analysisOfInitializer(), newField.analysisOfInitializer(), view);
         variableData(oldField.analysisOfInitializer(), view);
-        if (oldField.initializer() != null && !oldField.initializer().isEmpty()) body(oldField.initializer(), view);
+        if (oldField.initializer() != null && !oldField.initializer().isEmpty()) {
+            body(oldField.initializer(), view);
+            callSites(oldField.initializer(), newField.initializer(), view);
+        }
+    }
+
+    /*
+     The call sites' own analysis maps: the link computer's argument links (LINKED_VARIABLES_ARGUMENTS), which the
+     MODREACH reachability reads for its caller-to-callee edges. The rewire memoizes no expression, so the old and new
+     calls are paired by walking both bodies in the same order, which a type whose source did not change allows; a
+     pairing that does not line up carries nothing. Without these, every call site of a rewired type read as one
+     without argument links, and the early cutoff's MODREACH round rewrote hundreds of verdicts outside the seed
+     (fernflower: a one-line edit with 196 dependent types).
+     */
+    private static void callSites(Element oldRoot, Element newRoot, InfoMapView view) {
+        if (newRoot == null || oldRoot == newRoot) return;
+        List<Expression> oldCalls = calls(oldRoot);
+        List<Expression> newCalls = calls(newRoot);
+        if (oldCalls.size() != newCalls.size()) return;
+        for (int i = 0; i < oldCalls.size(); i++) {
+            Expression o = oldCalls.get(i);
+            Expression n = newCalls.get(i);
+            if (o.getClass() != n.getClass() || !callee(o).equals(callee(n))) return;
+        }
+        for (int i = 0; i < oldCalls.size(); i++) {
+            PropertyValueMap from = oldCalls.get(i).analysis();
+            PropertyValueMap to = newCalls.get(i).analysis();
+            if (from == to) continue;
+            from.propertyValueStream()
+                    .filter(pv -> ClearDerived.DERIVED.test(pv.property()))
+                    .filter(pv -> !to.haveAnalyzedValueFor(pv.property()))
+                    .forEach(pv -> {
+                        try {
+                            to.set(pv.property(), pv.value().rewire(view));
+                        } catch (UnsupportedOperationException e) {
+                            // a value without a rewire: not carried, the recompute derives it again
+                        }
+                    });
+        }
+    }
+
+    // the calls of a body in visit order, as body() walks it: a lambda's and a local type's are their own methods'
+    private static List<Expression> calls(Element root) {
+        List<Expression> list = new ArrayList<>();
+        root.visit(e -> {
+            if (e instanceof MethodCall || e instanceof ConstructorCall) list.add((Expression) e);
+            return !(e instanceof Lambda) && !(e instanceof LocalTypeDeclaration);
+        });
+        return list;
+    }
+
+    private static String callee(Expression call) {
+        MethodInfo mi = call instanceof MethodCall mc ? mc.methodInfo() : ((ConstructorCall) call).constructor();
+        return mi == null ? "" : mi.fullyQualifiedName();
     }
 
     // as ClearDerived.body: the statements' variable data, and the types and lambdas declared inside
