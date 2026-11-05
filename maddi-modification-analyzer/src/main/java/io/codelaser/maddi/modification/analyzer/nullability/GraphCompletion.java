@@ -388,6 +388,7 @@ final class GraphCompletion {
         ParameterizedType parent = anonymous.parentClass();
         if (!anonymous.isAnonymous() || mi.isStatic() || mi.isConstructor() || parent == null
             || parent.typeInfo() == null || parent.parameters().isEmpty() || mi.returnType().isVoid()) return -1;
+        if (!ANY_CREATOR_OFF.get() && !createdPrivately(anonymous)) return -1;
         for (MethodInfo overridden : mi.overrides()) {
             if (index.analysed.contains(overridden) || overridden.typeInfo() != parent.typeInfo()) continue;
             ParameterizedType rt = overridden.returnType();
@@ -399,6 +400,22 @@ final class GraphCompletion {
     }
 
     private static final Switches.Gate OVERRIDE_RETURN_SLOTS_OFF = Switches.gate("NOOVERRIDERETURNSLOTS");
+
+    /*
+     The element the override hands out becomes the anonymous object's type argument, and from there the type argument
+     of every list it travels into: returns, parameters, locals. Not the type arguments the program writes down
+     elsewhere, in a class header or an anonymous creation: jenkins' RingBufferLogHandler.getView() is public, its
+     'List<LogRecord?>' reached SlaveLogFetcher's 'extends MasterToSlaveCallable<List<LogRecord>, …>' and an anonymous
+     'FeedAdapter<LogRecord>' next to the list, three Kotlin type errors (maddi-all, 2026-11-05). Only an anonymous
+     object created in a private method: the family stays within its class. guava's Joiner.iterable is private. Gate
+     NOPRIVATECREATOR.
+     */
+    private static boolean createdPrivately(TypeInfo anonymous) {
+        MethodInfo creator = anonymous.enclosingMethod();
+        return creator != null && creator.access().isPrivate();
+    }
+
+    private static final Switches.Gate ANY_CREATOR_OFF = Switches.gate("NOPRIVATECREATOR");
 
     // the link edges counted by the walk become edges, or flows only
     private void linkEdges() {

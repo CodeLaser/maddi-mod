@@ -779,4 +779,58 @@ public class TestTolerance extends NullabilityFixtures {
         Map<String, String> control = byName(run("a.b.ON", withNullsFirst, Policy.KOTLIN));
         assertEquals("Iterable<Object>?", control.get("a.b.ON.Ordering.min(Iterable):0:it"), control.toString());
     }
+
+    /*
+     #85's override return slot stays inside a private creator. jenkins' RingBufferLogHandler.getView() is public: the
+     element its anonymous list hands out (a ring array's, nullable) would become the type argument of every list the
+     view travels into, but not of those written in a class header or an anonymous creation, which Kotlin rejects.
+     */
+    @DisplayName("#85: the override return slot only for an anonymous object created in a private method")
+    @Test
+    public void overrideReturnSlotOnlyInPrivateCreator() {
+        String input = """
+                package a.b;
+                import java.util.AbstractList;
+                import java.util.List;
+                public class RB {
+                    public static class Rec { public String msg() { return "x"; } }
+                    public static class Ring {
+                        private final Rec[] records;
+                        private int start, size;
+                        public Ring(int n) { records = new Rec[n]; }
+                        public synchronized void publish(Rec r) {
+                            int len = records.length;
+                            records[(start + size) % len] = r;
+                            if (size == len) start = (start + 1) % len; else size++;
+                        }
+                        public synchronized List<Rec> getView() {
+                            return new AbstractList<>() {
+                                @Override public Rec get(int index) {
+                                    synchronized (Ring.this) { return records[(start + (size - (index + 1))) % records.length]; }
+                                }
+                                @Override public int size() { return size; }
+                            };
+                        }
+                        public int count() { return view().size(); }
+                        private List<Rec> view() {
+                            return new AbstractList<>() {
+                                @Override public Rec get(int index) { return records[index]; }
+                                @Override public int size() { return size; }
+                            };
+                        }
+                    }
+                }
+                """;
+        Map<String, String> v = byName(run("a.b.RB", input, Policy.KOTLIN));
+        assertEquals("List<Rec>", v.get("a.b.RB.Ring.getView()"), v.toString());
+        assertEquals("List<Rec?>", v.get("a.b.RB.Ring.view()"));
+
+        Switches.offForNextPasses(Set.of("NOPRIVATECREATOR"));
+        try {
+            Map<String, String> off = byName(new NullabilityPass(Policy.KOTLIN).go(analysisOrder));
+            assertEquals("List<Rec?>", off.get("a.b.RB.Ring.getView()"), off.toString());
+        } finally {
+            Switches.offForNextPasses(Set.of());
+        }
+    }
 }
