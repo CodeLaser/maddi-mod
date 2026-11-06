@@ -51,6 +51,38 @@ public class TestGuardImmutable extends CommonTest {
     }
 
     @Language("java")
+    private static final String RULE_0_ABSTRACT = """
+            package a.b;
+            import io.codelaser.maddi.annotation.Immutable;
+
+            public class X {
+                @Immutable(hc = true)
+                abstract static class NotFinal {
+                    private int count;
+
+                    public void bump() { count++; }
+
+                    public int count() { return count; }
+
+                    abstract void run();
+                }
+            }
+            """;
+
+    // An abstract type with an abstract method takes its annotation as its level (IDE mode: a written annotation is a
+    // contract). The owner rule for field finality used to read that level back as "all fields final", which hid the
+    // rule-0 violation the guard exists to report.
+    @DisplayName("rule 0 on an abstract type: the contract does not make its own assignable field final")
+    @Test
+    public void testRule0Abstract() throws IOException {
+        List<Message> violations = violations(analyzeWithGuard("a.b.X", RULE_0_ABSTRACT));
+        assertFalse(violations.isEmpty(), "expected a violation for the assignable field");
+        Message v = violations.getFirst();
+        assertEquals("a.b.X.NotFinal.count", v.info().fullyQualifiedName());
+        assertTrue(v.message().contains("rule 0"), v.message());
+    }
+
+    @Language("java")
     private static final String RULE_0 = """
             package a.b;
             import io.codelaser.maddi.annotation.Immutable;
