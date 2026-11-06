@@ -276,6 +276,13 @@ public final class IncrementalFixpointEngine<V, L> {
                     dead.contains(f.source()) || dead.contains(f.target()));
             if (orphaned) orphans.add(fact);
         });
+        if (LAZY_MATERIALIZATION) {
+            // decided for all orphans on the closure as it is, before any promotion strengthens a label: the outcome
+            // must not depend on the order of the orphans
+            Set<Fact<V, L>> orphanSet = new HashSet<>(orphans);
+            List<Fact<V, L>> needed = orphans.stream().filter(f -> !rederivable(f, dead, orphanSet)).toList();
+            orphans.retainAll(new HashSet<>(needed));
+        }
         for (Fact<V, L> fact : orphans) {
             // The closure's two directions derive independently (feature #1: rev(combined) != combine(reversed))
             // and may hold different-strength labels (∩ one way, ~ the other). The consistency invariant demands
@@ -293,6 +300,46 @@ public final class IncrementalFixpointEngine<V, L> {
             witnessIndex.putIfBetter(new Fact<>(fact.target(), fact.source(), strongestReverse),
                     new Witness.DirectWitness<>(new Fact<>(fact.target(), fact.source(), strongestReverse), "mat"));
         }
+    }
+
+    /*
+     CodeLaser/maddi-mod#97, #92: most orphans are derivable again without the dead vertices. A temporary that many
+     variables may share content with leaves a near-complete set of pairwise '∩' facts; promoting all of them to raw
+     edges made them seeds of every later update (timefold's PillarSwapMoveSelectorFactory.buildBaseMoveSelector from
+     79% to 96% of the work ceiling, fernflower's DomHelper.findGeneralStatement from 67% to 87%), while the closure
+     reached the same size without them. An orphan is skipped when one surviving middle vertex re-derives it, under
+     the same rules as propagateForward, from two facts that are not orphans themselves: those facts keep their
+     support, so the next recompute derives the orphan again, at least as strong. Anything else is promoted as
+     before. Gate NOLAZYMAT.
+     */
+    private static final boolean LAZY_MATERIALIZATION = !Gate.isSet("NOLAZYMAT");
+
+    private boolean rederivable(Fact<V, L> fact, Set<V> dead, Set<Fact<V, L>> orphanSet) {
+        V source = fact.source();
+        V target = fact.target();
+        if (!acceptForComposite.test(target)) return false;
+        for (Map.Entry<V, L> left : closure.successors(source)) {
+            V middle = left.getKey();
+            if (dead.contains(middle) || middle.equals(target) || middle.equals(source)) continue;
+            L rightLabel = closure.label(middle, target);
+            if (rightLabel == null) continue;
+            L combined = combine.apply(left.getValue(), rightLabel);
+            if (combined == null || !valid.test(combined) || !betterThanOrEqual(combined, fact.label())) continue;
+            Fact<V, L> leftFact = new Fact<>(source, middle, left.getValue());
+            Fact<V, L> rightFact = new Fact<>(middle, target, rightLabel);
+            if (orphanSet.contains(leftFact) || orphanSet.contains(rightFact)) continue;
+            if (!acceptComposite.test(new Fact<>(source, target, combined), middle)) continue;
+            Witness<V, L> leftW = witnessIndex.get(leftFact);
+            Witness<V, L> rightW = witnessIndex.get(rightFact);
+            if (leftW == null || rightW == null || !doesNotCreateCycle(fact, leftW, rightW)) continue;
+            if (touchesDead(leftW, dead) || touchesDead(rightW, dead)) continue;
+            return true;
+        }
+        return false;
+    }
+
+    private boolean touchesDead(Witness<V, L> witness, Set<V> dead) {
+        return witness.support().stream().anyMatch(f -> dead.contains(f.source()) || dead.contains(f.target()));
     }
 
     public boolean isValid(L label) {
