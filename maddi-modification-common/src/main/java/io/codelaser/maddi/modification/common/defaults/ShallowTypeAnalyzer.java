@@ -177,9 +177,22 @@ public class ShallowTypeAnalyzer extends AnnotationToProperty {
 
         boolean enumField = isEnum && fieldInfo.isSynthetic();
 
+        // A type at FINAL_FIELDS or above promises that none of its fields is reassigned (§020), so its fields
+        // are final -- unless that level only holds after a mark (EVENTUALLY_IMMUTABLE_TYPE): such a field is
+        // assigned until the mark, which EVENTUALLY_FINAL_FIELD expresses.
+        boolean ownerFinalFields = (ownerImmutable.isFinalFields() || ownerImmutable.isAtLeastImmutableHC())
+                                   && !fieldInfo.owner().analysis().haveAnalyzedValueFor(EVENTUALLY_IMMUTABLE_TYPE);
+        // A SOURCE field's finality is computed from its assignments (prepwork, ComputePartOfConstructionFinalField)
+        // before the analyzer runs. Lifting it from the owner would replace that verdict with the owner's level,
+        // and for a source type that level is computed from, or claimed over, these very fields: a claimed
+        // @Immutable(hc=true) on an abstract type confirmed itself by turning a reassigned field final.
+        boolean computedFinality = !fieldInfo.owner().compilationUnit().externalLibrary()
+                                   && fieldInfo.analysis().haveAnalyzedValueFor(FINAL_FIELD);
         ValueOrigin ff = fieldMap.get(FINAL_FIELD);
-        if (ff == null || ff.valueAsBool().isFalse()) {
-            if (enumField || ownerImmutable.isAtLeastImmutableHC()) {
+        if (computedFinality) {
+            fieldMap.remove(FINAL_FIELD);
+        } else if (ff == null || ff.valueAsBool().isFalse()) {
+            if (enumField || ownerFinalFields) {
                 fieldMap.put(FINAL_FIELD, FROM_OWNER_TRUE);
             } else if (fieldInfo.isFinal()) {
                 fieldMap.put(FINAL_FIELD, FROM_FIELD_TRUE);
