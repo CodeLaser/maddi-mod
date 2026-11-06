@@ -1,9 +1,11 @@
 package io.codelaser.maddi.modification.link.impl.localvar;
 
 import io.codelaser.maddi.cst.api.expression.Expression;
+import io.codelaser.maddi.cst.api.info.InfoMapView;
 import io.codelaser.maddi.cst.api.runtime.Runtime;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.api.variable.LocalVariable;
+import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.cst.impl.variable.LocalVariableImpl;
 import io.codelaser.maddi.modification.link.impl.LinkVariable;
 
@@ -49,5 +51,13 @@ public class IntermediateVariable extends LocalVariableImpl implements LocalVari
     @Override
     public boolean acceptForLinkedVariables() {
         return false;
+    }
+
+    // an intermediate stays one on a rewired type; see MarkerVariable.rewire
+    @Override
+    public Variable rewire(InfoMapView infoMap) {
+        return infoMap.rewired(this, () -> new IntermediateVariable(simpleName().substring(PREFIX.length()),
+                parameterizedType().rewire(infoMap),
+                assignmentExpression() == null ? null : assignmentExpression().rewire(infoMap)));
     }
 }

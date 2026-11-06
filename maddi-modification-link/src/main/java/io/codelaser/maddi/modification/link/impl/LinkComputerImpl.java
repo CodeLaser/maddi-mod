@@ -95,6 +95,13 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
     public record ListOfLinksImpl(List<Links> list) implements ListOfLinks {
         public static final ListOfLinks EMPTY = new ListOfLinksImpl(List.of());
 
+        // carried onto a rewired call site (CarryDerived): each argument's Links, onto the new generation's objects;
+        // see LinksImpl.rewire
+        @Override
+        public Value rewire(InfoMapView infoMap) {
+            return new ListOfLinksImpl(list.stream().map(l -> l == null ? null : (Links) l.rewire(infoMap)).toList());
+        }
+
         @Override
         public Codec.EncodedValue encode(Codec codec, Codec.Context context) {
             return null;
@@ -121,11 +128,6 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
         // its write sites (ExpressionVisitor) use LAST-WRITE-WINS instead — the final write is the
         // settled-state derivation, identical across runs.
 
-        // a list of Links; see LinksImpl.rewire
-        @Override
-        public Value rewire(InfoMapView infoMap) {
-            throw new UnsupportedOperationException("NYI");
-        }
     }
 
     public interface TestVisitor {

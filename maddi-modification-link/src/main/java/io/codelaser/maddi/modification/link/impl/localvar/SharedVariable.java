@@ -9,6 +9,8 @@ import java.util.Set;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.Function;
 
+import io.codelaser.maddi.cst.api.expression.Expression;
+import io.codelaser.maddi.cst.api.info.InfoMapView;
 import io.codelaser.maddi.cst.api.runtime.Runtime;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.api.variable.Variable;
@@ -134,6 +136,32 @@ public class SharedVariable extends LocalVariableImpl implements LinkVariable {
 
     public SharedVariable(String name, ParameterizedType parameterizedType, Runtime runtime) {
         super(name, parameterizedType, runtime.newEmptyExpression());
+    }
+
+    private SharedVariable(String name, ParameterizedType parameterizedType, Expression assignmentExpression) {
+        super(name, parameterizedType, assignmentExpression);
+    }
+
+    /*
+     A shared variable stays one on a rewired type, its group rewired with it; see MarkerVariable.rewire. The copy is
+     registered before its group is rewired: a member can be scoped by the shared variable itself ('sv.f'), and rewiring
+     it reaches back here.
+     */
+    @Override
+    public Variable rewire(InfoMapView infoMap) {
+        SharedVariable done = infoMap.rewiredIfPresent(this);
+        if (done != null) return done;
+        SharedVariable copy = new SharedVariable(simpleName(), parameterizedType().rewire(infoMap),
+                assignmentExpression() == null ? null : assignmentExpression().rewire(infoMap));
+        infoMap.registerRewired(this, copy);
+        Set<Variable> variables = new LinkedHashSet<>();
+        for (Variable v : data.variables) variables.add(v.rewire(infoMap));
+        List<Assignment> assignments = new ArrayList<>();
+        for (Assignment a : data.assignments) {
+            assignments.add(new Assignment(a.from().rewire(infoMap), a.to().rewire(infoMap), a.statementIndex()));
+        }
+        copy.setData(new Data(variables, assignments));
+        return copy;
     }
 
     /**
