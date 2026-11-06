@@ -428,7 +428,8 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
      * reductions of the saturated ES methods — a fluent accumulator and concatenated exception messages —
      * both stayed flat, so the next step is not a third guess but reading what is actually in the closure.
      */
-    private static final String WORK_DUMP = System.getProperty("maddi.workDump");
+    // maddi.workDump, or LINKDUMP in the environment (which reaches a forked test JVM): the closure of the matching methods
+    private static final String WORK_DUMP = System.getProperty("maddi.workDump", System.getenv("LINKDUMP"));
 
     private static final boolean KEEP_OC_FACES = Gate.isSet("KEEPOCFACES");
     /*
