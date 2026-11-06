@@ -313,8 +313,16 @@ public final class IncrementalFixpointEngine<V, L> {
      before. Gate NOLAZYMAT.
      */
     private static final boolean LAZY_MATERIALIZATION = !Gate.isSet("NOLAZYMAT");
+    // diagnostic: LAZYMATANY applies the rule to every label, not only '∩'
+    private static final boolean LAZY_ANY_LABEL = Gate.isSet("LAZYMATANY");
 
     private boolean rederivable(Fact<V, L> fact, Set<V> dead, Set<Fact<V, L>> orphanSet) {
+        // '∩' only, the bulk of the orphans: a promoted fact keeps a fixed witness, a re-derived one stays tied to its
+        // support, and the label rewrites that follow witnesses (replaceReturnAffected, ⊆ to ~) then reach it. For
+        // ⊆/≥ facts that changed verdicts (fernflower's DomHelper.detectStatement); '∩' is not rewritten that way.
+        if (!LAZY_ANY_LABEL && fact.label() != io.codelaser.maddi.modification.link.impl.LinkNatureImpl.OBJECT_GRAPH_OVERLAPS) {
+            return false;
+        }
         V source = fact.source();
         V target = fact.target();
         if (!acceptForComposite.test(target)) return false;

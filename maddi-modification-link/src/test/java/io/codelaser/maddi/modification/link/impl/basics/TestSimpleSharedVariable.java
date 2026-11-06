@@ -180,11 +180,11 @@ public class TestSimpleSharedVariable extends CommonTest {
                         0:in ≥ copy.§$s   mat(0:in ≥ copy.§$s)
                         copy ≥ $__sv_return method   *[copy ≻ copy.§$s, copy.§$s ∋ $__sv_return method]
                         copy ∩ 0:in   *[copy ≻ copy.§$s, copy.§$s ≤ 0:in] support: 0:in.§$s ≺ 0:in, copy.§$s ⊆ 0:in.§$s
-                        copy ∩ 0:in.§$s   mat(copy ∩ 0:in.§$s)
+                        copy ∩ 0:in.§$s   *[copy ≥ $__sv_return method, $__sv_return method ∈ 0:in.§$s] support: $__sv_return method ∈ copy.§$s, copy ≻ copy.§$s, copy.§$s ∋ $__sv_return method, copy.§$s ⊆ 0:in.§$s
                         copy ≻ copy.§$s   0(copy ≻ copy.§$s)
                         0:in.§$s ∋ $__sv_return method   *[0:in.§$s ⊇ copy.§$s, copy.§$s ∋ $__sv_return method]
                         0:in.§$s ≺ 0:in   0(0:in.§$s ≺ 0:in)
-                        0:in.§$s ∩ copy   mat(0:in.§$s ∩ copy)
+                        0:in.§$s ∩ copy   *[0:in.§$s ∋ $__sv_return method, $__sv_return method ≤ copy] support: $__sv_return method ∈ copy.§$s, 0:in.§$s ⊇ copy.§$s, copy.§$s ∋ $__sv_return method, copy.§$s ≺ copy
                         0:in.§$s ⊇ copy.§$s   0(0:in.§$s ⊇ copy.§$s)
                         copy.§$s ∋ $__sv_return method   2(copy.§$s ∋ $__sv_return method)
                         copy.§$s ≤ 0:in   mat(copy.§$s ≤ 0:in)
