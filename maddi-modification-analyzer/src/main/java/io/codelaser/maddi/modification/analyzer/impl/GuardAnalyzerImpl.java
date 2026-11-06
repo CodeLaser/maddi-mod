@@ -451,13 +451,19 @@ public class GuardAnalyzerImpl extends CommonAnalyzerImpl implements GuardAnalyz
         if (contracts.get(CONTAINER_TYPE) instanceof Value.Bool container && container.isTrue()) {
             guardContainer(typeInfo);
         }
-        if (contracts.get(IMMUTABLE_TYPE) instanceof Value.Immutable immutable && immutable.isAtLeastImmutableHC()) {
+        Value.Immutable immutable = contracts.get(IMMUTABLE_TYPE) instanceof Value.Immutable i ? i : null;
+        if (immutable != null && immutable.isAtLeastImmutableHC()) {
             if (!isEventual(typeInfo)) guardImmutable(typeInfo);
-        } else if (hasExplicitIndependentAnnotation(typeInfo)
-                   && contracts.get(INDEPENDENT_TYPE) instanceof Value.Independent ind
-                   && ind.isAtLeastIndependentHc()) {
-            // only in the absence of an @Immutable contract: that one covers independence as its rule 3, and
-            // reporting the same field twice is noise.
+            // no separate @Independent check: the @Immutable contract covers independence as its rule 3, and
+            // reporting the same field twice is noise
+            return;
+        }
+        if (immutable != null && immutable.isFinalFields() && !isEventual(typeInfo)) {
+            guardFinalFields(typeInfo);
+        }
+        if (hasExplicitIndependentAnnotation(typeInfo)
+            && contracts.get(INDEPENDENT_TYPE) instanceof Value.Independent ind
+            && ind.isAtLeastIndependentHc()) {
             guardIndependentType(typeInfo);
         }
     }
@@ -519,6 +525,26 @@ public class GuardAnalyzerImpl extends CommonAnalyzerImpl implements GuardAnalyz
         return contractReader.contracts(typeInfo)
                 .get(EVENTUALLY_IMMUTABLE_TYPE) instanceof Value.EventuallyImmutable ev
                && ev.isEventual();
+    }
+
+    /**
+     * {@code @FinalFields} on a type (§020): no field is assigned after construction. That is rule 0 of
+     * {@code @Immutable} on its own, read from the same decided {@code FINAL_FIELD} values; the higher rules do not
+     * apply. Without this, a {@code @FinalFields} contract went unchecked: the guard only looked at types contracted
+     * {@code @Immutable(hc=true)} or higher.
+     */
+    private void guardFinalFields(TypeInfo contractHolder) {
+        Message contractLocation = MessageImpl.cause(contractHolder,
+                "@FinalFields contracted on " + contractHolder.simpleName());
+        for (FieldInfo fieldInfo : contractHolder.fields()) {
+            if (fieldInfo.isFinal()) continue;
+            Value.Bool finalField = fieldInfo.analysis().getOrNull(FINAL_FIELD, ValueImpl.BoolImpl.class);
+            if (finalField != null && finalField.isFalse()) {
+                reportViolation(fieldInfo, null, contractLocation, "field '" + fieldInfo.name() + "' of "
+                        + contractHolder.fullyQualifiedName() + " is assignable after construction, violating the"
+                        + " @FinalFields contract on " + contractHolder.fullyQualifiedName());
+            }
+        }
     }
 
     /**
