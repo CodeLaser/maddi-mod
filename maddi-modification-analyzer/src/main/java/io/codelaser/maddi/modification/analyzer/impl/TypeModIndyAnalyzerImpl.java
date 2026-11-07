@@ -81,6 +81,9 @@ parameter modification is computed as the combination of links to fields and loc
 
  */
 public class TypeModIndyAnalyzerImpl extends CommonAnalyzerImpl implements TypeModIndyAnalyzer {
+    // see worstLinkToFields
+    private static final boolean CB_METHOD_PESSIMISM = System.getenv("NOCBMETHODPESSIMISM") == null;
+
     private final AnalysisHelper analysisHelper = new AnalysisHelper();
 
     public TypeModIndyAnalyzerImpl(IteratingAnalyzer.Configuration configuration, AtomicInteger propertiesChanged, List<Message> analyzerMessages) {
@@ -534,7 +537,7 @@ normal methods: does a modification to the return value imply any modification i
  */
     private void doIndependent(boolean cycleBreakingActive, MethodInfo methodInfo, MethodLinkedVariables mlv) {
 
-        Independent independentMethod = doIndependentMethod(methodInfo, mlv);
+        Independent independentMethod = doIndependentMethod(methodInfo, mlv, cycleBreakingActive);
         if (independentMethod != null) {
             if (TolerantWrite.setAllowControlledOverwrite(methodInfo.analysis(), PropertyImpl.INDEPENDENT_METHOD, independentMethod, methodInfo)) {
                 DECIDE.debug("MI: Decide independent of method {} = {}", methodInfo, independentMethod);
@@ -555,7 +558,7 @@ normal methods: does a modification to the return value imply any modification i
             UNDECIDED.debug("MI: Independent of method undecided: {}", methodInfo);
         }
         for (ParameterInfo pi : methodInfo.parameters()) {
-            Independent independent = doIndependentParameter(pi, mlv);
+            Independent independent = doIndependentParameter(pi, mlv, cycleBreakingActive);
             if (independent != null) {
                 if (TolerantWrite.setAllowControlledOverwrite(pi.analysis(), PropertyImpl.INDEPENDENT_PARAMETER, independent, pi)) {
                     DECIDE.debug("MI: Decide independent of parameter {} = {}", pi, independent);
@@ -575,23 +578,25 @@ normal methods: does a modification to the return value imply any modification i
         }
     }
 
-    private Independent doIndependentParameter(ParameterInfo pi, MethodLinkedVariables mlv) {
+    private Independent doIndependentParameter(ParameterInfo pi, MethodLinkedVariables mlv,
+                                               boolean cycleBreakingActive) {
         boolean typeIsImmutable = analysisHelper.typeImmutable(pi.parameterizedType()).isImmutable();
         if (typeIsImmutable) return INDEPENDENT;
         if (pi.methodInfo().isAbstract() || pi.methodInfo().methodBody().isEmpty()) return DEPENDENT;
         assert pi.index() < mlv.ofParameters().size();
         Links links = mlv.ofParameters().get(pi.index());
-        return worstLinkToFields(links, pi.methodInfo());
+        return worstLinkToFields(links, pi.methodInfo(), cycleBreakingActive);
     }
 
-    private Independent doIndependentMethod(MethodInfo methodInfo, MethodLinkedVariables mlv) {
+    private Independent doIndependentMethod(MethodInfo methodInfo, MethodLinkedVariables mlv,
+                                            boolean cycleBreakingActive) {
         if (methodInfo.isConstructor() || methodInfo.noReturnValue()) return INDEPENDENT;
         assert !methodInfo.isAbstract() : "Code only called when there is a method body";
         boolean fluent = methodInfo.analysis().getOrDefault(FLUENT_METHOD, FALSE).isTrue();
         if (fluent) return INDEPENDENT;
         boolean typeIsImmutable = analysisHelper.typeImmutable(methodInfo.returnType()).isImmutable();
         if (typeIsImmutable) return INDEPENDENT;
-        Independent worst = worstLinkToFields(mlv.ofReturnValue(), methodInfo);
+        Independent worst = worstLinkToFields(mlv.ofReturnValue(), methodInfo, cycleBreakingActive);
         if (worst == null || worst.isDependent()) return worst;
         return withDependentExceptions(methodInfo, mlv.ofReturnValue(), worst);
     }
@@ -635,8 +640,14 @@ normal methods: does a modification to the return value imply any modification i
      * INDEPENDENT, cleared-not-yet-rederived field type → MUTABLE default → DEPENDENT): the composed-dogfood
      * hc↔FF fork of the statement family. A decided MUTABLE still concludes DEPENDENT immediately — the bottom
      * dominates whatever the undecided links might become.
+     * <p>
+     * Under cycle breaking, an undecided field counts as MUTABLE: the result is DEPENDENT where a link reaches one,
+     * and unchanged where none does. Undecided, the method's (parameter's) value was written INDEPENDENT outright,
+     * and a cold run settled above what a seeded run, with the fields decided, computes (fernflower's
+     * Statement.findObject, VarVersionsProcessor.getVarType, setVarType's parameter); the early cutoff fell back.
+     * NOCBMETHODPESSIMISM restores the old behaviour.
      */
-    private Independent worstLinkToFields(Links links, MethodInfo methodInfo) {
+    private Independent worstLinkToFields(Links links, MethodInfo methodInfo, boolean cycleBreakingActive) {
         boolean immutableHc = false;
         boolean undecided = false;
         for (Link link : links) {
@@ -648,7 +659,7 @@ normal methods: does a modification to the return value imply any modification i
                 if (fieldImmutable.isImmutableHC()) immutableHc = true;
             }
         }
-        if (undecided) return null;
+        if (undecided) return cycleBreakingActive && CB_METHOD_PESSIMISM ? DEPENDENT : null;
         return immutableHc ? INDEPENDENT_HC : INDEPENDENT;
     }
 
