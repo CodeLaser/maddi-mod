@@ -83,6 +83,32 @@ public final class IncrementalFixpointEngine<V, L> {
      */
     private final Set<V> touched = new HashSet<>();
 
+    /*
+     CodeLaser/maddi-mod#92: the implicit label ('∩'). It absorbs every composition (anything composed with it gives it
+     or nothing), so leaving it out of derivation changes no other fact. Stored as a composite it formed a near-complete
+     pairwise set among the variables sharing content with a common one, most of the closure and most of the work.
+     With an implicit label set, composites of that label are not derived; direct edges carrying it stay. The facts
+     are computed on demand from the rest of the closure (implicitSuccessors), and the ones that ran only through
+     vertices being removed are materialized as direct edges first (materializeImplicitOrphans).
+     */
+    private L implicit;
+    private long implicitCacheVersion = -1;
+    private final Map<V, Map<V, L>> implicitCache = new HashMap<>();
+
+    public void setImplicitLabel(L label) {
+        this.implicit = label;
+        implicitCache.clear();
+        implicitCacheVersion = -1;
+    }
+
+    private boolean derivable(L label) {
+        return valid.test(label) && (implicit == null || !implicit.equals(label));
+    }
+
+    private boolean isImplicit(L label) {
+        return implicit != null && implicit.equals(label);
+    }
+
     private void touch(Fact<V, L> fact) {
         touched.add(fact.source());
         touched.add(fact.target());
@@ -165,6 +191,7 @@ public final class IncrementalFixpointEngine<V, L> {
                 acceptForComposite, acceptComposite);
         copy.work = work;
         copy.touched.addAll(touched);
+        copy.implicit = implicit;
         return copy;
     }
 
@@ -247,7 +274,10 @@ public final class IncrementalFixpointEngine<V, L> {
     }
 
     public boolean removeVertices(Set<V> vertices) {
-        if (!Gate.isSet("NOMAT")) materializeWitnessOrphans(vertices);
+        if (!Gate.isSet("NOMAT")) {
+            if (implicit != null) materializeImplicitOrphans(vertices);
+            materializeWitnessOrphans(vertices);
+        }
         // dirty tracking: the removed vertices' knowledge vanishes, and surviving rows that lost a
         // fact to the column sweep changed content too
         touched.addAll(closure.removeVertices(vertices));
@@ -350,6 +380,129 @@ public final class IncrementalFixpointEngine<V, L> {
         return witness.support().stream().anyMatch(f -> dead.contains(f.source()) || dead.contains(f.target()));
     }
 
+    /*
+     The implicit facts from 'a': the targets an implicit-label composite from 'a' would reach in a closure that
+     derived them, excluding the pairs the closure holds with a (better) label of their own. Computed as a search over
+     the closure, with three kinds of state per vertex: START (anything implicit from here composes into the result:
+     at 'a', and wherever the label so far composes with the implicit one into the implicit one), PENDING(label) (a
+     non-implicit label composed so far) and REACHED (the implicit label composed so far). The closure derives both
+     orientations of every fact (completeSymmetrically), so the search runs twice: once composing left to right, once
+     composing the reversed labels right to left, which is the derivation of the mirror 'b ∩ a'. The same filters
+     apply as to a derived fact: no constant marker as a middle (acceptComposite), no composite targeting a return
+     variable or someValue marker (acceptForComposite). Cached until the closure changes.
+     */
+    public Map<V, L> implicitSuccessors(V a) {
+        if (implicit == null) return Map.of();
+        if (implicitCacheVersion != closure.modCount()) {
+            implicitCache.clear();
+            implicitCacheVersion = closure.modCount();
+        }
+        Map<V, L> cached = implicitCache.get(a);
+        if (cached != null) return cached;
+        Set<V> targets = new HashSet<>(implicitTargets(a, false, Set.of()));
+        if (acceptForComposite.test(a)) targets.addAll(implicitTargets(a, true, Set.of()));
+        Map<V, L> result = new LinkedHashMap<>();
+        targets.stream().sorted(vertexComparator).forEach(v -> result.put(v, implicit));
+        Map<V, L> frozen = Collections.unmodifiableMap(result);
+        implicitCache.put(a, frozen);
+        return frozen;
+    }
+
+    private static final int START = 0;
+    private static final int PENDING = 1;
+    private static final int REACHED = 2;
+
+    private record State<V, L>(V vertex, int kind, L label) {
+    }
+
+    private Set<V> implicitTargets(V a, boolean mirror, Set<V> excluded) {
+        Set<State<V, L>> seen = new HashSet<>();
+        Deque<State<V, L>> queue = new ArrayDeque<>();
+        Set<V> reached = new HashSet<>();
+        State<V, L> start = new State<>(a, START, null);
+        seen.add(start);
+        queue.add(start);
+        while (!queue.isEmpty()) {
+            State<V, L> state = queue.removeFirst();
+            V v = state.vertex();
+            if (state.kind() == REACHED) {
+                if (!v.equals(a)) reached.add(v);
+                State<V, L> restart = new State<>(v, START, null);
+                if (seen.add(restart)) queue.add(restart);
+            } else if (state.kind() == PENDING) {
+                L composed = mirror ? combine.apply(implicit, state.label()) : combine.apply(state.label(), implicit);
+                if (isImplicit(composed)) {
+                    State<V, L> restart = new State<>(v, START, null);
+                    if (seen.add(restart)) queue.add(restart);
+                }
+            }
+            boolean middle = !v.equals(a);
+            for (Map.Entry<V, L> edge : closure.successors(v)) {
+                V w = edge.getKey();
+                if (w.equals(a) || excluded.contains(w)) continue;
+                L m = edge.getValue();
+                L next;
+                int kind;
+                if (state.kind() == START) {
+                    next = mirror ? reverse.apply(m) : m;
+                } else {
+                    L sofar = state.kind() == REACHED ? implicit : state.label();
+                    next = mirror ? combine.apply(reverse.apply(m), sofar) : combine.apply(sofar, m);
+                }
+                if (next == null || !valid.test(next)) continue;
+                kind = isImplicit(next) ? REACHED : PENDING;
+                if (middle) {
+                    if (!acceptForComposite.test(w)) continue;
+                    Fact<V, L> composite = mirror ? new Fact<>(w, a, next) : new Fact<>(a, w, next);
+                    if (!acceptComposite.test(composite, v)) continue;
+                }
+                State<V, L> nextState = new State<>(w, kind, kind == REACHED ? null : next);
+                if (seen.add(nextState)) queue.add(nextState);
+            }
+        }
+        reached.removeIf(v -> !acceptForComposite.test(v) || closure.label(a, v) != null);
+        return reached;
+    }
+
+    /*
+     Before 'dead' leaves the graph: the implicit facts between survivors that hold only through a dead vertex become
+     direct edges, as materializeWitnessOrphans does for derived facts. Candidates are the survivors whose closure row
+     reaches a dead vertex. Decided on the closure as it is, before any edge is added.
+     */
+    private void materializeImplicitOrphans(Set<V> dead) {
+        List<V> candidates = new ArrayList<>();
+        for (V v : graph.vertices()) {
+            if (dead.contains(v)) continue;
+            for (Map.Entry<V, L> e : closure.successors(v)) {
+                if (dead.contains(e.getKey())) {
+                    candidates.add(v);
+                    break;
+                }
+            }
+        }
+        candidates.sort(vertexComparator);
+        List<Fact<V, L>> orphans = new ArrayList<>();
+        for (V a : candidates) {
+            Map<V, L> all = implicitSuccessors(a);
+            if (all.isEmpty()) continue;
+            Set<V> without = new HashSet<>(implicitTargets(a, false, dead));
+            if (acceptForComposite.test(a)) without.addAll(implicitTargets(a, true, dead));
+            for (V b : all.keySet()) {
+                if (!dead.contains(b) && !without.contains(b)) orphans.add(new Fact<>(a, b, implicit));
+            }
+        }
+        for (Fact<V, L> fact : orphans) {
+            if (closure.label(fact.source(), fact.target()) != null) continue; // added as the mirror of an earlier one
+            graph.addSymmetricEdge(fact.source(), fact.target(), implicit, implicit);
+            closure.add(fact.source(), fact.target(), implicit);
+            closure.add(fact.target(), fact.source(), implicit);
+            touch(fact);
+            witnessIndex.putIfBetter(fact, new Witness.DirectWitness<>(fact, "mat"));
+            Fact<V, L> mirror = new Fact<>(fact.target(), fact.source(), implicit);
+            witnessIndex.putIfBetter(mirror, new Witness.DirectWitness<>(mirror, "mat"));
+        }
+    }
+
     public boolean isValid(L label) {
         return valid.test(label);
     }
@@ -426,15 +579,17 @@ public final class IncrementalFixpointEngine<V, L> {
     }
 
     private void propagateForward(Fact<V, L> fact, Deque<Fact<V, L>> queue, boolean optimize, Set<Fact<V, L>> history) {
+        if (isImplicit(fact.label())) return;
         Iterable<Map.Entry<V, L>> successors = optimize
                 ? closure.successors(fact.target())
                 : graph.successors(fact.target());
         for (Map.Entry<V, L> edge : successors) {
+            if (isImplicit(edge.getValue())) continue;
             countWork();
             L nextLabel = combine.apply(fact.label(), edge.getValue());
             V source = fact.source();
             V target = edge.getKey();
-            if (acceptForComposite.test(target) && !source.equals(target) && valid.test(nextLabel)) {
+            if (acceptForComposite.test(target) && !source.equals(target) && derivable(nextLabel)) {
                 Fact<V, L> next = new Fact<>(source, target, nextLabel);
                 if (!acceptComposite.test(next, fact.target())) continue;
                 if (history == null || addToHistory(history, next)) {
@@ -478,7 +633,7 @@ public final class IncrementalFixpointEngine<V, L> {
     private void completeSymmetrically(Fact<V, L> next, V middle, Fact<V, L> left, Fact<V, L> right,
                                        Witness<V, L> fallback, Deque<Fact<V, L>> queue, boolean optimize) {
         L revLabel = reverse.apply(next.label());
-        if (!valid.test(revLabel) || !acceptForComposite.test(next.source())) return;
+        if (!derivable(revLabel) || !acceptForComposite.test(next.source())) return;
         Fact<V, L> mirror = new Fact<>(next.target(), next.source(), revLabel);
         if (!acceptComposite.test(mirror, middle)) return;
         boolean added = closure.add(mirror.source(), mirror.target(), mirror.label());
@@ -508,8 +663,10 @@ public final class IncrementalFixpointEngine<V, L> {
     }
 
     private void propagateBackward(Fact<V, L> fact, Deque<Fact<V, L>> queue, boolean optimize, Set<Fact<V, L>> history) {
+        if (isImplicit(fact.label())) return;
         V source = fact.source();
         for (Map.Entry<V, L> edge : closure.successors(source)) {
+            if (isImplicit(edge.getValue())) continue;
             countWork();
             V p = edge.getKey();
             V target = fact.target();
@@ -517,7 +674,7 @@ public final class IncrementalFixpointEngine<V, L> {
                 L label = edge.getValue();
                 L predLabel = reverse.apply(label); // because we're following the successors!
                 L combined = combine.apply(predLabel, fact.label());
-                if (valid.test(combined)) {
+                if (derivable(combined)) {
                     Fact<V, L> next = new Fact<>(p, target, combined);
                     if (!acceptComposite.test(next, source)) continue;
                     if (history == null || addToHistory(history, next)) {

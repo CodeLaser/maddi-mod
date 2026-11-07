@@ -1383,11 +1383,16 @@ public class Graph {
         return engine.vertices();
     }
 
+    // the closure row plus the implicit '∩' facts (#92), which the engine computes instead of storing
     Stream<Map.Entry<Variable, LinkNature>> closureStream(Variable variable) {
-        return engine.successorStream(variable);
+        Map<Variable, LinkNature> implicit = engine.implicitSuccessors(variable);
+        if (implicit.isEmpty()) return engine.successorStream(variable);
+        return Stream.concat(engine.successorStream(variable), implicit.entrySet().stream());
     }
 
     public Iterable<Map.Entry<Variable, LinkNature>> closure(Variable variable) {
-        return engine.successors(variable);
+        Map<Variable, LinkNature> implicit = engine.implicitSuccessors(variable);
+        if (implicit.isEmpty()) return engine.successors(variable);
+        return () -> closureStream(variable).iterator();
     }
 }

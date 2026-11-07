@@ -607,6 +607,11 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                             && (Util.notOwnFieldPath(fact.source(), fact.target())
                                 || !(fact.label().isIdenticalTo() || fact.label() == LinkNatureImpl.IS_ASSIGNED_FROM
                                      || fact.label() == LinkNatureImpl.IS_ASSIGNED_TO)));
+            // CodeLaser/maddi-mod#92: '∩' is computed on demand instead of derived (IncrementalFixpointEngine.implicit).
+            // Gate NOIMPLICIT derives it as before.
+            if (options.objectGraphLinks() && !Gate.isSet("NOOVERLAP") && !Gate.isSet("NOIMPLICIT")) {
+                engine.setImplicitLabel(LinkNatureImpl.OBJECT_GRAPH_OVERLAPS);
+            }
             Graph graph = new Graph(javaInspector.runtime(), engine);
             this.followGraph = new FollowGraph(graph);
             MakeGraph makeGraph = new MakeGraph(javaInspector, javaInspector.runtime(), graph);
