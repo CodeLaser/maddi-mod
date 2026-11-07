@@ -228,4 +228,38 @@ public class TestUnmodifiableView extends CommonTest {
                 unmodifiableView(method(user, "viaMid")), unmodifiableView(method(user, "viaSame")),
                 unmodifiableView(method(user, "viaSub"))));
     }
+
+    @Language("java")
+    private static final String ELEMENT = """
+            package a.b;
+            import java.util.ArrayList;
+            import java.util.HashMap;
+            import java.util.List;
+            import java.util.Map;
+            class Element {
+                static class C {
+                    private Object pool;
+                    Object getPool() { if (pool == null) pool = new Object(); return pool; }
+                }
+                private final Map<String, C> classes = new HashMap<>();
+                private final List<C> list = new ArrayList<>();
+                private final Map<String, String> names = new HashMap<>();
+                C getClass(String n) { return classes.get(n); }
+                C first() { return list.get(0); }
+                String name(String n) { return names.get(n); }
+            }
+            """;
+
+    @DisplayName("a getter handing out a mutable element of a map or list is no view; an immutable one is")
+    @Test
+    public void element() {
+        TypeInfo element = javaInspector.parse("a.b.Element", ELEMENT);
+        List<Info> ao = prepWork(element);
+        new IteratingAnalyzerImpl(javaInspector, new IteratingAnalyzerImpl.ConfigurationBuilder()
+                .setMaxIterations(10).build()).analyze(ao);
+        // Map.get's and List.get's own verdict (immutable-HC) is about their hidden content, a type parameter; here
+        // the element is a mutable C. Was 'true/true' (fernflower's StructContext.getClass)
+        assertEquals("false/false/true", String.join("/", unmodifiableView(method(element, "getClass")),
+                unmodifiableView(method(element, "first")), unmodifiableView(method(element, "name"))));
+    }
 }
