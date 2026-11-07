@@ -11,8 +11,10 @@ import org.slf4j.LoggerFactory;
 
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.expression.Expression;
+import io.codelaser.maddi.cst.api.expression.Lambda;
 import io.codelaser.maddi.cst.api.expression.MethodCall;
 import io.codelaser.maddi.cst.api.expression.MethodReference;
+import io.codelaser.maddi.cst.api.expression.TypeExpression;
 import io.codelaser.maddi.cst.api.expression.VariableExpression;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
@@ -20,6 +22,8 @@ import io.codelaser.maddi.cst.api.runtime.Runtime;
 import io.codelaser.maddi.cst.api.translate.TranslationMap;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.api.variable.Variable;
+import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
+import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 import io.codelaser.maddi.modification.link.impl.translate.VariableTranslationMap;
 import io.codelaser.maddi.modification.prepwork.Util;
 import io.codelaser.maddi.modification.prepwork.variable.MethodLinkedVariables;
@@ -39,6 +43,8 @@ public record MethodModification(Runtime runtime, VariableData variableData, Sta
                                  BiConsumer<ParameterInfo, String> throughPassedFunction,
                                  Consumer<MethodInfo> dependsOn) {
     private static final Logger LOGGER = LoggerFactory.getLogger(MethodModification.class);
+    // gate NOELEMENTFUNCTION: a function handed the receiver's elements by a library callee does not modify them (#99)
+    public static final boolean NO_ELEMENT_FUNCTION = Gate.isSet("NOELEMENTFUNCTION");
 
     /**
      * The variables this call modifies, and among them those whose objects are modified only in their hidden content
@@ -165,6 +171,12 @@ public record MethodModification(Runtime runtime, VariableData variableData, Sta
                 }
             }
         }
+        if (!receiverDisclaimed && objectPrimary != null && !NO_ELEMENT_FUNCTION
+            && handsElementsToModifyingFunction(mc)) {
+            // the receiver's elements are modified by the function they are handed to: its hidden content, deep-only
+            LOGGER.debug("Elements of {} modified by the function passed to {}", objectPrimary, methodInfo);
+            modified.addWithScopes(objectPrimary, false);
+        }
         // the same reasoning for the callee's OWN propagated modifications: if none of this call's effects are
         // the author's, that includes the ones the callee's body performs on variables translated into our scope
         if (!receiverDisclaimed && !methodLinkedVariables.isEmpty() && objectPrimary != null) {
@@ -259,5 +271,68 @@ public record MethodModification(Runtime runtime, VariableData variableData, Sta
         if (mr.methodInfo().isModifying() && mr.scope() instanceof VariableExpression ve) {
             modified.addWithScopes(ve.variable(), !mr.methodInfo().isStructurallyNonModifying());
         }
+    }
+    /*
+     A library callee that hands its receiver's elements to a function passed to it ('list.forEach(h -> h.touch())',
+     Map.forEach, Optional.ifPresent): its functional parameter's type arguments are the receiver type's own type
+     parameters (Consumer<? super T> on Iterable<T>), what its hidden content stands for. The independence the hints
+     give such a parameter is no guide (HC on Iterable.forEach, plain on ArrayList.forEach and Optional.ifPresent).
+     When the function passed modifies its argument, the elements are modified
+     (CodeLaser/maddi-mod#99). The loop form ('for (H h : hs) h.touch()') was always seen; a source callee records
+     the same through MODIFIED_THROUGH_PASSED_FUNCTION (#67), which a library callee has no body for. Only a lambda or
+     a method reference: an opaque function argument is handled where the callee's parameter is modified.
+     */
+    private static boolean ownerTypeParameter(ParameterizedType typeArgument) {
+        return typeArgument.typeParameter() != null && !typeArgument.typeParameter().isMethodTypeParameter();
+    }
+
+    public static boolean handsElementsToModifyingFunction(MethodCall mc) {
+        MethodInfo methodInfo = mc.methodInfo();
+        if (!methodInfo.typeInfo().compilationUnit().externalLibrary() || methodInfo.isStatic()) return false;
+        List<Expression> arguments = mc.parameterExpressions();
+        for (ParameterInfo pi : methodInfo.parameters()) {
+            if (pi.isVarArgs() || pi.index() >= arguments.size() || !PassedFunction.functional(pi)) continue;
+            // the function takes what the receiver's type parameters stand for: Consumer<? super T> on Iterable<T>
+            if (pi.parameterizedType().parameters().stream().noneMatch(MethodModification::ownerTypeParameter)) continue;
+            MethodInfo sam = pi.parameterizedType().typeInfo() == null ? null
+                    : pi.parameterizedType().typeInfo().singleAbstractMethod();
+            // a function called for its effect (Consumer, BiConsumer: forEach, ifPresent, forEachRemaining); a lazy
+            // stream stage's Predicate or Function is not where the element is changed, and starring the stream
+            // reshapes its links (TestConsumers)
+            if (sam == null || !sam.returnType().isVoid()) continue;
+            Expression function = arguments.get(pi.index());
+            for (int j = 0; j < sam.parameters().size(); j++) {
+                if (structurallyModifiesArgument(function, j)) return true;
+            }
+        }
+        return false;
+    }
+    /*
+     Whether the function, applied, changes the object it is handed: its parameter (or an unbound receiver's method) is
+     STRUCTURALLY modified. The deep verdict also stars an argument that is only stored into a modified container
+     ('j -> add(j)', '0:ii*∈this.set*.§$s', TestForEachLambda): the container changes, not the element.
+     */
+    private static boolean structurallyModifiesArgument(Expression function, int samArgumentIndex) {
+        MethodInfo target;
+        int index = samArgumentIndex;
+        if (function instanceof MethodReference mr) {
+            target = mr.methodInfo();
+            if (!target.isStatic() && !target.isConstructor() && mr.scope() instanceof TypeExpression) {
+                if (index == 0) {
+                    Value.Bool nonModifying = target.analysis().getOrNull(PropertyImpl.STRUCTURALLY_NON_MODIFYING_METHOD,
+                            ValueImpl.BoolImpl.class);
+                    return nonModifying != null && nonModifying.isFalse();
+                }
+                index--;
+            }
+        } else if (function instanceof Lambda lambda) {
+            target = lambda.methodInfo();
+        } else {
+            return false;
+        }
+        if (index >= target.parameters().size() || target.parameters().get(index).isVarArgs()) return false;
+        Value.Bool unmodified = target.parameters().get(index).analysis()
+                .getOrNull(PropertyImpl.STRUCTURALLY_UNMODIFIED_PARAMETER, ValueImpl.BoolImpl.class);
+        return unmodified != null && unmodified.isFalse();
     }
 }

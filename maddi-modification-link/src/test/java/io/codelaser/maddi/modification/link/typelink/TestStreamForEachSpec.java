@@ -34,8 +34,8 @@ import io.codelaser.maddi.modification.prepwork.variable.MethodLinkedVariables;
  * implementation emitted a {@code CONTAINS_AS_MEMBER} link to the bare captured parameter, which then dragged the
  * source into the modified set; these tests are the safety net against reintroducing that.)
  * <p>
- * Several cases are currently WRONG and pinned as gaps (see the {@code gap*} tests); they are the targets for the
- * consumer-side work.
+ * Several cases were WRONG and pinned as gaps (the "gaps" section); the element-modifying consumers are fixed
+ * (CodeLaser/maddi-mod#99).
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class TestStreamForEachSpec extends CommonTest {
@@ -125,23 +125,23 @@ public class TestStreamForEachSpec extends CommonTest {
         assertEquals("a.b.C.feedLambda(java.util.List,java.util.List):1:target", modified("feedLambda"));
     }
 
-    @DisplayName("forEach(M::clear): the unbound receiver's self-modification is the element's, not the enclosing "
-                 + "'this' — no longer leaked (element mutation of the source is not yet expressed: conservative)")
+    @DisplayName("forEach(M::clear): the unbound receiver's self-modification is the element's: the source list is "
+                 + "modified (its elements), not the enclosing 'this'")
     @Test
     public void elementModifyingConsumer() {
-        // clear() modifies each element (the SAM's receiver). We no longer misattribute that to the enclosing 'this';
-        // expressing it as modification of the source's elements would need LinkFunctionalInterface to carry
-        // modifications, so for now nothing is reported (conservative but no false positive).
+        // clear() modifies each element (the SAM's receiver). It used to be dropped (pinned here as 'conservative',
+        // which it was not: an opaque Consumer marks the list modified, see applyConsumer); since
+        // CodeLaser/maddi-mod#99 a library callee handing its receiver's elements to a function that modifies them
+        // modifies the receiver, deep-only (MethodModification.handsElementsToModifyingFunction)
         assertEquals("[-] --> -", link("modifyElem"));
-        assertEquals("", modified("modifyElem"));
+        assertEquals("a.b.C.modifyElem(java.util.List):0:list", modified("modifyElem"));
     }
 
-    @DisplayName("forEach(m -> m.clear()): the lambda form behaves identically to the M::clear reference — the "
-                 + "lambda's own parameter never leaks, so the same conservative (empty) result")
+    @DisplayName("forEach(m -> m.clear()): the lambda form behaves identically to the M::clear reference")
     @Test
     public void elementModifyingConsumerLambda() {
         assertEquals("[-] --> -", link("modifyElemLambda"));
-        assertEquals("", modified("modifyElemLambda"));
+        assertEquals("a.b.C.modifyElemLambda(java.util.List):0:list", modified("modifyElemLambda"));
     }
 
     @DisplayName("Stream.peek(target::add).toList(): the consumer's modification of target propagates through the "

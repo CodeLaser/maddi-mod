@@ -90,7 +90,11 @@ public class TestForEachLambda extends CommonTest {
         Links tlvT1 = listVi.linkedVariablesOrEmpty();
         assertEquals("0:list.§$s~this.set.§$s", tlvT1.toString());
 
-        assertEquals("[0:list.§$s~this.set*.§$s] --> -", mlv.toString());
+        // list starred (CodeLaser/maddi-mod#99): this harness runs no field analysis, so add's parameter stays
+        // undecided, read as modified; the lambda then modifies the element it is handed ('0:ii*' in add2 above:
+        // "modification must survive a lambda"), and forEach hands it the list's elements. The full analyzer decides
+        // add's parameter unmodified and the list with it (TestModificationOfElementThroughLibraryFunction.storeForEach)
+        assertEquals("[0:list*.§$s~this.set*.§$s] --> -", mlv.toString());
     }
 
 
@@ -198,7 +202,7 @@ public class TestForEachLambda extends CommonTest {
         Links tlvT1 = listVi.linkedVariablesOrEmpty();
         assertEquals("0:list.§$s~1:x.set.§$s", tlvT1.toString());
         assertEquals("""
-                [0:list.§$s~1:x.set*.§$s, 1:x.set*.§$s~0:list.§$s] --> -\
+                [0:list*.§$s~1:x.set*.§$s, 1:x.set*.§$s~0:list*.§$s] --> -\
                 """, method.analysis().getOrNull(METHOD_LINKS, MethodLinkedVariablesImpl.class).toString());
     }
 
@@ -321,8 +325,8 @@ public class TestForEachLambda extends CommonTest {
                 0:map.§$$s[-2]∩this.map.§$$s[-1],0:map.§$$s[-2]~this.map.§$$s[-2]\
                 """, tlvT1.toString());
         assertEquals("""
-                [0:map.§$$s~this.map*.§$$s,0:map.§$$s[-1]~this.map*.§$$s[-1],0:map.§$$s[-1]∩this.map*.§$$s[-2],\
-                0:map.§$$s[-2]∩this.map*.§$$s[-1],0:map.§$$s[-2]~this.map*.§$$s[-2]] --> -\
+                [0:map*.§$$s~this.map*.§$$s,0:map*.§$$s[-1]~this.map*.§$$s[-1],0:map*.§$$s[-1]∩this.map*.§$$s[-2],\
+                0:map*.§$$s[-2]∩this.map*.§$$s[-1],0:map*.§$$s[-2]~this.map*.§$$s[-2]] --> -\
                 """, mlv.toString());
 
         MethodInfo method2 = X.findUniqueMethod("method2", 1);
@@ -375,8 +379,8 @@ public class TestForEachLambda extends CommonTest {
         assertEquals("[0:h*∈this.map*.§$$s[-1], 1:ii*∈this.map*.§$$s[-2]] --> -", add2Mtl.toString());
 
         final String LINKS_MAP_PUT = """
-                [0:map.§$$s~this.map*.§$$s,0:map.§$$s[-1]~this.map*.§$$s[-1],0:map.§$$s[-1]∩this.map*.§$$s[-2],\
-                0:map.§$$s[-2]∩this.map*.§$$s[-1],0:map.§$$s[-2]~this.map*.§$$s[-2]] --> -\
+                [0:map*.§$$s~this.map*.§$$s,0:map*.§$$s[-1]~this.map*.§$$s[-1],0:map*.§$$s[-1]∩this.map*.§$$s[-2],\
+                0:map*.§$$s[-2]∩this.map*.§$$s[-1],0:map*.§$$s[-2]~this.map*.§$$s[-2]] --> -\
                 """;
 
         MethodInfo method = X.findUniqueMethod("method", 1);
@@ -420,8 +424,8 @@ public class TestForEachLambda extends CommonTest {
         MethodInfo method = X.findUniqueMethod("method", 1);
         MethodLinkedVariables mlvMethod = method.analysis().getOrCreate(METHOD_LINKS, () -> tlc.doMethod(method));
         assertEquals("""
-                [0:map.§$$s~this.map*.§$$s,0:map.§$$s[-1]∩this.map*.§$$s[-1],0:map.§$$s[-1]~this.map*.§$$s[-2],\
-                0:map.§$$s[-2]~this.map*.§$$s[-1],0:map.§$$s[-2]∩this.map*.§$$s[-2]] --> -\
+                [0:map*.§$$s~this.map*.§$$s,0:map*.§$$s[-1]∩this.map*.§$$s[-1],0:map*.§$$s[-1]~this.map*.§$$s[-2],\
+                0:map*.§$$s[-2]~this.map*.§$$s[-1],0:map*.§$$s[-2]∩this.map*.§$$s[-2]] --> -\
                 """, mlvMethod.toString());
     }
 

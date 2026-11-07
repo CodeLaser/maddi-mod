@@ -45,6 +45,7 @@ import io.codelaser.maddi.modification.link.impl.LinkComputerImpl;
 import io.codelaser.maddi.modification.link.impl.LinkNatureImpl;
 import io.codelaser.maddi.modification.link.impl.LinkVariable;
 import io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl;
+import io.codelaser.maddi.modification.link.impl.MethodModification;
 import io.codelaser.maddi.modification.link.impl.PassedFunction;
 import io.codelaser.maddi.modification.link.impl.ReceiverLevel;
 import io.codelaser.maddi.modification.prepwork.Util;
@@ -755,6 +756,16 @@ public class ShadowModificationPass {
                     if (!disclaimed) {
                         handleCallSite(mi, vd, mc.methodInfo(), mc.analysis(), mc.parameterExpressions(), receiverType,
                                 mc.object() instanceof VariableExpression rve ? rve.variable() : null);
+                    }
+                    // engine mirror (MethodModification.handsElementsToModifyingFunction, CodeLaser/maddi-mod#99): a
+                    // library callee hands the receiver's elements to a lambda that modifies its argument
+                    // ('hs.forEach(h -> h.touch())'): the receiver's hidden content is modified, deep-only
+                    if (!disclaimed && mc.object() != null && !MethodModification.NO_ELEMENT_FUNCTION
+                        && MethodModification.handsElementsToModifyingFunction(mc)) {
+                        for (Object node : projectReceiverChain(mi, vd, mc.object(), null)) {
+                            seedWithOrigin(deepOnly(node), mi, "elements handed to a modifying function by "
+                                                               + mc.methodInfo().fullyQualifiedName());
+                        }
                     }
                     // E2: callee receiver -> caller-side receiver nodes (chained receivers resolved
                     // through the inner callee's return-value summary, P2.2a). Mirror of the engine's cone
