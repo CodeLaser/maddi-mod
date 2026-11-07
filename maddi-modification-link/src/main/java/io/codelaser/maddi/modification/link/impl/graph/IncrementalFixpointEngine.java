@@ -266,7 +266,23 @@ public final class IncrementalFixpointEngine<V, L> {
     }
 
     public String printClosure() {
-        return closure.print(vertexPrinter, vertexComparator, witnessIndex);
+        if (implicit == null) return closure.print(vertexPrinter, vertexComparator, witnessIndex);
+        // the stored facts and the implicit ones (#92), in one order; an implicit fact prints 'implicit' as witness
+        List<V> sources = new ArrayList<>(graph.vertices());
+        sources.sort(vertexComparator);
+        StringBuilder sb = new StringBuilder();
+        for (V from : sources) {
+            Map<V, L> row = new TreeMap<>(vertexComparator);
+            closure.successors(from).forEach(e -> row.put(e.getKey(), e.getValue()));
+            Map<V, L> implicitRow = implicitSuccessors(from);
+            row.putAll(implicitRow);
+            row.forEach((to, label) -> sb.append(vertexPrinter.apply(from)).append(' ').append(label).append(' ')
+                    .append(vertexPrinter.apply(to)).append("   ")
+                    .append(implicitRow.containsKey(to) ? "implicit"
+                            : witnessIndex.print(vertexPrinter, new Fact<>(from, to, label)))
+                    .append('\n'));
+        }
+        return sb.toString();
     }
 
     public boolean addVertex(V v) {
@@ -387,7 +403,8 @@ public final class IncrementalFixpointEngine<V, L> {
      at 'a', and wherever the label so far composes with the implicit one into the implicit one), PENDING(label) (a
      non-implicit label composed so far) and REACHED (the implicit label composed so far). The closure derives both
      orientations of every fact (completeSymmetrically), so the search runs twice: once composing left to right, once
-     composing the reversed labels right to left, which is the derivation of the mirror 'b ∩ a'. The same filters
+     composing the reversed labels right to left, which is the derivation of the mirror 'b ∩ a'. Where the closure
+     holds a fact between 'a' and the vertex reached, the search goes on with that fact's label. The same filters
      apply as to a derived fact: no constant marker as a middle (acceptComposite), no composite targeting a return
      variable or someValue marker (acceptForComposite). Cached until the closure changes.
      */
@@ -450,6 +467,10 @@ public final class IncrementalFixpointEngine<V, L> {
                     next = mirror ? combine.apply(reverse.apply(m), sofar) : combine.apply(sofar, m);
                 }
                 if (next == null || !valid.test(next)) continue;
+                // a pair the closure holds composes on with its stored (best) label, as the engine's own
+                // propagation does: an implicit composite never shadows a fact the closure has
+                L stored = mirror ? closure.label(w, a) : closure.label(a, w);
+                if (stored != null) next = stored;
                 kind = isImplicit(next) ? REACHED : PENDING;
                 if (middle) {
                     if (!acceptForComposite.test(w)) continue;
