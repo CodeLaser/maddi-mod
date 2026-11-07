@@ -59,8 +59,50 @@ public record ExpressionVisitor(Runtime runtime,
     static final boolean NO_EXPRESSION_SCOPE_FIELD = Gate.isSet("NOEXPRSCOPEFIELD");
     // gate NOCALLRESULTFIELD: a call result its callee calls a field of the receiver is no genuine containment
     private static final boolean NO_CALL_RESULT_FIELD = Gate.isSet("NOCALLRESULTFIELD");
+    // gate NOELEMENTOWNER: a modified receiver that is an element of a variable unknown here modifies nothing more
+    private static final boolean NO_ELEMENT_OWNER = Gate.isSet("NOELEMENTOWNER");
+
     // gate NOGETTERRECEIVER: an inlined getter drops its receiver expression's links and modifications
     private static final boolean NO_GETTER_RECEIVER = Gate.isSet("NOGETTERRECEIVER");
+
+    /*
+     The call modifies its receiver, and the receiver is an element of a variable this method does not know: a getter
+     handed it out ('C c = getClass(n)', 'getClass ∈ this.classes.§$$s[-2]'; 'getClass(n).getPool()'). A known
+     container takes the modification over its own '∋' link (WriteLinksAndModification.notLinkedToModified, the
+     direct 'classes.get(n)'); an unknown one has no variable to carry it, and the modification was lost
+     (CodeLaser/maddi-mod#100, fernflower's StructContext.instanceOf). Its nearest known scope ('this') is modified
+     instead, deep-only: what changed is an element of its hidden content. The element counterpart of #80.
+     */
+    private static Set<Variable> ownersOfModifiedElement(Variable objectPrimary, Links objectLinks,
+                                                         Set<Variable> modified, VariableData variableData,
+                                                         Stage stage) {
+        if (objectPrimary == null || objectLinks == null || !modified.contains(objectPrimary)) {
+            return Set.of();
+        }
+        Set<Variable> out = new HashSet<>();
+        Iterable<Link> links = objectLinks.linkSet();
+        if (objectLinks.isEmpty() && variableData != null && variableData.isKnown(objectPrimary.fullyQualifiedName())) {
+            // a local holding the element: its links are in the variable data
+            VariableInfo vi = variableData.variableInfo(objectPrimary, stage);
+            Links ofLocal = vi == null ? null : vi.linkedVariables();
+            links = ofLocal == null ? Set.of() : ofLocal.linkSet();
+        }
+        for (Link link : links) {
+            if (link.linkNature() != LinkNatureImpl.IS_ELEMENT_OF) continue;
+            Variable container = Util.firstRealVariable(link.to());
+            if (container == null || variableData != null && variableData.isKnown(container.fullyQualifiedName())) {
+                continue;
+            }
+            // 'this' stands for the receiver whether or not the body names it; without variable data (an expression
+            // evaluated on its own, a return value's) only 'this' and a parameter are certainly the method's own
+            Util.variableAndScopes(container)
+                    .filter(v -> v != container && !v.isIgnoreModifications()
+                                 && (v instanceof This || v instanceof ParameterInfo
+                                     || variableData != null && variableData.isKnown(v.fullyQualifiedName())))
+                    .findFirst().ifPresent(out::add);
+        }
+        return out;
+    }
 
     static final Result EMPTY = new Result(LinksImpl.EMPTY, LinkedVariablesImpl.EMPTY, Map.of(), Set.of(), List.of(),
             Map.of(), Set.of(), Set.of());
@@ -966,7 +1008,10 @@ public record ExpressionVisitor(Runtime runtime,
                     return p == null || !consumedIntoObject.contains(p);
                 })
                 .collect(Collectors.toUnmodifiableSet());
+        Set<Variable> elementOwners = NO_ELEMENT_OWNER ? Set.of()
+                : ownersOfModifiedElement(objectPrimary, object.links(), modified.all(), variableData, stage);
         return r.addModified(modified.all(), modified.deepOnly(), mc.methodInfo())
+                .addModified(elementOwners, elementOwners, mc.methodInfo())
                 .addModified(extraModified, deepOnlyAmong(params, extraModified), null)
                 .addModified(objectModified, object.deepOnlyAmong(objectModified), null)
                 .add(new WriteMethodCall(mc, object.links()))
