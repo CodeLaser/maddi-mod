@@ -70,6 +70,19 @@ import io.codelaser.maddi.modification.common.util.TolerantWrite;
 public class StaticSideEffectAnalyzerImpl {
     // non-final: a run's ModificationOptions can switch it off
     public static boolean ENABLED = true;
+
+    private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger(StaticSideEffectAnalyzerImpl.class);
+    // SSETRACE=<substring>[,<substring>...] (diagnostic): log each decision of a method whose name holds one, with
+    // what it waited for or dropped under cycle breaking
+    private static final String[] TRACE = System.getenv("SSETRACE") == null ? null
+            : System.getenv("SSETRACE").split(",");
+
+    private static boolean traced(MethodInfo mi) {
+        if (TRACE == null) return false;
+        String fqn = mi.fullyQualifiedName();
+        for (String t : TRACE) if (!t.isBlank() && fqn.contains(t)) return true;
+        return false;
+    }
     // how far a culprit is followed into the callees
     private static final int CULPRIT_DEPTH = 6;
 
@@ -116,6 +129,10 @@ public class StaticSideEffectAnalyzerImpl {
             if (waiting.contains(mi)) continue;
             Set<TypeInfo> set = sets.get(mi);
             boolean sse = set.stream().anyMatch(owner -> escapes(mi, owner));
+            if (traced(mi)) {
+                LOGGER.info("SSETRACE decide {} = {} sse={} cycleBreaking={} group={}", mi, set, sse,
+                        activateCycleBreaking, group.size());
+            }
             if (TolerantWrite.setAllowControlledOverwrite(mi.analysis(), PropertyImpl.STATIC_STATE_MODIFIED_METHOD,
                     new ValueImpl.SetOfTypeInfoImpl(Set.copyOf(set)), mi)) {
                 propertyChanges.incrementAndGet();
@@ -243,6 +260,9 @@ public class StaticSideEffectAnalyzerImpl {
                 if (sets.containsKey(callee)) inGroup.add(callee);
                 else if (decided(callee)) set.addAll(modified(callee));
                 else if (computable(callee) && !activateCycleBreaking) waits[0] = true;
+                else if (computable(callee) && traced(mi)) {
+                    LOGGER.info("SSETRACE {} drops undecided callee {} under cycle breaking", mi, callee);
+                }
             }
             return true;
         };
