@@ -131,12 +131,18 @@ public class StaticSideEffectAnalyzerImpl {
             changed = false;
             for (MethodInfo mi : group) {
                 Set<MethodInfo> inGroup = new HashSet<>();
+                // any growth counts, also what collect adds itself (a static write, a decided callee's set): counting
+                // only the in-group copies ended the loop while a member earlier in the order had not yet taken a
+                // later member's new set (fernflower: SwitchStatement.sortEdgesAndNodes stayed empty while its
+                // callee replaceNullStatementsWithBasicBlocks held DecompilerContext)
+                int before = sets.get(mi).size();
                 boolean waits = collect(mi, sets, inGroup, activateCycleBreaking);
                 if (!waits && inGroup.stream().anyMatch(waiting::contains)) waits = true;
                 if (waits && waiting.add(mi)) changed = true;
                 for (MethodInfo callee : inGroup) {
-                    if (sets.get(mi).addAll(sets.get(callee))) changed = true;
+                    sets.get(mi).addAll(sets.get(callee));
                 }
+                if (sets.get(mi).size() != before) changed = true;
             }
         }
         if (TRACE != null && own.stream().anyMatch(StaticSideEffectAnalyzerImpl::traced)) {
