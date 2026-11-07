@@ -841,7 +841,13 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                     String prior = priors.get(element.fullyQualifiedName());
                     String now = ElementSummary.of(element);
                     if (prior != null && prior.equals(now)) continue;
-                    if (moved++ < 10) LOGGER.info("Early cutoff: {} moved;\n  prior: {}\n  now:   {}", c, prior, now);
+                    if (moved++ < 10) {
+                        // the culprit: why the re-analysed element has a static side effect, the run before may not
+                        Object culprit = element.analysis().getOrNull(PropertyImpl.STATIC_SIDE_EFFECTS_CULPRIT_METHOD,
+                                ValueImpl.CulpritImpl.class);
+                        LOGGER.info("Early cutoff: {} moved;\n  prior: {}\n  now:   {}{}", c, prior, now,
+                                culprit == null ? "" : "\n  static side effect: " + culprit);
+                    }
                 }
                 LOGGER.info("Early cutoff: the seed is certified after {} iteration(s); {} of {} seed element(s) with "
                             + "dependents outside the seed moved", iterations, moved, pending.size());

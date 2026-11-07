@@ -42,8 +42,9 @@ public final class Culprits {
     private Culprits() {
     }
 
-    // non-final: the engine sets it per run
-    public static boolean ENABLED = false;
+    // non-final: the engine sets it per run; CULPRITS (presence-only) switches it on where nothing does, for a
+    // diagnostic run (the early cutoff logs a moved element's static-side-effect culprit)
+    public static boolean ENABLED = System.getenv("CULPRITS") != null;
 
     /** A step at element {@code e}, which lies in {@code in}'s compilation unit. */
     public static Value.Culprit.Step step(Info in, Element e, String text) {
