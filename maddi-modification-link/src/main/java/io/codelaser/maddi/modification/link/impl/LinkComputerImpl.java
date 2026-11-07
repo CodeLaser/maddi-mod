@@ -308,6 +308,7 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
             boolean trace = linkTrace != null && methodInfo.fullyQualifiedName().contains(linkTrace);
             if (trace) {
                 IncrementalFixpointEngine.TRACE = true;
+                IncrementalFixpointEngine.traceOverlap(true);
                 System.out.println("LT >>> " + methodInfo.fullyQualifiedName());
             }
             SourceMethodComputer computer = new SourceMethodComputer(methodInfo);
@@ -371,6 +372,7 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                 recursionPrevention.doneSource(methodInfo);
                 if (trace) {
                     IncrementalFixpointEngine.TRACE = false;
+                    IncrementalFixpointEngine.traceOverlap(false);
                     System.out.println("LT <<< " + methodInfo.fullyQualifiedName());
                 }
             }
@@ -609,6 +611,10 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                                      || fact.label() == LinkNatureImpl.IS_ASSIGNED_TO)));
             // CodeLaser/maddi-mod#92: '∩' is computed on demand instead of derived (IncrementalFixpointEngine.implicit).
             // Gate NOIMPLICIT derives it as before.
+            // gate NOCHAIN (with NOIMPLICIT): '∩' derived as before, but never composed with itself
+            if (options.objectGraphLinks() && Gate.isSet("NOIMPLICIT") && Gate.isSet("NOCHAIN")) {
+                engine.setNonChainingLabel(LinkNatureImpl.OBJECT_GRAPH_OVERLAPS);
+            }
             if (options.objectGraphLinks() && !Gate.isSet("NOOVERLAP") && !Gate.isSet("NOIMPLICIT")) {
                 // the same filters as acceptComposite: a constant marker is never the middle of a composition, and
                 // under nullConstantReturns a null constant is an endpoint only of an assignment

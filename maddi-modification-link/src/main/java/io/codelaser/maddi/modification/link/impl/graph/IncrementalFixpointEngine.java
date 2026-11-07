@@ -74,6 +74,10 @@ public final class IncrementalFixpointEngine<V, L> {
     // propagation step and witness decision. Volatile, off by default; zero overhead when false.
     public static volatile boolean TRACE = false;
 
+    public static void traceOverlap(boolean on) {
+        ImplicitOverlap.TRACE = on;
+    }
+
     /*
     Extraction-reuse dirty tracking (remedy A, review 2026-08-05): the endpoints of every CLOSURE-CONTENT
     change (fact added, label upgraded, fact removed) since the last drain. Witness-only changes are
@@ -115,6 +119,21 @@ public final class IncrementalFixpointEngine<V, L> {
 
     private boolean isImplicit(L label) {
         return implicit != null && implicit.equals(label);
+    }
+
+    /*
+     #92, the alternative to an implicit label: a label that is derived and stored as before, but never composed with
+     itself ('∩ ∘ ∩'). Composing every new '∩' fact with all the other '∩' facts of its endpoints was the cubic part of the
+     work; the facts only that composition derives are 1-2% of the closure.
+     */
+    private L nonChaining;
+
+    public void setNonChainingLabel(L label) {
+        this.nonChaining = label;
+    }
+
+    private boolean chain(L l1, L l2) {
+        return nonChaining != null && nonChaining.equals(l1) && nonChaining.equals(l2);
     }
 
     private void touch(Fact<V, L> fact) {
@@ -200,6 +219,7 @@ public final class IncrementalFixpointEngine<V, L> {
         copy.work = work;
         copy.touched.addAll(touched);
         copy.implicit = implicit;
+        copy.nonChaining = nonChaining;
         copy.implicitMiddleOk = implicitMiddleOk;
         copy.implicitPairOk = implicitPairOk;
         copy.frozenGroups = new ArrayList<>(frozenGroups);
@@ -420,7 +440,7 @@ public final class IncrementalFixpointEngine<V, L> {
         Map<V, L> cached = implicitCache.get(a);
         if (cached != null) return cached;
         List<V> targets = new ArrayList<>();
-        for (V b : overlap.partners(a)) {
+        for (V b : SEARCH ? overlap.search(a) : overlap.partners(a)) {
             if (acceptForComposite.test(b) && closure.label(a, b) == null && implicitPairOk.test(a, b)) targets.add(b);
         }
         targets.sort(vertexComparator);
@@ -430,6 +450,9 @@ public final class IncrementalFixpointEngine<V, L> {
         implicitCache.put(a, frozen);
         return frozen;
     }
+
+    // gate OVERLAPSEARCH (diagnostic): the per-vertex search instead of the class partners
+    private static final boolean SEARCH = Gate.isSet("OVERLAPSEARCH");
 
     private ImplicitOverlap<V, L> currentOverlap() {
         if (implicitCacheVersion != closure.modCount() || currentOverlap == null) {
@@ -622,7 +645,7 @@ public final class IncrementalFixpointEngine<V, L> {
                 ? closure.successors(fact.target())
                 : graph.successors(fact.target());
         for (Map.Entry<V, L> edge : successors) {
-            if (isImplicit(edge.getValue())) continue;
+            if (isImplicit(edge.getValue()) || chain(fact.label(), edge.getValue())) continue;
             countWork();
             L nextLabel = combine.apply(fact.label(), edge.getValue());
             V source = fact.source();
@@ -704,7 +727,7 @@ public final class IncrementalFixpointEngine<V, L> {
         if (isImplicit(fact.label())) return;
         V source = fact.source();
         for (Map.Entry<V, L> edge : closure.successors(source)) {
-            if (isImplicit(edge.getValue())) continue;
+            if (isImplicit(edge.getValue()) || chain(edge.getValue(), fact.label())) continue;
             countWork();
             V p = edge.getKey();
             V target = fact.target();

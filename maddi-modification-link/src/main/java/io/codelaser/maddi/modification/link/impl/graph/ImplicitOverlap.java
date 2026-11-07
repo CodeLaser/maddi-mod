@@ -47,6 +47,17 @@ final class ImplicitOverlap<V, L> {
     private final Map<L, Boolean> keepsToRight = new HashMap<>();
     private final L implicit;
 
+    // for the per-vertex search: creation groups (xs on one side, ys on the other), indexed per vertex and side
+    private record Group<V>(List<V> xs, List<V> ys) {
+    }
+
+    private final List<Group<V>> groups = new ArrayList<>();
+    private final Map<V, List<Integer>> groupsOfX = new HashMap<>();
+    private final Map<V, List<Integer>> groupsOfY = new HashMap<>();
+    private final Map<V, List<Integer>> frozenOf = new HashMap<>();
+    private final Map<L, Boolean> keepsFromLeft = new HashMap<>();
+    private final List<List<V>> liveFrozen = new ArrayList<>();
+
     // resolved
     private final Map<V, Set<V>> members = new HashMap<>();
     private final Map<V, Set<V>> leaves = new HashMap<>();
@@ -106,8 +117,18 @@ final class ImplicitOverlap<V, L> {
         leafPairs.computeIfAbsent(l2, _ -> new HashSet<>()).add(l1);
     }
 
+    static volatile boolean TRACE = false;
+
+    private void recordGroup(List<V> xs, List<V> ys) {
+        int index = groups.size();
+        groups.add(new Group<>(xs, ys));
+        for (V x : xs) groupsOfX.computeIfAbsent(x, _ -> new ArrayList<>()).add(index);
+        for (V y : ys) groupsOfY.computeIfAbsent(y, _ -> new ArrayList<>()).add(index);
+    }
+
     // the creations between every x of xs and y of ys (x != y)
     private void create(List<V> xs, List<V> ys) {
+        recordGroup(xs, ys);
         List<V> xm = xs.stream().filter(middleOk).toList();
         List<V> ym = ys.stream().filter(middleOk).toList();
         List<V> xl = xs.stream().filter(v -> !middleOk.test(v)).toList();
@@ -156,6 +177,8 @@ final class ImplicitOverlap<V, L> {
                 for (Map.Entry<L, List<V>> eout : out.entrySet()) {
                     if (source.isImplicit(source.combine(ein.getKey(), eout.getKey()))
                         && hasUnstoredPair(ein.getValue(), eout.getValue())) {
+                        if (TRACE) System.out.println("OVL create via " + m + ": " + ein.getValue() + " " + ein.getKey()
+                                                      + " . " + eout.getKey() + " " + eout.getValue());
                         create(ein.getValue(), eout.getValue());
                     }
                 }
@@ -170,9 +193,12 @@ final class ImplicitOverlap<V, L> {
             }
         }
         // frozen groups
-        for (List<V> group : source.frozenGroups()) {
-            List<V> live = group.stream().filter(v -> !excluded.contains(v)).toList();
+        List<List<V>> frozenGroups = source.frozenGroups();
+        for (int i = 0; i < frozenGroups.size(); i++) {
+            List<V> live = frozenGroups.get(i).stream().filter(v -> !excluded.contains(v)).toList();
             if (live.size() < 2) continue;
+            for (V v : live) frozenOf.computeIfAbsent(v, _ -> new ArrayList<>()).add(liveFrozen.size());
+            liveFrozen.add(live);
             List<V> middles = live.stream().filter(middleOk).toList();
             List<V> ls = live.stream().filter(v -> !middleOk.test(v)).toList();
             if (!middles.isEmpty()) {
@@ -193,6 +219,7 @@ final class ImplicitOverlap<V, L> {
                     V w = e.getKey();
                     if (excluded.contains(w) || !keepsToRight(e.getValue())) continue;
                     if (middleOk.test(w)) {
+                        if (TRACE && find(w) != find(v)) System.out.println("OVL grow " + v + " " + e.getValue() + " " + w);
                         if (find(w) != find(v) && union(v, w)) changed = true;
                     } else {
                         Set<V> anchors = leafAnchors.computeIfAbsent(w, _ -> new HashSet<>());
@@ -232,6 +259,70 @@ final class ImplicitOverlap<V, L> {
         result.addAll(leafPairs.getOrDefault(a, Set.of()));
         result.remove(a);
         return result;
+    }
+
+    private boolean keepsFromLeft(L l) {
+        return keepsFromLeft.computeIfAbsent(l, x -> source.isImplicit(source.combine(x, implicit)));
+    }
+
+    /*
+     The pairs of 'a', following the derivation more closely than the class: a vertex 'v' is reached ('a ∩ v') only
+     when the closure holds no label of its own for '(a, v)', and only a reached vertex composes on, as in the engine:
+     an intermediate '∩' fact must exist to be composed with. From 'a' and from every reached middle-capable vertex:
+     its creation groups, direct '∩' edges and frozen groups reach their other side (R); from a reached vertex, a label
+     that keeps '∩' to the right reaches its target (R ∘ ⊆ = R), and a label that keeps it from the left makes its
+     target an intermediate whose own groups count (R ∘ (⊇ ∘ R) = R). From 'a' itself, such a label does the same
+     ((⊇ ∘ R) = R).
+     */
+    Set<V> search(V a) {
+        Set<V> reached = new HashSet<>();
+        Set<V> pending = new HashSet<>();
+        Set<Long> expanded = new HashSet<>();
+        Deque<V> rQueue = new ArrayDeque<>();
+        Deque<V> pQueue = new ArrayDeque<>();
+        java.util.function.Consumer<V> reach = v -> {
+            if (!v.equals(a) && !excluded.contains(v) && source.stored(a, v) == null && reached.add(v)) rQueue.add(v);
+        };
+        java.util.function.Consumer<V> base = v -> {
+            for (int g : groupsOfX.getOrDefault(v, List.of())) {
+                if (expanded.add(2L * g)) groups.get(g).ys().forEach(reach);
+            }
+            for (int g : groupsOfY.getOrDefault(v, List.of())) {
+                if (expanded.add(2L * g + 1)) groups.get(g).xs().forEach(reach);
+            }
+            for (int f : frozenOf.getOrDefault(v, List.of())) {
+                if (expanded.add(-1L - f)) liveFrozen.get(f).forEach(reach);
+            }
+        };
+        base.accept(a);
+        for (Map.Entry<V, L> e : source.edges(a)) {
+            V w = e.getKey();
+            if (excluded.contains(w)) continue;
+            if (source.isImplicit(e.getValue())) reach.accept(w);
+            else if (keepsFromLeft(e.getValue()) && pending.add(w)) pQueue.add(w);
+        }
+        while (!rQueue.isEmpty() || !pQueue.isEmpty()) {
+            if (!pQueue.isEmpty()) {
+                V y = pQueue.removeFirst();
+                if (!middleOk.test(y)) continue;
+                base.accept(y);
+                for (Map.Entry<V, L> e : source.edges(y)) {
+                    if (source.isImplicit(e.getValue()) && !excluded.contains(e.getKey())) reach.accept(e.getKey());
+                }
+                continue;
+            }
+            V v = rQueue.removeFirst();
+            if (!middleOk.test(v)) continue;
+            base.accept(v);
+            for (Map.Entry<V, L> e : source.edges(v)) {
+                V w = e.getKey();
+                if (excluded.contains(w)) continue;
+                L label = e.getValue();
+                if (source.isImplicit(label) || keepsToRight(label)) reach.accept(w);
+                if (keepsFromLeft(label) && !source.isImplicit(label) && pending.add(w)) pQueue.add(w);
+            }
+        }
+        return reached;
     }
 
     // the classes (members and leaves together), for freezing
