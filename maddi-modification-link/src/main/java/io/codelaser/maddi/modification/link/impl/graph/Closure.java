@@ -54,6 +54,10 @@ public class Closure<V, L> {
         return changed;
     }
 
+    public Set<V> sources() {
+        return reachable.keySet();
+    }
+
     public int countFacts() {
         return reachable.values().stream().mapToInt(Map::size).sum();
     }

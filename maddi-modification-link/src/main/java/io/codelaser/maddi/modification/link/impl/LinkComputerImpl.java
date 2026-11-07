@@ -610,7 +610,11 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
             // CodeLaser/maddi-mod#92: '∩' is computed on demand instead of derived (IncrementalFixpointEngine.implicit).
             // Gate NOIMPLICIT derives it as before.
             if (options.objectGraphLinks() && !Gate.isSet("NOOVERLAP") && !Gate.isSet("NOIMPLICIT")) {
-                engine.setImplicitLabel(LinkNatureImpl.OBJECT_GRAPH_OVERLAPS);
+                // the same filters as acceptComposite: a constant marker is never the middle of a composition, and
+                // under nullConstantReturns a null constant is an endpoint only of an assignment
+                engine.setImplicitLabel(LinkNatureImpl.OBJECT_GRAPH_OVERLAPS,
+                        v -> !(v instanceof MarkerVariable mv && mv.isConstant()),
+                        (a, b) -> !nullTerminal || !isNullConstant(a) && !isNullConstant(b));
             }
             Graph graph = new Graph(javaInspector.runtime(), engine);
             this.followGraph = new FollowGraph(graph);
