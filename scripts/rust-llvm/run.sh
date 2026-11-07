@@ -44,13 +44,18 @@ else
 fi
 cli="$root/maddi-dist/maddi-cli/build/install/maddi/bin/maddi"
 archive="$root/maddi/maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles"
-[[ -x "$cli" ]] || { echo "no maddi CLI at $cli: run ./gradlew :maddi-cli:installDist in maddi-dist" >&2; exit 2; }
+[[ -n "${SKIP_MADDI:-}" || -x "$cli" ]] || { echo "no maddi CLI at $cli: run ./gradlew :maddi-cli:installDist in maddi-dist" >&2; exit 2; }
 
-rm -rf "$out/results" "$out/translated" "$out/crates"
-JAVA_OPTS="${JAVA_OPTS:--Xmx3g}" "$cli" --source "$src" --source-packages "$packages" --jmod java.base \
-  --classpath "$(echo "$lib"/maddi-annotation-*.jar)${MADDI_CLASSPATH:+:$MADDI_CLASSPATH}" \
-  --preload-analysis-results-dirs "$archive/jdk" ${MADDI_ARGS:-} --translate rust \
-  --translate-output "$out/translated" --analysis-results-dir "$out/results" > "$out/maddi.log" 2>&1
+# SKIP_MADDI=1: reuse <out>/{results,translated,maddi.log} of an earlier run, e.g. a corpus analysed on another machine
+# (lab) that has no Rust toolchain; only the Rust half runs here
+rm -rf "$out/crates"
+if [[ -z "${SKIP_MADDI:-}" ]]; then
+  rm -rf "$out/results" "$out/translated"
+  JAVA_OPTS="${JAVA_OPTS:--Xmx3g}" "$cli" --source "$src" --source-packages "$packages" --jmod java.base \
+    --classpath "$(echo "$lib"/maddi-annotation-*.jar)${MADDI_CLASSPATH:+:$MADDI_CLASSPATH}" \
+    --preload-analysis-results-dirs "$archive/jdk" ${MADDI_ARGS:-} --translate rust \
+    --translate-output "$out/translated" --analysis-results-dir "$out/results" > "$out/maddi.log" 2>&1
+fi
 [[ -d "$out/translated/src" ]] || { echo "no translation, see $out/maddi.log" >&2; exit 1; }
 
 # the tests' packages are independent inputs: a crate each, so that what one gets wrong costs only that one; a
