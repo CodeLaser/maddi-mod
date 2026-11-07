@@ -149,6 +149,8 @@ public class TypeModIndyAnalyzerImpl extends CommonAnalyzerImpl implements TypeM
     }
 
     // gate NOALLVALUESFLUENT: fluent when any return link reaches this (the old rule, A/B)
+    // gate NOVIEWOFTYPEPARAMETER: a call whose formal result is a type parameter is a view by the callee's verdict
+    private static final boolean NO_VIEW_OF_TYPE_PARAMETER = System.getenv("NOVIEWOFTYPEPARAMETER") != null;
     private static final boolean ALL_VALUES_FLUENT_OFF = System.getenv("NOALLVALUESFLUENT") != null;
 
     private static boolean isThis(MethodInfo methodInfo, Variable v) {
@@ -264,6 +266,15 @@ public class TypeModIndyAnalyzerImpl extends CommonAnalyzerImpl implements TypeM
         }
         if (value instanceof MethodCall mc && mc.methodInfo() != null) {
             MethodInfo callee = mc.methodInfo();
+            // a callee whose result is a type parameter ('map.get(k)', 'list.get(i)'): its own verdict is about the
+            // hidden content, immutable-HC as far as it knows; what the result is here is the concrete type's
+            // business, decided above when at least immutable-HC. A mutable element is no view (fernflower's
+            // StructContext.getClass, 'classes.get(name)', whose StructClass getPool() loads lazily)
+            if (!NO_VIEW_OF_TYPE_PARAMETER && callee.returnType().isTypeParameter() && type != null
+                && !type.isTypeParameter()) {
+                Value.Immutable ofType = analysisHelper.typeImmutable(type);
+                return ofType == null ? null : Boolean.FALSE;
+            }
             Boolean ofOverrides = unmodifiableOverrides(callee);
             if (Boolean.FALSE.equals(ofOverrides)) return false;
             Boolean ofCallee = unmodifiableCallee(callee);

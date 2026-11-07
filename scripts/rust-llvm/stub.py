@@ -43,6 +43,10 @@ for round_no in range(1, 60):
         if msg.get('level') != 'error' or not msg.get('spans'):
             continue
         span = next((s for s in msg['spans'] if s['is_primary']), msg['spans'][0])
+        # a span inside a macro's expansion ('(todo!(..))(b)', E0618) is in the standard library's sources: its call
+        # site in the crate is where the error is
+        while not span['file_name'].startswith('src/') and span.get('expansion'):
+            span = span['expansion']['span']
         code = (msg.get('code') or {}).get('code', 'other')
         module = os.path.basename(span['file_name'])[:-3]
         if module not in lines:
