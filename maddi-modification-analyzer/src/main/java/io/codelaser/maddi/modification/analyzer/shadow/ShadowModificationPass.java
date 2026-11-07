@@ -1217,7 +1217,14 @@ public class ShadowModificationPass {
                     // field node; the scope chain still projects (Util.variableAndScopes filter)
                     if (!fr.isIgnoreModifications() && isFieldNode(fr.fieldInfo())) out.add(fr.fieldInfo());
                     if (fr.scopeIsRecursivelyThis()) out.add(mi);
-                    push(todo, fr.scopeVariable());
+                    if (fr.scopeVariable() != null) {
+                        push(todo, fr.scopeVariable());
+                    } else if (!NO_SHADOW_CALL_RESULT_FIELD && fr.scope() != null) {
+                        // a field of an expression's result ('parent.getWrapper().getH().list.clear()'): what the
+                        // result stands for, as a modifying call on it (seedAssignmentTarget's #71 rule, for a
+                        // receiver or argument rather than an assignment target)
+                        out.addAll(projectReceiverChain(mi, vd, fr.scope(), null));
+                    }
                 }
                 // own or another method's: a node either way — UNLESS disclaimed. The engine's
                 // Util.variableAndScopes(...).filter(!isIgnoreModifications) drops ANY disclaimed variable,
@@ -1250,6 +1257,17 @@ public class ShadowModificationPass {
                                                 push(todo, l.from());
                                             }
                                         });
+                                // the local is a field of another object ('w ≺ 0:parent', a call result its callee
+                                // calls a field of the receiver): modifying it modifies that object. The engine keeps
+                                // such a containment only where it is genuine (#80, ExpressionVisitor), and lets the
+                                // modification travel over it; the walk follows it the same way
+                                if (!NO_SHADOW_CALL_RESULT_FIELD) {
+                                    links.stream().filter(l -> l.linkNature() == LinkNatureImpl.IS_FIELD_OF
+                                                               && !Util.virtual(l.from()) && !Util.virtual(l.to())
+                                                               && l.from().fullyQualifiedName()
+                                                                       .equals(v.fullyQualifiedName()))
+                                            .forEach(l -> push(todo, l.to()));
+                                }
                                 links.stream().filter(l -> l.linkNature() == LinkNatureImpl.IS_ELEMENT_OF
                                                            && l.from().fullyQualifiedName().equals(v.fullyQualifiedName()))
                                         .map(l -> Util.firstRealVariable(l.to()))
@@ -1280,6 +1298,8 @@ public class ShadowModificationPass {
     }
 
     private static final boolean NO_VIEW_LOCAL = Gate.isSet("NOVIEWLOCAL");
+    // gate NOSHADOWCALLRESULTFIELD: the walk does not follow a call result that is part of the receiver (#80's mirror)
+    private static final boolean NO_SHADOW_CALL_RESULT_FIELD = Gate.isSet("NOSHADOWCALLRESULTFIELD");
 
     /*
      A local initialised with a call whose result is a VIEW of an argument: the callee's summary says
