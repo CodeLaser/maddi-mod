@@ -26,7 +26,8 @@ def functions(lines, module):
     fns = {}
     impl = None
     for i, line in enumerate(lines):
-        m = re.match(r'(?:impl|trait)(?:<[^>]*>)? (\w+)', line)
+        # 'pub trait Filter {', 'pub(crate) unsafe trait ..': a trait's default methods are functions too
+        m = re.match(r'(?:pub(?:\([\w:]+\))? )?(?:unsafe )?(?:impl|trait)(?:<[^>]*>)? (\w+)', line)
         if m:
             impl = m.group(1)
             continue
