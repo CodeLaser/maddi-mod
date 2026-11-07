@@ -30,6 +30,11 @@ def functions(lines, module):
         m = re.match(r'(?:pub(?:\([\w:]+\))? )?(?:unsafe )?(?:impl|trait)(?:<[^>]*>)? (\w+)', line)
         if m:
             impl = m.group(1)
+            # 'impl PartialEq for AiMessage', 'impl std::fmt::Display for BasicBlock': keyed by the type, so that every
+            # type's eq or fmt is a function of its own
+            f = re.search(r' for (?:[\w:]+::)?(\w+)', line)
+            if f and line.startswith(('impl', 'unsafe impl')):
+                impl = f.group(1) + '/' + re.sub(r'<.*', '', line.split(' for ')[0].split()[-1]).split('::')[-1]
             continue
         m = SIGNATURE.match(line)
         if not m or impl is None:
