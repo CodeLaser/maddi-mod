@@ -564,8 +564,11 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
             // see Options.objectGraphLinks: the coarse ∩/≤/≥ web is not consumed by linking's applications and
             // is quadratic on deep structures; PRODUCTION excludes those labels from the closure entirely
             boolean nullTerminal = options.nullConstantReturns() && !Gate.isSet("NULLCOMPOSE");
+            // gate NOOVERLAP (#92 measurement): drop only '∩' from the closure, to see what it costs and which
+            // verdicts read it
             Predicate<LinkNature> valid = options.objectGraphLinks()
-                    ? LinkNature::valid
+                    ? (Gate.isSet("NOOVERLAP") ? ln -> ln.valid() && ln != LinkNatureImpl.OBJECT_GRAPH_OVERLAPS
+                                               : LinkNature::valid)
                     : ln -> ln.valid() && ln != LinkNatureImpl.OBJECT_GRAPH_OVERLAPS
                             && ln != LinkNatureImpl.IS_IN_OBJECT_GRAPH && ln != LinkNatureImpl.OBJECT_GRAPH_CONTAINS;
             IncrementalFixpointEngine<Variable, LinkNature> engine = new IncrementalFixpointEngine<>(LinkNature::combine,
