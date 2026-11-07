@@ -237,12 +237,19 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
         doType(typeInfo);
     }
 
+    // MLVDUMP=<fqn substring> in the environment: print every computed summary of the matching methods (diagnostic)
+    private static final String MLV_DUMP = System.getenv("MLVDUMP");
+
     @Override
     public MethodLinkedVariables doMethod(MethodInfo method) {
         try {
             TypeInfo typeInfo = method.typeInfo();
             boolean shallow = options.forceShallow() || method.isAbstract() || typeInfo.compilationUnit().externalLibrary();
-            return doMethod(method, shallow, false, true);
+            MethodLinkedVariables result = doMethod(method, shallow, false, true);
+            if (MLV_DUMP != null && method.fullyQualifiedName().contains(MLV_DUMP)) {
+                System.out.println("MLVDUMP " + method.fullyQualifiedName() + " " + result);
+            }
+            return result;
         } catch (RuntimeException | AssertionError | StackOverflowError e) {
             LOGGER.error("Caught exception computing {}", method, e);
             throw e;
