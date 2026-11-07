@@ -139,6 +139,12 @@ public class StaticSideEffectAnalyzerImpl {
                 }
             }
         }
+        if (TRACE != null && own.stream().anyMatch(StaticSideEffectAnalyzerImpl::traced)) {
+            for (MethodInfo g : group) {
+                LOGGER.info("SSETRACE   group of {}: {} = {}{}{}", typeInfo, g, sets.get(g),
+                        waiting.contains(g) ? " WAITING" : "", own.contains(g) ? " (own)" : "");
+            }
+        }
         for (MethodInfo mi : own) {
             if (waiting.contains(mi)) continue;
             Set<TypeInfo> set = sets.get(mi);
