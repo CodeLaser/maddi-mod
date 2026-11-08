@@ -127,14 +127,14 @@ public class TestSimpleSharedVariable extends CommonTest {
         LinkComputer tlc = new LinkComputerImpl(javaInspector, (statementIndex, graph) -> {
             if ("0".equals(statementIndex)) {
                 assertEquals("""
-                        0:in ∩ copy   implicit
+                        0:in ∩ copy   *[0:in ≥ copy.§$s, copy.§$s ≺ copy] support: 0:in ≻ 0:in.§$s, 0:in.§$s ⊇ copy.§$s
                         0:in ≻ 0:in.§$s   0(0:in ≻ 0:in.§$s)
                         0:in ≥ copy.§$s   *[0:in ≻ 0:in.§$s, 0:in.§$s ⊇ copy.§$s]
-                        copy ∩ 0:in   implicit
-                        copy ∩ 0:in.§$s   implicit
+                        copy ∩ 0:in   *[copy ≻ copy.§$s, copy.§$s ≤ 0:in] support: 0:in.§$s ≺ 0:in, copy.§$s ⊆ 0:in.§$s
+                        copy ∩ 0:in.§$s   *[copy ≻ copy.§$s, copy.§$s ⊆ 0:in.§$s]
                         copy ≻ copy.§$s   0(copy ≻ copy.§$s)
                         0:in.§$s ≺ 0:in   0(0:in.§$s ≺ 0:in)
-                        0:in.§$s ∩ copy   implicit
+                        0:in.§$s ∩ copy   *[0:in.§$s ⊇ copy.§$s, copy.§$s ≺ copy]
                         0:in.§$s ⊇ copy.§$s   0(0:in.§$s ⊇ copy.§$s)
                         copy.§$s ≤ 0:in   *[copy.§$s ⊆ 0:in.§$s, 0:in.§$s ≺ 0:in]
                         copy.§$s ≺ copy   0(copy.§$s ≺ copy)
@@ -144,23 +144,23 @@ public class TestSimpleSharedVariable extends CommonTest {
             // (3 choose 2) = 3 combinations; always x2 because of symmetry
             if ("1".equals(statementIndex)) {
                 assertEquals("""
-                        0:in ∩ copy   implicit
+                        0:in ∩ copy   *[0:in ≥ copy.§$s, copy.§$s ≺ copy] support: 0:in ≻ 0:in.§$s, 0:in.§$s ⊇ copy.§$s
                         0:in ≥ first   *[0:in ≻ 0:in.§$s, 0:in.§$s ∋ first] support: 0:in.§$s ⊇ copy.§$s, copy.§$s ∋ first
                         0:in ≻ 0:in.§$s   0(0:in ≻ 0:in.§$s)
-                        0:in ≥ copy.§$s   *[0:in ≻ 0:in.§$s, 0:in.§$s ⊇ copy.§$s]
-                        copy ∩ 0:in   implicit
+                        0:in ≥ copy.§$s   *[0:in ≥ first, first ∈ copy.§$s] support: 0:in ≻ 0:in.§$s, 0:in.§$s ⊇ copy.§$s, copy.§$s ∋ first
+                        copy ∩ 0:in   *[copy ≻ copy.§$s, copy.§$s ≤ 0:in] support: 0:in.§$s ≺ 0:in, copy.§$s ⊆ 0:in.§$s
                         copy ≥ first   *[copy ≻ copy.§$s, copy.§$s ∋ first]
-                        copy ∩ 0:in.§$s   implicit
+                        copy ∩ 0:in.§$s   *[copy ≥ first, first ∈ 0:in.§$s] support: copy ≻ copy.§$s, copy.§$s ∋ first, copy.§$s ⊆ 0:in.§$s, first ∈ copy.§$s
                         copy ≻ copy.§$s   0(copy ≻ copy.§$s)
                         first ≤ 0:in   *[first ∈ 0:in.§$s, 0:in.§$s ≺ 0:in] support: copy.§$s ⊆ 0:in.§$s, first ∈ copy.§$s
                         first ≤ copy   *[first ∈ copy.§$s, copy.§$s ≺ copy]
                         first ∈ 0:in.§$s   *[first ∈ copy.§$s, copy.§$s ⊆ 0:in.§$s]
                         first ∈ copy.§$s   1(first ∈ copy.§$s)
                         0:in.§$s ≺ 0:in   0(0:in.§$s ≺ 0:in)
-                        0:in.§$s ∩ copy   implicit
+                        0:in.§$s ∩ copy   *[0:in.§$s ∋ first, first ≤ copy] support: 0:in.§$s ⊇ copy.§$s, copy.§$s ∋ first, copy.§$s ≺ copy, first ∈ copy.§$s
                         0:in.§$s ∋ first   *[0:in.§$s ⊇ copy.§$s, copy.§$s ∋ first]
                         0:in.§$s ⊇ copy.§$s   0(0:in.§$s ⊇ copy.§$s)
-                        copy.§$s ≤ 0:in   *[copy.§$s ⊆ 0:in.§$s, 0:in.§$s ≺ 0:in]
+                        copy.§$s ≤ 0:in   *[copy.§$s ∋ first, first ≤ 0:in] support: 0:in.§$s ≺ 0:in, copy.§$s ⊆ 0:in.§$s, first ∈ copy.§$s
                         copy.§$s ≺ copy   0(copy.§$s ≺ copy)
                         copy.§$s ∋ first   1(copy.§$s ∋ first)
                         copy.§$s ⊆ 0:in.§$s   0(copy.§$s ⊆ 0:in.§$s)
@@ -175,19 +175,19 @@ public class TestSimpleSharedVariable extends CommonTest {
                         $__sv_return method ∈ 0:in.§$s   *[$__sv_return method ∈ copy.§$s, copy.§$s ⊆ 0:in.§$s]
                         $__sv_return method ∈ copy.§$s   2($__sv_return method ∈ copy.§$s)
                         0:in ≥ $__sv_return method   *[0:in ≻ 0:in.§$s, 0:in.§$s ∋ $__sv_return method] support: 0:in.§$s ⊇ copy.§$s, copy.§$s ∋ $__sv_return method
-                        0:in ∩ copy   implicit
+                        0:in ∩ copy   *[0:in ≥ copy.§$s, copy.§$s ≺ copy] support: 0:in ≻ 0:in.§$s, 0:in.§$s ⊇ copy.§$s
                         0:in ≻ 0:in.§$s   0(0:in ≻ 0:in.§$s)
-                        0:in ≥ copy.§$s   *[0:in ≻ 0:in.§$s, 0:in.§$s ⊇ copy.§$s]
+                        0:in ≥ copy.§$s   mat(0:in ≥ copy.§$s)
                         copy ≥ $__sv_return method   *[copy ≻ copy.§$s, copy.§$s ∋ $__sv_return method]
-                        copy ∩ 0:in   implicit
-                        copy ∩ 0:in.§$s   implicit
+                        copy ∩ 0:in   *[copy ≻ copy.§$s, copy.§$s ≤ 0:in] support: 0:in.§$s ≺ 0:in, copy.§$s ⊆ 0:in.§$s
+                        copy ∩ 0:in.§$s   *[copy ≥ $__sv_return method, $__sv_return method ∈ 0:in.§$s] support: $__sv_return method ∈ copy.§$s, copy ≻ copy.§$s, copy.§$s ∋ $__sv_return method, copy.§$s ⊆ 0:in.§$s
                         copy ≻ copy.§$s   0(copy ≻ copy.§$s)
                         0:in.§$s ∋ $__sv_return method   *[0:in.§$s ⊇ copy.§$s, copy.§$s ∋ $__sv_return method]
                         0:in.§$s ≺ 0:in   0(0:in.§$s ≺ 0:in)
-                        0:in.§$s ∩ copy   implicit
+                        0:in.§$s ∩ copy   *[0:in.§$s ∋ $__sv_return method, $__sv_return method ≤ copy] support: $__sv_return method ∈ copy.§$s, 0:in.§$s ⊇ copy.§$s, copy.§$s ∋ $__sv_return method, copy.§$s ≺ copy
                         0:in.§$s ⊇ copy.§$s   0(0:in.§$s ⊇ copy.§$s)
                         copy.§$s ∋ $__sv_return method   2(copy.§$s ∋ $__sv_return method)
-                        copy.§$s ≤ 0:in   *[copy.§$s ⊆ 0:in.§$s, 0:in.§$s ≺ 0:in]
+                        copy.§$s ≤ 0:in   mat(copy.§$s ≤ 0:in)
                         copy.§$s ≺ copy   0(copy.§$s ≺ copy)
                         copy.§$s ⊆ 0:in.§$s   0(copy.§$s ⊆ 0:in.§$s)
                         """, graph.printClosure());

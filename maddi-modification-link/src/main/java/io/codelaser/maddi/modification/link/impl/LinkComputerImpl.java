@@ -638,12 +638,14 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                                 || !(fact.label().isIdenticalTo() || fact.label() == LinkNatureImpl.IS_ASSIGNED_FROM
                                      || fact.label() == LinkNatureImpl.IS_ASSIGNED_TO)));
             // CodeLaser/maddi-mod#92: '∩' is computed on demand instead of derived (IncrementalFixpointEngine.implicit).
-            // Gate NOIMPLICIT derives it as before.
-            // gate NOCHAIN (with NOIMPLICIT): '∩' derived as before, but never composed with itself
-            if (options.objectGraphLinks() && Gate.isSet("NOIMPLICIT") && Gate.isSet("NOCHAIN")) {
+            // Opt-in, gate IMPLICIT, while #92 is open: by default '∩' is derived as before (2026-11-08: the class
+            // model changes 10 link/analyzer expectations and ~30 corpus verdicts; Bart has not decided on '∩').
+            // gate NOCHAIN (without IMPLICIT): '∩' derived as before, but never composed with itself
+            boolean implicitOverlap = Gate.isSet("IMPLICIT") && !Gate.isSet("NOIMPLICIT");
+            if (options.objectGraphLinks() && !implicitOverlap && Gate.isSet("NOCHAIN")) {
                 engine.setNonChainingLabel(LinkNatureImpl.OBJECT_GRAPH_OVERLAPS);
             }
-            if (options.objectGraphLinks() && !Gate.isSet("NOOVERLAP") && !Gate.isSet("NOIMPLICIT")) {
+            if (options.objectGraphLinks() && !Gate.isSet("NOOVERLAP") && implicitOverlap) {
                 // the same filters as acceptComposite: a constant marker is never the middle of a composition, and
                 // under nullConstantReturns a null constant is an endpoint only of an assignment
                 engine.setImplicitLabel(LinkNatureImpl.OBJECT_GRAPH_OVERLAPS,
