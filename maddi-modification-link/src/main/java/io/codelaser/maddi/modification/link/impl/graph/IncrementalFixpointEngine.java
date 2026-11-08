@@ -113,6 +113,14 @@ public final class IncrementalFixpointEngine<V, L> {
         currentOverlap = null;
     }
 
+    // #92 gate OVLRELEVANT: the vertices whose implicit facts are answered (null: all)
+    private Predicate<V> implicitQuery;
+
+    public void setImplicitQuery(Predicate<V> query) {
+        this.implicitQuery = query;
+        implicitCache.clear();
+    }
+
     private boolean derivable(L label) {
         return valid.test(label) && (implicit == null || !implicit.equals(label));
     }
@@ -222,6 +230,7 @@ public final class IncrementalFixpointEngine<V, L> {
         copy.nonChaining = nonChaining;
         copy.implicitMiddleOk = implicitMiddleOk;
         copy.implicitPairOk = implicitPairOk;
+        copy.implicitQuery = implicitQuery;
         copy.frozenGroups = new ArrayList<>(frozenGroups);
         return copy;
     }
@@ -435,9 +444,10 @@ public final class IncrementalFixpointEngine<V, L> {
      filter rejects. Computed once per closure version.
      */
     public Map<V, L> implicitSuccessors(V a) {
-        if (implicit == null) return Map.of();
+        if (implicit == null || implicitQuery != null && !implicitQuery.test(a)) return Map.of();
         ImplicitOverlap<V, L> overlap = currentOverlap();
         Map<V, L> cached = implicitCache.get(a);
+        if (OverlapStats.ON) OverlapStats.read(cached != null);
         if (cached != null) return cached;
         List<V> targets = new ArrayList<>();
         for (V b : SEARCH ? overlap.search(a) : overlap.partners(a)) {
@@ -459,7 +469,9 @@ public final class IncrementalFixpointEngine<V, L> {
             implicitCache.clear();
             reversedRows = null;
             implicitCacheVersion = closure.modCount();
+            long t0 = OverlapStats.ON ? System.nanoTime() : 0;
             currentOverlap = buildOverlap(Set.of());
+            if (OverlapStats.ON) OverlapStats.build(System.nanoTime() - t0, graph.vertices().size());
         }
         return currentOverlap;
     }
@@ -532,6 +544,15 @@ public final class IncrementalFixpointEngine<V, L> {
      instead of an edge per pair. Frozen groups lose their members as those are removed in turn.
      */
     private void freezeImplicitGroups(Set<V> dead) {
+        long t0 = OverlapStats.ON ? System.nanoTime() : 0;
+        try {
+            freezeImplicitGroups0(dead);
+        } finally {
+            if (OverlapStats.ON) OverlapStats.freeze(System.nanoTime() - t0);
+        }
+    }
+
+    private void freezeImplicitGroups0(Set<V> dead) {
         ImplicitOverlap<V, L> before = currentOverlap();
         ImplicitOverlap<V, L> after = buildOverlap(dead);
         List<List<V>> newGroups = new ArrayList<>();
