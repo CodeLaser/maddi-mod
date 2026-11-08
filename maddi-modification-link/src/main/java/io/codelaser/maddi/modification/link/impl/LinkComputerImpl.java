@@ -237,12 +237,19 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
         doType(typeInfo);
     }
 
+    // MLVDUMP=<fqn substring> in the environment: print every computed summary of the matching methods (diagnostic)
+    private static final String MLV_DUMP = System.getenv("MLVDUMP");
+
     @Override
     public MethodLinkedVariables doMethod(MethodInfo method) {
         try {
             TypeInfo typeInfo = method.typeInfo();
             boolean shallow = options.forceShallow() || method.isAbstract() || typeInfo.compilationUnit().externalLibrary();
-            return doMethod(method, shallow, false, true);
+            MethodLinkedVariables result = doMethod(method, shallow, false, true);
+            if (MLV_DUMP != null && method.fullyQualifiedName().contains(MLV_DUMP)) {
+                System.out.println("MLVDUMP " + method.fullyQualifiedName() + " " + result);
+            }
+            return result;
         } catch (RuntimeException | AssertionError | StackOverflowError e) {
             LOGGER.error("Caught exception computing {}", method, e);
             throw e;
@@ -308,6 +315,7 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
             boolean trace = linkTrace != null && methodInfo.fullyQualifiedName().contains(linkTrace);
             if (trace) {
                 IncrementalFixpointEngine.TRACE = true;
+                IncrementalFixpointEngine.traceOverlap(true);
                 System.out.println("LT >>> " + methodInfo.fullyQualifiedName());
             }
             SourceMethodComputer computer = new SourceMethodComputer(methodInfo);
@@ -371,6 +379,7 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                 recursionPrevention.doneSource(methodInfo);
                 if (trace) {
                     IncrementalFixpointEngine.TRACE = false;
+                    IncrementalFixpointEngine.traceOverlap(false);
                     System.out.println("LT <<< " + methodInfo.fullyQualifiedName());
                 }
             }
@@ -607,6 +616,19 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                             && (Util.notOwnFieldPath(fact.source(), fact.target())
                                 || !(fact.label().isIdenticalTo() || fact.label() == LinkNatureImpl.IS_ASSIGNED_FROM
                                      || fact.label() == LinkNatureImpl.IS_ASSIGNED_TO)));
+            // CodeLaser/maddi-mod#92: '∩' is computed on demand instead of derived (IncrementalFixpointEngine.implicit).
+            // Gate NOIMPLICIT derives it as before.
+            // gate NOCHAIN (with NOIMPLICIT): '∩' derived as before, but never composed with itself
+            if (options.objectGraphLinks() && Gate.isSet("NOIMPLICIT") && Gate.isSet("NOCHAIN")) {
+                engine.setNonChainingLabel(LinkNatureImpl.OBJECT_GRAPH_OVERLAPS);
+            }
+            if (options.objectGraphLinks() && !Gate.isSet("NOOVERLAP") && !Gate.isSet("NOIMPLICIT")) {
+                // the same filters as acceptComposite: a constant marker is never the middle of a composition, and
+                // under nullConstantReturns a null constant is an endpoint only of an assignment
+                engine.setImplicitLabel(LinkNatureImpl.OBJECT_GRAPH_OVERLAPS,
+                        v -> !(v instanceof MarkerVariable mv && mv.isConstant()),
+                        (a, b) -> !nullTerminal || !isNullConstant(a) && !isNullConstant(b));
+            }
             Graph graph = new Graph(javaInspector.runtime(), engine);
             this.followGraph = new FollowGraph(graph);
             MakeGraph makeGraph = new MakeGraph(javaInspector, javaInspector.runtime(), graph);

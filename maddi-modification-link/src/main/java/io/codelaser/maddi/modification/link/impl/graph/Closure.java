@@ -13,6 +13,12 @@ import java.util.stream.Stream;
 public class Closure<V, L> {
     private final Map<V, Map<V, L>> reachable = new HashMap<>();
     private final BinaryOperator<L> best;
+    // bumped on every content change: the engine's implicit-overlap cache is valid for one value of it
+    private long modCount;
+
+    public long modCount() {
+        return modCount;
+    }
 
     public Closure(BinaryOperator<L> best) {
         this.best = best;
@@ -38,11 +44,18 @@ public class Closure<V, L> {
         L current = map.get(to);
         if (current == null) {
             map.put(to, label);
+            modCount++;
             return true;
         }
         L newLabel = best.apply(current, label);
         map.put(to, newLabel);
-        return !current.equals(newLabel);
+        boolean changed = !current.equals(newLabel);
+        if (changed) modCount++;
+        return changed;
+    }
+
+    public Set<V> sources() {
+        return reachable.keySet();
     }
 
     public int countFacts() {
@@ -88,6 +101,7 @@ public class Closure<V, L> {
                     Fact<V, L> fact = new Fact<>(v, entry.getKey(), entry.getValue());
                     if (acceptForRemoval.test(fact)) {
                         result.add(fact);
+                        modCount++;
                         return true;
                     }
                     return false;
@@ -100,6 +114,7 @@ public class Closure<V, L> {
     // returns the SURVIVING row owners that lost a fact to the column sweep: their closure content
     // changed, which extraction-reuse dirty tracking (remedy A) must know about
     public Set<V> removeVertices(Set<V> vertices) {
+        modCount++;
         Set<V> affectedSurvivors = new HashSet<>();
         for (Map.Entry<V, Map<V, L>> entry : reachable.entrySet()) {
             if (vertices.contains(entry.getKey())) continue;
