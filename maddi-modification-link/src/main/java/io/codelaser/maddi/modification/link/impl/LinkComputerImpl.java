@@ -41,6 +41,7 @@ import io.codelaser.maddi.modification.common.defaults.ShallowMethodAnalyzer;
 import io.codelaser.maddi.modification.common.util.OwnStaticState;
 import io.codelaser.maddi.modification.common.util.TolerantWrite;
 import io.codelaser.maddi.modification.link.LinkComputer;
+import io.codelaser.maddi.modification.link.impl.graph.OverlapStats;
 import io.codelaser.maddi.modification.link.impl.graph.DegradedAnalysisException;
 import io.codelaser.maddi.modification.link.impl.graph.Fact;
 import io.codelaser.maddi.modification.link.impl.graph.IncrementalFixpointEngine;
@@ -240,12 +241,32 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
     // MLVDUMP=<fqn substring> in the environment: print every computed summary of the matching methods (diagnostic)
     private static final String MLV_DUMP = System.getenv("MLVDUMP");
 
+    // a variable of the method's summary, or a shared variable grouping one (#92, gate OVLRELEVANT)
+    private static boolean summaryRelevant(Variable v) {
+        Variable p = Util.primary(v);
+        if (p instanceof io.codelaser.maddi.modification.link.impl.localvar.SharedVariable sv) {
+            return sv.variables().stream().anyMatch(LinkComputerImpl::summaryRelevant);
+        }
+        return p instanceof ParameterInfo || p instanceof ReturnVariable || p instanceof This
+               || p instanceof FieldReference;
+    }
+
     @Override
     public MethodLinkedVariables doMethod(MethodInfo method) {
         try {
             TypeInfo typeInfo = method.typeInfo();
             boolean shallow = options.forceShallow() || method.isAbstract() || typeInfo.compilationUnit().externalLibrary();
+            long ovl0 = OverlapStats.ON ? OverlapStats.threadNanos() : 0;
+            long t0 = OverlapStats.ON ? System.nanoTime() : 0;
             MethodLinkedVariables result = doMethod(method, shallow, false, true);
+            if (OverlapStats.ON) {
+                long ovl = OverlapStats.threadNanos() - ovl0;
+                long total = System.nanoTime() - t0;
+                if (total > 1_000_000_000L) {
+                    System.out.println("OVLMETHOD " + total / 1_000_000 + "ms overlap=" + ovl / 1_000_000 + "ms "
+                                       + method.fullyQualifiedName());
+                }
+            }
             if (MLV_DUMP != null && method.fullyQualifiedName().contains(MLV_DUMP)) {
                 System.out.println("MLVDUMP " + method.fullyQualifiedName() + " " + result);
             }
@@ -617,17 +638,22 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                                 || !(fact.label().isIdenticalTo() || fact.label() == LinkNatureImpl.IS_ASSIGNED_FROM
                                      || fact.label() == LinkNatureImpl.IS_ASSIGNED_TO)));
             // CodeLaser/maddi-mod#92: '∩' is computed on demand instead of derived (IncrementalFixpointEngine.implicit).
-            // Gate NOIMPLICIT derives it as before.
-            // gate NOCHAIN (with NOIMPLICIT): '∩' derived as before, but never composed with itself
-            if (options.objectGraphLinks() && Gate.isSet("NOIMPLICIT") && Gate.isSet("NOCHAIN")) {
+            // Opt-in, gate IMPLICIT, while #92 is open: by default '∩' is derived as before (2026-11-08: the class
+            // model changes 10 link/analyzer expectations and ~30 corpus verdicts; Bart has not decided on '∩').
+            // gate NOCHAIN (without IMPLICIT): '∩' derived as before, but never composed with itself
+            boolean implicitOverlap = Gate.isSet("IMPLICIT") && !Gate.isSet("NOIMPLICIT");
+            if (options.objectGraphLinks() && !implicitOverlap && Gate.isSet("NOCHAIN")) {
                 engine.setNonChainingLabel(LinkNatureImpl.OBJECT_GRAPH_OVERLAPS);
             }
-            if (options.objectGraphLinks() && !Gate.isSet("NOOVERLAP") && !Gate.isSet("NOIMPLICIT")) {
+            if (options.objectGraphLinks() && !Gate.isSet("NOOVERLAP") && implicitOverlap) {
                 // the same filters as acceptComposite: a constant marker is never the middle of a composition, and
                 // under nullConstantReturns a null constant is an endpoint only of an assignment
                 engine.setImplicitLabel(LinkNatureImpl.OBJECT_GRAPH_OVERLAPS,
                         v -> !(v instanceof MarkerVariable mv && mv.isConstant()),
                         (a, b) -> !nullTerminal || !isNullConstant(a) && !isNullConstant(b));
+                // gate OVLRELEVANT (#92 measurement): '∩' answered only for the summary's variables (parameters,
+                // the return value, this and its fields); every other read sees none
+                if (Gate.isSet("OVLRELEVANT")) engine.setImplicitQuery(LinkComputerImpl::summaryRelevant);
             }
             Graph graph = new Graph(javaInspector.runtime(), engine);
             this.followGraph = new FollowGraph(graph);

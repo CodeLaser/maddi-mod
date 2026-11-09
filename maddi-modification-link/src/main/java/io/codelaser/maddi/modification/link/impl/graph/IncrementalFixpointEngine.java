@@ -113,6 +113,14 @@ public final class IncrementalFixpointEngine<V, L> {
         currentOverlap = null;
     }
 
+    // #92 gate OVLRELEVANT: the vertices whose implicit facts are answered (null: all)
+    private Predicate<V> implicitQuery;
+
+    public void setImplicitQuery(Predicate<V> query) {
+        this.implicitQuery = query;
+        implicitCache.clear();
+    }
+
     private boolean derivable(L label) {
         return valid.test(label) && (implicit == null || !implicit.equals(label));
     }
@@ -222,6 +230,7 @@ public final class IncrementalFixpointEngine<V, L> {
         copy.nonChaining = nonChaining;
         copy.implicitMiddleOk = implicitMiddleOk;
         copy.implicitPairOk = implicitPairOk;
+        copy.implicitQuery = implicitQuery;
         copy.frozenGroups = new ArrayList<>(frozenGroups);
         return copy;
     }
@@ -435,9 +444,10 @@ public final class IncrementalFixpointEngine<V, L> {
      filter rejects. Computed once per closure version.
      */
     public Map<V, L> implicitSuccessors(V a) {
-        if (implicit == null) return Map.of();
+        if (implicit == null || implicitQuery != null && !implicitQuery.test(a)) return Map.of();
         ImplicitOverlap<V, L> overlap = currentOverlap();
         Map<V, L> cached = implicitCache.get(a);
+        if (OverlapStats.ON) OverlapStats.read(cached != null);
         if (cached != null) return cached;
         List<V> targets = new ArrayList<>();
         for (V b : SEARCH ? overlap.search(a) : overlap.partners(a)) {
@@ -459,7 +469,9 @@ public final class IncrementalFixpointEngine<V, L> {
             implicitCache.clear();
             reversedRows = null;
             implicitCacheVersion = closure.modCount();
+            long t0 = OverlapStats.ON ? System.nanoTime() : 0;
             currentOverlap = buildOverlap(Set.of());
+            if (OverlapStats.ON) OverlapStats.build(System.nanoTime() - t0, graph.vertices().size());
         }
         return currentOverlap;
     }
@@ -532,10 +544,79 @@ public final class IncrementalFixpointEngine<V, L> {
      instead of an edge per pair. Frozen groups lose their members as those are removed in turn.
      */
     private void freezeImplicitGroups(Set<V> dead) {
+        long t0 = OverlapStats.ON ? System.nanoTime() : 0;
+        try {
+            freezeImplicitGroups0(dead);
+        } finally {
+            if (OverlapStats.ON) OverlapStats.freeze(System.nanoTime() - t0);
+        }
+    }
+
+    private void freezeImplicitGroups0(Set<V> dead) {
+        boolean stale = implicitCacheVersion != closure.modCount() || currentOverlap == null;
         ImplicitOverlap<V, L> before = currentOverlap();
-        ImplicitOverlap<V, L> after = buildOverlap(dead);
+        /*
+         Only a class holding a dead vertex, or a neighbour of one, can lose its unity: every union inside a class
+         comes from a creation through a hub (whose two sides are the hub's neighbours), a growth edge (whose ends
+         are members), a direct '∩' edge or a frozen group (whose members are members). Removing 'dead' removes
+         exactly the edges incident to it, so a class without such a vertex survives intact, and so does a leaf
+         pair. When no class is touched, the partition after the removal need not be built.
+         */
+        Set<V> seeds = new HashSet<>(dead);
+        for (V d : dead) {
+            for (Map.Entry<V, L> e : searchEdges(d)) seeds.add(e.getKey());
+        }
+        for (V src : closure.sources()) {
+            if (seeds.contains(src)) continue;
+            for (Map.Entry<V, L> e : searchEdges(src)) {
+                if (dead.contains(e.getKey())) {
+                    seeds.add(src);
+                    break;
+                }
+            }
+        }
+        Set<V> touchedSeeds = new HashSet<>();
+        for (V s : seeds) {
+            if (!before.partners(s).isEmpty()) touchedSeeds.add(s);
+        }
+        if (OverlapStats.ON) {
+            boolean inFrozen = frozenGroups.stream().anyMatch(g -> g.stream().anyMatch(dead::contains));
+            OverlapStats.freezeShape(stale, !touchedSeeds.isEmpty(), inFrozen, seeds.size());
+        }
+        List<List<V>> newGroups = touchedSeeds.isEmpty() ? List.of() : brokenGroups(before, buildOverlap(dead), dead,
+                touchedSeeds);
+        if (CHECK) {
+            List<List<V>> full = brokenGroups(before, buildOverlap(dead), dead, null);
+            if (!full.equals(newGroups)) {
+                throw new IllegalStateException("OVLCHECK freeze: " + newGroups + " vs full " + full);
+            }
+        }
+        List<List<V>> kept = new ArrayList<>();
+        for (List<V> g : frozenGroups) {
+            List<V> live = g.stream().filter(v -> !dead.contains(v)).toList();
+            if (live.size() >= 2) kept.add(live);
+        }
+        kept.addAll(newGroups);
+        frozenGroups = kept;
+        if (!newGroups.isEmpty()) {
+            if (OverlapStats.ON) OverlapStats.freezeNewGroups();
+            newGroups.forEach(touched::addAll);
+            currentOverlap = null;
+        }
+    }
+
+    // gate OVLCHECK (#92): every shortcut of the implicit-'∩' bookkeeping is compared with the full computation
+    private static final boolean CHECK = Gate.isSet("OVLCHECK");
+
+    /*
+     The classes and leaf pairs of 'before' that are no longer one in 'after', as their surviving members, sorted.
+     With 'only' non-null, only the classes and leaf pairs holding one of those vertices are looked at.
+     */
+    private List<List<V>> brokenGroups(ImplicitOverlap<V, L> before, ImplicitOverlap<V, L> after, Set<V> dead,
+                                       Set<V> only) {
         List<List<V>> newGroups = new ArrayList<>();
         for (Set<V> cls : before.classes()) {
+            if (only != null && Collections.disjoint(cls, only)) continue;
             List<V> survivors = cls.stream().filter(v -> !dead.contains(v)).sorted(vertexComparator).toList();
             if (survivors.size() < 2) continue;
             V first = survivors.getFirst();
@@ -545,23 +626,15 @@ public final class IncrementalFixpointEngine<V, L> {
         before.leafPairs().forEach((l1, others) -> {
             if (dead.contains(l1)) return;
             for (V l2 : others) {
+                if (only != null && !only.contains(l1) && !only.contains(l2)) continue;
                 if (!dead.contains(l2) && vertexComparator.compare(l1, l2) < 0 && !after.overlap(l1, l2)) {
                     newGroups.add(List.of(l1, l2));
                 }
             }
         });
-        newGroups.sort(Comparator.comparing(g -> vertexPrinter.apply(g.getFirst())));
-        List<List<V>> kept = new ArrayList<>();
-        for (List<V> g : frozenGroups) {
-            List<V> live = g.stream().filter(v -> !dead.contains(v)).toList();
-            if (live.size() >= 2) kept.add(live);
-        }
-        kept.addAll(newGroups);
-        frozenGroups = kept;
-        if (!newGroups.isEmpty()) {
-            newGroups.forEach(touched::addAll);
-            currentOverlap = null;
-        }
+        newGroups.sort(Comparator.comparing((List<V> g) -> vertexPrinter.apply(g.getFirst()))
+                .thenComparing(g -> g.stream().map(vertexPrinter).collect(Collectors.joining(","))));
+        return newGroups;
     }
 
     public boolean isValid(L label) {
