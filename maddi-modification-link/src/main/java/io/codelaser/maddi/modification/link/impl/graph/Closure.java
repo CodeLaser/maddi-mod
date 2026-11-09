@@ -15,9 +15,21 @@ public class Closure<V, L> {
     private final BinaryOperator<L> best;
     // bumped on every content change: the engine's implicit-overlap cache is valid for one value of it
     private long modCount;
+    // per row: a value unique over all closures, renewed on every change of that row (#92: the implicit-'∩' creation
+    // memo of IncrementalFixpointEngine is valid while the rows it read keep their versions)
+    private static final java.util.concurrent.atomic.AtomicLong VERSIONS = new java.util.concurrent.atomic.AtomicLong();
+    private final Map<V, Long> rowVersion = new HashMap<>();
 
     public long modCount() {
         return modCount;
+    }
+
+    public long rowVersion(V v) {
+        return rowVersion.getOrDefault(v, 0L);
+    }
+
+    private void bump(V v) {
+        rowVersion.put(v, VERSIONS.incrementAndGet());
     }
 
     public Closure(BinaryOperator<L> best) {
@@ -28,6 +40,7 @@ public class Closure<V, L> {
     public Closure<V, L> copy() {
         Closure<V, L> copy = new Closure<>(best);
         reachable.forEach((v, row) -> copy.reachable.put(v, new HashMap<>(row)));
+        copy.rowVersion.putAll(rowVersion);
         return copy;
     }
 
@@ -45,12 +58,16 @@ public class Closure<V, L> {
         if (current == null) {
             map.put(to, label);
             modCount++;
+            bump(from);
             return true;
         }
         L newLabel = best.apply(current, label);
         map.put(to, newLabel);
         boolean changed = !current.equals(newLabel);
-        if (changed) modCount++;
+        if (changed) {
+            modCount++;
+            bump(from);
+        }
         return changed;
     }
 
@@ -102,6 +119,7 @@ public class Closure<V, L> {
                     if (acceptForRemoval.test(fact)) {
                         result.add(fact);
                         modCount++;
+                        bump(v);
                         return true;
                     }
                     return false;
@@ -122,7 +140,9 @@ public class Closure<V, L> {
                 affectedSurvivors.add(entry.getKey());
             }
         }
+        affectedSurvivors.forEach(this::bump);
         reachable.keySet().removeAll(vertices);
+        rowVersion.keySet().removeAll(vertices);
         return affectedSurvivors;
     }
 }

@@ -34,6 +34,16 @@ final class ImplicitOverlap<V, L> {
         boolean isImplicit(L l);
 
         List<List<V>> frozenGroups();
+
+        // the creations through hub 'm', computed by 'compute'; a source may remember them while nothing they
+        // depend on changed (IncrementalFixpointEngine: the rows of 'm' and of its neighbours)
+        default List<Creation<V, L>> creations(V m, java.util.function.Supplier<List<Creation<V, L>>> compute) {
+            return compute.get();
+        }
+    }
+
+    // one creation through a hub: every x of xs overlaps every y of ys ('x in . out y' composes into '∩')
+    record Creation<V, L>(List<V> xs, L in, L out, List<V> ys) {
     }
 
     private final Source<V, L> source;
@@ -152,37 +162,49 @@ final class ImplicitOverlap<V, L> {
         return false;
     }
 
+    // the creations through hub 'm': its in-labels and out-labels whose composition is '∩', with an unstored pair
+    List<Creation<V, L>> hubCreations(V m) {
+        Map<L, List<V>> in = new LinkedHashMap<>();
+        Map<L, List<V>> out = new LinkedHashMap<>();
+        for (Map.Entry<V, L> e : source.edges(m)) {
+            V w = e.getKey();
+            L label = e.getValue();
+            if (excluded.contains(w) || source.isImplicit(label)) continue;
+            out.computeIfAbsent(label, _ -> new ArrayList<>()).add(w);
+            // the engine composes through 'm' with the stored 'w → m' (forward) and with the reversed 'm → w'
+            // (backward); both are in-labels
+            L reversed = source.reverse(label);
+            in.computeIfAbsent(reversed, _ -> new ArrayList<>()).add(w);
+            L stored = source.stored(w, m);
+            if (stored != null && !stored.equals(reversed) && !source.isImplicit(stored)) {
+                in.computeIfAbsent(stored, _ -> new ArrayList<>()).add(w);
+            }
+        }
+        List<Creation<V, L>> result = new ArrayList<>();
+        for (Map.Entry<L, List<V>> ein : in.entrySet()) {
+            for (Map.Entry<L, List<V>> eout : out.entrySet()) {
+                if (source.isImplicit(source.combine(ein.getKey(), eout.getKey()))
+                    && hasUnstoredPair(ein.getValue(), eout.getValue())) {
+                    result.add(new Creation<>(List.copyOf(ein.getValue()), ein.getKey(), eout.getKey(),
+                            List.copyOf(eout.getValue())));
+                }
+            }
+        }
+        return result;
+    }
+
     private void build() {
         long t0 = OverlapStats.ON ? System.nanoTime() : 0;
         List<V> vertices = source.vertices().stream().filter(v -> !excluded.contains(v)).toList();
         // creations through a middle vertex
         for (V m : vertices) {
             if (!middleOk.test(m)) continue;
-            Map<L, List<V>> in = new LinkedHashMap<>();
-            Map<L, List<V>> out = new LinkedHashMap<>();
-            for (Map.Entry<V, L> e : source.edges(m)) {
-                V w = e.getKey();
-                L label = e.getValue();
-                if (excluded.contains(w) || source.isImplicit(label)) continue;
-                out.computeIfAbsent(label, _ -> new ArrayList<>()).add(w);
-                // the engine composes through 'm' with the stored 'w → m' (forward) and with the reversed 'm → w'
-                // (backward); both are in-labels
-                L reversed = source.reverse(label);
-                in.computeIfAbsent(reversed, _ -> new ArrayList<>()).add(w);
-                L stored = source.stored(w, m);
-                if (stored != null && !stored.equals(reversed) && !source.isImplicit(stored)) {
-                    in.computeIfAbsent(stored, _ -> new ArrayList<>()).add(w);
-                }
-            }
-            for (Map.Entry<L, List<V>> ein : in.entrySet()) {
-                for (Map.Entry<L, List<V>> eout : out.entrySet()) {
-                    if (source.isImplicit(source.combine(ein.getKey(), eout.getKey()))
-                        && hasUnstoredPair(ein.getValue(), eout.getValue())) {
-                        if (TRACE) System.out.println("OVL create via " + m + ": " + ein.getValue() + " " + ein.getKey()
-                                                      + " . " + eout.getKey() + " " + eout.getValue());
-                        create(ein.getValue(), eout.getValue());
-                    }
-                }
+            List<Creation<V, L>> creations = excluded.isEmpty()
+                    ? source.creations(m, () -> hubCreations(m)) : hubCreations(m);
+            for (Creation<V, L> c : creations) {
+                if (TRACE) System.out.println("OVL create via " + m + ": " + c.xs() + " " + c.in()
+                                              + " . " + c.out() + " " + c.ys());
+                create(c.xs(), c.ys());
             }
         }
         // direct implicit facts
