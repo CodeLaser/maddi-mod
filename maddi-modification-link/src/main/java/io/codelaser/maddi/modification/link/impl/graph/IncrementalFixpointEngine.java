@@ -123,6 +123,11 @@ public final class IncrementalFixpointEngine<V, L> {
     private boolean snapshotMode;
     private Set<V> pendingDead = new HashSet<>();
     private Set<V> pendingSeeds = new HashSet<>();
+    // the snapshots of the alternatives joined into this engine since the last refresh (unionWith): a class that
+    // only another alternative held is checked at the next refresh too
+    private List<ImplicitOverlap<V, L>> joinedSnapshots = new ArrayList<>();
+    // the closure version of the snapshot: a removal after a change refreshes first (removeVertices)
+    private long snapshotVersion = -1;
 
     public void setImplicitSnapshot(boolean snapshot) {
         this.snapshotMode = snapshot;
@@ -143,28 +148,38 @@ public final class IncrementalFixpointEngine<V, L> {
         }
         reversedRows = null;
         ImplicitOverlap<V, L> now = buildOverlap(Set.of());
-        if (old != null && !pendingDead.isEmpty()) {
-            List<List<V>> newGroups = new ArrayList<>();
-            for (Set<V> cls : old.classes()) {
-                if (Collections.disjoint(cls, pendingSeeds)) continue;
-                List<V> survivors = cls.stream().filter(alive::contains).sorted(vertexComparator).toList();
-                if (survivors.size() < 2) continue;
-                V first = survivors.getFirst();
-                if (!survivors.stream().allMatch(v -> v.equals(first) || now.overlap(first, v))) {
-                    newGroups.add(survivors);
-                }
-            }
-            old.leafPairs().forEach((l1, others) -> {
-                if (!alive.contains(l1)) return;
-                for (V l2 : others) {
-                    if (alive.contains(l2) && vertexComparator.compare(l1, l2) < 0
-                        && (pendingSeeds.contains(l1) || pendingSeeds.contains(l2)) && !now.overlap(l1, l2)) {
-                        newGroups.add(List.of(l1, l2));
+        List<ImplicitOverlap<V, L>> previous = new ArrayList<>();
+        if (old != null) previous.add(old);
+        for (ImplicitOverlap<V, L> joined : joinedSnapshots) {
+            if (previous.stream().noneMatch(p -> p == joined)) previous.add(joined);
+        }
+        if (!previous.isEmpty() && !pendingDead.isEmpty()) {
+            // a set: two alternatives usually hold the same class
+            Set<List<V>> newGroupSet = new LinkedHashSet<>();
+            for (ImplicitOverlap<V, L> snapshot : previous) {
+                for (Set<V> cls : snapshot.classes()) {
+                    if (Collections.disjoint(cls, pendingSeeds)) continue;
+                    List<V> survivors = cls.stream().filter(alive::contains).sorted(vertexComparator).toList();
+                    if (survivors.size() < 2) continue;
+                    V first = survivors.getFirst();
+                    if (!survivors.stream().allMatch(v -> v.equals(first) || now.overlap(first, v))) {
+                        newGroupSet.add(survivors);
                     }
                 }
-            });
+                snapshot.leafPairs().forEach((l1, others) -> {
+                    if (!alive.contains(l1)) return;
+                    for (V l2 : others) {
+                        if (alive.contains(l2) && vertexComparator.compare(l1, l2) < 0
+                            && (pendingSeeds.contains(l1) || pendingSeeds.contains(l2)) && !now.overlap(l1, l2)) {
+                            newGroupSet.add(List.of(l1, l2));
+                        }
+                    }
+                });
+            }
+            List<List<V>> newGroups = new ArrayList<>(newGroupSet);
             if (!newGroups.isEmpty()) {
-                newGroups.sort(Comparator.comparing((List<V> g) -> vertexPrinter.apply(g.getFirst())));
+                newGroups.sort(Comparator.comparing((List<V> g) -> g.stream().map(vertexPrinter)
+                        .collect(java.util.stream.Collectors.joining(","))));
                 frozenGroups = new ArrayList<>(frozenGroups);
                 frozenGroups.addAll(newGroups);
                 newGroups.forEach(touched::addAll);
@@ -178,8 +193,10 @@ public final class IncrementalFixpointEngine<V, L> {
         }
         pendingDead = new HashSet<>();
         pendingSeeds = new HashSet<>();
+        joinedSnapshots = new ArrayList<>();
         implicitCache.clear();
         implicitCacheVersion = closure.modCount();
+        snapshotVersion = closure.modCount();
         if (OverlapStats.ON) OverlapStats.build(System.nanoTime() - t0, alive.size());
     }
 
@@ -308,6 +325,10 @@ public final class IncrementalFixpointEngine<V, L> {
             copy.currentOverlap = currentOverlap;
             copy.pendingDead = new HashSet<>(pendingDead);
             copy.pendingSeeds = new HashSet<>(pendingSeeds);
+            copy.joinedSnapshots = new ArrayList<>(joinedSnapshots);
+            // a copy's closure counts its changes from zero
+            copy.snapshotVersion = currentOverlap != null && snapshotVersion == closure.modCount()
+                    ? copy.closure.modCount() : -1;
         }
         return copy;
     }
@@ -326,6 +347,8 @@ public final class IncrementalFixpointEngine<V, L> {
         if (snapshotMode) {
             pendingDead.addAll(other.pendingDead);
             pendingSeeds.addAll(other.pendingSeeds);
+            if (other.currentOverlap != null) joinedSnapshots.add(other.currentOverlap);
+            joinedSnapshots.addAll(other.joinedSnapshots);
             implicitCache.clear();
         } else {
             currentOverlap = null;
@@ -418,6 +441,9 @@ public final class IncrementalFixpointEngine<V, L> {
         if (!Gate.isSet("NOMAT")) {
             if (implicit != null) {
                 if (snapshotMode) {
+                    // a class that formed since the last refresh and that only these vertices hold together is in
+                    // no snapshot yet (a variable linked and collapsed into its group within one statement)
+                    if (snapshotVersion != closure.modCount()) refreshImplicit();
                     pendingDead.addAll(vertices);
                     pendingSeeds.addAll(vertices);
                     for (V d : vertices) {
