@@ -553,7 +553,42 @@ public final class IncrementalFixpointEngine<V, L> {
     }
 
     private void freezeImplicitGroups0(Set<V> dead) {
+        boolean stale = implicitCacheVersion != closure.modCount() || currentOverlap == null;
         ImplicitOverlap<V, L> before = currentOverlap();
+        if (OverlapStats.ON) {
+            // #92 measurement: could this removal break a class at all? Only a class (or leaf pair) holding a dead
+            // vertex or a neighbour of one
+            Set<V> seeds = new HashSet<>(dead);
+            for (V d : dead) {
+                for (Map.Entry<V, L> e : searchEdges(d)) seeds.add(e.getKey());
+            }
+            for (V src : closure.sources()) {
+                if (seeds.contains(src)) continue;
+                for (Map.Entry<V, L> e : closure.successors(src)) {
+                    if (dead.contains(e.getKey())) {
+                        seeds.add(src);
+                        break;
+                    }
+                }
+            }
+            boolean affected = false;
+            for (V s : seeds) {
+                if (!before.partners(s).isEmpty()) {
+                    affected = true;
+                    break;
+                }
+            }
+            boolean inFrozen = false;
+            for (List<V> g : frozenGroups) {
+                for (V v : g) {
+                    if (dead.contains(v)) {
+                        inFrozen = true;
+                        break;
+                    }
+                }
+            }
+            OverlapStats.freezeShape(stale, affected, inFrozen, seeds.size());
+        }
         ImplicitOverlap<V, L> after = buildOverlap(dead);
         List<List<V>> newGroups = new ArrayList<>();
         for (Set<V> cls : before.classes()) {
@@ -580,6 +615,7 @@ public final class IncrementalFixpointEngine<V, L> {
         kept.addAll(newGroups);
         frozenGroups = kept;
         if (!newGroups.isEmpty()) {
+            if (OverlapStats.ON) OverlapStats.freezeNewGroups();
             newGroups.forEach(touched::addAll);
             currentOverlap = null;
         }

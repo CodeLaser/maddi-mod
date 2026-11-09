@@ -24,12 +24,42 @@ public final class OverlapStats {
         return threadNanos.get()[0];
     }
 
+    private static final AtomicLong freezeStale = new AtomicLong();
+    private static final AtomicLong freezeAffected = new AtomicLong();
+    private static final AtomicLong freezeInFrozen = new AtomicLong();
+    private static final AtomicLong freezeSeeds = new AtomicLong();
+    private static final AtomicLong freezeNewGroups = new AtomicLong();
+    private static final AtomicLong growthPasses = new AtomicLong();
+    private static final AtomicLong creationNanos = new AtomicLong();
+    private static final AtomicLong growthNanos = new AtomicLong();
+
+    static void freezeShape(boolean stale, boolean affected, boolean inFrozen, int seeds) {
+        if (stale) freezeStale.incrementAndGet();
+        if (affected) freezeAffected.incrementAndGet();
+        if (inFrozen) freezeInFrozen.incrementAndGet();
+        freezeSeeds.addAndGet(seeds);
+    }
+
+    static void freezeNewGroups() {
+        freezeNewGroups.incrementAndGet();
+    }
+
+    static void buildPhases(long creation, long growth, int passes) {
+        creationNanos.addAndGet(creation);
+        growthNanos.addAndGet(growth);
+        growthPasses.addAndGet(passes);
+    }
+
     private static void print() {
         System.out.println("OVLSTATS builds=" + builds + " buildMs=" + buildNanos.get() / 1_000_000
                            + " avgVertices=" + (builds.get() == 0 ? 0 : buildVertices.get() / builds.get())
                            + " maxBuildMs=" + maxBuildNanos.get() / 1_000_000
                            + " freezes=" + freezes + " freezeMs=" + freezeNanos.get() / 1_000_000
-                           + " reads=" + reads + " cachedReads=" + cachedReads);
+                           + " reads=" + reads + " cachedReads=" + cachedReads
+                           + " freezeStale=" + freezeStale + " freezeAffected=" + freezeAffected
+                           + " freezeInFrozen=" + freezeInFrozen + " freezeSeeds=" + freezeSeeds
+                           + " freezeNewGroups=" + freezeNewGroups + " creationMs=" + creationNanos.get() / 1_000_000
+                           + " growthMs=" + growthNanos.get() / 1_000_000 + " growthPasses=" + growthPasses);
     }
 
     private OverlapStats() {

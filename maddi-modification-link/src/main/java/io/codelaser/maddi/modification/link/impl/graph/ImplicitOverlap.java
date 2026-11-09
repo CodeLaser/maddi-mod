@@ -153,6 +153,7 @@ final class ImplicitOverlap<V, L> {
     }
 
     private void build() {
+        long t0 = OverlapStats.ON ? System.nanoTime() : 0;
         List<V> vertices = source.vertices().stream().filter(v -> !excluded.contains(v)).toList();
         // creations through a middle vertex
         for (V m : vertices) {
@@ -210,8 +211,11 @@ final class ImplicitOverlap<V, L> {
             }
         }
         // growth along the labels that keep '∩'
+        long t1 = OverlapStats.ON ? System.nanoTime() : 0;
+        int passes = 0;
         boolean changed = true;
         while (changed) {
+            passes++;
             changed = false;
             for (V v : vertices) {
                 if (!middleOk.test(v) || !isActive(v)) continue;
@@ -228,6 +232,7 @@ final class ImplicitOverlap<V, L> {
                 }
             }
         }
+        if (OverlapStats.ON) OverlapStats.buildPhases(t1 - t0, System.nanoTime() - t1, passes);
         // resolve
         for (V v : vertices) {
             if (middleOk.test(v) && isActive(v)) members.computeIfAbsent(find(v), _ -> new HashSet<>()).add(v);
