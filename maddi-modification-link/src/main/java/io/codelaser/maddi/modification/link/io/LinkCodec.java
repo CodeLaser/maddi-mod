@@ -125,6 +125,20 @@ public class LinkCodec {
             };
         }
 
+        /*
+         ⛔ THE SCOPE OF A DECODED MARKER IS THE OWNER'S NAME, NOT THE OWNER OBJECT. A class can exist in two source
+         sets: a project that parses transform-support's source and also loads its jar's analysis snapshot has two
+         Loop.LoopDataImpl.withBreak(boolean), and MethodInfoImpl.equals tells them apart by source set. The definition
+         ["M", "$_ce3M", ...] was put under the element being read (the jar's copy); the back-reference
+         ["m", "$_ce3M", owner] in withBreakLevel resolves its owner by name, through the source-set disambiguation,
+         to the parsed copy; the lookup missed and the load died on "Cannot find $_ce3M under ...". A marker's scope
+         is one method's evaluation, which the fully qualified name (with the parameter types) identifies; the source
+         set adds nothing to it. Found on a refactor server's maddi-audit project, 2026-11-09.
+         */
+        static String markerScope(Info owner) {
+            return owner == null ? "" : owner.fullyQualifiedName();
+        }
+
         private EncodedValue markerBackReference(Context context, String name, Info owner) {
             if (owner == null) {
                 return encodeList(context, List.of(encodeString(context, "m"), encodeString(context, name)));
@@ -270,10 +284,10 @@ public class LinkCodec {
          * did ({@code LoadAnalysisResults.processSub}), so the owner of an unqualified back-reference is simply
          * the element being read.
          */
-        private final Map<Info, Map<String, MarkerVariable>> decodedMarkerVariables = new HashMap<>();
+        private final Map<String, Map<String, MarkerVariable>> decodedMarkerVariables = new HashMap<>();
 
         private void putDecodedMarkerVariable(Context context, String name, MarkerVariable mv) {
-            decodedMarkerVariables.computeIfAbsent(ownerOfMarkerVariables(context), _ -> new HashMap<>())
+            decodedMarkerVariables.computeIfAbsent(markerScope(ownerOfMarkerVariables(context)), _ -> new HashMap<>())
                     .put(name, mv);
         }
 
@@ -294,7 +308,7 @@ public class LinkCodec {
                 // a third element names the element the definition was written under; without it, this one
                 Info owner = list.size() > 2 ? decodeInfoOutOfContext(context, list.get(2))
                         : ownerOfMarkerVariables(context);
-                MarkerVariable mv = decodedMarkerVariables.getOrDefault(owner, Map.of()).get(name);
+                MarkerVariable mv = decodedMarkerVariables.getOrDefault(markerScope(owner), Map.of()).get(name);
                 assert mv != null : "Cannot find " + name + " under " + owner;
                 return mv;
             }
