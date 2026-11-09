@@ -40,13 +40,6 @@ public final class OverlapStats {
         freezeSeeds.addAndGet(seeds);
     }
 
-    private static final AtomicLong memoHits = new AtomicLong();
-    private static final AtomicLong memoMisses = new AtomicLong();
-
-    static void memo(boolean hit) {
-        (hit ? memoHits : memoMisses).incrementAndGet();
-    }
-
     static void freezeNewGroups() {
         freezeNewGroups.incrementAndGet();
     }
@@ -66,8 +59,7 @@ public final class OverlapStats {
                            + " freezeStale=" + freezeStale + " freezeAffected=" + freezeAffected
                            + " freezeInFrozen=" + freezeInFrozen + " freezeSeeds=" + freezeSeeds
                            + " freezeNewGroups=" + freezeNewGroups + " creationMs=" + creationNanos.get() / 1_000_000
-                           + " growthMs=" + growthNanos.get() / 1_000_000 + " growthPasses=" + growthPasses
-                           + " memoHits=" + memoHits + " memoMisses=" + memoMisses);
+                           + " growthMs=" + growthNanos.get() / 1_000_000 + " growthPasses=" + growthPasses);
     }
 
     private OverlapStats() {

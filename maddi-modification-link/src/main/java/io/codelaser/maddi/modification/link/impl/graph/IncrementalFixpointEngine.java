@@ -5,7 +5,6 @@ import java.util.function.BiPredicate;
 import java.util.function.BinaryOperator;
 import java.util.function.Function;
 import java.util.function.Predicate;
-import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -340,7 +339,6 @@ public final class IncrementalFixpointEngine<V, L> {
         // dirty tracking: the removed vertices' knowledge vanishes, and surviving rows that lost a
         // fact to the column sweep changed content too
         touched.addAll(closure.removeVertices(vertices));
-        creationMemo.keySet().removeAll(vertices);
         touched.addAll(vertices);
         return graph.removeVertices(vertices);
     }
@@ -527,50 +525,7 @@ public final class IncrementalFixpointEngine<V, L> {
             public List<List<V>> frozenGroups() {
                 return frozenGroups;
             }
-
-            @Override
-            public List<ImplicitOverlap.Creation<V, L>> creations(V m,
-                                                                  Supplier<List<ImplicitOverlap.Creation<V, L>>> compute) {
-                return memoizedCreations(m, compute);
-            }
         }, implicit, implicitMiddleOk, excluded, vertexComparator);
-    }
-
-    /*
-     #92: the creations through hub 'm' read the rows of 'm' and of its neighbours (their labels, which pairs are
-     stored) and the reversed rows into 'm'; while all of those are unchanged (Closure.rowVersion), so are the
-     creations. Most rows do not change between two consecutive builds. Gate NOOVLMEMO recomputes every time.
-     */
-    private record HubMemo<V, L>(Map<V, Long> signature, Map<V, L> reversed,
-                                 List<ImplicitOverlap.Creation<V, L>> creations) {
-    }
-
-    private static final boolean NO_MEMO = Gate.isSet("NOOVLMEMO");
-    private final Map<V, HubMemo<V, L>> creationMemo = new HashMap<>();
-
-    private List<ImplicitOverlap.Creation<V, L>> memoizedCreations(V m,
-                                                                  Supplier<List<ImplicitOverlap.Creation<V, L>>> compute) {
-        if (NO_MEMO) return compute.get();
-        Map<V, Long> signature = new HashMap<>();
-        signature.put(m, closure.rowVersion(m));
-        for (Map.Entry<V, L> e : searchEdges(m)) signature.put(e.getKey(), closure.rowVersion(e.getKey()));
-        Map<V, L> reversed = reversedRows.get(m);
-        HubMemo<V, L> memo = creationMemo.get(m);
-        if (memo != null && memo.signature().equals(signature) && Objects.equals(memo.reversed(), reversed)) {
-            if (OverlapStats.ON) OverlapStats.memo(true);
-            if (CHECK) {
-                List<ImplicitOverlap.Creation<V, L>> fresh = compute.get();
-                if (!fresh.equals(memo.creations())) {
-                    throw new IllegalStateException("OVLCHECK memo of " + vertexPrinter.apply(m) + ": "
-                                                    + memo.creations() + " vs fresh " + fresh);
-                }
-            }
-            return memo.creations();
-        }
-        if (OverlapStats.ON) OverlapStats.memo(false);
-        List<ImplicitOverlap.Creation<V, L>> creations = compute.get();
-        creationMemo.put(m, new HubMemo<>(signature, reversed == null ? null : Map.copyOf(reversed), creations));
-        return creations;
     }
 
     // closure rows, plus the reversed rows of vertices no composite targets: propagateBackward composes through them
