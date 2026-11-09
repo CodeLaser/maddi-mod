@@ -24,7 +24,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.BeforeAll;
@@ -60,6 +62,21 @@ public class TestRewireFernflower {
 
     @Test
     public void test(@TempDir Path tmp) throws Exception {
+        Map<String, String> properties = new HashMap<>();
+        properties.put("maddi.rewire.iterations", "20");
+        properties.put("maddi.rewire.oracleEvery", "5");
+        // a value given on the command line wins
+        properties.replaceAll((key, value) -> System.getProperty(key, value));
+        assertEquals(Main.EXIT_OK, rewire(tmp, properties),
+                "the rewire driver failed, or its oracle found a difference");
+    }
+
+    /**
+     * The rewire driver on a copy of fernflower, with these system properties set for the run and restored after it.
+     *
+     * @return the driver's exit value
+     */
+    static int rewire(Path tmp, Map<String, String> properties) throws Exception {
         Corpora.Corpus fernflower = Corpora.oss("fernflower");
         fernflower.requireConfig();
         // ⛔ THE REAL PATH. The locator may answer through a symbolic link (a workspace links test-oss in), while the
@@ -77,18 +94,17 @@ public class TestRewireFernflower {
         Path copiedConfiguration = copy.resolve("inputConfiguration.json");
         Files.writeString(copiedConfiguration, configuration);
 
-        String iterations = System.getProperty("maddi.rewire.iterations");
-        String oracleEvery = System.getProperty("maddi.rewire.oracleEvery");
-        System.setProperty("maddi.rewire.iterations", iterations == null ? "20" : iterations);
-        System.setProperty("maddi.rewire.oracleEvery", oracleEvery == null ? "5" : oracleEvery);
+        Map<String, String> before = new HashMap<>();
+        properties.forEach((key, value) -> {
+            before.put(key, System.getProperty(key));
+            System.setProperty(key, value);
+        });
         try {
-            int exitValue = Main.execute(new String[]{
+            return Main.execute(new String[]{
                     "--input-configuration=" + copiedConfiguration,
                     "--analysis-steps=rewire-tests"});
-            assertEquals(Main.EXIT_OK, exitValue, "the rewire driver failed, or its oracle found a difference");
         } finally {
-            restore("maddi.rewire.iterations", iterations);
-            restore("maddi.rewire.oracleEvery", oracleEvery);
+            before.forEach(TestRewireFernflower::restore);
         }
     }
 
