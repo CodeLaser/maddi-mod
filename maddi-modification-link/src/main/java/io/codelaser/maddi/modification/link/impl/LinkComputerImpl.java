@@ -654,6 +654,8 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                 // gate OVLRELEVANT (#92 measurement): '∩' answered only for the summary's variables (parameters,
                 // the return value, this and its fields); every other read sees none
                 if (Gate.isSet("OVLRELEVANT")) engine.setImplicitQuery(LinkComputerImpl::summaryRelevant);
+                // gate OVLSNAPSHOT (#92): '∩' computed once per statement instead of after every change
+                if (Gate.isSet("OVLSNAPSHOT")) engine.setImplicitSnapshot(true);
             }
             Graph graph = new Graph(javaInspector.runtime(), engine);
             this.followGraph = new FollowGraph(graph);
@@ -1358,6 +1360,7 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
             }
             Set<Variable> previouslyModified = computePreviouslyModified(vd, previousVd, stageOfPrevious, false);
             Set<Variable> previouslyStructurallyModified = computePreviouslyModified(vd, previousVd, stageOfPrevious, true);
+            linkGraph.graph().refreshImplicit();
             WriteLinksAndModification.WriteResult wr = writeLinksAndModification.go(statement, lastStatement, vd,
                     previouslyModified, previouslyStructurallyModified,
                     r == null ? Map.of() : r.modified(), r == null ? Set.of() : r.deepOnlyModified());

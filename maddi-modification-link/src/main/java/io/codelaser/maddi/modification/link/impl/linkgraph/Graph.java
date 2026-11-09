@@ -1384,6 +1384,11 @@ public class Graph {
     }
 
     // the closure row plus the implicit '∩' facts (#92), which the engine computes instead of storing
+    // #92 gate OVLSNAPSHOT: compute the implicit '∩' for this statement (see IncrementalFixpointEngine)
+    public void refreshImplicit() {
+        engine.refreshImplicit();
+    }
+
     Stream<Map.Entry<Variable, LinkNature>> closureStream(Variable variable) {
         Map<Variable, LinkNature> implicit = engine.implicitSuccessors(variable);
         if (implicit.isEmpty()) return engine.successorStream(variable);
