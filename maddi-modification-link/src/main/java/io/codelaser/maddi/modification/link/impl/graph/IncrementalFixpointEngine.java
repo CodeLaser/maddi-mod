@@ -126,6 +126,8 @@ public final class IncrementalFixpointEngine<V, L> {
     // the snapshots of the alternatives joined into this engine since the last refresh (unionWith): a class that
     // only another alternative held is checked at the next refresh too
     private List<ImplicitOverlap<V, L>> joinedSnapshots = new ArrayList<>();
+    // the closure version of the snapshot: a removal after a change refreshes first (removeVertices)
+    private long snapshotVersion = -1;
 
     public void setImplicitSnapshot(boolean snapshot) {
         this.snapshotMode = snapshot;
@@ -194,6 +196,7 @@ public final class IncrementalFixpointEngine<V, L> {
         joinedSnapshots = new ArrayList<>();
         implicitCache.clear();
         implicitCacheVersion = closure.modCount();
+        snapshotVersion = closure.modCount();
         if (OverlapStats.ON) OverlapStats.build(System.nanoTime() - t0, alive.size());
     }
 
@@ -323,6 +326,9 @@ public final class IncrementalFixpointEngine<V, L> {
             copy.pendingDead = new HashSet<>(pendingDead);
             copy.pendingSeeds = new HashSet<>(pendingSeeds);
             copy.joinedSnapshots = new ArrayList<>(joinedSnapshots);
+            // a copy's closure counts its changes from zero
+            copy.snapshotVersion = currentOverlap != null && snapshotVersion == closure.modCount()
+                    ? copy.closure.modCount() : -1;
         }
         return copy;
     }
@@ -435,6 +441,9 @@ public final class IncrementalFixpointEngine<V, L> {
         if (!Gate.isSet("NOMAT")) {
             if (implicit != null) {
                 if (snapshotMode) {
+                    // a class that formed since the last refresh and that only these vertices hold together is in
+                    // no snapshot yet (a variable linked and collapsed into its group within one statement)
+                    if (snapshotVersion != closure.modCount()) refreshImplicit();
                     pendingDead.addAll(vertices);
                     pendingSeeds.addAll(vertices);
                     for (V d : vertices) {

@@ -51,6 +51,26 @@ public class TestImplicitSnapshotJoin {
         assertEquals(Set.of("x"), joined.implicitSuccessors("y").keySet());
     }
 
+    // 't' links 'x' and 'y' and leaves again without a refresh in between (a variable collapsed into its group)
+    private static void createAndRemove(boolean snapshot) {
+        IncrementalFixpointEngine<String, LinkNature> engine = engine(snapshot);
+        engine.addVertex("x");
+        engine.addVertex("y");
+        engine.refreshImplicit();
+        engine.addSymmetricEdge("x", "t", IS_SUBSET_OF, "0");
+        engine.addSymmetricEdge("t", "y", SHARES_ELEMENTS, "0");
+        engine.removeVertices(Set.of("t"));
+        engine.refreshImplicit();
+        assertEquals(Set.of("y"), engine.implicitSuccessors("x").keySet());
+    }
+
+    @DisplayName("created and removed between two refreshes")
+    @Test
+    public void test4() {
+        createAndRemove(false);
+        createAndRemove(true);
+    }
+
     @DisplayName("computed after every change")
     @Test
     public void test1() {
