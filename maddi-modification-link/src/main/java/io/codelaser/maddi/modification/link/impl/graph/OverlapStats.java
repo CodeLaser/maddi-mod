@@ -58,7 +58,7 @@ public final class OverlapStats {
     public static void method(long nanos) {
         methods.incrementAndGet();
         methodNanos.addAndGet(nanos);
-        if (methods.get() % 20_000 == 0) print();
+        if (methods.get() % 500 == 0) print();
     }
 
     static void freezeShape(boolean stale, boolean affected, boolean inFrozen, int seeds) {
