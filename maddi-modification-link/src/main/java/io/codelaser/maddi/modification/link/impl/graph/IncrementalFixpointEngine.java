@@ -437,6 +437,12 @@ public final class IncrementalFixpointEngine<V, L> {
         return graph.addVertex(v);
     }
 
+    // dirty tracking: what overlapped a removed vertex implicitly loses that link, without a stored fact for the
+    // column sweep of removeVertices to find
+    private void touchImplicitPartners(Set<V> dead) {
+        for (V d : dead) touched.addAll(implicitSuccessors(d).keySet());
+    }
+
     public boolean removeVertices(Set<V> vertices) {
         if (!Gate.isSet("NOMAT")) {
             if (implicit != null) {
@@ -444,12 +450,14 @@ public final class IncrementalFixpointEngine<V, L> {
                     // a class that formed since the last refresh and that only these vertices hold together is in
                     // no snapshot yet (a variable linked and collapsed into its group within one statement)
                     if (snapshotVersion != closure.modCount()) refreshImplicit();
+                    touchImplicitPartners(vertices);
                     pendingDead.addAll(vertices);
                     pendingSeeds.addAll(vertices);
                     for (V d : vertices) {
                         for (Map.Entry<V, L> e : closure.successors(d)) pendingSeeds.add(e.getKey());
                     }
                 } else {
+                    touchImplicitPartners(vertices);
                     freezeImplicitGroups(vertices);
                 }
             }
