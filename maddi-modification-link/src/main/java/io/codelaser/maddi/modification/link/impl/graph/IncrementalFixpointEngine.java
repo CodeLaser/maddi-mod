@@ -471,10 +471,7 @@ public final class IncrementalFixpointEngine<V, L> {
             implicitCacheVersion = closure.modCount();
             long t0 = OverlapStats.ON ? System.nanoTime() : 0;
             currentOverlap = buildOverlap(Set.of());
-            if (OverlapStats.ON) {
-                OverlapStats.build(System.nanoTime() - t0, graph.vertices().size());
-                classifyRebuild(currentOverlap);
-            }
+            if (OverlapStats.ON) OverlapStats.build(System.nanoTime() - t0, graph.vertices().size());
         }
         return currentOverlap;
     }
@@ -558,50 +555,58 @@ public final class IncrementalFixpointEngine<V, L> {
     private void freezeImplicitGroups0(Set<V> dead) {
         boolean stale = implicitCacheVersion != closure.modCount() || currentOverlap == null;
         ImplicitOverlap<V, L> before = currentOverlap();
-        /*
-         Only a class holding a dead vertex, or a neighbour of one, can lose its unity: every union inside a class
-         comes from a creation through a hub (whose two sides are the hub's neighbours), a growth edge (whose ends
-         are members), a direct '∩' edge or a frozen group (whose members are members). Removing 'dead' removes
-         exactly the edges incident to it, so a class without such a vertex survives intact, and so does a leaf
-         pair. When no class is touched, the partition after the removal need not be built.
-         */
-        if (NO_FREEZE_SKIP) {
-            freezeGroups(brokenGroups(before, buildOverlap(dead), dead, null), dead);
-            return;
-        }
-        Set<V> seeds = new HashSet<>(dead);
-        for (V d : dead) {
-            for (Map.Entry<V, L> e : searchEdges(d)) seeds.add(e.getKey());
-        }
-        for (V src : closure.sources()) {
-            if (seeds.contains(src)) continue;
-            for (Map.Entry<V, L> e : searchEdges(src)) {
-                if (dead.contains(e.getKey())) {
-                    seeds.add(src);
+        if (OverlapStats.ON) {
+            // #92 measurement: could this removal break a class at all? Only a class (or leaf pair) holding a dead
+            // vertex or a neighbour of one
+            Set<V> seeds = new HashSet<>(dead);
+            for (V d : dead) {
+                for (Map.Entry<V, L> e : searchEdges(d)) seeds.add(e.getKey());
+            }
+            for (V src : closure.sources()) {
+                if (seeds.contains(src)) continue;
+                for (Map.Entry<V, L> e : closure.successors(src)) {
+                    if (dead.contains(e.getKey())) {
+                        seeds.add(src);
+                        break;
+                    }
+                }
+            }
+            boolean affected = false;
+            for (V s : seeds) {
+                if (!before.partners(s).isEmpty()) {
+                    affected = true;
                     break;
                 }
             }
-        }
-        Set<V> touchedSeeds = new HashSet<>();
-        for (V s : seeds) {
-            if (!before.partners(s).isEmpty()) touchedSeeds.add(s);
-        }
-        if (OverlapStats.ON) {
-            boolean inFrozen = frozenGroups.stream().anyMatch(g -> g.stream().anyMatch(dead::contains));
-            OverlapStats.freezeShape(stale, !touchedSeeds.isEmpty(), inFrozen, seeds.size());
-        }
-        List<List<V>> newGroups = touchedSeeds.isEmpty() ? List.of() : brokenGroups(before, buildOverlap(dead), dead,
-                touchedSeeds);
-        if (CHECK) {
-            List<List<V>> full = brokenGroups(before, buildOverlap(dead), dead, null);
-            if (!full.equals(newGroups)) {
-                throw new IllegalStateException("OVLCHECK freeze: " + newGroups + " vs full " + full);
+            boolean inFrozen = false;
+            for (List<V> g : frozenGroups) {
+                for (V v : g) {
+                    if (dead.contains(v)) {
+                        inFrozen = true;
+                        break;
+                    }
+                }
             }
+            OverlapStats.freezeShape(stale, affected, inFrozen, seeds.size());
         }
-        freezeGroups(newGroups, dead);
-    }
-
-    private void freezeGroups(List<List<V>> newGroups, Set<V> dead) {
+        ImplicitOverlap<V, L> after = buildOverlap(dead);
+        List<List<V>> newGroups = new ArrayList<>();
+        for (Set<V> cls : before.classes()) {
+            List<V> survivors = cls.stream().filter(v -> !dead.contains(v)).sorted(vertexComparator).toList();
+            if (survivors.size() < 2) continue;
+            V first = survivors.getFirst();
+            boolean intact = survivors.stream().allMatch(v -> v.equals(first) || after.overlap(first, v));
+            if (!intact) newGroups.add(survivors);
+        }
+        before.leafPairs().forEach((l1, others) -> {
+            if (dead.contains(l1)) return;
+            for (V l2 : others) {
+                if (!dead.contains(l2) && vertexComparator.compare(l1, l2) < 0 && !after.overlap(l1, l2)) {
+                    newGroups.add(List.of(l1, l2));
+                }
+            }
+        });
+        newGroups.sort(Comparator.comparing(g -> vertexPrinter.apply(g.getFirst())));
         List<List<V>> kept = new ArrayList<>();
         for (List<V> g : frozenGroups) {
             List<V> live = g.stream().filter(v -> !dead.contains(v)).toList();
@@ -614,82 +619,6 @@ public final class IncrementalFixpointEngine<V, L> {
             newGroups.forEach(touched::addAll);
             currentOverlap = null;
         }
-    }
-
-    /*
-     #92 measurement, for keeping the classes up to date instead of rebuilding them: since the previous build, did
-     only new facts arrive (no removal, no label change)? And did the classes then only grow (every earlier class
-     and leaf pair still one), as a union-find fed with the new facts would have them?
-     */
-    private ImplicitOverlap<V, L> lastBuilt;
-    private long lastBuiltNonAdditive = -1;
-    private int lastBuiltFrozen = -1;
-
-    private void classifyRebuild(ImplicitOverlap<V, L> now) {
-        if (lastBuilt != null) {
-            boolean additive = lastBuiltNonAdditive == closure.nonAdditiveCount()
-                               && lastBuiltFrozen == frozenGroups.size();
-            boolean grows = true;
-            for (Set<V> cls : lastBuilt.classes()) {
-                Iterator<V> it = cls.iterator();
-                V first = it.next();
-                while (grows && it.hasNext()) {
-                    V v = it.next();
-                    if (!now.overlap(first, v)) grows = false;
-                }
-                if (!grows) break;
-            }
-            if (grows) {
-                outer:
-                for (Map.Entry<V, Set<V>> e : lastBuilt.leafPairs().entrySet()) {
-                    for (V l2 : e.getValue()) {
-                        if (!now.overlap(e.getKey(), l2)) {
-                            grows = false;
-                            break outer;
-                        }
-                    }
-                }
-            }
-            OverlapStats.rebuildKind(additive, grows);
-        }
-        lastBuilt = now;
-        lastBuiltNonAdditive = closure.nonAdditiveCount();
-        lastBuiltFrozen = frozenGroups.size();
-    }
-
-    // gate NOFREEZESKIP (#92 A/B): always build the partition without the dead vertices and compare every class
-    private static final boolean NO_FREEZE_SKIP = Gate.isSet("NOFREEZESKIP");
-
-    // gate OVLCHECK (#92): every shortcut of the implicit-'∩' bookkeeping is compared with the full computation
-    private static final boolean CHECK = Gate.isSet("OVLCHECK");
-
-    /*
-     The classes and leaf pairs of 'before' that are no longer one in 'after', as their surviving members, sorted.
-     With 'only' non-null, only the classes and leaf pairs holding one of those vertices are looked at.
-     */
-    private List<List<V>> brokenGroups(ImplicitOverlap<V, L> before, ImplicitOverlap<V, L> after, Set<V> dead,
-                                       Set<V> only) {
-        List<List<V>> newGroups = new ArrayList<>();
-        for (Set<V> cls : before.classes()) {
-            if (only != null && Collections.disjoint(cls, only)) continue;
-            List<V> survivors = cls.stream().filter(v -> !dead.contains(v)).sorted(vertexComparator).toList();
-            if (survivors.size() < 2) continue;
-            V first = survivors.getFirst();
-            boolean intact = survivors.stream().allMatch(v -> v.equals(first) || after.overlap(first, v));
-            if (!intact) newGroups.add(survivors);
-        }
-        before.leafPairs().forEach((l1, others) -> {
-            if (dead.contains(l1)) return;
-            for (V l2 : others) {
-                if (only != null && !only.contains(l1) && !only.contains(l2)) continue;
-                if (!dead.contains(l2) && vertexComparator.compare(l1, l2) < 0 && !after.overlap(l1, l2)) {
-                    newGroups.add(List.of(l1, l2));
-                }
-            }
-        });
-        newGroups.sort(Comparator.comparing((List<V> g) -> vertexPrinter.apply(g.getFirst()))
-                .thenComparing(g -> g.stream().map(vertexPrinter).collect(Collectors.joining(","))));
-        return newGroups;
     }
 
     public boolean isValid(L label) {

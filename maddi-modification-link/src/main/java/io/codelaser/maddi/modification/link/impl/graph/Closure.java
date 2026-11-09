@@ -16,15 +16,8 @@ public class Closure<V, L> {
     // bumped on every content change: the engine's implicit-overlap cache is valid for one value of it
     private long modCount;
 
-    // #92 diagnostic: bumped when facts or vertices are removed, or a label changes (not by a plain new fact)
-    private long nonAdditiveCount;
-
     public long modCount() {
         return modCount;
-    }
-
-    public long nonAdditiveCount() {
-        return nonAdditiveCount;
     }
 
     public Closure(BinaryOperator<L> best) {
@@ -57,10 +50,7 @@ public class Closure<V, L> {
         L newLabel = best.apply(current, label);
         map.put(to, newLabel);
         boolean changed = !current.equals(newLabel);
-        if (changed) {
-            modCount++;
-            nonAdditiveCount++;
-        }
+        if (changed) modCount++;
         return changed;
     }
 
@@ -112,7 +102,6 @@ public class Closure<V, L> {
                     if (acceptForRemoval.test(fact)) {
                         result.add(fact);
                         modCount++;
-                        nonAdditiveCount++;
                         return true;
                     }
                     return false;
@@ -126,7 +115,6 @@ public class Closure<V, L> {
     // changed, which extraction-reuse dirty tracking (remedy A) must know about
     public Set<V> removeVertices(Set<V> vertices) {
         modCount++;
-        nonAdditiveCount++;
         Set<V> affectedSurvivors = new HashSet<>();
         for (Map.Entry<V, Map<V, L>> entry : reachable.entrySet()) {
             if (vertices.contains(entry.getKey())) continue;
