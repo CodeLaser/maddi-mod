@@ -471,7 +471,10 @@ public final class IncrementalFixpointEngine<V, L> {
             implicitCacheVersion = closure.modCount();
             long t0 = OverlapStats.ON ? System.nanoTime() : 0;
             currentOverlap = buildOverlap(Set.of());
-            if (OverlapStats.ON) OverlapStats.build(System.nanoTime() - t0, graph.vertices().size());
+            if (OverlapStats.ON) {
+                OverlapStats.build(System.nanoTime() - t0, graph.vertices().size());
+                classifyRebuild(currentOverlap);
+            }
         }
         return currentOverlap;
     }
@@ -562,6 +565,10 @@ public final class IncrementalFixpointEngine<V, L> {
          exactly the edges incident to it, so a class without such a vertex survives intact, and so does a leaf
          pair. When no class is touched, the partition after the removal need not be built.
          */
+        if (NO_FREEZE_SKIP) {
+            freezeGroups(brokenGroups(before, buildOverlap(dead), dead, null), dead);
+            return;
+        }
         Set<V> seeds = new HashSet<>(dead);
         for (V d : dead) {
             for (Map.Entry<V, L> e : searchEdges(d)) seeds.add(e.getKey());
@@ -591,6 +598,10 @@ public final class IncrementalFixpointEngine<V, L> {
                 throw new IllegalStateException("OVLCHECK freeze: " + newGroups + " vs full " + full);
             }
         }
+        freezeGroups(newGroups, dead);
+    }
+
+    private void freezeGroups(List<List<V>> newGroups, Set<V> dead) {
         List<List<V>> kept = new ArrayList<>();
         for (List<V> g : frozenGroups) {
             List<V> live = g.stream().filter(v -> !dead.contains(v)).toList();
@@ -604,6 +615,50 @@ public final class IncrementalFixpointEngine<V, L> {
             currentOverlap = null;
         }
     }
+
+    /*
+     #92 measurement, for keeping the classes up to date instead of rebuilding them: since the previous build, did
+     only new facts arrive (no removal, no label change)? And did the classes then only grow (every earlier class
+     and leaf pair still one), as a union-find fed with the new facts would have them?
+     */
+    private ImplicitOverlap<V, L> lastBuilt;
+    private long lastBuiltNonAdditive = -1;
+    private int lastBuiltFrozen = -1;
+
+    private void classifyRebuild(ImplicitOverlap<V, L> now) {
+        if (lastBuilt != null) {
+            boolean additive = lastBuiltNonAdditive == closure.nonAdditiveCount()
+                               && lastBuiltFrozen == frozenGroups.size();
+            boolean grows = true;
+            for (Set<V> cls : lastBuilt.classes()) {
+                Iterator<V> it = cls.iterator();
+                V first = it.next();
+                while (grows && it.hasNext()) {
+                    V v = it.next();
+                    if (!now.overlap(first, v)) grows = false;
+                }
+                if (!grows) break;
+            }
+            if (grows) {
+                outer:
+                for (Map.Entry<V, Set<V>> e : lastBuilt.leafPairs().entrySet()) {
+                    for (V l2 : e.getValue()) {
+                        if (!now.overlap(e.getKey(), l2)) {
+                            grows = false;
+                            break outer;
+                        }
+                    }
+                }
+            }
+            OverlapStats.rebuildKind(additive, grows);
+        }
+        lastBuilt = now;
+        lastBuiltNonAdditive = closure.nonAdditiveCount();
+        lastBuiltFrozen = frozenGroups.size();
+    }
+
+    // gate NOFREEZESKIP (#92 A/B): always build the partition without the dead vertices and compare every class
+    private static final boolean NO_FREEZE_SKIP = Gate.isSet("NOFREEZESKIP");
 
     // gate OVLCHECK (#92): every shortcut of the implicit-'∩' bookkeeping is compared with the full computation
     private static final boolean CHECK = Gate.isSet("OVLCHECK");

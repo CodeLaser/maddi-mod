@@ -40,6 +40,19 @@ public final class OverlapStats {
         freezeSeeds.addAndGet(seeds);
     }
 
+    private static final AtomicLong rebuildNonAdditive = new AtomicLong();
+    private static final AtomicLong rebuildAdditiveGrows = new AtomicLong();
+    private static final AtomicLong rebuildAdditiveShrinks = new AtomicLong();
+    private static final AtomicLong rebuildNonAdditiveGrows = new AtomicLong();
+
+    static void rebuildKind(boolean additive, boolean grows) {
+        if (additive) (grows ? rebuildAdditiveGrows : rebuildAdditiveShrinks).incrementAndGet();
+        else {
+            rebuildNonAdditive.incrementAndGet();
+            if (grows) rebuildNonAdditiveGrows.incrementAndGet();
+        }
+    }
+
     static void freezeNewGroups() {
         freezeNewGroups.incrementAndGet();
     }
@@ -59,7 +72,11 @@ public final class OverlapStats {
                            + " freezeStale=" + freezeStale + " freezeAffected=" + freezeAffected
                            + " freezeInFrozen=" + freezeInFrozen + " freezeSeeds=" + freezeSeeds
                            + " freezeNewGroups=" + freezeNewGroups + " creationMs=" + creationNanos.get() / 1_000_000
-                           + " growthMs=" + growthNanos.get() / 1_000_000 + " growthPasses=" + growthPasses);
+                           + " growthMs=" + growthNanos.get() / 1_000_000 + " growthPasses=" + growthPasses
+                           + " rebuildAdditiveGrows=" + rebuildAdditiveGrows
+                           + " rebuildAdditiveShrinks=" + rebuildAdditiveShrinks
+                           + " rebuildNonAdditive=" + rebuildNonAdditive
+                           + " rebuildNonAdditiveGrows=" + rebuildNonAdditiveGrows);
     }
 
     private OverlapStats() {
