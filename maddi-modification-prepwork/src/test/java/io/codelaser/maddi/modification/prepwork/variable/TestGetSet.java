@@ -420,10 +420,14 @@ public class TestGetSet extends CommonTest {
         MethodInfo getInt = X.findUniqueMethod("getInt", 1);
         assertEquals("a.b.X.intList", getInt.getSetField().field().fullyQualifiedName());
         {
-            // NO synthetics for ArrayList!!!
+            // as for a List (test5): ArrayList.get inherits List.get's element getter, also before the analysis
+            // reaches it (MethodInfoImpl.getSetField; until 2026-11-09 prep saw no synthetics for ArrayList, the
+            // analysis did, and a cold run disagreed with a warm re-analysis)
             VariableData vdLast = VariableDataImpl.of(getInt.methodBody().lastStatement());
             assertEquals("""
-                    a.b.X.getInt(int), a.b.X.getInt(int):0:index, a.b.X.intList, a.b.X.this\
+                    a.b.X.getInt(int), a.b.X.getInt(int):0:index, a.b.X.intList, a.b.X.this, \
+                    java.util.List._synthetic_list#a.b.X.intList, \
+                    java.util.List._synthetic_list#a.b.X.intList[a.b.X.getInt(int):0:index]\
                     """, vdLast.knownVariableNamesToString());
         }
     }

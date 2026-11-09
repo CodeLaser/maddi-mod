@@ -38,6 +38,7 @@ import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 import io.codelaser.maddi.modification.common.getset.ApplyGetSetTranslation;
 import io.codelaser.maddi.modification.prepwork.CommonTest;
 import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
+import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
 
 public class TestGetSet2 extends CommonTest {
     @Language("java")
@@ -250,6 +251,10 @@ public class TestGetSet2 extends CommonTest {
         new PrepAnalyzer(runtime).doPrimaryType(X);
         for (String name : new String[]{"first", "firstOfColl"}) {
             MethodInfo method = X.findUniqueMethod(name, 0);
+            // what prep made of it: the read of the element, as for a call through a List
+            VariableData vd = VariableDataImpl.of(method.methodBody().lastStatement());
+            assertTrue(vd.knownVariableNamesToString().contains("_synthetic_list"),
+                    name + ": " + vd.knownVariableNamesToString());
             MethodCall get = (MethodCall) method.methodBody().lastStatement().expression();
             assertEquals("java.util.ArrayList.get(int)", get.methodInfo().fullyQualifiedName(), name);
             assertFalse(get.methodInfo().analysis().haveAnalyzedValueFor(
