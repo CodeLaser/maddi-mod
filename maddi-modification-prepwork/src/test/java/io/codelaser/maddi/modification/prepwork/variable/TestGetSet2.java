@@ -33,6 +33,7 @@ import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.statement.LocalVariableCreation;
 import io.codelaser.maddi.cst.api.variable.DependentVariable;
 import io.codelaser.maddi.cst.api.variable.Variable;
+import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 import io.codelaser.maddi.modification.common.getset.ApplyGetSetTranslation;
 import io.codelaser.maddi.modification.prepwork.CommonTest;
@@ -221,6 +222,41 @@ public class TestGetSet2 extends CommonTest {
             Expression sum = runtime.sum(runtime.newVariableExpression(resolved),
                     runtime.newVariableExpression(method.parameters().getFirst()));
             assertNotNull(sum);
+        }
+    }
+
+    @Language("java")
+    public static final String INPUT4 = """
+            import java.util.ArrayList;
+            class X {
+                static class Coll<E> extends ArrayList<E> { }
+                private final ArrayList<String> list = new ArrayList<>();
+                private final Coll<String> coll = new Coll<>();
+                String first() { return list.get(0); }
+                String firstOfColl() { return coll.get(0); }
+            }
+            """;
+
+    /*
+     A library method inherits its getter status from the method it overrides: ArrayList.get from List.get.
+     ShallowMethodAnalyzer copies it, but only during the analysis, after prep. Prep must resolve it the same way,
+     or a cold run (prep first) and a warm re-analysis (ArrayList.get analysed by the previous run) disagree on
+     every list.get through an ArrayList or a subclass of it (fernflower's VBStyleCollection, 2026-11-09).
+     */
+    @DisplayName("a call to ArrayList.get, directly or through a subclass, reads the list element before any analysis")
+    @Test
+    public void test4() {
+        TypeInfo X = javaInspector.parse("X", INPUT4);
+        new PrepAnalyzer(runtime).doPrimaryType(X);
+        for (String name : new String[]{"first", "firstOfColl"}) {
+            MethodInfo method = X.findUniqueMethod(name, 0);
+            MethodCall get = (MethodCall) method.methodBody().lastStatement().expression();
+            assertEquals("java.util.ArrayList.get(int)", get.methodInfo().fullyQualifiedName(), name);
+            assertFalse(get.methodInfo().analysis().haveAnalyzedValueFor(
+                    PropertyImpl.GET_SET_FIELD), "not analysed yet");
+            Variable resolved = runtime.getterVariable(get);
+            assertInstanceOf(DependentVariable.class, resolved, name);
+            assertTrue(resolved.toString().contains("_synthetic_list"), name + ": " + resolved);
         }
     }
 }
