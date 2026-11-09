@@ -21,6 +21,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 import io.codelaser.maddi.cst.api.analysis.PropertyValueMap;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import io.codelaser.maddi.cst.api.element.Element;
 import io.codelaser.maddi.cst.api.expression.ConstructorCall;
 import io.codelaser.maddi.cst.api.expression.Expression;
@@ -61,6 +63,17 @@ public class CarryDerived {
     private CarryDerived() {
     }
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(CarryDerived.class);
+    // diagnostic: CARRYTRACE=a,b logs the derived values of every field whose name contains a or b, before and after
+    // its carry
+    private static final List<String> TRACE = System.getenv("CARRYTRACE") == null ? List.of()
+            : List.of(System.getenv("CARRYTRACE").split(","));
+
+    static boolean traced(String fqn) {
+        for (String t : TRACE) if (fqn.contains(t)) return true;
+        return false;
+    }
+
     /** Carry everything of {@code oldType}, a primary type the rewire copied, onto its copy in {@code view}. */
     public static void primaryType(TypeInfo oldType, InfoMapView view) {
         type(oldType, view);
@@ -92,8 +105,16 @@ public class CarryDerived {
 
     private static void field(FieldInfo oldField, InfoMapView view) {
         FieldInfo newField = view.fieldInfo(oldField);
+        boolean trace = !TRACE.isEmpty() && traced(oldField.fullyQualifiedName());
+        if (trace) {
+            LOGGER.info("CARRYTRACE field {} old {} -> new {}{}\n  old: {}", oldField.fullyQualifiedName(),
+                    System.identityHashCode(oldField), System.identityHashCode(newField),
+                    newField == oldField ? " (same object, not carried)" : "", oldField.analysis());
+        }
         if (newField == oldField) return;
         map(oldField.analysis(), newField.analysis(), view);
+        if (trace) LOGGER.info("CARRYTRACE field {} carried\n  new: {}", newField.fullyQualifiedName(),
+                newField.analysis());
         map(oldField.analysisOfInitializer(), newField.analysisOfInitializer(), view);
         variableData(oldField.analysisOfInitializer(), view);
         if (oldField.initializer() != null && !oldField.initializer().isEmpty()) {

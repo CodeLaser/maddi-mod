@@ -58,6 +58,10 @@ public class ClearDerived {
 
     /** The hook for {@code IteratingAnalyzer.analyze(order, graph, seed, beforeFirstRecompute)}. */
     public static void element(Info info) {
+        if (info instanceof FieldInfo fi && CarryDerived.traced(fi.fullyQualifiedName())) {
+            org.slf4j.LoggerFactory.getLogger(ClearDerived.class).info("CARRYTRACE clear (recompute) field {} {}",
+                    fi.fullyQualifiedName(), System.identityHashCode(fi));
+        }
         info.analysis().removeIf(DERIVED);
         switch (info) {
             case MethodInfo mi -> method(mi);
@@ -82,6 +86,10 @@ public class ClearDerived {
             type.analysis().removeIf(DERIVED);
             type.constructorAndMethodStream().forEach(ClearDerived::method);
             type.fields().forEach(fi -> {
+                if (CarryDerived.traced(fi.fullyQualifiedName())) {
+                    org.slf4j.LoggerFactory.getLogger(ClearDerived.class).info("CARRYTRACE clear field {} {}",
+                            fi.fullyQualifiedName(), System.identityHashCode(fi));
+                }
                 fi.analysis().removeIf(DERIVED);
                 element(fi);
             });
