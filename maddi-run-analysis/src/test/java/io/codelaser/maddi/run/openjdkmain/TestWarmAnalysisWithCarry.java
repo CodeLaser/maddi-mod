@@ -288,6 +288,99 @@ public class TestWarmAnalysisWithCarry {
         assertAsCold(warm);
     }
 
+    // ---- real edits of a body, where the early cutoff decides: whatever it decides, the result is a cold one
+
+    @Language("java")
+    private static final String POKING = """
+            package s;
+            public class Circle {
+                private final double r;
+                public Circle(double r) { this.r = r; }
+                public double area() { return 3.14 * r * r; }
+                public void poke(Holder h) { POKE }
+            }
+            """;
+
+    @DisplayName("Circle.poke now also assigns a field of Holder, which it modified already")
+    @Test
+    public void testForeignFieldAssigned() throws IOException {
+        String holder = """
+                package s;
+                public class Holder {
+                    int count;
+                    int other;
+                    private final Circle circle = new Circle(1);
+                    public int count() { return count; }
+                    public double area() { return circle.area(); }
+                }
+                """;
+        assertAsCold(warmAfterEdit(POKING.replace("POKE", "h.other = 2;"),
+                POKING.replace("POKE", "h.other = 2; h.count = 3;"), holder, false));
+    }
+
+    @DisplayName("Circle.poke now also modifies a second field of Holder")
+    @Test
+    public void testForeignFieldModified() throws IOException {
+        String holder = """
+                package s;
+                import java.util.ArrayList;
+                import java.util.List;
+                public class Holder {
+                    final List<String> items = new ArrayList<>();
+                    final List<String> names = new ArrayList<>();
+                    private final Circle circle = new Circle(1);
+                    public int size() { return names.size(); }
+                    public double area() { return circle.area(); }
+                }
+                """;
+        assertAsCold(warmAfterEdit(POKING.replace("POKE", "h.items.add(\"a\");"),
+                POKING.replace("POKE", "h.items.add(\"a\"); h.names.add(\"b\");"), holder, false));
+    }
+
+    @Language("java")
+    private static final String PLAIN = """
+            package s;
+            public class Circle {
+                private double r;
+                public Circle(double r) { this.r = r; }
+                public double area() { return r; }
+            }
+            """;
+
+    @Language("java")
+    private static final String PLAIN_HOLDER = """
+            package s;
+            public class Holder {
+                private final Circle circle = new Circle(1);
+                public String text() { return "" + circle.area(); }
+                public Circle get() { return circle; }
+            }
+            """;
+
+    @DisplayName("Circle.area() stops modifying: the cutoff sees it move, the cold analysis runs")
+    @Test
+    public void testMethodStopsModifying() throws IOException {
+        Warm warm = warmAfterEdit(PLAIN.replace("return r;", "r++; return r;"), PLAIN, PLAIN_HOLDER, false);
+        assertTrue(warm.fellBack());
+        assertAsCold(warm);
+    }
+
+    @DisplayName("another computation of the same value in Circle.area()")
+    @Test
+    public void testBodyRewritten() throws IOException {
+        assertAsCold(warmAfterEdit(PLAIN, PLAIN.replace("return r;", "double q = r * 2; return q / 2;"),
+                PLAIN_HOLDER, false));
+    }
+
+    @DisplayName("a setter nobody calls makes Circle mutable: a declaration edit, Holder is parsed again")
+    @Test
+    public void testTypeBecomesMutable() throws IOException {
+        assertAsCold(warmAfterEdit(PLAIN.replace("private double r;", "private final double r;"),
+                PLAIN.replace("public double area() { return r; }",
+                        "public double area() { return r; }\n    public void setR(double d) { r = d; }"),
+                PLAIN_HOLDER, true));
+    }
+
     /* per type, the element lines that differ: "-" cold only, "+" warm only */
     private static void assertSameAnalysis(Map<String, String> cold, Map<String, String> warm, String what) {
         StringBuilder sb = new StringBuilder();
