@@ -78,6 +78,7 @@ public final class TolerantWrite {
      */
     public static <V extends Value> void setOnce(PropertyValueMap analysis, Property property, V value,
                                                  Object context) {
+        traceOutside(property, context);
         if (MODIFICATION_FROZEN && MODIFICATION_PROPERTIES.contains(property.key())) return;
         analysis.set(property, value);
         CHANGES.computeIfAbsent(property.key(), _ -> new LongAdder()).increment();
@@ -190,6 +191,28 @@ public final class TolerantWrite {
             // their structural twins (#25), written by the same pass
             "structurallyUnmodifiedParameter", "structurallyUnmodifiedField", "structurallyNonModifyingMethod");
 
+    // diagnostic, MODWRITETRACE: who writes a modification property outside IteratingAnalyzer.analyze(), where the
+    // freeze of the analysis before may or may not still be set (the first 12 distinct call sites, with the state)
+    private static final boolean MODWRITETRACE = System.getenv("MODWRITETRACE") != null;
+    private static volatile boolean OUTSIDE_ANALYZE = true;
+    private static final Set<String> TRACED = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    public static void insideAnalyze(boolean inside) {
+        OUTSIDE_ANALYZE = !inside;
+    }
+
+    private static void traceOutside(Property property, Object context) {
+        if (!MODWRITETRACE || !OUTSIDE_ANALYZE || !MODIFICATION_PROPERTIES.contains(property.key())) return;
+        StackTraceElement[] st = Thread.currentThread().getStackTrace();
+        StringBuilder sb = new StringBuilder();
+        for (int i = 3; i < Math.min(st.length, 14); i++) sb.append("\n    at ").append(st[i]);
+        String key = sb.toString();
+        if (TRACED.size() < 12 && TRACED.add(key)) {
+            org.slf4j.LoggerFactory.getLogger(TolerantWrite.class).info("MODWRITETRACE {} on {} outside analyze, "
+                    + "frozen={}{}", property.key(), context, MODIFICATION_FROZEN, key);
+        }
+    }
+
     public static void freezeModificationProperties() {
         MODIFICATION_FROZEN = true;
     }
@@ -212,6 +235,7 @@ public final class TolerantWrite {
                                                                         Property property,
                                                                         V value,
                                                                         Object context) {
+        traceOutside(property, context);
         if (MODIFICATION_FROZEN && MODIFICATION_PROPERTIES.contains(property.key())) return false;
         boolean changed;
         String traceBefore;
