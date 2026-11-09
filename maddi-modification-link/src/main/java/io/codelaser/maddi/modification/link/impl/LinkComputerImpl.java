@@ -240,6 +240,9 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
 
     // MLVDUMP=<fqn substring> in the environment: print every computed summary of the matching methods (diagnostic)
     private static final String MLV_DUMP = System.getenv("MLVDUMP");
+    // OVLMETHODMS=<ms>: the threshold of the per-method OVLSTATS line (default 1000)
+    private static final long OVLMETHOD_NANOS = 1_000_000L * Long.parseLong(
+            System.getenv().getOrDefault("OVLMETHODMS", "1000"));
 
     // a variable of the method's summary, or a shared variable grouping one (#92, gate OVLRELEVANT)
     private static boolean summaryRelevant(Variable v) {
@@ -262,7 +265,8 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
             if (OverlapStats.ON) {
                 long ovl = OverlapStats.threadNanos() - ovl0;
                 long total = System.nanoTime() - t0;
-                if (total > 1_000_000_000L) {
+                OverlapStats.method(total);
+                if (total > OVLMETHOD_NANOS) {
                     System.out.println("OVLMETHOD " + total / 1_000_000 + "ms overlap=" + ovl / 1_000_000 + "ms "
                                        + method.fullyQualifiedName());
                 }

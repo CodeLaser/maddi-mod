@@ -32,6 +32,15 @@ public final class OverlapStats {
     private static final AtomicLong growthPasses = new AtomicLong();
     private static final AtomicLong creationNanos = new AtomicLong();
     private static final AtomicLong growthNanos = new AtomicLong();
+    private static final AtomicLong methods = new AtomicLong();
+    private static final AtomicLong methodNanos = new AtomicLong();
+
+    // one top-level LinkComputerImpl.doMethod: all link computation, with or without the implicit overlap
+    public static void method(long nanos) {
+        methods.incrementAndGet();
+        methodNanos.addAndGet(nanos);
+        if (methods.get() % 20_000 == 0) print();
+    }
 
     static void freezeShape(boolean stale, boolean affected, boolean inFrozen, int seeds) {
         if (stale) freezeStale.incrementAndGet();
@@ -59,7 +68,8 @@ public final class OverlapStats {
                            + " freezeStale=" + freezeStale + " freezeAffected=" + freezeAffected
                            + " freezeInFrozen=" + freezeInFrozen + " freezeSeeds=" + freezeSeeds
                            + " freezeNewGroups=" + freezeNewGroups + " creationMs=" + creationNanos.get() / 1_000_000
-                           + " growthMs=" + growthNanos.get() / 1_000_000 + " growthPasses=" + growthPasses);
+                           + " growthMs=" + growthNanos.get() / 1_000_000 + " growthPasses=" + growthPasses
+                           + " methods=" + methods + " methodMs=" + methodNanos.get() / 1_000_000);
     }
 
     private OverlapStats() {
