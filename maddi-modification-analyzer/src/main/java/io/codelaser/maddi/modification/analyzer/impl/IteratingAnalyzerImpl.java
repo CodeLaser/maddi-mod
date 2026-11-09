@@ -500,7 +500,14 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
     @Override
     public void analyze(List<Info> analysisOrder, G<Info> dependencyGraph,
                         Set<Info> initialDirty, Consumer<Info> beforeFirstRecompute) {
-        iterate(analysisOrder, dependencyGraph, initialDirty, beforeFirstRecompute);
+        try {
+            iterate(analysisOrder, dependencyGraph, initialDirty, beforeFirstRecompute);
+        } finally {
+            // the MODREACH freeze is a JVM-wide static: whatever way iterate ends, an exception included, it must
+            // not stay set for the code that runs before the next analyze() (TestWarmAnalysisWithCarry
+            // .testFreezeDoesNotLeak pins the normal exits)
+            TolerantWrite.unfreezeModificationProperties();
+        }
         if (configuration.nullability()) {
             // docs/design/nullability.md M3/B2: one-shot, over the converged link facts. The stored verdicts are the
             // Java annotations' (NullabilityDecorator): a parameter its method needs non-null is @NonNull, which

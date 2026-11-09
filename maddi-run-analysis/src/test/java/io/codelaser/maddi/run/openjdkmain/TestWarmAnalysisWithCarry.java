@@ -54,6 +54,7 @@ import io.codelaser.maddi.inspection.resource.InputConfigurationImpl;
 import io.codelaser.maddi.inspection.resource.SourceSetImpl;
 import io.codelaser.maddi.modification.analyzer.impl.ElementSummary;
 import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
+import io.codelaser.maddi.modification.common.util.TolerantWrite;
 import io.codelaser.maddi.modification.prepwork.CarryDerived;
 import io.codelaser.maddi.modification.prepwork.ClearDerived;
 import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
@@ -381,6 +382,17 @@ public class TestWarmAnalysisWithCarry {
                 PLAIN_HOLDER, true));
     }
 
+    @DisplayName("with MODREACH: the modification freeze does not outlive a seeded analysis, cutoff or fall-back")
+    @Test
+    public void testFreezeDoesNotLeak() throws IOException {
+        modReach = true;
+        for (String edited : List.of("// a comment\n" + PLAIN, PLAIN.replace("return r;", "r++; return r;"))) {
+            Warm warm = warmAfterEdit(PLAIN, edited, PLAIN_HOLDER, false);
+            assertFalse(TolerantWrite.modificationPropertiesFrozen(), "fell back: " + warm.fellBack());
+            assertAsCold(warm);
+        }
+    }
+
     /* per type, the element lines that differ: "-" cold only, "+" warm only */
     private static void assertSameAnalysis(Map<String, String> cold, Map<String, String> warm, String what) {
         StringBuilder sb = new StringBuilder();
@@ -395,9 +407,13 @@ public class TestWarmAnalysisWithCarry {
         assertTrue(sb.isEmpty(), what + ":" + sb);
     }
 
-    private static IteratingAnalyzerImpl.Configuration configuration() {
+    // MODREACH, as the engine runs by default: the early cutoff then has its own reachability round, which freezes
+    private boolean modReach;
+
+    private IteratingAnalyzerImpl.Configuration configuration() {
         return new IteratingAnalyzerImpl.ConfigurationBuilder().setMaxIterations(20)
-                .setStopWhenCycleDetectedAndNoImprovements(true).build();
+                .setStopWhenCycleDetectedAndNoImprovements(true)
+                .setTrackObjectCreations(modReach).setModificationViaReachability(modReach).build();
     }
 
     private static ComputeCallGraph prep(JavaInspector inspector, ParseResult pr, CallGraphContributions contributions,
@@ -407,7 +423,7 @@ public class TestWarmAnalysisWithCarry {
                         pr.sourceSetToModuleInfoMap().values(), externals, false, List.of(), null, contributions);
     }
 
-    private static ParseResult coldAnalysis(SourceSet set) {
+    private ParseResult coldAnalysis(SourceSet set) {
         JavaInspector cold = inspector(set);
         ParseResult pr = cold.parse(Map.of(), JavaInspectorImpl.DETAILED_SOURCES).parseResult();
         ComputeCallGraph ccg = prep(cold, pr, null, _ -> false);
