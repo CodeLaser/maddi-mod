@@ -1,5 +1,6 @@
 package io.codelaser.maddi.modification.link.impl;
 
+import io.codelaser.maddi.modification.link.impl.graph.OverlapStats;
 import static io.codelaser.maddi.modification.link.impl.LinkNatureImpl.*;
 import static io.codelaser.maddi.modification.prepwork.variable.impl.VariableInfoImpl.STRUCTURALLY_UNMODIFIED_VARIABLE;
 import static io.codelaser.maddi.modification.prepwork.variable.impl.VariableInfoImpl.UNMODIFIED_VARIABLE;
@@ -117,6 +118,7 @@ class WriteLinksAndModification {
         Map<Variable, Links.Builder> newLinkedVariables = new HashMap<>();
         List<Link> toRemove = new ArrayList<>();
         ReuseContext reuse = prepareReuse();
+        if (OverlapStats.ON) OverlapStats.statement(reuse == null);
         if (Gate.isSet("SVDUMP")) {
             System.out.println("SVDUMP stmt " + statement.source().index() + "\n"
                                + followGraph.graph().printShared(Object::toString));
@@ -334,6 +336,7 @@ class WriteLinksAndModification {
                     throw new UnsupportedOperationException("Each real variable must be a primary");
                 }
                 reuse.untouched.put(variable, prev);
+                if (OverlapStats.ON) OverlapStats.extraction(true, 0);
                 return fastToRemove;
             }
         }
@@ -342,6 +345,7 @@ class WriteLinksAndModification {
         // step one, multiple real variables map onto a single shared variable
         Variable toFollow = followGraph.graph().translateForward(variable);
         Links.Builder builder1 = followGraph.followGraph(virtualFieldComputer, toFollow);
+        if (OverlapStats.ON) OverlapStats.extraction(false, builder1.linkSet().size());
         if (toFollow != variable) {
             builder2 = new LinksImpl.Builder(variable);
             // A pure assignment source (a value that flows INTO the collapsed variable, e.g. 'alternative' in

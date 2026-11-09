@@ -33,6 +33,25 @@ public final class OverlapStats {
     private static final AtomicLong creationNanos = new AtomicLong();
     private static final AtomicLong growthNanos = new AtomicLong();
     private static final AtomicLong methods = new AtomicLong();
+    private static final AtomicLong statements = new AtomicLong();
+    private static final AtomicLong dirtyAll = new AtomicLong();
+    private static final AtomicLong reused = new AtomicLong();
+    private static final AtomicLong extracted = new AtomicLong();
+    private static final AtomicLong extractedLinks = new AtomicLong();
+
+    // WriteLinksAndModification: per statement, whether reuse was off (dirty-all); per variable, reused or extracted
+    public static void statement(boolean all) {
+        statements.incrementAndGet();
+        if (all) dirtyAll.incrementAndGet();
+    }
+
+    public static void extraction(boolean reuse, int links) {
+        if (reuse) reused.incrementAndGet();
+        else {
+            extracted.incrementAndGet();
+            extractedLinks.addAndGet(links);
+        }
+    }
     private static final AtomicLong methodNanos = new AtomicLong();
 
     // one top-level LinkComputerImpl.doMethod: all link computation, with or without the implicit overlap
@@ -69,7 +88,9 @@ public final class OverlapStats {
                            + " freezeInFrozen=" + freezeInFrozen + " freezeSeeds=" + freezeSeeds
                            + " freezeNewGroups=" + freezeNewGroups + " creationMs=" + creationNanos.get() / 1_000_000
                            + " growthMs=" + growthNanos.get() / 1_000_000 + " growthPasses=" + growthPasses
-                           + " methods=" + methods + " methodMs=" + methodNanos.get() / 1_000_000);
+                           + " methods=" + methods + " methodMs=" + methodNanos.get() / 1_000_000
+                           + " statements=" + statements + " dirtyAll=" + dirtyAll + " reused=" + reused
+                           + " extracted=" + extracted + " extractedLinks=" + extractedLinks);
     }
 
     private OverlapStats() {
