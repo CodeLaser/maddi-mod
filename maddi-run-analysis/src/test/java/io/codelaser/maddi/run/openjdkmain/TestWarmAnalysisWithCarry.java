@@ -40,6 +40,7 @@ import io.codelaser.maddi.callgraph.CallGraphContributions;
 import io.codelaser.maddi.callgraph.ComputeAnalysisOrder;
 import io.codelaser.maddi.callgraph.ComputeCallGraph;
 import io.codelaser.maddi.callgraph.PrimaryTypeUseGraph;
+import io.codelaser.maddi.callgraph.ReparseWithDependents;
 import io.codelaser.maddi.cst.api.analysis.Property;
 import io.codelaser.maddi.cst.api.element.SourceSet;
 import io.codelaser.maddi.cst.api.info.Info;
@@ -178,6 +179,113 @@ public class TestWarmAnalysisWithCarry {
         assertTrue(warm.fellBack(), "Circle.area() moved, and Holder.total() reads it");
         assertSameAnalysis(dumpAll(coldAnalysis(warm.set()), warm.inspector()), dumpAll(warm.pr(), warm.inspector()),
                 "warm with the carry as a cold analysis (recomputed: " + warm.recomputed() + ")");
+    }
+
+    // ---- an edit of Circle's declarations: Holder's names resolve differently, so it is parsed again, not rewired
+
+    @Language("java")
+    private static final String SCALED = """
+            package s;
+            public class Circle {
+                private double r;
+                public Circle(double r) { this.r = r; }
+                public double scale(Object o) { return r; }
+            }
+            """;
+
+    @Language("java")
+    private static final String SCALING_HOLDER = """
+            package s;
+            public class Holder {
+                private final Circle circle = new Circle(1);
+                public double area() { return circle.scale("x"); }
+                public String text() { return circle.toString(); }
+            }
+            """;
+
+    /*
+     cold analysis; Circle edited; ReparseWithDependents: Holder is rewired, or parsed again when Circle's declarations
+     moved. Rewired: Holder's output is carried, the seed is Circle, with the early cutoff. Parsed again: Holder is a
+     new type without values, so both are seeded, and nothing is carried.
+     */
+    private Warm warmAfterEdit(String circleSource, String newCircle, String holderSource, boolean expectReparsed)
+            throws IOException {
+        Path src = root.resolve("src");
+        write(src, "s/Circle.java", circleSource);
+        write(src, "s/Holder.java", holderSource);
+        SourceSet set = new SourceSetImpl.Builder().setName("main").setSourceDirectories(List.of(src))
+                .setUri(src.toUri()).build();
+        JavaInspector inspector = inspector(set);
+        ParseResult pr0 = inspector.parse(Map.of(), JavaInspectorImpl.DETAILED_SOURCES).parseResult();
+        CallGraphContributions contributions = new CallGraphContributions();
+        Predicate<TypeInfo> noExternals = _ -> false;
+        ComputeCallGraph ccg = prep(inspector, pr0, contributions, noExternals);
+        new IteratingAnalyzerImpl(inspector, configuration())
+                .analyze(new ComputeAnalysisOrder().go(ccg.graph(), false), ccg.graph());
+        TypeInfo circle0 = pr0.findType("s.Circle");
+        TypeInfo holder0 = pr0.findType("s.Holder");
+
+        write(src, "s/Circle.java", newCircle);
+        ReparseWithDependents.Outcome reparse = ReparseWithDependents.go(inspector, Set.of(circle0), Set.of(holder0),
+                invalidated -> new JavaInspector.ParseOptions.Builder().setDetailedSources(true).setFailFast(true)
+                        .setInvalidated(invalidated).build());
+        assertEquals(expectReparsed, reparse.dependentsReparsed());
+        ParseResult pr = reparse.parseResult();
+
+        ccg = prep(inspector, pr, contributions, noExternals);
+        Set<String> seedTypes = new HashSet<>(Set.of("s.Circle"));
+        IteratingAnalyzerImpl analyzer = new IteratingAnalyzerImpl(inspector, configuration());
+        if (reparse.dependentsReparsed()) {
+            seedTypes.add("s.Holder");
+        } else {
+            CarryDerived.primaryType(holder0, inspector.lastRewireInfoMap());
+            analyzer.setPriorSummaries(ElementSummary.ofTypes(Set.of(circle0)));
+        }
+        List<Info> order = new ComputeAnalysisOrder().go(ccg.graph(), false);
+        Set<Info> seed = new HashSet<>();
+        for (Info info : order) {
+            TypeInfo type = info instanceof TypeInfo ti ? ti : info.typeInfo();
+            if (type != null && seedTypes.contains(type.primaryType().fullyQualifiedName())) seed.add(info);
+        }
+        Set<String> recomputed = new TreeSet<>();
+        analyzer.analyze(order, ccg.graph(), seed, info -> {
+            recomputed.add(info.fullyQualifiedName());
+            ClearDerived.element(info);
+        });
+        return new Warm(inspector, set, pr, recomputed, analyzer.cutoffFellBack());
+    }
+
+    private void assertAsCold(Warm warm) {
+        assertSameAnalysis(dumpAll(coldAnalysis(warm.set()), warm.inspector()), dumpAll(warm.pr(), warm.inspector()),
+                "warm as a cold analysis (recomputed: " + warm.recomputed() + ")");
+    }
+
+    @DisplayName("an overload scale(String) that modifies: Holder.area() calls it now, and is no longer non-modifying")
+    @Test
+    public void testOverloadAdded() throws IOException {
+        Warm warm = warmAfterEdit(SCALED, SCALED.replace("public double scale(Object o) { return r; }",
+                "public double scale(Object o) { return r; }\n    public double scale(String s) { r++; return r; }"),
+                SCALING_HOLDER, true);
+        assertTrue(warm.recomputed().contains("s.Holder.area()"), "Holder was parsed again: " + warm.recomputed());
+        assertAsCold(warm);
+    }
+
+    @DisplayName("toString() overridden, modifying: Holder.text() calls Circle's now")
+    @Test
+    public void testInheritedMethodOverridden() throws IOException {
+        Warm warm = warmAfterEdit(SCALED, SCALED.replace("public double scale(Object o) { return r; }",
+                "public double scale(Object o) { return r; }\n"
+                + "    @Override public String toString() { r++; return \"c\"; }"), SCALING_HOLDER, true);
+        assertAsCold(warm);
+    }
+
+    @DisplayName("a body edit through the same path: Holder is rewired and its output carried")
+    @Test
+    public void testBodyEditThroughReparseWithDependents() throws IOException {
+        Warm warm = warmAfterEdit(SCALED, "// a comment\n" + SCALED, SCALING_HOLDER, false);
+        assertFalse(warm.fellBack());
+        assertTrue(warm.recomputed().stream().noneMatch(s -> s.startsWith("s.Holder")), "" + warm.recomputed());
+        assertAsCold(warm);
     }
 
     /* per type, the element lines that differ: "-" cold only, "+" warm only */
