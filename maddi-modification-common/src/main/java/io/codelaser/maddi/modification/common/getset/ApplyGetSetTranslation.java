@@ -17,7 +17,6 @@
 
 package io.codelaser.maddi.modification.common.getset;
 
-import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.GET_SET_FIELD;
 
 import java.util.function.BiConsumer;
 
@@ -30,7 +29,6 @@ import io.codelaser.maddi.cst.api.translate.TranslationMap;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.cst.api.variable.Variable;
-import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 
 public record ApplyGetSetTranslation(Runtime runtime,
                                      BiConsumer<MethodInfo, Value.FieldValue> observer)
@@ -55,7 +53,7 @@ public record ApplyGetSetTranslation(Runtime runtime,
     /** The status {@link #translateExpression} would read, computed on demand as it does. */
     public static Value.FieldValue currentGetSet(MethodInfo methodInfo) {
         ensureGetSet(methodInfo);
-        return methodInfo.analysis().getOrDefault(GET_SET_FIELD, ValueImpl.GetSetValueImpl.EMPTY);
+        return methodInfo.getSetField(); // includes the status a library method inherits (MethodInfoImpl)
     }
 
     @Override
@@ -94,8 +92,7 @@ public record ApplyGetSetTranslation(Runtime runtime,
         if (expression instanceof MethodCall mc) {
             ensureGetSet(mc.methodInfo());
 
-            Value.FieldValue getSet = mc.methodInfo().analysis().getOrDefault(GET_SET_FIELD,
-                    ValueImpl.GetSetValueImpl.EMPTY);
+            Value.FieldValue getSet = mc.methodInfo().getSetField();
             observer.accept(mc.methodInfo(), getSet);
             if (getSet.field() != null) {
                 ParameterizedType type = mc.concreteReturnType();
