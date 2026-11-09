@@ -170,8 +170,11 @@ public class TestIncrementalConsumptionWake {
         JavaInspector.ReloadResult rr = javaInspector.reloadSources(inputConfiguration(), Map.of());
         Set<TypeInfo> changed = rr.sourceHasChanged();
         Set<TypeInfo> dependents = new PrimaryTypeUseGraph(ccg0.graph()).dependentsOf(changed);
-        JavaInspector.Invalidated inv = ti ->
-                changed.contains(ti) ? INVALID : dependents.contains(ti) ? REWIRE : UNCHANGED;
+        // the semantic edit adds a public method, a declaration change the re-parse refuses to rewire across
+        // (JavaInspector.DeclarationsChangedException). This test is about the wake along the rewired chain, and
+        // vouches for its edit: no dependent calls rename, and no name of theirs resolves differently
+        JavaInspector.Invalidated inv = JavaInspector.Invalidated.acrossDeclarationChanges(ti ->
+                changed.contains(ti) ? INVALID : dependents.contains(ti) ? REWIRE : UNCHANGED);
         pr1 = javaInspector.parse(new JavaInspector.ParseOptions.Builder()
                 .setDetailedSources(true).setFailFast(true).setInvalidated(inv).build()).parseResult();
 
