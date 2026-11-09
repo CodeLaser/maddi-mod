@@ -240,6 +240,8 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
 
     // MLVDUMP=<fqn substring> in the environment: print every computed summary of the matching methods (diagnostic)
     private static final String MLV_DUMP = System.getenv("MLVDUMP");
+    // #92: the implicit ∩ only in the last statement's extraction (see Graph.setImplicitHidden)
+    private static final boolean OVL_LAST = Gate.isSet("OVLLAST");
     // OVLMETHODMS=<ms>: the threshold of the per-method OVLSTATS line (default 1000)
     private static final long OVLMETHOD_NANOS = 1_000_000L * Long.parseLong(
             System.getenv().getOrDefault("OVLMETHODMS", "1000"));
@@ -1365,9 +1367,14 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
             Set<Variable> previouslyModified = computePreviouslyModified(vd, previousVd, stageOfPrevious, false);
             Set<Variable> previouslyStructurallyModified = computePreviouslyModified(vd, previousVd, stageOfPrevious, true);
             linkGraph.graph().refreshImplicit();
+            if (OVL_LAST) {
+                linkGraph.graph().setImplicitHidden(!lastStatement);
+                if (lastStatement) linkGraph.graph().invalidateExtractions();
+            }
             WriteLinksAndModification.WriteResult wr = writeLinksAndModification.go(statement, lastStatement, vd,
                     previouslyModified, previouslyStructurallyModified,
                     r == null ? Map.of() : r.modified(), r == null ? Set.of() : r.deepOnlyModified());
+            if (OVL_LAST) linkGraph.graph().setImplicitHidden(false);
             copyEvalIntoVariableData(wr.newLinks(), vd);
             modificationsOutsideVariableData.addAll(wr.modifiedOutsideVariableData());
             wr.modifiedOutsideVariableData().stream().filter(v -> !wr.modifiedOutsideDeepOnly().contains(v))

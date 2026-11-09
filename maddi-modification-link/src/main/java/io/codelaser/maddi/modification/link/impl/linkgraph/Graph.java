@@ -1389,13 +1389,29 @@ public class Graph {
         engine.refreshImplicit();
     }
 
+    /*
+    #92 gate OVLLAST: the extraction of a statement other than the method's last sees no implicit ∩; the summary
+    (the last statement) does. Its extraction must then recompute every variable (remedy A cannot see the change).
+     */
+    private boolean implicitHidden;
+
+    public void setImplicitHidden(boolean hidden) {
+        implicitHidden = hidden;
+    }
+
+    public void invalidateExtractions() {
+        dirtyEverything = true;
+    }
+
     Stream<Map.Entry<Variable, LinkNature>> closureStream(Variable variable) {
+        if (implicitHidden) return engine.successorStream(variable);
         Map<Variable, LinkNature> implicit = engine.implicitSuccessors(variable);
         if (implicit.isEmpty()) return engine.successorStream(variable);
         return Stream.concat(engine.successorStream(variable), implicit.entrySet().stream());
     }
 
     public Iterable<Map.Entry<Variable, LinkNature>> closure(Variable variable) {
+        if (implicitHidden) return engine.successors(variable);
         Map<Variable, LinkNature> implicit = engine.implicitSuccessors(variable);
         if (implicit.isEmpty()) return engine.successors(variable);
         return () -> closureStream(variable).iterator();
