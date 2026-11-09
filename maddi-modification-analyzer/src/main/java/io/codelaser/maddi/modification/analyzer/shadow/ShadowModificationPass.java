@@ -17,7 +17,9 @@ import io.codelaser.maddi.cst.api.element.Element;
 import io.codelaser.maddi.cst.api.element.SourceSet;
 import io.codelaser.maddi.cst.api.expression.AnnotationExpression;
 import io.codelaser.maddi.cst.api.expression.Assignment;
+import io.codelaser.maddi.cst.api.expression.Cast;
 import io.codelaser.maddi.cst.api.expression.ConstructorCall;
+import io.codelaser.maddi.cst.api.expression.EnclosedExpression;
 import io.codelaser.maddi.cst.api.expression.Expression;
 import io.codelaser.maddi.cst.api.expression.Lambda;
 import io.codelaser.maddi.cst.api.expression.MethodCall;
@@ -1174,8 +1176,17 @@ public class ShadowModificationPass {
                 }
                 return out;
             }
+            // engine mirror (ExpressionVisitor.cast): a reference cast is the same object, and parentheses too;
+            // '((SynchronizedStatement) stat).removeExc()' modifies stat (fernflower's
+            // DomHelper.removeSynchronizedHandler, found by the rust-llvm oracle). Gate NOSHADOWCAST.
+            case Cast cast when !NO_SHADOW_CAST -> {
+                return projectReceiverChain(mi, vd, cast.expression(), outer);
+            }
+            case EnclosedExpression enclosed when !NO_SHADOW_CAST -> {
+                return projectReceiverChain(mi, vd, enclosed.expression(), outer);
+            }
             default -> {
-                // literals, casts of the above, arbitrary expressions: no resolution attempted here;
+                // literals, arbitrary expressions: no resolution attempted here;
                 // count only genuinely call-shaped receivers we failed on (handled above)
                 return Set.of();
             }
@@ -1311,6 +1322,8 @@ public class ShadowModificationPass {
     private static final boolean NO_VIEW_LOCAL = Gate.isSet("NOVIEWLOCAL");
     // gate NOSHADOWCALLRESULTFIELD: the walk does not follow a call result that is part of the receiver (#80's mirror)
     private static final boolean NO_SHADOW_CALL_RESULT_FIELD = Gate.isSet("NOSHADOWCALLRESULTFIELD");
+    // gate NOSHADOWCAST: a cast (or parentheses) as a call's receiver is not projected (the modification is lost)
+    private static final boolean NO_SHADOW_CAST = Gate.isSet("NOSHADOWCAST");
 
     /*
      A local initialised with a call whose result is a VIEW of an argument: the callee's summary says
