@@ -119,7 +119,12 @@ public class TestKotlinScopeFunctionsVsJava {
             }
             """;
 
-    /** Java handing the field to a lambda through a LIBRARY method: the parity question for the modify rows. */
+    /**
+     * Java handing the field to a lambda through a LIBRARY method: the parity question for the modify rows.
+     * {@code JListForEachModify} reads modified since CodeLaser/maddi-mod#99 (a library callee that hands its receiver's
+     * elements to a modifying lambda modifies them, deep-only); Optional.of(s).ifPresent and Stream.of(s).forEach,
+     * where {@code s} is the element of a new wrapper rather than the receiver, are still the open gap.
+     */
     private static final List<String> JAVA_TWINS = List.of(
             "package b; import java.util.Set; public final class JOptionalModify { private final Set<String> s; public JOptionalModify(Set<String> s) { this.s = s; } public void f() { java.util.Optional.of(s).ifPresent(x -> x.clear()); } }",
             "package b; import java.util.Set; public final class JStreamModify { private final Set<String> s; public JStreamModify(Set<String> s) { this.s = s; } public void f() { java.util.stream.Stream.of(s).forEach(x -> x.clear()); } }",
@@ -173,7 +178,7 @@ public class TestKotlinScopeFunctionsVsJava {
                 b.JOptionalModify true
                 b.JStreamModify true
                 b.JConsumerModify false
-                b.JListForEachModify true
+                b.JListForEachModify false
                 b.JTryWithResourcesRead true
                 a.LetRead true
                 a.ApplyRead true
