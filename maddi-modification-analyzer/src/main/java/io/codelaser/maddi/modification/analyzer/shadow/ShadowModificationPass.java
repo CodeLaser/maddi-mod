@@ -1710,22 +1710,8 @@ public class ShadowModificationPass {
         // its eventual verdict (TestEventualRatchet 224 -> 225, 2026-09-22): a contracted element whose value was
         // still FALSE lost the reverse-upgrade that would have lifted it.
         if (reached && contracted) return CONTRACT_KEPT;
-        if (immutableType) {
-            // an immutable object cannot be modified: reached is the union's over-reach, and a FALSE is the
-            // fixpoint's, written before the type was known immutable (the family is re-derived between rounds).
-            // Leaving either stand left fernflower's VarType constants without unmodifiedField under the freeze,
-            // which refuses FieldAnalyzerImpl's own TRUE (CodeLaser/maddi-mod#101).
-            if (current == null) {
-                analysis.set(property, ValueImpl.BoolImpl.TRUE);
-                return DECIDED_TRUE;
-            }
-            if (current.isFalse()) {
-                analysis.overwrite(property, ValueImpl.BoolImpl.TRUE);
-                return REVERSE_UPGRADED;
-            }
-            return NO_CHANGE;
-        }
         if (reached) {
+            if (immutableType) return NO_CHANGE; // an immutable object cannot be modified: union over-reach
             if (current == null) {
                 analysis.set(property, ValueImpl.BoolImpl.FALSE);
                 return DECIDED_FALSE;
@@ -1737,7 +1723,7 @@ public class ShadowModificationPass {
             return NO_CHANGE; // already FALSE: agreement
         }
         if (current == null) {
-            if (!tainted) {
+            if (immutableType || !tainted) {
                 analysis.set(property, ValueImpl.BoolImpl.TRUE);
                 return DECIDED_TRUE;
             }
