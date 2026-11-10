@@ -415,7 +415,9 @@ public class Graph {
             if (d instanceof ReturnVariable || Util.primary(d) instanceof ReturnVariable) {
                 return null; // global dirt
             }
-            engine.successorStream(d).forEach(e -> push.accept(e.getKey()));
+            // with the implicit '∩' (#92): the members of a frozen group share no stored fact, and a class that
+            // gains a member changes the links of all of them
+            closureStream(d).forEach(e -> push.accept(e.getKey()));
             verticesByScopePart.getOrDefault(d, Set.of()).forEach(push);
             // prefix web: rep-expansion only when a rep actually sits in the chain — the stream-and-
             // rebuild machinery, run unconditionally, was 37% of the drain's CPU (asprof 2026-08-05);

@@ -116,28 +116,49 @@ public final class IncrementalFixpointEngine<V, L> {
     /*
      #92 gate OVLSNAPSHOT: the classes are computed once per statement (refreshImplicit, called before the statement's
      links are extracted) instead of after every change of the closure. Between two refreshes, reads answer from the
-     last snapshot, filtered on the vertices still present. A removal no longer freezes at once: the removed vertices
-     and their neighbours are remembered, and at the next refresh every class of the previous snapshot that held one
-     of them, and is no longer one, is frozen.
+     last snapshot, filtered on the vertices still present. A removal no longer freezes at once: the closure rows of
+     the removed vertices, in both directions, are kept as ghost rows. The next refresh computes the classes once
+     with the ghost rows and once without; a class of the first that is no longer one in the second is frozen.
      */
     private boolean snapshotMode;
     private Set<V> pendingDead = new HashSet<>();
-    private Set<V> pendingSeeds = new HashSet<>();
-    // the snapshots of the alternatives joined into this engine since the last refresh (unionWith): a class that
-    // only another alternative held is checked at the next refresh too
-    private List<ImplicitOverlap<V, L>> joinedSnapshots = new ArrayList<>();
-    // the closure version of the snapshot: a removal after a change refreshes first (removeVertices)
-    private long snapshotVersion = -1;
+    private Map<V, Map<V, L>> ghostRows = new HashMap<>();
 
     public void setImplicitSnapshot(boolean snapshot) {
         this.snapshotMode = snapshot;
     }
 
+    private void addGhost(V from, V to, L label) {
+        ghostRows.computeIfAbsent(from, _ -> new HashMap<>()).merge(to, label, best);
+    }
+
+    private void recordGhostRows(Set<V> dead) {
+        pendingDead.addAll(dead);
+        for (V d : dead) {
+            for (Map.Entry<V, L> e : closure.successors(d)) {
+                addGhost(d, e.getKey(), e.getValue());
+                // a vertex no composite targets has no incoming row: its reversed row stands in (see buildOverlap)
+                if (!acceptForComposite.test(d) && closure.label(e.getKey(), d) == null) {
+                    addGhost(e.getKey(), d, reverse.apply(e.getValue()));
+                }
+            }
+        }
+        for (V source : closure.sources()) {
+            if (dead.contains(source)) continue;
+            for (V d : dead) {
+                L label = closure.label(source, d);
+                if (label != null) addGhost(source, d, label);
+            }
+        }
+    }
+
     public void refreshImplicit() {
         if (implicit == null || !snapshotMode) return;
         long t0 = OverlapStats.ON ? System.nanoTime() : 0;
-        ImplicitOverlap<V, L> old = currentOverlap;
         Set<V> alive = graph.vertices();
+        reversedRows = null;
+        // with the frozen groups as they are: a group of a removed vertex still joins what that vertex linked
+        ImplicitOverlap<V, L> before = ghostRows.isEmpty() ? null : buildOverlap(Set.of(), ghostRows);
         if (!pendingDead.isEmpty()) {
             List<List<V>> kept = new ArrayList<>();
             for (List<V> g : frozenGroups) {
@@ -146,44 +167,33 @@ public final class IncrementalFixpointEngine<V, L> {
             }
             frozenGroups = kept;
         }
-        reversedRows = null;
         ImplicitOverlap<V, L> now = buildOverlap(Set.of());
-        List<ImplicitOverlap<V, L>> previous = new ArrayList<>();
-        if (old != null) previous.add(old);
-        for (ImplicitOverlap<V, L> joined : joinedSnapshots) {
-            if (previous.stream().noneMatch(p -> p == joined)) previous.add(joined);
-        }
-        if (!previous.isEmpty() && !pendingDead.isEmpty()) {
-            // a set: two alternatives usually hold the same class
-            Set<List<V>> newGroupSet = new LinkedHashSet<>();
-            for (ImplicitOverlap<V, L> snapshot : previous) {
-                for (Set<V> cls : snapshot.classes()) {
-                    if (Collections.disjoint(cls, pendingSeeds)) continue;
-                    List<V> survivors = cls.stream().filter(alive::contains).sorted(vertexComparator).toList();
-                    if (survivors.size() < 2) continue;
-                    V first = survivors.getFirst();
-                    if (!survivors.stream().allMatch(v -> v.equals(first) || now.overlap(first, v))) {
-                        newGroupSet.add(survivors);
+        if (before != null) {
+            Set<V> ghosts = ghostRows.keySet();
+            List<List<V>> newGroups = new ArrayList<>();
+            for (Set<V> cls : before.classes()) {
+                if (Collections.disjoint(cls, ghosts)) continue;
+                List<V> survivors = cls.stream().filter(alive::contains).sorted(vertexComparator).toList();
+                if (survivors.size() < 2) continue;
+                V first = survivors.getFirst();
+                if (!survivors.stream().allMatch(v -> v.equals(first) || now.overlap(first, v))) {
+                    newGroups.add(survivors);
+                }
+            }
+            before.leafPairs().forEach((l1, others) -> {
+                if (!alive.contains(l1)) return;
+                for (V l2 : others) {
+                    if (alive.contains(l2) && vertexComparator.compare(l1, l2) < 0 && !now.overlap(l1, l2)) {
+                        newGroups.add(List.of(l1, l2));
                     }
                 }
-                snapshot.leafPairs().forEach((l1, others) -> {
-                    if (!alive.contains(l1)) return;
-                    for (V l2 : others) {
-                        if (alive.contains(l2) && vertexComparator.compare(l1, l2) < 0
-                            && (pendingSeeds.contains(l1) || pendingSeeds.contains(l2)) && !now.overlap(l1, l2)) {
-                            newGroupSet.add(List.of(l1, l2));
-                        }
-                    }
-                });
-            }
-            List<List<V>> newGroups = new ArrayList<>(newGroupSet);
+            });
             if (!newGroups.isEmpty()) {
                 newGroups.sort(Comparator.comparing((List<V> g) -> g.stream().map(vertexPrinter)
-                        .collect(java.util.stream.Collectors.joining(","))));
+                        .collect(Collectors.joining(","))));
                 frozenGroups = new ArrayList<>(frozenGroups);
                 frozenGroups.addAll(newGroups);
                 newGroups.forEach(touched::addAll);
-                reversedRows = null;
                 currentOverlap = buildOverlap(Set.of());
             } else {
                 currentOverlap = now;
@@ -192,11 +202,9 @@ public final class IncrementalFixpointEngine<V, L> {
             currentOverlap = now;
         }
         pendingDead = new HashSet<>();
-        pendingSeeds = new HashSet<>();
-        joinedSnapshots = new ArrayList<>();
+        ghostRows = new HashMap<>();
         implicitCache.clear();
         implicitCacheVersion = closure.modCount();
-        snapshotVersion = closure.modCount();
         if (OverlapStats.ON) OverlapStats.build(System.nanoTime() - t0, alive.size());
     }
 
@@ -324,11 +332,7 @@ public final class IncrementalFixpointEngine<V, L> {
             // the snapshot itself is never changed, only replaced: share it
             copy.currentOverlap = currentOverlap;
             copy.pendingDead = new HashSet<>(pendingDead);
-            copy.pendingSeeds = new HashSet<>(pendingSeeds);
-            copy.joinedSnapshots = new ArrayList<>(joinedSnapshots);
-            // a copy's closure counts its changes from zero
-            copy.snapshotVersion = currentOverlap != null && snapshotVersion == closure.modCount()
-                    ? copy.closure.modCount() : -1;
+            ghostRows.forEach((v, row) -> copy.ghostRows.put(v, new HashMap<>(row)));
         }
         return copy;
     }
@@ -346,9 +350,7 @@ public final class IncrementalFixpointEngine<V, L> {
         for (List<V> g : other.frozenGroups) if (!frozenGroups.contains(g)) frozenGroups.add(g);
         if (snapshotMode) {
             pendingDead.addAll(other.pendingDead);
-            pendingSeeds.addAll(other.pendingSeeds);
-            if (other.currentOverlap != null) joinedSnapshots.add(other.currentOverlap);
-            joinedSnapshots.addAll(other.joinedSnapshots);
+            other.ghostRows.forEach((v, row) -> row.forEach((to, label) -> addGhost(v, to, label)));
             implicitCache.clear();
         } else {
             currentOverlap = null;
@@ -437,19 +439,20 @@ public final class IncrementalFixpointEngine<V, L> {
         return graph.addVertex(v);
     }
 
+    // dirty tracking: what overlapped a removed vertex implicitly loses that link, without a stored fact for the
+    // column sweep of removeVertices to find
+    private void touchImplicitPartners(Set<V> dead) {
+        for (V d : dead) touched.addAll(implicitSuccessors(d).keySet());
+    }
+
     public boolean removeVertices(Set<V> vertices) {
         if (!Gate.isSet("NOMAT")) {
             if (implicit != null) {
                 if (snapshotMode) {
-                    // a class that formed since the last refresh and that only these vertices hold together is in
-                    // no snapshot yet (a variable linked and collapsed into its group within one statement)
-                    if (snapshotVersion != closure.modCount()) refreshImplicit();
-                    pendingDead.addAll(vertices);
-                    pendingSeeds.addAll(vertices);
-                    for (V d : vertices) {
-                        for (Map.Entry<V, L> e : closure.successors(d)) pendingSeeds.add(e.getKey());
-                    }
+                    touchImplicitPartners(vertices);
+                    recordGhostRows(vertices);
                 } else {
+                    touchImplicitPartners(vertices);
                     freezeImplicitGroups(vertices);
                 }
             }
@@ -607,6 +610,11 @@ public final class IncrementalFixpointEngine<V, L> {
     }
 
     private ImplicitOverlap<V, L> buildOverlap(Set<V> excluded) {
+        return buildOverlap(excluded, Map.of());
+    }
+
+    // 'ghosts': rows of vertices that left the graph, read as if they were still in the closure
+    private ImplicitOverlap<V, L> buildOverlap(Set<V> excluded, Map<V, Map<V, L>> ghosts) {
         if (reversedRows == null) {
             reversedRows = new HashMap<>();
             for (V r : closure.sources()) {
@@ -618,7 +626,12 @@ public final class IncrementalFixpointEngine<V, L> {
                 }
             }
         }
-        List<V> vertices = new ArrayList<>(graph.vertices());
+        Set<V> vertexSet = new HashSet<>(graph.vertices());
+        ghosts.forEach((v, row) -> {
+            vertexSet.add(v);
+            vertexSet.addAll(row.keySet());
+        });
+        List<V> vertices = new ArrayList<>(vertexSet);
         vertices.sort(vertexComparator);
         return new ImplicitOverlap<>(new ImplicitOverlap.Source<>() {
             @Override
@@ -628,12 +641,17 @@ public final class IncrementalFixpointEngine<V, L> {
 
             @Override
             public Iterable<Map.Entry<V, L>> edges(V v) {
-                return searchEdges(v);
+                Map<V, L> ghost = ghosts.get(v);
+                if (ghost == null) return searchEdges(v);
+                List<Map.Entry<V, L>> all = new ArrayList<>(ghost.entrySet());
+                searchEdges(v).forEach(all::add);
+                return all;
             }
 
             @Override
             public L stored(V from, V to) {
-                return closure.label(from, to);
+                L label = closure.label(from, to);
+                return label != null ? label : ghosts.getOrDefault(from, Map.of()).get(to);
             }
 
             @Override
