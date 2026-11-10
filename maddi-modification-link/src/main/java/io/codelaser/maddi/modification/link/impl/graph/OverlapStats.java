@@ -85,6 +85,14 @@ public final class OverlapStats {
         }
     }
 
+    private static final java.util.concurrent.ConcurrentHashMap<String, AtomicLong> links
+            = new java.util.concurrent.ConcurrentHashMap<>();
+
+    // FollowGraph: one extracted link, by kind
+    public static void link(String kind) {
+        links.computeIfAbsent(kind, _ -> new AtomicLong()).incrementAndGet();
+    }
+
     // one union of two alternatives: the implicit pairs that neither alternative has (both directions counted)
     static void join(int pairs) {
         joins.incrementAndGet();
@@ -134,7 +142,8 @@ public final class OverlapStats {
                            + " extracted=" + extracted + " extractedLinks=" + extractedLinks
                            + " joins=" + joins + " crossJoins=" + crossJoins + " crossPairs=" + crossPairs
                            + " staleReads=" + staleReads + " staleDiffer=" + staleDiffer
-                           + " staleSites=" + new java.util.TreeMap<>(staleSites).toString().replace(' ', '_'));
+                           + " staleSites=" + new java.util.TreeMap<>(staleSites).toString().replace(' ', '_')
+                           + " links=" + new java.util.TreeMap<>(links).toString().replace(' ', '_'));
     }
 
     private OverlapStats() {
