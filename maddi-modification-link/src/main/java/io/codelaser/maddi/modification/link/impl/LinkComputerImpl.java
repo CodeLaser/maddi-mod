@@ -557,6 +557,11 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
             LOGGER.info("LINKDUMP method={} work={} variables={}\n{}", methodInfo.fullyQualifiedName(), work,
                     graph.size(), graph.engine().printClosure());
         }
+        // #92 measurement: the methods a ceiling that also charged the extracted links would stop
+        if (OverlapStats.ON && !tripped && work + 10 * OverlapStats.threadLinks() > IncrementalFixpointEngine.workCeiling()) {
+            System.out.println("OVLBUDGET work=" + work + " links=" + OverlapStats.threadLinks() + " "
+                               + methodInfo.fullyQualifiedName());
+        }
         if (tripped || work >= WORK_REPORT) {
             LOGGER.info("LINKWORK {} work={} ceilingPct={} graph={} closure={} witnesses={} method={}",
                     tripped ? "TRIPPED" : "ok", work,
