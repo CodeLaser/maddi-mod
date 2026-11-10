@@ -1300,6 +1300,8 @@ public class Graph {
                 continue;
             }
             Variable array = dv.arrayVariable();
+            // OVLSNAPSHOT: the links lifted below include '∩', and the closure changed since the statement's refresh
+            if (lifted.isEmpty()) engine.refreshImplicit();
             // the element and what holds the same object: its shared group's rep ('a[i] ← $__sv_a[i]')
             Set<Variable> same = new HashSet<>();
             same.add(removed);
@@ -1412,10 +1414,8 @@ public class Graph {
         return Stream.concat(engine.successorStream(variable), implicit.entrySet().stream());
     }
 
+    // the stored facts only: ExpandSlice, the one reader, looks at '∈', '~' and assignments, never at '∩'
     public Iterable<Map.Entry<Variable, LinkNature>> closure(Variable variable) {
-        if (implicitHidden) return engine.successors(variable);
-        Map<Variable, LinkNature> implicit = engine.implicitSuccessors(variable);
-        if (implicit.isEmpty()) return engine.successors(variable);
-        return () -> closureStream(variable).iterator();
+        return engine.successors(variable);
     }
 }

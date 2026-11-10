@@ -185,6 +185,8 @@ class WriteLinksAndModification {
                 if (reuse != null) reuse.untouched.remove(Util.primary(link.from()));
             }
             followGraph.graph().recompute(affected, statement.source().index(), this::acceptRemoval);
+            // OVLSNAPSHOT: the extractions that follow read the '∩' of the closure as rewritten here
+            followGraph.graph().refreshImplicit();
         }
         Map<Variable, Links> builtNewLinkedVariables = new HashMap<>();
         int sum = newLinkedVariables.entrySet().stream().mapToInt(e -> {
