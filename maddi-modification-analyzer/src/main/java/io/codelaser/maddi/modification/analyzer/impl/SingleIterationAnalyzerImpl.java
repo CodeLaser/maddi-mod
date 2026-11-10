@@ -849,6 +849,25 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
                 LOGGER.warn("LINKRECHECK summary of {} differs:\n  stored     {}\n  recomputed {}", methodInfo, stored, again);
             }
             Map<String, String> after = linksAtLastStatement(methodInfo);
+            boolean summaryDiffers = !String.valueOf(stored).equals(String.valueOf(again));
+            if (summaryDiffers || !before.equals(after)) {
+                // is the computation a function of the stored state at all? Five more, on the same inputs: more than
+                // one distinct result means it is not (iteration order of a hash set, say); one result that is not
+                // the stored one means the stored one was never recomputed after an input changed. The link cache's
+                // own verdict tells whether it would have skipped this method.
+                Set<String> distinct = new HashSet<>();
+                distinct.add(again + " " + after);
+                for (int i = 0; i < 5; ++i) {
+                    MethodLinkedVariables more = linkComputer.doMethod(methodInfo);
+                    distinct.add(more + " " + linksAtLastStatement(methodInfo));
+                }
+                AnalysisAccessRecorder.Recording recording = linkRecordings.get(methodInfo);
+                String cache = recording == null ? "no recording"
+                        : String.valueOf(recording.firstChange(linkCacheContext()));
+                LOGGER.warn("LINKRECHECK {}: 6 recomputations give {} distinct result(s), the stored one {} among them;"
+                            + " link cache: first changed input = {}", methodInfo, distinct.size(),
+                        distinct.contains(stored + " " + before) ? "is" : "is not", cache);
+            }
             if (!before.equals(after)) {
                 ++variableData;
                 StringBuilder sb = new StringBuilder();
