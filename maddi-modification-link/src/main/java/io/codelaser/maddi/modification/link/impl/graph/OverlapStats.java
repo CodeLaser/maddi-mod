@@ -62,11 +62,6 @@ public final class OverlapStats {
     // per thread, for the per-method line: statements, reused, extracted, links, most vertices, largest class
     private static final ThreadLocal<long[]> threadShape = ThreadLocal.withInitial(() -> new long[6]);
 
-    // links extracted on this thread since the top-level method started (callees computed inside it included)
-    public static long threadLinks() {
-        return threadShape.get()[3];
-    }
-
     public static String takeShape() {
         long[] s = threadShape.get();
         String r = "statements=" + s[0] + " reused=" + s[1] + " extracted=" + s[2] + " links=" + s[3]

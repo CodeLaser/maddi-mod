@@ -422,6 +422,21 @@ public final class IncrementalFixpointEngine<V, L> {
         return graph.isKnown(from);
     }
 
+    /*
+     #92: with the implicit '∩' the engine no longer pays for the overlap facts, the extraction does: a class of n
+     vertices is n links for each of its members, at every statement. Each extracted link is charged to the work
+     count, so that a method the old derivation stopped early is not ground through to the same ceiling at ten
+     times the cost (elasticsearch's DesiredBalanceComputer.compute: 21s instead of 5s per analysis, degraded
+     either way). The weight is the measured time of a link against that of an edge visit.
+     */
+    private static final int EXTRACTION_WORK = 10;
+
+    public void chargeExtraction(int links) {
+        if (implicit == null || NO_WORK_CEILING) return;
+        work += (long) EXTRACTION_WORK * links;
+        if (work > WORK_CEILING) throw new DegradedAnalysisException(DegradedAnalysisException.Reason.WORK_CEILING);
+    }
+
     /** Edge visits spent on this method so far, against {@link #workCeiling()}. Read for diagnostics only. */
     public long work() {
         return work;
