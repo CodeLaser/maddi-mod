@@ -16,6 +16,7 @@ import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.element.Element;
 import io.codelaser.maddi.cst.api.element.SourceSet;
 import io.codelaser.maddi.cst.api.expression.AnnotationExpression;
+import io.codelaser.maddi.cst.api.expression.ArrayInitializer;
 import io.codelaser.maddi.cst.api.expression.Assignment;
 import io.codelaser.maddi.cst.api.expression.Cast;
 import io.codelaser.maddi.cst.api.expression.ConstructorCall;
@@ -269,7 +270,7 @@ public class ShadowModificationPass {
             // 0 reverse AND divergences == immutableGuarded (frozen == pass output otherwise)
             boolean immutableTyped = switch (info) {
                 case ParameterInfo pi -> immutableForModification(pi.parameterizedType());
-                case FieldInfo fi -> immutableForModification(fi.type());
+                case FieldInfo fi -> immutableForModification(fi);
                 default -> false;
             };
             if (immutableTyped) immutableGuardedDivergences++;
@@ -1559,7 +1560,7 @@ public class ShadowModificationPass {
                     }
                 }
                 case FieldInfo fi -> {
-                    boolean immutable = immutableForModification(fi.type());
+                    boolean immutable = immutableForModification(fi);
                     int r = write(fi.analysis(), PropertyImpl.UNMODIFIED_FIELD,
                             report.reached().contains(fi), report.frontierIncomplete().contains(fi), immutable, fi,
                             false);
@@ -1710,8 +1711,22 @@ public class ShadowModificationPass {
         // its eventual verdict (TestEventualRatchet 224 -> 225, 2026-09-22): a contracted element whose value was
         // still FALSE lost the reverse-upgrade that would have lifted it.
         if (reached && contracted) return CONTRACT_KEPT;
+        if (immutableType) {
+            // an immutable object cannot be modified: reached is the union's over-reach, and a FALSE is the
+            // fixpoint's, which did not know the object (a final field's initializer, immutableForModification) or
+            // the type's immutability yet (the family is re-derived between rounds). Under the freeze nothing else
+            // may correct either: fernflower's VarType constants ended without unmodifiedField (maddi-mod#101).
+            if (current == null) {
+                analysis.set(property, ValueImpl.BoolImpl.TRUE);
+                return DECIDED_TRUE;
+            }
+            if (current.isFalse()) {
+                analysis.overwrite(property, ValueImpl.BoolImpl.TRUE);
+                return REVERSE_UPGRADED;
+            }
+            return NO_CHANGE;
+        }
         if (reached) {
-            if (immutableType) return NO_CHANGE; // an immutable object cannot be modified: union over-reach
             if (current == null) {
                 analysis.set(property, ValueImpl.BoolImpl.FALSE);
                 return DECIDED_FALSE;
@@ -1723,7 +1738,7 @@ public class ShadowModificationPass {
             return NO_CHANGE; // already FALSE: agreement
         }
         if (current == null) {
-            if (immutableType || !tainted) {
+            if (!tainted) {
                 analysis.set(property, ValueImpl.BoolImpl.TRUE);
                 return DECIDED_TRUE;
             }
@@ -1771,7 +1786,7 @@ public class ShadowModificationPass {
     private boolean immutableTyped(Object node) {
         return switch (node) {
             case ParameterInfo pi -> immutableForModification(pi.parameterizedType());
-            case FieldInfo fi -> immutableForModification(fi.type());
+            case FieldInfo fi -> immutableForModification(fi);
             default -> false;
         };
     }
@@ -1790,6 +1805,49 @@ public class ShadowModificationPass {
     private boolean immutableForModification(ParameterizedType pt) {
         return analysisHelper.typeImmutable(pt).isImmutable()
                || ReceiverLevel.enabled() && ReceiverLevel.immutableBaseType(pt);
+    }
+
+    /*
+    A field by its declared type, or by the object it holds when that is known on the spot (CodeLaser/maddi-mod#101):
+    a final field whose initializer constructs it holds an object of exactly that class for good, so the class's
+    extensibility, which is all that keeps fernflower's VarType at immutable-HC (GenericType extends it and modifies),
+    says nothing about it. 'static final VarType VARTYPE_INT = new VarType(TYPE_INT)' is reached through every
+    VarType parameter a GenericType makes modified, yet its object cannot change. Purely local, so sound for any
+    caller (docs/design/dynamic-immutability-feasibility.md, part 2's "locally in ctor/initializer" shape); an empty
+    array, which has nothing to modify, likewise.
+     */
+    private boolean immutableForModification(FieldInfo fi) {
+        return immutableForModification(fi.type()) || immutableObjectOfInitializer(fi);
+    }
+
+    private boolean immutableObjectOfInitializer(FieldInfo fi) {
+        if (!fi.isFinal() || fi.initializer() == null || fi.initializer().isEmpty()) return false;
+        Expression init = fi.initializer();
+        if (init instanceof ArrayInitializer ai) return ai.expressions().isEmpty();
+        if (!(init instanceof ConstructorCall cc)) return false;
+        if (cc.arrayInitializer() != null) return cc.arrayInitializer().expressions().isEmpty();
+        if (cc.anonymousClass() != null || cc.constructor() == null) return false;
+        return exactlyImmutable(cc.constructor().typeInfo());
+    }
+
+    /*
+    An object of exactly this class cannot change: the class is immutable but for its hidden content, and none of its
+    own or its superclasses' instance fields holds any (each is primitive or of a deeply immutable type), so what
+    hides is only what a subclass might add.
+     */
+    private boolean exactlyImmutable(TypeInfo typeInfo) {
+        if (!typeInfo.typeParameters().isEmpty()) return false;
+        if (!analysisHelper.typeImmutable(typeInfo.asSimpleParameterizedType()).isAtLeastImmutableHC()) return false;
+        for (TypeInfo t = typeInfo; t != null && !t.isJavaLangObject();
+             t = t.parentClass() == null ? null : t.parentClass().typeInfo()) {
+            for (FieldInfo f : t.fields()) {
+                if (f.isStatic()) continue;
+                if (!f.type().isPrimitiveExcludingVoid() && !analysisHelper.typeImmutable(f.type()).isImmutable()) {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     /**
