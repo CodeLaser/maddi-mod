@@ -207,6 +207,9 @@ public final class IncrementalFixpointEngine<V, L> {
         pendingDead = new HashSet<>();
         ghostRows = new HashMap<>();
         refreshedAt = closure.modCount();
+        if (OverlapStats.ON) {
+            OverlapStats.shape(alive.size(), currentOverlap.classes().stream().mapToInt(Set::size).max().orElse(0));
+        }
         implicitCache.clear();
         implicitCacheVersion = closure.modCount();
         if (OverlapStats.ON) OverlapStats.build(System.nanoTime() - t0, alive.size());

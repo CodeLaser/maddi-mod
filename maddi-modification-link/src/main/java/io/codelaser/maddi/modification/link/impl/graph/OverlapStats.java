@@ -42,15 +42,38 @@ public final class OverlapStats {
     // WriteLinksAndModification: per statement, whether reuse was off (dirty-all); per variable, reused or extracted
     public static void statement(boolean all) {
         statements.incrementAndGet();
+        threadShape.get()[0]++;
         if (all) dirtyAll.incrementAndGet();
     }
 
     public static void extraction(boolean reuse, int links) {
-        if (reuse) reused.incrementAndGet();
-        else {
+        long[] shape = threadShape.get();
+        if (reuse) {
+            reused.incrementAndGet();
+            shape[1]++;
+        } else {
             extracted.incrementAndGet();
             extractedLinks.addAndGet(links);
+            shape[2]++;
+            shape[3] += links;
         }
+    }
+
+    // per thread, for the per-method line: statements, reused, extracted, links, most vertices, largest class
+    private static final ThreadLocal<long[]> threadShape = ThreadLocal.withInitial(() -> new long[6]);
+
+    public static String takeShape() {
+        long[] s = threadShape.get();
+        String r = "statements=" + s[0] + " reused=" + s[1] + " extracted=" + s[2] + " links=" + s[3]
+                   + " maxVertices=" + s[4] + " maxClass=" + s[5];
+        java.util.Arrays.fill(s, 0);
+        return r;
+    }
+
+    static void shape(int vertices, int largestClass) {
+        long[] s = threadShape.get();
+        s[4] = Math.max(s[4], vertices);
+        s[5] = Math.max(s[5], largestClass);
     }
     private static final AtomicLong methodNanos = new AtomicLong();
     private static final AtomicLong joins = new AtomicLong();

@@ -264,6 +264,7 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
             long ovl0 = OverlapStats.ON ? OverlapStats.threadNanos() : 0;
             long t0 = OverlapStats.ON ? System.nanoTime() : 0;
             long cross0 = OverlapStats.ON ? OverlapStats.threadCross() : 0;
+            if (OverlapStats.ON) OverlapStats.takeShape();
             MethodLinkedVariables result = doMethod(method, shallow, false, true);
             if (OverlapStats.ON) {
                 long cross = OverlapStats.threadCross() - cross0;
@@ -273,6 +274,7 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                 OverlapStats.method(total);
                 if (total > OVLMETHOD_NANOS) {
                     System.out.println("OVLMETHOD " + total / 1_000_000 + "ms overlap=" + ovl / 1_000_000 + "ms "
+                                       + OverlapStats.takeShape() + " "
                                        + method.fullyQualifiedName());
                 }
             }
