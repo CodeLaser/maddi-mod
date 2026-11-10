@@ -92,11 +92,18 @@ public final class IncrementalFixpointEngine<V, L> {
      or nothing), so leaving it out of derivation changes no other fact. Stored as a composite it formed a near-complete
      pairwise set among the variables sharing content with a common one, most of the closure and most of the work.
      With an implicit label set, composites of that label are not derived; direct edges carrying it stay. The facts
-     are computed on demand from the rest of the closure (implicitSuccessors, ImplicitOverlap), and the classes held
-     together only by vertices being removed are frozen first (freezeImplicitGroups).
+     are computed from the rest of the closure, as classes (ImplicitOverlap), once per statement: refreshImplicit is
+     called before the statement's links are extracted, and wherever the closure is read for '∩' after a change within
+     the statement. Between two refreshes, reads answer from the last classes, filtered on the vertices still present.
+     A removal keeps the closure rows of the removed vertices, in both directions, as ghost rows. The next refresh
+     computes the classes once with the ghost rows and once without; the survivors of a class of the first that is no
+     longer one class in the second are frozen: they stay one group, the way materializeWitnessOrphans keeps derived
+     facts as direct edges. One group per class instead of an edge per pair; a frozen group loses its members as
+     those are removed in turn.
      */
     private L implicit;
     private long implicitCacheVersion = -1;
+    private long refreshedAt = -1;
     private final Map<V, Map<V, L>> implicitCache = new HashMap<>();
     // reversed rows of the vertices no composite targets (a return variable): propagateBackward composes through them
     private Map<V, Map<V, L>> reversedRows;
@@ -113,20 +120,8 @@ public final class IncrementalFixpointEngine<V, L> {
         currentOverlap = null;
     }
 
-    /*
-     #92 gate OVLSNAPSHOT: the classes are computed once per statement (refreshImplicit, called before the statement's
-     links are extracted) instead of after every change of the closure. Between two refreshes, reads answer from the
-     last snapshot, filtered on the vertices still present. A removal no longer freezes at once: the closure rows of
-     the removed vertices, in both directions, are kept as ghost rows. The next refresh computes the classes once
-     with the ghost rows and once without; a class of the first that is no longer one in the second is frozen.
-     */
-    private boolean snapshotMode;
     private Set<V> pendingDead = new HashSet<>();
     private Map<V, Map<V, L>> ghostRows = new HashMap<>();
-
-    public void setImplicitSnapshot(boolean snapshot) {
-        this.snapshotMode = snapshot;
-    }
 
     private void addGhost(V from, V to, L label) {
         ghostRows.computeIfAbsent(from, _ -> new HashMap<>()).merge(to, label, best);
@@ -153,15 +148,14 @@ public final class IncrementalFixpointEngine<V, L> {
     }
 
     public void refreshImplicit() {
-        if (implicit == null || !snapshotMode) return;
+        if (implicit == null) return;
         // nothing changed since the last refresh
         if (currentOverlap != null && refreshedAt == closure.modCount() && ghostRows.isEmpty()
             && pendingDead.isEmpty()) return;
-        long t0 = OverlapStats.ON ? System.nanoTime() : 0;
         Set<V> alive = graph.vertices();
         reversedRows = null;
         // with the frozen groups as they are: a group of a removed vertex still joins what that vertex linked
-        ImplicitOverlap<V, L> before = ghostRows.isEmpty() ? null : buildOverlap(Set.of(), ghostRows);
+        ImplicitOverlap<V, L> before = ghostRows.isEmpty() ? null : buildOverlap(ghostRows);
         if (!pendingDead.isEmpty()) {
             List<List<V>> kept = new ArrayList<>();
             for (List<V> g : frozenGroups) {
@@ -170,7 +164,7 @@ public final class IncrementalFixpointEngine<V, L> {
             }
             frozenGroups = kept;
         }
-        ImplicitOverlap<V, L> now = buildOverlap(Set.of());
+        ImplicitOverlap<V, L> now = buildOverlap(Map.of());
         if (before != null) {
             Set<V> ghosts = ghostRows.keySet();
             List<List<V>> newGroups = new ArrayList<>();
@@ -197,7 +191,7 @@ public final class IncrementalFixpointEngine<V, L> {
                 frozenGroups = new ArrayList<>(frozenGroups);
                 frozenGroups.addAll(newGroups);
                 newGroups.forEach(touched::addAll);
-                currentOverlap = buildOverlap(Set.of());
+                currentOverlap = buildOverlap(Map.of());
             } else {
                 currentOverlap = now;
             }
@@ -207,20 +201,8 @@ public final class IncrementalFixpointEngine<V, L> {
         pendingDead = new HashSet<>();
         ghostRows = new HashMap<>();
         refreshedAt = closure.modCount();
-        if (OverlapStats.ON) {
-            OverlapStats.shape(alive.size(), currentOverlap.classes().stream().mapToInt(Set::size).max().orElse(0));
-        }
         implicitCache.clear();
         implicitCacheVersion = closure.modCount();
-        if (OverlapStats.ON) OverlapStats.build(System.nanoTime() - t0, alive.size());
-    }
-
-    // #92 gate OVLRELEVANT: the vertices whose implicit facts are answered (null: all)
-    private Predicate<V> implicitQuery;
-
-    public void setImplicitQuery(Predicate<V> query) {
-        this.implicitQuery = query;
-        implicitCache.clear();
     }
 
     private boolean derivable(L label) {
@@ -229,21 +211,6 @@ public final class IncrementalFixpointEngine<V, L> {
 
     private boolean isImplicit(L label) {
         return implicit != null && implicit.equals(label);
-    }
-
-    /*
-     #92, the alternative to an implicit label: a label that is derived and stored as before, but never composed with
-     itself ('∩ ∘ ∩'). Composing every new '∩' fact with all the other '∩' facts of its endpoints was the cubic part of the
-     work; the facts only that composition derives are 1-2% of the closure.
-     */
-    private L nonChaining;
-
-    public void setNonChainingLabel(L label) {
-        this.nonChaining = label;
-    }
-
-    private boolean chain(L l1, L l2) {
-        return nonChaining != null && nonChaining.equals(l1) && nonChaining.equals(l2);
     }
 
     private void touch(Fact<V, L> fact) {
@@ -329,20 +296,14 @@ public final class IncrementalFixpointEngine<V, L> {
         copy.work = work;
         copy.touched.addAll(touched);
         copy.implicit = implicit;
-        copy.nonChaining = nonChaining;
         copy.implicitMiddleOk = implicitMiddleOk;
         copy.implicitPairOk = implicitPairOk;
-        copy.implicitQuery = implicitQuery;
         copy.frozenGroups = new ArrayList<>(frozenGroups);
-        copy.snapshotMode = snapshotMode;
-        crossBlocked.forEach((a, bs) -> copy.crossBlocked.put(a, new HashSet<>(bs)));
-        if (snapshotMode) {
-            // the snapshot itself is never changed, only replaced: share it
-            copy.currentOverlap = currentOverlap;
-            copy.refreshedAt = refreshedAt;
-            copy.pendingDead = new HashSet<>(pendingDead);
-            ghostRows.forEach((v, row) -> copy.ghostRows.put(v, new HashMap<>(row)));
-        }
+        // the classes themselves are never changed, only replaced: share them
+        copy.currentOverlap = currentOverlap;
+        copy.refreshedAt = refreshedAt;
+        copy.pendingDead = new HashSet<>(pendingDead);
+        ghostRows.forEach((v, row) -> copy.ghostRows.put(v, new HashMap<>(row)));
         return copy;
     }
 
@@ -351,59 +312,18 @@ public final class IncrementalFixpointEngine<V, L> {
      propagation. Both engines are closed; their union is deliberately NOT re-closed, because a composition of a
      fact of one alternative with a fact of another describes no execution. A pair present in both gets the best
      label, which is also what linking the alternatives one after the other into one engine produced.
+     The implicit '∩' is computed on the union, and therefore does compose a fact of one alternative with a fact of
+     another (TestImplicitSnapshotJoin, test5; measured on four corpora, one verdict depends on it).
      */
     public void unionWith(IncrementalFixpointEngine<V, L> other) {
-        boolean cross = (OverlapStats.ON || NO_CROSS) && implicit != null && !snapshotMode;
-        Map<V, Set<V>> mine = cross ? implicitPairs() : null;
-        Map<V, Set<V>> theirs = cross ? other.implicitPairs() : null;
-        unionWith0(other);
-        if (cross) {
-            other.crossBlocked.forEach((a, bs) -> crossBlocked.computeIfAbsent(a, _ -> new HashSet<>()).addAll(bs));
-            int pairs = 0;
-            for (V a : graph.vertices()) {
-                for (V b : implicitSuccessors(a).keySet()) {
-                    if (!mine.getOrDefault(a, Set.of()).contains(b) && !theirs.getOrDefault(a, Set.of()).contains(b)) {
-                        ++pairs;
-                        if (NO_CROSS) crossBlocked.computeIfAbsent(a, _ -> new HashSet<>()).add(b);
-                    }
-                }
-            }
-            if (NO_CROSS) implicitCache.clear();
-            if (OverlapStats.ON) OverlapStats.join(pairs);
-        }
-    }
-
-    /*
-     #92 measurement: the implicit '∩' of the union of two alternatives composes facts of the one with facts of the
-     other, which the stored closure deliberately does not. OVLSTATS counts the pairs that are implicit after the
-     union and in neither alternative; gate OVLNOCROSS hides them from then on (an experiment that bounds their
-     effect: a pair stays hidden even when a later statement creates it). Not with OVLSNAPSHOT.
-     */
-    private static final boolean NO_CROSS = Gate.isSet("OVLNOCROSS");
-    private final Map<V, Set<V>> crossBlocked = new HashMap<>();
-
-    private Map<V, Set<V>> implicitPairs() {
-        Map<V, Set<V>> pairs = new HashMap<>();
-        for (V a : graph.vertices()) {
-            Set<V> row = implicitSuccessors(a).keySet();
-            if (!row.isEmpty()) pairs.put(a, row);
-        }
-        return pairs;
-    }
-
-    private void unionWith0(IncrementalFixpointEngine<V, L> other) {
         graph.unionWith(other.graph, best);
         closure.unionWith(other.closure);
         witnessIndex.unionWith(other.witnessIndex);
         for (List<V> g : other.frozenGroups) if (!frozenGroups.contains(g)) frozenGroups.add(g);
-        if (snapshotMode) {
-            pendingDead.addAll(other.pendingDead);
-            refreshedAt = -1;
-            other.ghostRows.forEach((v, row) -> row.forEach((to, label) -> addGhost(v, to, label)));
-            implicitCache.clear();
-        } else {
-            currentOverlap = null;
-        }
+        pendingDead.addAll(other.pendingDead);
+        refreshedAt = -1;
+        other.ghostRows.forEach((v, row) -> row.forEach((to, label) -> addGhost(v, to, label)));
+        implicitCache.clear();
         touched.addAll(other.touched);
         touched.addAll(other.graph.vertices());
     }
@@ -423,10 +343,10 @@ public final class IncrementalFixpointEngine<V, L> {
     }
 
     /*
-     #92: with the implicit '∩' the engine no longer pays for the overlap facts, the extraction does: a class of n
+     #92: with the implicit '∩' the engine does not pay for the overlap facts, the extraction does: a class of n
      vertices is n links for each of its members, at every statement. Each extracted link is charged to the work
-     count, so that a method the old derivation stopped early is not ground through to the same ceiling at ten
-     times the cost (elasticsearch's DesiredBalanceComputer.compute: 21s instead of 5s per analysis, degraded
+     count; without that, a method with a class of hundreds of vertices is ground through to the ceiling on edge
+     visits alone, at ten times the cost (elasticsearch's DesiredBalanceComputer.compute: 21s per analysis, degraded
      either way). The weight is the measured time of a link against that of an edge visit.
      */
     private static final int EXTRACTION_WORK = 10;
@@ -506,21 +426,14 @@ public final class IncrementalFixpointEngine<V, L> {
     // dirty tracking: what overlapped a removed vertex implicitly loses that link, without a stored fact for the
     // column sweep of removeVertices to find
     private void touchImplicitPartners(Set<V> dead) {
-        touching = true;
         for (V d : dead) touched.addAll(implicitSuccessors(d).keySet());
-        touching = false;
     }
 
     public boolean removeVertices(Set<V> vertices) {
         if (!Gate.isSet("NOMAT")) {
             if (implicit != null) {
-                if (snapshotMode) {
-                    touchImplicitPartners(vertices);
-                    recordGhostRows(vertices);
-                } else {
-                    touchImplicitPartners(vertices);
-                    freezeImplicitGroups(vertices);
-                }
+                touchImplicitPartners(vertices);
+                recordGhostRows(vertices);
             }
             materializeWitnessOrphans(vertices);
         }
@@ -552,13 +465,6 @@ public final class IncrementalFixpointEngine<V, L> {
                     dead.contains(f.source()) || dead.contains(f.target()));
             if (orphaned) orphans.add(fact);
         });
-        if (LAZY_MATERIALIZATION) {
-            // decided for all orphans on the closure as it is, before any promotion strengthens a label: the outcome
-            // must not depend on the order of the orphans
-            Set<Fact<V, L>> orphanSet = new HashSet<>(orphans);
-            List<Fact<V, L>> needed = orphans.stream().filter(f -> !rederivable(f, dead, orphanSet)).toList();
-            orphans.retainAll(new HashSet<>(needed));
-        }
         for (Fact<V, L> fact : orphans) {
             // The closure's two directions derive independently (feature #1: rev(combined) != combine(reversed))
             // and may hold different-strength labels (∩ one way, ~ the other). The consistency invariant demands
@@ -579,75 +485,26 @@ public final class IncrementalFixpointEngine<V, L> {
     }
 
     /*
-     CodeLaser/maddi-mod#97, #92: most orphans are derivable again without the dead vertices. A temporary that many
-     variables may share content with leaves a near-complete set of pairwise '∩' facts; promoting all of them to raw
-     edges made them seeds of every later update (timefold's PillarSwapMoveSelectorFactory.buildBaseMoveSelector from
-     79% to 96% of the work ceiling, fernflower's DomHelper.findGeneralStatement from 67% to 87%), while the closure
-     reached the same size without them. An orphan is skipped when one surviving middle vertex re-derives it, under
-     the same rules as propagateForward, from two facts that are not orphans themselves: those facts keep their
-     support, so the next recompute derives the orphan again, at least as strong. Anything else is promoted as
-     before. Gate NOLAZYMAT.
-     */
-    private static final boolean LAZY_MATERIALIZATION = !Gate.isSet("NOLAZYMAT");
-    // diagnostic: LAZYMATANY applies the rule to every label, not only '∩'
-    private static final boolean LAZY_ANY_LABEL = Gate.isSet("LAZYMATANY");
-
-    private boolean rederivable(Fact<V, L> fact, Set<V> dead, Set<Fact<V, L>> orphanSet) {
-        // '∩' only, the bulk of the orphans: a promoted fact keeps a fixed witness, a re-derived one stays tied to its
-        // support, and the label rewrites that follow witnesses (replaceReturnAffected, ⊆ to ~) then reach it. For
-        // ⊆/≥ facts that changed verdicts (fernflower's DomHelper.detectStatement); '∩' is not rewritten that way.
-        if (!LAZY_ANY_LABEL && fact.label() != io.codelaser.maddi.modification.link.impl.LinkNatureImpl.OBJECT_GRAPH_OVERLAPS) {
-            return false;
-        }
-        V source = fact.source();
-        V target = fact.target();
-        if (!acceptForComposite.test(target)) return false;
-        for (Map.Entry<V, L> left : closure.successors(source)) {
-            V middle = left.getKey();
-            if (dead.contains(middle) || middle.equals(target) || middle.equals(source)) continue;
-            L rightLabel = closure.label(middle, target);
-            if (rightLabel == null) continue;
-            L combined = combine.apply(left.getValue(), rightLabel);
-            if (combined == null || !valid.test(combined) || !betterThanOrEqual(combined, fact.label())) continue;
-            Fact<V, L> leftFact = new Fact<>(source, middle, left.getValue());
-            Fact<V, L> rightFact = new Fact<>(middle, target, rightLabel);
-            if (orphanSet.contains(leftFact) || orphanSet.contains(rightFact)) continue;
-            if (!acceptComposite.test(new Fact<>(source, target, combined), middle)) continue;
-            Witness<V, L> leftW = witnessIndex.get(leftFact);
-            Witness<V, L> rightW = witnessIndex.get(rightFact);
-            if (leftW == null || rightW == null || !doesNotCreateCycle(fact, leftW, rightW)) continue;
-            if (touchesDead(leftW, dead) || touchesDead(rightW, dead)) continue;
-            return true;
-        }
-        return false;
-    }
-
-    private boolean touchesDead(Witness<V, L> witness, Set<V> dead) {
-        return witness.support().stream().anyMatch(f -> dead.contains(f.source()) || dead.contains(f.target()));
-    }
-
-    /*
      The implicit facts from 'a' (ImplicitOverlap): the class partners of 'a', minus the pairs the closure holds with
      a label of their own, minus the targets no composite takes (acceptForComposite), minus the pairs the endpoint
-     filter rejects. Computed once per closure version.
+     filter rejects, minus the vertices removed since the last refresh.
      */
     public Map<V, L> implicitSuccessors(V a) {
-        if (implicit == null || implicitQuery != null && !implicitQuery.test(a)) return Map.of();
-        ImplicitOverlap<V, L> overlap = currentOverlap();
-        if (overlap == null) return Map.of();
-        Map<V, L> cached = implicitCache.get(a);
-        if (OverlapStats.ON) OverlapStats.read(cached != null);
-        if (cached != null) return cached;
-        List<V> targets = implicitTargets(overlap, a);
-        if (OverlapStats.ON && snapshotMode && !touching
-            && (closure.modCount() != refreshedAt || !ghostRows.isEmpty())) {
-            // #92 measurement: a read between two refreshes, against the classes as they are at this moment
-            if (staleCheck == null || staleCheckVersion != closure.modCount()) {
-                staleCheck = buildOverlap(Set.of(), ghostRows);
-                staleCheckVersion = closure.modCount();
-            }
-            OverlapStats.staleRead(!targets.equals(implicitTargets(staleCheck, a)));
+        if (implicit == null || currentOverlap == null) return Map.of();
+        if (implicitCacheVersion != closure.modCount()) {
+            implicitCache.clear();
+            implicitCacheVersion = closure.modCount();
         }
+        Map<V, L> cached = implicitCache.get(a);
+        if (cached != null) return cached;
+        List<V> targets = new ArrayList<>();
+        for (V b : currentOverlap.partners(a)) {
+            if (acceptForComposite.test(b) && closure.label(a, b) == null && implicitPairOk.test(a, b)
+                && graph.vertices().contains(b)) {
+                targets.add(b);
+            }
+        }
+        targets.sort(vertexComparator);
         Map<V, L> result = new LinkedHashMap<>();
         targets.forEach(v -> result.put(v, implicit));
         Map<V, L> frozen = Collections.unmodifiableMap(result);
@@ -655,52 +512,8 @@ public final class IncrementalFixpointEngine<V, L> {
         return frozen;
     }
 
-    private List<V> implicitTargets(ImplicitOverlap<V, L> overlap, V a) {
-        List<V> targets = new ArrayList<>();
-        for (V b : SEARCH ? overlap.search(a) : overlap.partners(a)) {
-            if (acceptForComposite.test(b) && closure.label(a, b) == null && implicitPairOk.test(a, b)
-                && (!snapshotMode || graph.vertices().contains(b))
-                && (crossBlocked.isEmpty() || !crossBlocked.getOrDefault(a, Set.of()).contains(b))) {
-                targets.add(b);
-            }
-        }
-        targets.sort(vertexComparator);
-        return targets;
-    }
-
-    private long refreshedAt = -1;
-    private boolean touching;
-    private ImplicitOverlap<V, L> staleCheck;
-    private long staleCheckVersion = -1;
-
-    // gate OVERLAPSEARCH (diagnostic): the per-vertex search instead of the class partners
-    private static final boolean SEARCH = Gate.isSet("OVERLAPSEARCH");
-
-    private ImplicitOverlap<V, L> currentOverlap() {
-        if (snapshotMode) {
-            if (implicitCacheVersion != closure.modCount()) {
-                implicitCache.clear();
-                implicitCacheVersion = closure.modCount();
-            }
-            return currentOverlap;
-        }
-        if (implicitCacheVersion != closure.modCount() || currentOverlap == null) {
-            implicitCache.clear();
-            reversedRows = null;
-            implicitCacheVersion = closure.modCount();
-            long t0 = OverlapStats.ON ? System.nanoTime() : 0;
-            currentOverlap = buildOverlap(Set.of());
-            if (OverlapStats.ON) OverlapStats.build(System.nanoTime() - t0, graph.vertices().size());
-        }
-        return currentOverlap;
-    }
-
-    private ImplicitOverlap<V, L> buildOverlap(Set<V> excluded) {
-        return buildOverlap(excluded, Map.of());
-    }
-
     // 'ghosts': rows of vertices that left the graph, read as if they were still in the closure
-    private ImplicitOverlap<V, L> buildOverlap(Set<V> excluded, Map<V, Map<V, L>> ghosts) {
+    private ImplicitOverlap<V, L> buildOverlap(Map<V, Map<V, L>> ghosts) {
         if (reversedRows == null) {
             reversedRows = new HashMap<>();
             for (V r : closure.sources()) {
@@ -759,7 +572,7 @@ public final class IncrementalFixpointEngine<V, L> {
             public List<List<V>> frozenGroups() {
                 return frozenGroups;
             }
-        }, implicit, implicitMiddleOk, excluded, vertexComparator);
+        }, implicit, implicitMiddleOk, vertexComparator);
     }
 
     // closure rows, plus the reversed rows of vertices no composite targets: propagateBackward composes through them
@@ -769,90 +582,6 @@ public final class IncrementalFixpointEngine<V, L> {
         List<Map.Entry<V, L>> all = new ArrayList<>(extra.entrySet());
         closure.successors(v).forEach(all::add);
         return all;
-    }
-
-    /*
-     Before 'dead' leaves the graph: a class whose survivors would no longer be one class without the dead vertices
-     (a removed temporary was the middle that created it, or a member that held it together) is frozen: its survivors
-     stay one group, the way materializeWitnessOrphans keeps derived facts as direct edges. One group per class
-     instead of an edge per pair. Frozen groups lose their members as those are removed in turn.
-     */
-    private void freezeImplicitGroups(Set<V> dead) {
-        long t0 = OverlapStats.ON ? System.nanoTime() : 0;
-        try {
-            freezeImplicitGroups0(dead);
-        } finally {
-            if (OverlapStats.ON) OverlapStats.freeze(System.nanoTime() - t0);
-        }
-    }
-
-    private void freezeImplicitGroups0(Set<V> dead) {
-        boolean stale = implicitCacheVersion != closure.modCount() || currentOverlap == null;
-        ImplicitOverlap<V, L> before = currentOverlap();
-        if (OverlapStats.ON) {
-            // #92 measurement: could this removal break a class at all? Only a class (or leaf pair) holding a dead
-            // vertex or a neighbour of one
-            Set<V> seeds = new HashSet<>(dead);
-            for (V d : dead) {
-                for (Map.Entry<V, L> e : searchEdges(d)) seeds.add(e.getKey());
-            }
-            for (V src : closure.sources()) {
-                if (seeds.contains(src)) continue;
-                for (Map.Entry<V, L> e : closure.successors(src)) {
-                    if (dead.contains(e.getKey())) {
-                        seeds.add(src);
-                        break;
-                    }
-                }
-            }
-            boolean affected = false;
-            for (V s : seeds) {
-                if (!before.partners(s).isEmpty()) {
-                    affected = true;
-                    break;
-                }
-            }
-            boolean inFrozen = false;
-            for (List<V> g : frozenGroups) {
-                for (V v : g) {
-                    if (dead.contains(v)) {
-                        inFrozen = true;
-                        break;
-                    }
-                }
-            }
-            OverlapStats.freezeShape(stale, affected, inFrozen, seeds.size());
-        }
-        ImplicitOverlap<V, L> after = buildOverlap(dead);
-        List<List<V>> newGroups = new ArrayList<>();
-        for (Set<V> cls : before.classes()) {
-            List<V> survivors = cls.stream().filter(v -> !dead.contains(v)).sorted(vertexComparator).toList();
-            if (survivors.size() < 2) continue;
-            V first = survivors.getFirst();
-            boolean intact = survivors.stream().allMatch(v -> v.equals(first) || after.overlap(first, v));
-            if (!intact) newGroups.add(survivors);
-        }
-        before.leafPairs().forEach((l1, others) -> {
-            if (dead.contains(l1)) return;
-            for (V l2 : others) {
-                if (!dead.contains(l2) && vertexComparator.compare(l1, l2) < 0 && !after.overlap(l1, l2)) {
-                    newGroups.add(List.of(l1, l2));
-                }
-            }
-        });
-        newGroups.sort(Comparator.comparing(g -> vertexPrinter.apply(g.getFirst())));
-        List<List<V>> kept = new ArrayList<>();
-        for (List<V> g : frozenGroups) {
-            List<V> live = g.stream().filter(v -> !dead.contains(v)).toList();
-            if (live.size() >= 2) kept.add(live);
-        }
-        kept.addAll(newGroups);
-        frozenGroups = kept;
-        if (!newGroups.isEmpty()) {
-            if (OverlapStats.ON) OverlapStats.freezeNewGroups();
-            newGroups.forEach(touched::addAll);
-            currentOverlap = null;
-        }
     }
 
     public boolean isValid(L label) {
@@ -936,7 +665,7 @@ public final class IncrementalFixpointEngine<V, L> {
                 ? closure.successors(fact.target())
                 : graph.successors(fact.target());
         for (Map.Entry<V, L> edge : successors) {
-            if (isImplicit(edge.getValue()) || chain(fact.label(), edge.getValue())) continue;
+            if (isImplicit(edge.getValue())) continue;
             countWork();
             L nextLabel = combine.apply(fact.label(), edge.getValue());
             V source = fact.source();
@@ -1018,7 +747,7 @@ public final class IncrementalFixpointEngine<V, L> {
         if (isImplicit(fact.label())) return;
         V source = fact.source();
         for (Map.Entry<V, L> edge : closure.successors(source)) {
-            if (isImplicit(edge.getValue()) || chain(edge.getValue(), fact.label())) continue;
+            if (isImplicit(edge.getValue())) continue;
             countWork();
             V p = edge.getKey();
             V target = fact.target();

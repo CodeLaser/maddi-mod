@@ -1300,7 +1300,7 @@ public class Graph {
                 continue;
             }
             Variable array = dv.arrayVariable();
-            // OVLSNAPSHOT: the links lifted below include '∩', and the closure changed since the statement's refresh
+            // the links lifted below include '∩', and the closure changed since the statement's refresh
             if (lifted.isEmpty()) engine.refreshImplicit();
             // the element and what holds the same object: its shared group's rep ('a[i] ← $__sv_a[i]')
             Set<Variable> same = new HashSet<>();
@@ -1387,28 +1387,13 @@ public class Graph {
         return engine.vertices();
     }
 
-    // the closure row plus the implicit '∩' facts (#92), which the engine computes instead of storing
-    // #92 gate OVLSNAPSHOT: compute the implicit '∩' for this statement (see IncrementalFixpointEngine)
+    // #92: compute the implicit '∩' of the closure as it is now (see IncrementalFixpointEngine)
     public void refreshImplicit() {
         engine.refreshImplicit();
     }
 
-    /*
-    #92 gate OVLLAST: the extraction of a statement other than the method's last sees no implicit ∩; the summary
-    (the last statement) does. Its extraction must then recompute every variable (remedy A cannot see the change).
-     */
-    private boolean implicitHidden;
-
-    public void setImplicitHidden(boolean hidden) {
-        implicitHidden = hidden;
-    }
-
-    public void invalidateExtractions() {
-        dirtyEverything = true;
-    }
-
+    // the closure row plus the implicit '∩' facts (#92), which the engine computes instead of storing
     Stream<Map.Entry<Variable, LinkNature>> closureStream(Variable variable) {
-        if (implicitHidden) return engine.successorStream(variable);
         Map<Variable, LinkNature> implicit = engine.implicitSuccessors(variable);
         if (implicit.isEmpty()) return engine.successorStream(variable);
         return Stream.concat(engine.successorStream(variable), implicit.entrySet().stream());
