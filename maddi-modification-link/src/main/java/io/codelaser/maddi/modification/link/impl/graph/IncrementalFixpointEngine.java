@@ -154,6 +154,9 @@ public final class IncrementalFixpointEngine<V, L> {
 
     public void refreshImplicit() {
         if (implicit == null || !snapshotMode) return;
+        // nothing changed since the last refresh
+        if (currentOverlap != null && refreshedAt == closure.modCount() && ghostRows.isEmpty()
+            && pendingDead.isEmpty()) return;
         long t0 = OverlapStats.ON ? System.nanoTime() : 0;
         Set<V> alive = graph.vertices();
         reversedRows = null;
@@ -203,6 +206,7 @@ public final class IncrementalFixpointEngine<V, L> {
         }
         pendingDead = new HashSet<>();
         ghostRows = new HashMap<>();
+        refreshedAt = closure.modCount();
         implicitCache.clear();
         implicitCacheVersion = closure.modCount();
         if (OverlapStats.ON) OverlapStats.build(System.nanoTime() - t0, alive.size());
@@ -328,9 +332,11 @@ public final class IncrementalFixpointEngine<V, L> {
         copy.implicitQuery = implicitQuery;
         copy.frozenGroups = new ArrayList<>(frozenGroups);
         copy.snapshotMode = snapshotMode;
+        crossBlocked.forEach((a, bs) -> copy.crossBlocked.put(a, new HashSet<>(bs)));
         if (snapshotMode) {
             // the snapshot itself is never changed, only replaced: share it
             copy.currentOverlap = currentOverlap;
+            copy.refreshedAt = refreshedAt;
             copy.pendingDead = new HashSet<>(pendingDead);
             ghostRows.forEach((v, row) -> copy.ghostRows.put(v, new HashMap<>(row)));
         }
@@ -344,12 +350,52 @@ public final class IncrementalFixpointEngine<V, L> {
      label, which is also what linking the alternatives one after the other into one engine produced.
      */
     public void unionWith(IncrementalFixpointEngine<V, L> other) {
+        boolean cross = (OverlapStats.ON || NO_CROSS) && implicit != null && !snapshotMode;
+        Map<V, Set<V>> mine = cross ? implicitPairs() : null;
+        Map<V, Set<V>> theirs = cross ? other.implicitPairs() : null;
+        unionWith0(other);
+        if (cross) {
+            other.crossBlocked.forEach((a, bs) -> crossBlocked.computeIfAbsent(a, _ -> new HashSet<>()).addAll(bs));
+            int pairs = 0;
+            for (V a : graph.vertices()) {
+                for (V b : implicitSuccessors(a).keySet()) {
+                    if (!mine.getOrDefault(a, Set.of()).contains(b) && !theirs.getOrDefault(a, Set.of()).contains(b)) {
+                        ++pairs;
+                        if (NO_CROSS) crossBlocked.computeIfAbsent(a, _ -> new HashSet<>()).add(b);
+                    }
+                }
+            }
+            if (NO_CROSS) implicitCache.clear();
+            if (OverlapStats.ON) OverlapStats.join(pairs);
+        }
+    }
+
+    /*
+     #92 measurement: the implicit '∩' of the union of two alternatives composes facts of the one with facts of the
+     other, which the stored closure deliberately does not. OVLSTATS counts the pairs that are implicit after the
+     union and in neither alternative; gate OVLNOCROSS hides them from then on (an experiment that bounds their
+     effect: a pair stays hidden even when a later statement creates it). Not with OVLSNAPSHOT.
+     */
+    private static final boolean NO_CROSS = Gate.isSet("OVLNOCROSS");
+    private final Map<V, Set<V>> crossBlocked = new HashMap<>();
+
+    private Map<V, Set<V>> implicitPairs() {
+        Map<V, Set<V>> pairs = new HashMap<>();
+        for (V a : graph.vertices()) {
+            Set<V> row = implicitSuccessors(a).keySet();
+            if (!row.isEmpty()) pairs.put(a, row);
+        }
+        return pairs;
+    }
+
+    private void unionWith0(IncrementalFixpointEngine<V, L> other) {
         graph.unionWith(other.graph, best);
         closure.unionWith(other.closure);
         witnessIndex.unionWith(other.witnessIndex);
         for (List<V> g : other.frozenGroups) if (!frozenGroups.contains(g)) frozenGroups.add(g);
         if (snapshotMode) {
             pendingDead.addAll(other.pendingDead);
+            refreshedAt = -1;
             other.ghostRows.forEach((v, row) -> row.forEach((to, label) -> addGhost(v, to, label)));
             implicitCache.clear();
         } else {
@@ -442,7 +488,9 @@ public final class IncrementalFixpointEngine<V, L> {
     // dirty tracking: what overlapped a removed vertex implicitly loses that link, without a stored fact for the
     // column sweep of removeVertices to find
     private void touchImplicitPartners(Set<V> dead) {
+        touching = true;
         for (V d : dead) touched.addAll(implicitSuccessors(d).keySet());
+        touching = false;
     }
 
     public boolean removeVertices(Set<V> vertices) {
@@ -572,20 +620,40 @@ public final class IncrementalFixpointEngine<V, L> {
         Map<V, L> cached = implicitCache.get(a);
         if (OverlapStats.ON) OverlapStats.read(cached != null);
         if (cached != null) return cached;
-        List<V> targets = new ArrayList<>();
-        for (V b : SEARCH ? overlap.search(a) : overlap.partners(a)) {
-            if (acceptForComposite.test(b) && closure.label(a, b) == null && implicitPairOk.test(a, b)
-                && (!snapshotMode || graph.vertices().contains(b))) {
-                targets.add(b);
+        List<V> targets = implicitTargets(overlap, a);
+        if (OverlapStats.ON && snapshotMode && !touching
+            && (closure.modCount() != refreshedAt || !ghostRows.isEmpty())) {
+            // #92 measurement: a read between two refreshes, against the classes as they are at this moment
+            if (staleCheck == null || staleCheckVersion != closure.modCount()) {
+                staleCheck = buildOverlap(Set.of(), ghostRows);
+                staleCheckVersion = closure.modCount();
             }
+            OverlapStats.staleRead(!targets.equals(implicitTargets(staleCheck, a)));
         }
-        targets.sort(vertexComparator);
         Map<V, L> result = new LinkedHashMap<>();
         targets.forEach(v -> result.put(v, implicit));
         Map<V, L> frozen = Collections.unmodifiableMap(result);
         implicitCache.put(a, frozen);
         return frozen;
     }
+
+    private List<V> implicitTargets(ImplicitOverlap<V, L> overlap, V a) {
+        List<V> targets = new ArrayList<>();
+        for (V b : SEARCH ? overlap.search(a) : overlap.partners(a)) {
+            if (acceptForComposite.test(b) && closure.label(a, b) == null && implicitPairOk.test(a, b)
+                && (!snapshotMode || graph.vertices().contains(b))
+                && (crossBlocked.isEmpty() || !crossBlocked.getOrDefault(a, Set.of()).contains(b))) {
+                targets.add(b);
+            }
+        }
+        targets.sort(vertexComparator);
+        return targets;
+    }
+
+    private long refreshedAt = -1;
+    private boolean touching;
+    private ImplicitOverlap<V, L> staleCheck;
+    private long staleCheckVersion = -1;
 
     // gate OVERLAPSEARCH (diagnostic): the per-vertex search instead of the class partners
     private static final boolean SEARCH = Gate.isSet("OVERLAPSEARCH");

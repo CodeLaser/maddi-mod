@@ -64,6 +64,33 @@ public class TestImplicitSnapshotJoin {
         assertEquals(Set.of("y"), engine.implicitSuccessors("x").keySet());
     }
 
+    /*
+     One alternative holds 'x ⊆ m', the other 'm ~ y'. No execution has both, and the stored closure does not
+     compose them (unionWith); the classes, computed from the union, do: 'x ∩ y' (review finding 2).
+     */
+    @DisplayName("the classes compose across the alternatives of a join")
+    @Test
+    public void test5() {
+        for (boolean snapshot : new boolean[]{false, true}) {
+            IncrementalFixpointEngine<String, LinkNature> before = engine(snapshot);
+            before.addVertex("x");
+            before.addVertex("m");
+            before.addVertex("y");
+            before.refreshImplicit();
+            IncrementalFixpointEngine<String, LinkNature> first = before.copy();
+            first.addSymmetricEdge("x", "m", IS_SUBSET_OF, "0");
+            first.refreshImplicit();
+            assertEquals(Set.of(), first.implicitSuccessors("x").keySet());
+            IncrementalFixpointEngine<String, LinkNature> second = before.copy();
+            second.addSymmetricEdge("m", "y", SHARES_ELEMENTS, "0");
+            second.refreshImplicit();
+            assertEquals(Set.of(), second.implicitSuccessors("x").keySet());
+            first.unionWith(second);
+            first.refreshImplicit();
+            assertEquals(Set.of("y"), first.implicitSuccessors("x").keySet());
+        }
+    }
+
     @DisplayName("created and removed between two refreshes")
     @Test
     public void test4() {

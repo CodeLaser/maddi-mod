@@ -53,6 +53,55 @@ public final class OverlapStats {
         }
     }
     private static final AtomicLong methodNanos = new AtomicLong();
+    private static final AtomicLong joins = new AtomicLong();
+    private static final AtomicLong crossJoins = new AtomicLong();
+    private static final AtomicLong crossPairs = new AtomicLong();
+    private static final ThreadLocal<long[]> threadCross = ThreadLocal.withInitial(() -> new long[1]);
+
+    public static long threadCross() {
+        return threadCross.get()[0];
+    }
+
+    private static final AtomicLong staleReads = new AtomicLong();
+    private static final AtomicLong staleDiffer = new AtomicLong();
+    private static final java.util.concurrent.ConcurrentHashMap<String, AtomicLong> staleSites
+            = new java.util.concurrent.ConcurrentHashMap<>();
+
+    // OVLSNAPSHOT: a read after the closure changed since the refresh; 'differs' when the current classes answer
+    // differently. The differing reads are counted per calling site outside the engine and Graph.
+    static void staleRead(boolean differs) {
+        staleReads.incrementAndGet();
+        if (differs) {
+            staleDiffer.incrementAndGet();
+            String site = StackWalker.getInstance().walk(frames -> frames
+                    .filter(f -> !f.getClassName().endsWith("IncrementalFixpointEngine")
+                                 && !f.getClassName().endsWith("OverlapStats")
+                                 && !(f.getClassName().endsWith("linkgraph.Graph") && f.getMethodName().startsWith("closure")))
+                    .filter(f -> !f.getMethodName().startsWith("lambda$") && !f.getClassName().startsWith("java."))
+                    .limit(3).map(f -> f.getClassName().substring(f.getClassName().lastIndexOf('.') + 1)
+                                       + "." + f.getMethodName() + ":" + f.getLineNumber())
+                    .collect(java.util.stream.Collectors.joining("<")));
+            staleSites.computeIfAbsent(site, _ -> new AtomicLong()).incrementAndGet();
+        }
+    }
+
+    private static final java.util.concurrent.ConcurrentHashMap<String, AtomicLong> links
+            = new java.util.concurrent.ConcurrentHashMap<>();
+
+    // FollowGraph: one extracted link, by kind
+    public static void link(String kind) {
+        links.computeIfAbsent(kind, _ -> new AtomicLong()).incrementAndGet();
+    }
+
+    // one union of two alternatives: the implicit pairs that neither alternative has (both directions counted)
+    static void join(int pairs) {
+        joins.incrementAndGet();
+        if (pairs > 0) {
+            crossJoins.incrementAndGet();
+            crossPairs.addAndGet(pairs);
+            threadCross.get()[0] += pairs;
+        }
+    }
 
     // one top-level LinkComputerImpl.doMethod: all link computation, with or without the implicit overlap
     public static void method(long nanos) {
@@ -90,7 +139,11 @@ public final class OverlapStats {
                            + " growthMs=" + growthNanos.get() / 1_000_000 + " growthPasses=" + growthPasses
                            + " methods=" + methods + " methodMs=" + methodNanos.get() / 1_000_000
                            + " statements=" + statements + " dirtyAll=" + dirtyAll + " reused=" + reused
-                           + " extracted=" + extracted + " extractedLinks=" + extractedLinks);
+                           + " extracted=" + extracted + " extractedLinks=" + extractedLinks
+                           + " joins=" + joins + " crossJoins=" + crossJoins + " crossPairs=" + crossPairs
+                           + " staleReads=" + staleReads + " staleDiffer=" + staleDiffer
+                           + " staleSites=" + new java.util.TreeMap<>(staleSites).toString().replace(' ', '_')
+                           + " links=" + new java.util.TreeMap<>(links).toString().replace(' ', '_'));
     }
 
     private OverlapStats() {
