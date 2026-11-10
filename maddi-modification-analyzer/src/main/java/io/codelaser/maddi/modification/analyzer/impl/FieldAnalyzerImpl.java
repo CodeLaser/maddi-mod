@@ -264,6 +264,9 @@ public class FieldAnalyzerImpl extends CommonAnalyzerImpl implements FieldAnalyz
             Links localLinks = vic.best().linkedVariables();
             if (localLinks == null) return;
             Variable fieldPrimary = Util.primary(fieldToLocal.from());
+            if (fieldPrimary instanceof FieldReference tfr && FieldLinkTrace.traced(tfr.fieldInfo())) {
+                FieldLinkTrace.throughLocal(tfr.fieldInfo(), vd, fieldToLocal, localLinks);
+            }
             for (Link ll : localLinks) {
                 if (ll.linkNature().isDecoration()) continue;
                 Variable target = Util.primary(ll.to());

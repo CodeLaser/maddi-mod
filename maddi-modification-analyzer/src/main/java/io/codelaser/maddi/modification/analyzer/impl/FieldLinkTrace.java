@@ -74,6 +74,12 @@ final class FieldLinkTrace {
                 describe(links));
     }
 
+    /* the field is linked to a local of the method; the local's own links are composed onto the field */
+    static void throughLocal(FieldInfo fieldInfo, VariableData vd, Link fieldToLocal, Links localLinks) {
+        LOGGER.info("FIELDLINKTRACE field {} through local, vd {}: {}; the local has {}", fieldInfo.name(),
+                Integer.toHexString(System.identityHashCode(vd)), fieldToLocal, describe(localLinks));
+    }
+
     static void fieldResult(FieldInfo fieldInfo, Links links) {
         LOGGER.info("FIELDLINKTRACE field {} result: {}", fieldInfo.name(), describe(links));
     }
