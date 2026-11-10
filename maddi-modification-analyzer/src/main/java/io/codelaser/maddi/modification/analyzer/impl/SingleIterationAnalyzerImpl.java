@@ -112,7 +112,9 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
     // cores-2) threads. Override with PARALLEL=<n>; PARALLEL=1 = sequential. Small runs (the suites) stay
     // sequential via MIN_ELEMENTS_FOR_PARALLEL — no pool overhead, no order sensitivity in pinned counts.
     static final int PARALLEL_THREADS = parallelThreads(); // package: IteratingAnalyzerImpl gates wave computation
-    static final int MIN_ELEMENTS_FOR_PARALLEL = 256;
+    // MINPARALLEL=<n> lowers it, to run a small test's passes in parallel (a reproducer of an order-dependent result)
+    static final int MIN_ELEMENTS_FOR_PARALLEL = Gate.get("MINPARALLEL") == null ? 256
+            : Integer.parseInt(Gate.get("MINPARALLEL"));
     // EXPERIMENT (#82, #91): once cycle breaking is active, run every pass sequentially. Cycle breaking decides
     // the still-undecided (an independence, an immutability) at the moment an element is reached; in a parallel
     // pass that moment depends on thread timing, and so does the verdict (guava, 8 threads: 6-10 FPDUMP lines
@@ -824,7 +826,8 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
      */
     static final boolean LINK_RECHECK = Gate.isSet("LINKRECHECK");
 
-    void linkRecheck(List<Info> analysisOrder) {
+    /** @return the number of methods whose summary or last-statement links a recomputation does not reproduce */
+    int linkRecheck(List<Info> analysisOrder) {
         int methods = 0;
         int summaries = 0;
         int variableData = 0;
@@ -890,6 +893,7 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
         }
         LOGGER.info("LINKRECHECK {} method(s) recomputed: {} summaries differ, {} differ in the links at the last "
                     + "statement", methods, summaries, variableData);
+        return summaries + variableData;
     }
 
     private static Map<String, String> linksAtLastStatement(MethodInfo methodInfo) {
