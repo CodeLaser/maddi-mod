@@ -500,9 +500,17 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
     @Override
     public void analyze(List<Info> analysisOrder, G<Info> dependencyGraph,
                         Set<Info> initialDirty, Consumer<Info> beforeFirstRecompute) {
+        boolean frozenBefore = TolerantWrite.modificationPropertiesFrozen();
+        TolerantWrite.insideAnalyze(true);
         try {
             iterate(analysisOrder, dependencyGraph, initialDirty, beforeFirstRecompute);
         } finally {
+            TolerantWrite.insideAnalyze(false);
+            if (System.getenv("MODWRITETRACE") != null) {
+                LOGGER.info("MODWRITETRACE analyze() of {} element(s), seeded: {}; frozen on entry: {}, at iterate's "
+                            + "exit: {}", analysisOrder.size(), initialDirty != null, frozenBefore,
+                        TolerantWrite.modificationPropertiesFrozen());
+            }
             // the MODREACH freeze is a JVM-wide static: whatever way iterate ends, an exception included, it must
             // not stay set for the code that runs before the next analyze() (TestWarmAnalysisWithCarry
             // .testFreezeDoesNotLeak pins the normal exits)
