@@ -104,6 +104,7 @@ tasks.test {
     System.getProperty("maddi.rewire.carry")?.let { systemProperty("maddi.rewire.carry", it) }
     System.getProperty("maddi.rewire.types")?.let { systemProperty("maddi.rewire.types", it) }
     System.getProperty("maddi.rewire.oracleAtStart")?.let { systemProperty("maddi.rewire.oracleAtStart", it) }
+    System.getProperty("maddi.rewire.dumpTo")?.let { systemProperty("maddi.rewire.dumpTo", it) }
     System.getProperty("maddi.rewire.requireIncremental")?.let { systemProperty("maddi.rewire.requireIncremental", it) }
     // 12G: the elasticsearch-server closure under PARALLEL=8; TESTXMX overrides (see maddi-run-openjdk)
     jvmArgs("-Xmx" + (System.getenv("TESTXMX") ?: "12G"))
