@@ -205,9 +205,11 @@ public class TestWarmAnalysisWithCarry {
             """;
 
     /*
-     cold analysis; Circle edited; ReparseWithDependents: Holder is rewired, or parsed again when Circle's declarations
-     moved. Rewired: Holder's output is carried, the seed is Circle, with the early cutoff. Parsed again: Holder is a
-     new type without values, so both are seeded, and nothing is carried.
+     cold analysis; Circle edited; ReparseWithDependents: Holder is rewired, or parsed again when it relies on
+     Circle's declarations and those moved. Rewired: Holder's output is carried, the seed is Circle. Parsed again:
+     Holder is a new type without values, so both are seeded, and nothing is carried. Either way the early cutoff
+     compares the seed with its previous generation: a re-parsed dependent's source did not change, so its previous
+     output is a prior like the changed type's.
      */
     private Warm warmAfterEdit(String circleSource, String newCircle, String holderSource, boolean expectReparsed)
             throws IOException {
@@ -237,7 +239,9 @@ public class TestWarmAnalysisWithCarry {
         Set<String> seedTypes = new HashSet<>(Set.of("s.Circle"));
         IteratingAnalyzerImpl analyzer = new IteratingAnalyzerImpl(inspector, configuration());
         if (reparse.dependentsReparsed()) {
+            assertEquals(Set.of(holder0), reparse.reparsedDependents());
             seedTypes.add("s.Holder");
+            analyzer.setPriorSummaries(ElementSummary.ofTypes(Set.of(circle0, holder0)));
         } else {
             CarryDerived.primaryType(holder0, inspector.lastRewireInfoMap());
             analyzer.setPriorSummaries(ElementSummary.ofTypes(Set.of(circle0)));
