@@ -53,6 +53,24 @@ public final class OverlapStats {
         }
     }
     private static final AtomicLong methodNanos = new AtomicLong();
+    private static final AtomicLong joins = new AtomicLong();
+    private static final AtomicLong crossJoins = new AtomicLong();
+    private static final AtomicLong crossPairs = new AtomicLong();
+    private static final ThreadLocal<long[]> threadCross = ThreadLocal.withInitial(() -> new long[1]);
+
+    public static long threadCross() {
+        return threadCross.get()[0];
+    }
+
+    // one union of two alternatives: the implicit pairs that neither alternative has (both directions counted)
+    static void join(int pairs) {
+        joins.incrementAndGet();
+        if (pairs > 0) {
+            crossJoins.incrementAndGet();
+            crossPairs.addAndGet(pairs);
+            threadCross.get()[0] += pairs;
+        }
+    }
 
     // one top-level LinkComputerImpl.doMethod: all link computation, with or without the implicit overlap
     public static void method(long nanos) {
@@ -90,7 +108,8 @@ public final class OverlapStats {
                            + " growthMs=" + growthNanos.get() / 1_000_000 + " growthPasses=" + growthPasses
                            + " methods=" + methods + " methodMs=" + methodNanos.get() / 1_000_000
                            + " statements=" + statements + " dirtyAll=" + dirtyAll + " reused=" + reused
-                           + " extracted=" + extracted + " extractedLinks=" + extractedLinks);
+                           + " extracted=" + extracted + " extractedLinks=" + extractedLinks
+                           + " joins=" + joins + " crossJoins=" + crossJoins + " crossPairs=" + crossPairs);
     }
 
     private OverlapStats() {

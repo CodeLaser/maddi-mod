@@ -328,6 +328,7 @@ public final class IncrementalFixpointEngine<V, L> {
         copy.implicitQuery = implicitQuery;
         copy.frozenGroups = new ArrayList<>(frozenGroups);
         copy.snapshotMode = snapshotMode;
+        crossBlocked.forEach((a, bs) -> copy.crossBlocked.put(a, new HashSet<>(bs)));
         if (snapshotMode) {
             // the snapshot itself is never changed, only replaced: share it
             copy.currentOverlap = currentOverlap;
@@ -344,6 +345,45 @@ public final class IncrementalFixpointEngine<V, L> {
      label, which is also what linking the alternatives one after the other into one engine produced.
      */
     public void unionWith(IncrementalFixpointEngine<V, L> other) {
+        boolean cross = (OverlapStats.ON || NO_CROSS) && implicit != null && !snapshotMode;
+        Map<V, Set<V>> mine = cross ? implicitPairs() : null;
+        Map<V, Set<V>> theirs = cross ? other.implicitPairs() : null;
+        unionWith0(other);
+        if (cross) {
+            other.crossBlocked.forEach((a, bs) -> crossBlocked.computeIfAbsent(a, _ -> new HashSet<>()).addAll(bs));
+            int pairs = 0;
+            for (V a : graph.vertices()) {
+                for (V b : implicitSuccessors(a).keySet()) {
+                    if (!mine.getOrDefault(a, Set.of()).contains(b) && !theirs.getOrDefault(a, Set.of()).contains(b)) {
+                        ++pairs;
+                        if (NO_CROSS) crossBlocked.computeIfAbsent(a, _ -> new HashSet<>()).add(b);
+                    }
+                }
+            }
+            if (NO_CROSS) implicitCache.clear();
+            if (OverlapStats.ON) OverlapStats.join(pairs);
+        }
+    }
+
+    /*
+     #92 measurement: the implicit '∩' of the union of two alternatives composes facts of the one with facts of the
+     other, which the stored closure deliberately does not. OVLSTATS counts the pairs that are implicit after the
+     union and in neither alternative; gate OVLNOCROSS hides them from then on (an experiment that bounds their
+     effect: a pair stays hidden even when a later statement creates it). Not with OVLSNAPSHOT.
+     */
+    private static final boolean NO_CROSS = Gate.isSet("OVLNOCROSS");
+    private final Map<V, Set<V>> crossBlocked = new HashMap<>();
+
+    private Map<V, Set<V>> implicitPairs() {
+        Map<V, Set<V>> pairs = new HashMap<>();
+        for (V a : graph.vertices()) {
+            Set<V> row = implicitSuccessors(a).keySet();
+            if (!row.isEmpty()) pairs.put(a, row);
+        }
+        return pairs;
+    }
+
+    private void unionWith0(IncrementalFixpointEngine<V, L> other) {
         graph.unionWith(other.graph, best);
         closure.unionWith(other.closure);
         witnessIndex.unionWith(other.witnessIndex);
@@ -575,7 +615,8 @@ public final class IncrementalFixpointEngine<V, L> {
         List<V> targets = new ArrayList<>();
         for (V b : SEARCH ? overlap.search(a) : overlap.partners(a)) {
             if (acceptForComposite.test(b) && closure.label(a, b) == null && implicitPairOk.test(a, b)
-                && (!snapshotMode || graph.vertices().contains(b))) {
+                && (!snapshotMode || graph.vertices().contains(b))
+                && (crossBlocked.isEmpty() || !crossBlocked.getOrDefault(a, Set.of()).contains(b))) {
                 targets.add(b);
             }
         }

@@ -263,8 +263,11 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
             boolean shallow = options.forceShallow() || method.isAbstract() || typeInfo.compilationUnit().externalLibrary();
             long ovl0 = OverlapStats.ON ? OverlapStats.threadNanos() : 0;
             long t0 = OverlapStats.ON ? System.nanoTime() : 0;
+            long cross0 = OverlapStats.ON ? OverlapStats.threadCross() : 0;
             MethodLinkedVariables result = doMethod(method, shallow, false, true);
             if (OverlapStats.ON) {
+                long cross = OverlapStats.threadCross() - cross0;
+                if (cross > 0) System.out.println("OVLCROSS " + cross + " " + method.fullyQualifiedName());
                 long ovl = OverlapStats.threadNanos() - ovl0;
                 long total = System.nanoTime() - t0;
                 OverlapStats.method(total);
