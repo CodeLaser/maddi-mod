@@ -505,6 +505,11 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
         try {
             iterate(analysisOrder, dependencyGraph, initialDirty, beforeFirstRecompute);
             if (SingleIterationAnalyzerImpl.LINK_RECHECK && lastSingleIterationAnalyzer != null) {
+                // as the last passes ran: after MODREACH the modification properties are frozen, a link computation's
+                // writes to them are refused, and it reads them back. iterate() released the freeze on its way out;
+                // recomputing without it measured that difference (2026-11-10), not the analysis. The finally below
+                // releases it again.
+                TolerantWrite.freezeModificationProperties();
                 lastSingleIterationAnalyzer.linkRecheck(analysisOrder);
             }
         } finally {
