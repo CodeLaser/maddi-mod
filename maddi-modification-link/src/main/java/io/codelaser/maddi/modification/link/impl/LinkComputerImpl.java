@@ -1393,6 +1393,8 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                 handleSubBlocks(statement, vd);
             }
             if (r != null) {
+                // OVLSNAPSHOT: the probe below reads the '∩' of the closure as the extraction's rewrites left it
+                linkGraph.graph().refreshImplicit();
                 writeOutMethodCallAnalysis(r.writeMethodCalls(), vd);
             }
             if (testVisitor != null) {

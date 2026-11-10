@@ -154,6 +154,9 @@ public final class IncrementalFixpointEngine<V, L> {
 
     public void refreshImplicit() {
         if (implicit == null || !snapshotMode) return;
+        // nothing changed since the last refresh
+        if (currentOverlap != null && refreshedAt == closure.modCount() && ghostRows.isEmpty()
+            && pendingDead.isEmpty()) return;
         long t0 = OverlapStats.ON ? System.nanoTime() : 0;
         Set<V> alive = graph.vertices();
         reversedRows = null;
@@ -392,6 +395,7 @@ public final class IncrementalFixpointEngine<V, L> {
         for (List<V> g : other.frozenGroups) if (!frozenGroups.contains(g)) frozenGroups.add(g);
         if (snapshotMode) {
             pendingDead.addAll(other.pendingDead);
+            refreshedAt = -1;
             other.ghostRows.forEach((v, row) -> row.forEach((to, label) -> addGhost(v, to, label)));
             implicitCache.clear();
         } else {
