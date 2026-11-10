@@ -542,6 +542,16 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
     // DIAGNOSTIC (LINKRECHECK): the analyzer of the last iterate(), for the recomputation after it
     private SingleIterationAnalyzerImpl lastSingleIterationAnalyzer;
 
+    /**
+     * DIAGNOSTIC: compute every source method's links again, after {@link #analyze} has returned, and compare with
+     * what the analysis left (see SingleIterationAnalyzerImpl.linkRecheck). Overwrites variable data.
+     *
+     * @return the number of summaries and last-statement link sets that a recomputation does not reproduce
+     */
+    public int linkRecheck(List<Info> analysisOrder) {
+        return lastSingleIterationAnalyzer.linkRecheck(analysisOrder);
+    }
+
     private void iterate(List<Info> analysisOrder, G<Info> dependencyGraph,
                          Set<Info> initialDirty, Consumer<Info> beforeFirstRecompute) {
         // incremental (early-cutoff) mode: seed the worklist with initialDirty and stop the moment it runs dry,
