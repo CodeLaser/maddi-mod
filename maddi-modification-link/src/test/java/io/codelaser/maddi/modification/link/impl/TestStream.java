@@ -74,18 +74,18 @@ public class TestStream extends CommonTest {
 
         VariableData vd1 = VariableDataImpl.of(large2.methodBody().statements().get(1));
         VariableInfo viFiltered = vd1.variableInfo("filtered");
-        assertEquals("filtered∩0:t,filtered.§ts⊆stream.§ts", viFiltered.linkedVariables().toString());
+        assertEquals("filtered.§ts∩0:t,filtered.§ts⊆stream.§ts", viFiltered.linkedVariables().toString());
         // filtered.§ts⊆this.list.§ts dropped
 
         VariableData vd2 = VariableDataImpl.of(large2.methodBody().statements().get(2));
         VariableInfo viFirst = vd2.variableInfo("first");
-        assertEquals("first∩0:t,first.§t∈this.list.§ts,first.§t∈filtered.§ts,first.§t∈stream.§ts",
+        assertEquals("first.§t∩0:t,first.§t∈this.list.§ts,first.§t∈filtered.§ts,first.§t∈stream.§ts",
                 viFirst.linkedVariables().toString());
 
         VariableData vd3 = VariableDataImpl.of(large2.methodBody().statements().get(3));
         VariableInfo viOrElse = vd3.variableInfo("orElse");
         assertEquals("""
-                orElse∈this.list.§ts,orElse←first.§t,orElse∈filtered.§ts,orElse∈stream.§ts\
+                orElse∩0:t,orElse∈this.list.§ts,orElse←first.§t,orElse∈filtered.§ts,orElse∈stream.§ts\
                 """, viOrElse.linkedVariables().toString());
 
         assertEquals("[-] --> large2∈this.list.§ts", mlvLarge2.toString());

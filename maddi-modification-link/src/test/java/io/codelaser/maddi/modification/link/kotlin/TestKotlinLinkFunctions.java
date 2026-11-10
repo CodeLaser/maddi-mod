@@ -96,7 +96,7 @@ public class TestKotlinLinkFunctions extends CommonKotlinLinkTest {
      */
     @Test
     public void nonLocalReturn() {
-        assertEquals("[0:xs.§$s∋$_ce2] --> find←$_ce2,find∈0:xs.§$s", p.javaLinks("find"));
+        assertEquals("[0:xs.§$s∋$_ce2] --> find∩$_ce2,find←$_ce2,find∈0:xs.§$s", p.javaLinks("find"));
         assertEquals("[0:xs.§$s∋$_ce1] --> find←$_ce1,find∈0:xs.§$s", p.kotlinLinks("find"));
     }
 

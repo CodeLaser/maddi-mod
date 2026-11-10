@@ -115,7 +115,7 @@ public class TestConsumers extends CommonTest {
         assertEquals("stream.§$$s⊆this.map.§$$s", stream0.linkedVariables().toString());
         VariableData vd1 = VariableDataImpl.of(variableInfoStream2.methodBody().statements().get(1));
         VariableInfo filtered1 = vd1.variableInfo("filtered");
-        assertEquals("filtered∩0:e,filtered.§$$s⊆stream.§$$s", filtered1.linkedVariables().toString());
+        assertEquals("filtered.§$$s∩0:e,filtered.§$$s⊆stream.§$$s", filtered1.linkedVariables().toString());
         // filtered.§$$s⊆this.map.§$$s,filtered.§$$s⊆stream.§$$s,filtered∩0:e would be without efficiency dropping
         VariableData vd2 = VariableDataImpl.of(variableInfoStream2.methodBody().statements().get(2));
         VariableInfo mapped2 = vd2.variableInfo("mapped");

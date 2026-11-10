@@ -154,7 +154,7 @@ public class TestLanguageConstructs extends CommonTest {
                 public class Coll<X> { X m(List<X> list) { for (X x : list) { return x; } return null; } }
                 """;
         // for-each over a Collection: the loop variable links to the collection's hidden content
-        assertEquals("[0:list.§xs∋$_ce2] --> m←$_ce2,m∈0:list.§xs", link("a.b.Coll", coll, "m"));
+        assertEquals("[0:list.§xs∋$_ce2] --> m∩$_ce2,m←$_ce2,m∈0:list.§xs", link("a.b.Coll", coll, "m"));
 
         @Language("java") String arr = """
                 package a.b;
