@@ -768,6 +768,7 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
                         // FieldAnalyzer read sees the old chained or new flattened VD, both valid) and nothing
                         // cross-method reads this method's intermediate statements.
                         if (flattenVariableData) flattenMethod(methodInfo);
+                        FieldLinkTrace.afterMethod(methodInfo, churnPass.get());
                         completed = true;
                     } finally {
                         if (recording != null) linkCacheStore(methodInfo, recording, completed);

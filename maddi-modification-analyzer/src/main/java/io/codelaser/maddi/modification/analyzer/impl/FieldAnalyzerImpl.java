@@ -208,6 +208,7 @@ public class FieldAnalyzerImpl extends CommonAnalyzerImpl implements FieldAnalyz
                     for (VariableInfo vi : vd.variableInfoIterable()) {
                         if (vi.variable() instanceof FieldReference fr && fr.fieldInfo() == fieldInfo) {
                             Links lv = vi.linkedVariables();
+                            if (FieldLinkTrace.traced(fieldInfo)) FieldLinkTrace.fieldReads(fieldInfo, methodInfo, lv);
                             if (lv == null) {
                                 // no linked variables yet
                                 undecided = true;
@@ -237,7 +238,9 @@ public class FieldAnalyzerImpl extends CommonAnalyzerImpl implements FieldAnalyz
                     }
                 }
             }
-            return undecided ? null : builder.build();
+            Links result = undecided ? null : builder.build();
+            if (FieldLinkTrace.traced(fieldInfo)) FieldLinkTrace.fieldResult(fieldInfo, result);
+            return result;
         }
 
 
