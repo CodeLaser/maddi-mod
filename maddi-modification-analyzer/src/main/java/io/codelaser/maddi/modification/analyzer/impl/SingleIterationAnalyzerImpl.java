@@ -29,7 +29,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
+import java.util.Objects;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -68,8 +70,11 @@ import io.codelaser.maddi.modification.link.impl.LinkComputerImpl;
 import io.codelaser.maddi.modification.link.impl.ReceiverLevel;
 import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
 import io.codelaser.maddi.modification.prepwork.Util;
+import io.codelaser.maddi.modification.prepwork.variable.Link;
+import io.codelaser.maddi.modification.prepwork.variable.Links;
 import io.codelaser.maddi.modification.prepwork.variable.MethodLinkedVariables;
 import io.codelaser.maddi.modification.prepwork.variable.VariableData;
+import io.codelaser.maddi.modification.prepwork.variable.VariableInfo;
 import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
 
 public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, ModAnalyzerForTesting {
@@ -808,6 +813,83 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
             Runnable ec = elementCompletedCallback;
             if (ec != null) ec.run();
         }
+    }
+
+    /*
+     DIAGNOSTIC LINKRECHECK: after an analysis has ended, compute every source method's links again, one at a time and
+     past the link cache, and compare with what the analysis left: the summary, and per variable the links at the
+     method's last statement, which the field analyzer reads and no summary shows. A difference is state that the
+     certified end of the analysis does not reproduce (fernflower 2026-11-10: a field's links differ between runs
+     while every summary agrees). The recomputation overwrites the variable data, so this is for diagnostic runs.
+     */
+    static final boolean LINK_RECHECK = Gate.isSet("LINKRECHECK");
+
+    void linkRecheck(List<Info> analysisOrder) {
+        int methods = 0;
+        int summaries = 0;
+        int variableData = 0;
+        for (Info info : analysisOrder) {
+            if (!(info instanceof MethodInfo methodInfo) || methodInfo.isAbstract()
+                || methodInfo.typeInfo().compilationUnit().externalLibrary()
+                || methodInfo.methodBody() == null || methodInfo.methodBody().isEmpty()
+                || failed.contains(info)) continue;
+            Map<String, String> before = linksAtLastStatement(methodInfo);
+            MethodLinkedVariables stored = methodInfo.analysis().getOrNull(METHOD_LINKS,
+                    io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl.class);
+            MethodLinkedVariables again;
+            try {
+                again = linkComputer.doMethod(methodInfo);
+            } catch (RuntimeException | AssertionError | StackOverflowError e) {
+                LOGGER.warn("LINKRECHECK {}: the recomputation failed: {}", methodInfo, e.toString());
+                continue;
+            }
+            ++methods;
+            if (!String.valueOf(stored).equals(String.valueOf(again))) {
+                ++summaries;
+                LOGGER.warn("LINKRECHECK summary of {} differs:\n  stored     {}\n  recomputed {}", methodInfo, stored, again);
+            }
+            Map<String, String> after = linksAtLastStatement(methodInfo);
+            if (!before.equals(after)) {
+                ++variableData;
+                StringBuilder sb = new StringBuilder();
+                Set<String> names = new TreeSet<>(before.keySet());
+                names.addAll(after.keySet());
+                int shown = 0;
+                for (String name : names) {
+                    String b = before.get(name);
+                    String a = after.get(name);
+                    if (Objects.equals(a, b)) continue;
+                    if (++shown > 6) {
+                        sb.append("\n  ...");
+                        break;
+                    }
+                    sb.append("\n  ").append(name).append("\n    stored     ").append(b)
+                            .append("\n    recomputed ").append(a);
+                }
+                LOGGER.warn("LINKRECHECK variable data of {} differs:{}", methodInfo, sb);
+            }
+        }
+        LOGGER.info("LINKRECHECK {} method(s) recomputed: {} summaries differ, {} differ in the links at the last "
+                    + "statement", methods, summaries, variableData);
+    }
+
+    private static Map<String, String> linksAtLastStatement(MethodInfo methodInfo) {
+        Map<String, String> map = new TreeMap<>();
+        VariableData vd = VariableDataImpl.of(methodInfo.methodBody().lastStatement());
+        if (vd == null) return map;
+        for (VariableInfo vi : vd.variableInfoIterable()) {
+            Links links = vi.linkedVariables();
+            String value;
+            if (links == null) {
+                value = "no links";
+            } else {
+                Set<String> sorted = new TreeSet<>();
+                for (Link l : links) sorted.add(String.valueOf(l));
+                value = sorted.toString();
+            }
+            map.put(vi.variable().fullyQualifiedName(), value);
+        }
+        return map;
     }
 
     private void unionInWriteTargets() {

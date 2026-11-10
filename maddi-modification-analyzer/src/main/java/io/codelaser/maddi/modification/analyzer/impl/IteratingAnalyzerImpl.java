@@ -504,6 +504,9 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
         TolerantWrite.insideAnalyze(true);
         try {
             iterate(analysisOrder, dependencyGraph, initialDirty, beforeFirstRecompute);
+            if (SingleIterationAnalyzerImpl.LINK_RECHECK && lastSingleIterationAnalyzer != null) {
+                lastSingleIterationAnalyzer.linkRecheck(analysisOrder);
+            }
         } finally {
             TolerantWrite.insideAnalyze(false);
             if (System.getenv("MODWRITETRACE") != null) {
@@ -530,6 +533,9 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
             NullabilityPass.write(pass.go(analysisOrder));
         }
     }
+
+    // DIAGNOSTIC (LINKRECHECK): the analyzer of the last iterate(), for the recomputation after it
+    private SingleIterationAnalyzerImpl lastSingleIterationAnalyzer;
 
     private void iterate(List<Info> analysisOrder, G<Info> dependencyGraph,
                          Set<Info> initialDirty, Consumer<Info> beforeFirstRecompute) {
@@ -562,6 +568,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
         modReachFailures = 0;
         int eventualDeferralRounds = 0; // terminal-phase re-derivation of the eventual family, once
         SingleIterationAnalyzer singleIterationAnalyzer = new SingleIterationAnalyzerImpl(javaInspector, configuration);
+        lastSingleIterationAnalyzer = singleIterationAnalyzer instanceof SingleIterationAnalyzerImpl impl ? impl : null;
         this.lastRun = singleIterationAnalyzer;
         // G43: the wall-clock budget starts here, and every pass and every element in it is checked against it
         AnalysisBudget budget = AnalysisBudget.start(configuration.maxDuration(), analysisOrder.size());
