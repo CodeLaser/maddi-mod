@@ -62,6 +62,28 @@ public final class OverlapStats {
         return threadCross.get()[0];
     }
 
+    private static final AtomicLong staleReads = new AtomicLong();
+    private static final AtomicLong staleDiffer = new AtomicLong();
+    private static final java.util.concurrent.ConcurrentHashMap<String, AtomicLong> staleSites
+            = new java.util.concurrent.ConcurrentHashMap<>();
+
+    // OVLSNAPSHOT: a read after the closure changed since the refresh; 'differs' when the current classes answer
+    // differently. The differing reads are counted per calling site outside the engine and Graph.
+    static void staleRead(boolean differs) {
+        staleReads.incrementAndGet();
+        if (differs) {
+            staleDiffer.incrementAndGet();
+            String site = StackWalker.getInstance().walk(frames -> frames
+                    .filter(f -> !f.getClassName().endsWith("IncrementalFixpointEngine")
+                                 && !f.getClassName().endsWith("OverlapStats")
+                                 && !(f.getClassName().endsWith("linkgraph.Graph") && f.getMethodName().startsWith("closure")))
+                    .filter(f -> !f.getMethodName().startsWith("lambda$") && !f.getClassName().startsWith("java."))
+                    .findFirst().map(f -> f.getClassName().substring(f.getClassName().lastIndexOf('.') + 1)
+                                          + "." + f.getMethodName()).orElse("?"));
+            staleSites.computeIfAbsent(site, _ -> new AtomicLong()).incrementAndGet();
+        }
+    }
+
     // one union of two alternatives: the implicit pairs that neither alternative has (both directions counted)
     static void join(int pairs) {
         joins.incrementAndGet();
@@ -109,7 +131,9 @@ public final class OverlapStats {
                            + " methods=" + methods + " methodMs=" + methodNanos.get() / 1_000_000
                            + " statements=" + statements + " dirtyAll=" + dirtyAll + " reused=" + reused
                            + " extracted=" + extracted + " extractedLinks=" + extractedLinks
-                           + " joins=" + joins + " crossJoins=" + crossJoins + " crossPairs=" + crossPairs);
+                           + " joins=" + joins + " crossJoins=" + crossJoins + " crossPairs=" + crossPairs
+                           + " staleReads=" + staleReads + " staleDiffer=" + staleDiffer
+                           + " staleSites=" + new java.util.TreeMap<>(staleSites).toString().replace(' ', '_'));
     }
 
     private OverlapStats() {

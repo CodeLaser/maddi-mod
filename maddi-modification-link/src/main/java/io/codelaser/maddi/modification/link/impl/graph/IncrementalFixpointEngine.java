@@ -203,6 +203,7 @@ public final class IncrementalFixpointEngine<V, L> {
         }
         pendingDead = new HashSet<>();
         ghostRows = new HashMap<>();
+        refreshedAt = closure.modCount();
         implicitCache.clear();
         implicitCacheVersion = closure.modCount();
         if (OverlapStats.ON) OverlapStats.build(System.nanoTime() - t0, alive.size());
@@ -332,6 +333,7 @@ public final class IncrementalFixpointEngine<V, L> {
         if (snapshotMode) {
             // the snapshot itself is never changed, only replaced: share it
             copy.currentOverlap = currentOverlap;
+            copy.refreshedAt = refreshedAt;
             copy.pendingDead = new HashSet<>(pendingDead);
             ghostRows.forEach((v, row) -> copy.ghostRows.put(v, new HashMap<>(row)));
         }
@@ -482,7 +484,9 @@ public final class IncrementalFixpointEngine<V, L> {
     // dirty tracking: what overlapped a removed vertex implicitly loses that link, without a stored fact for the
     // column sweep of removeVertices to find
     private void touchImplicitPartners(Set<V> dead) {
+        touching = true;
         for (V d : dead) touched.addAll(implicitSuccessors(d).keySet());
+        touching = false;
     }
 
     public boolean removeVertices(Set<V> vertices) {
@@ -612,6 +616,24 @@ public final class IncrementalFixpointEngine<V, L> {
         Map<V, L> cached = implicitCache.get(a);
         if (OverlapStats.ON) OverlapStats.read(cached != null);
         if (cached != null) return cached;
+        List<V> targets = implicitTargets(overlap, a);
+        if (OverlapStats.ON && snapshotMode && !touching
+            && (closure.modCount() != refreshedAt || !ghostRows.isEmpty())) {
+            // #92 measurement: a read between two refreshes, against the classes as they are at this moment
+            if (staleCheck == null || staleCheckVersion != closure.modCount()) {
+                staleCheck = buildOverlap(Set.of(), ghostRows);
+                staleCheckVersion = closure.modCount();
+            }
+            OverlapStats.staleRead(!targets.equals(implicitTargets(staleCheck, a)));
+        }
+        Map<V, L> result = new LinkedHashMap<>();
+        targets.forEach(v -> result.put(v, implicit));
+        Map<V, L> frozen = Collections.unmodifiableMap(result);
+        implicitCache.put(a, frozen);
+        return frozen;
+    }
+
+    private List<V> implicitTargets(ImplicitOverlap<V, L> overlap, V a) {
         List<V> targets = new ArrayList<>();
         for (V b : SEARCH ? overlap.search(a) : overlap.partners(a)) {
             if (acceptForComposite.test(b) && closure.label(a, b) == null && implicitPairOk.test(a, b)
@@ -621,12 +643,13 @@ public final class IncrementalFixpointEngine<V, L> {
             }
         }
         targets.sort(vertexComparator);
-        Map<V, L> result = new LinkedHashMap<>();
-        targets.forEach(v -> result.put(v, implicit));
-        Map<V, L> frozen = Collections.unmodifiableMap(result);
-        implicitCache.put(a, frozen);
-        return frozen;
+        return targets;
     }
+
+    private long refreshedAt = -1;
+    private boolean touching;
+    private ImplicitOverlap<V, L> staleCheck;
+    private long staleCheckVersion = -1;
 
     // gate OVERLAPSEARCH (diagnostic): the per-vertex search instead of the class partners
     private static final boolean SEARCH = Gate.isSet("OVERLAPSEARCH");
