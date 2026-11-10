@@ -78,8 +78,9 @@ public final class OverlapStats {
                                  && !f.getClassName().endsWith("OverlapStats")
                                  && !(f.getClassName().endsWith("linkgraph.Graph") && f.getMethodName().startsWith("closure")))
                     .filter(f -> !f.getMethodName().startsWith("lambda$") && !f.getClassName().startsWith("java."))
-                    .findFirst().map(f -> f.getClassName().substring(f.getClassName().lastIndexOf('.') + 1)
-                                          + "." + f.getMethodName()).orElse("?"));
+                    .limit(3).map(f -> f.getClassName().substring(f.getClassName().lastIndexOf('.') + 1)
+                                       + "." + f.getMethodName() + ":" + f.getLineNumber())
+                    .collect(java.util.stream.Collectors.joining("<")));
             staleSites.computeIfAbsent(site, _ -> new AtomicLong()).incrementAndGet();
         }
     }
