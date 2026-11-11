@@ -6,7 +6,8 @@ Runs rustc (--emit=metadata) on <crate>/src/lib.rs, whose modules are the other 
 excepted). Each error inside a function body is recorded against that function, and the body becomes
 `unimplemented!()`; an error in a signature removes the function; an error outside any function removes the
 top-level item it is in (a struct, an impl block, with its functions). Repeats until the crate compiles, or an error
-in the runtime or in no item stops it. Writes <crate>/rustc.json: the errors, per function or item, with the round
+in the runtime or in no item stops it. STUB_TEST=1 compiles the crate as its test harness
+(rustc --test), so that the #[test] functions are checked too. Writes <crate>/rustc.json: the errors, per function or item, with the round
 they appeared in and what was done, and {"compiles": bool}. The original modules are kept as src/<module>.rs.orig.
 """
 import json
@@ -26,8 +27,10 @@ for module in modules:
     shutil.copy(f'{crate}/src/{module}.rs', f'{crate}/src/{module}.rs.orig')
 errors, compiles = [], False
 for round_no in range(1, 60):
+    # STUB_TEST=1: the crate as its test harness, so that the #[test] functions are compiled (and stubbed) too
+    test = ['--test'] if os.environ.get('STUB_TEST') else []
     run = subprocess.run(['rustc', '--edition', '2024', '--crate-type', 'lib', '--crate-name', name, '-A', 'warnings',
-                          '--error-format=json', f'--emit=metadata={crate}/stub.rmeta', 'src/lib.rs'],
+                          *test, '--error-format=json', f'--emit=metadata={crate}/stub.rmeta', 'src/lib.rs'],
                          cwd=crate, capture_output=True, text=True)
     if run.returncode == 0:
         compiles = True
