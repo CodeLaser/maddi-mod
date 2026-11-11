@@ -20,6 +20,52 @@ def split_params(text, offset):
     return params
 
 
+def closing_line(lines, i):
+    """The 0-based line of the brace closing the last '{' of line `i`, skipping strings, chars and comments; None if
+    the braces do not balance. The closing brace must start its line (only whitespace before it)."""
+    depth, in_block = 0, False
+    for j in range(i, len(lines)):
+        text, k = lines[j], 0
+        while k < len(text):
+            ch = text[k]
+            if in_block:
+                if text.startswith('*/', k):
+                    in_block, k = False, k + 2
+                    continue
+                k += 1
+                continue
+            if text.startswith('//', k):
+                break
+            if text.startswith('/*', k):
+                in_block, k = True, k + 2
+                continue
+            m = re.match(r'r(#*)"', text[k:]) if ch == 'r' and (k == 0 or not (text[k - 1].isalnum() or text[k - 1] == '_')) else None
+            if m:
+                end = text.find('"' + m.group(1), k + len(m.group(0)))
+                k = len(text) if end < 0 else end + 1 + len(m.group(1))
+                continue
+            if ch == '"':
+                k += 1
+                while k < len(text) and text[k] != '"':
+                    k += 2 if text[k] == '\\' else 1
+                k += 1
+                continue
+            if ch == "'":
+                # a char literal ('x', '\n', '\u{1F}', '{'); otherwise a lifetime ('a)
+                m = re.match(r"'(?:\\u\{[0-9a-fA-F]+\}|\\.|[^\\'])'", text[k:])
+                k += len(m.group(0)) if m else 1
+                continue
+            if ch == '{':
+                depth += 1
+            elif ch == '}':
+                depth -= 1
+                if depth == 0:
+                    return j if j > i and not text[:k].strip() else None
+            k += 1
+        # a string spanning lines is not printed; a block comment is
+    return None
+
+
 def functions(lines, module):
     """(module, type, fn) -> {'line': 1-based signature line, 'first'/'last': 0-based line range of the item,
     attribute included, 'body': (first, last) 0-based body lines or None, 'params': [(name, mode, col0, col1)]}."""
@@ -43,10 +89,11 @@ def functions(lines, module):
         first = i - 1 if i > 0 and lines[i - 1].strip() == '#[inline(never)]' else i
         last, body = i, None
         if line.rstrip().endswith('{'):
-            for j in range(i + 1, len(lines)):
-                if lines[j] == indent + '}':
-                    last, body = j, (i + 1, j - 1)
-                    break
+            # matched by braces, not by indentation: a closure's body can be printed at column 0, and its '    }' then
+            # looks like the end of the function
+            j = closing_line(lines, i)
+            if j is not None:
+                last, body = j, (i + 1, j - 1)
         params = []
         for p, c0, c1 in split_params(m.group(3), m.start(3)):
             if p in ('self', '&self', '&mut self', 'mut self'):
@@ -72,7 +119,8 @@ def enclosing(fns, line0):
     return None, False
 
 
-ITEM = re.compile(r'(?:pub(?:\([\w:]+\))? )?(?:unsafe )?(?:struct|enum|impl|trait|static|const|type|use|fn|mod)\b')
+# thread_local! { static .. } holds a static, indented: the macro call is the item
+ITEM = re.compile(r'(?:pub(?:\([\w:]+\))? )?(?:unsafe )?(?:struct|enum|impl|trait|static|const|type|use|fn|mod)\b|thread_local!')
 
 
 def item_at(lines, line0):
@@ -82,7 +130,9 @@ def item_at(lines, line0):
         return None
     end = start
     if not lines[start].rstrip().endswith((';', '}')):
-        end = next((j for j in range(start + 1, len(lines)) if lines[j] == '}'), len(lines) - 1)
+        end = closing_line(lines, start) if lines[start].rstrip().endswith('{') else None
+        if end is None:
+            end = next((j for j in range(start + 1, len(lines)) if lines[j] == '}'), len(lines) - 1)
     if end < line0:
         return None
     while start > 0 and lines[start - 1].startswith(('///', '#[', '#![')):
