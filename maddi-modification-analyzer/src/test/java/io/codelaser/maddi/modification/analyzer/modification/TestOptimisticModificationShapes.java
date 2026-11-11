@@ -146,6 +146,77 @@ public class TestOptimisticModificationShapes extends CommonTest {
         }
     }
 
+    private static final String O2_CYCLE = """
+            package a.b;
+            public class O2c {
+                public static class VT {
+                    private final int dim;
+                    private final java.util.List<VT> arguments = new java.util.ArrayList<>();
+                    public VT(int dim) { this.dim = dim; }
+                    public int dim() { return dim; }
+                    public java.util.List<VT> arguments() { return arguments; }
+                    public VT resize(int d) { VT t = new VT(d); t.arguments.addAll(arguments); return t; }
+                }
+                public static class Ex {
+                    public void infer(VT upper) { }
+                }
+                public static class Assign extends Ex {
+                    private Ex left;
+                    @Override public void infer(VT upper) { left.infer(upper); }
+                }
+                public static class Func extends Ex {
+                    private boolean cast;
+                    private final java.util.List<Ex> operands = new java.util.ArrayList<>();
+                    @Override public void infer(VT upper) {
+                        cast = true;
+                        operands.get(0).infer(upper);
+                        if (upper != null && upper.dim() > 0) { upper = upper.resize(0); }
+                    }
+                }
+                public static class Invocation extends Ex {
+                    private Ex instance;
+                    private final java.util.List<VT> genericArgs = new java.util.ArrayList<>();
+                    @Override public void infer(VT upper) {
+                        genericArgs.clear();
+                        if (instance != null) { instance.infer(upper); }
+                    }
+                }
+                public static class New extends Ex {
+                    private VT inferred;
+                    @Override public void infer(VT upper) { inferred = gather(upper); }
+                    private static VT gather(VT upper) {
+                        return upper == null || upper.arguments().isEmpty() ? null : upper.arguments().get(0);
+                    }
+                }
+                public static void run(Ex ex, VT t) { ex.infer(t); }
+            }
+            """;
+
+    @DisplayName("O2, option 2 (DISPATCHUNION): a parameter passed round the dispatch cycle stays unmodified")
+    @Test
+    public void o2dispatchUnionCycle() {
+        boolean before = io.codelaser.maddi.modification.prepwork.Util.DISPATCH_UNION;
+        io.codelaser.maddi.modification.prepwork.Util.DISPATCH_UNION = true;
+        try {
+            TypeInfo X = javaInspector.parse("a.b.O2c", O2_CYCLE);
+            List<Info> ao = prepWork(X);
+            var iterating = new IteratingAnalyzerImpl(javaInspector, new IteratingAnalyzerImpl.ConfigurationBuilder()
+                    .setMaxIterations(10)
+                    .setModificationViaReachability(true)
+                    .build());
+            iterating.analyze(ao);
+            MethodInfo exInfer = method(X.findSubType("Ex"), "infer");
+            MethodInfo assignInfer = method(X.findSubType("Assign"), "infer");
+            MethodInfo funcInfer = method(X.findSubType("Func"), "infer");
+            assertFalse(exInfer.isNonModifying(), "a call through Ex.infer may reach Func.infer, which modifies");
+            assertTrue(funcInfer.parameters().getFirst().isUnmodified(), "Func.infer only reads upper");
+            assertTrue(assignInfer.parameters().getFirst().isUnmodified(), "Assign.infer only passes upper on");
+            assertTrue(exInfer.parameters().getFirst().isUnmodified(), "no override modifies upper");
+        } finally {
+            io.codelaser.maddi.modification.prepwork.Util.DISPATCH_UNION = before;
+        }
+    }
+
     @DisplayName("O2-D: a real default body keeps its verdict; the weakening override is reported")
     @Test
     public void o2d() {
