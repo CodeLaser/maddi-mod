@@ -604,12 +604,56 @@ public class ShadowModificationPass {
         return ae.typeInfo() != null && MODIFIED_FQN.equals(ae.typeInfo().fullyQualifiedName());
     }
 
+    /**
+     * Experiment (CodeLaser/maddi#202), off by default: DEEPWALK=1 leaves a walkable body's deep-only entries to the
+     * walk, as its structural ones, unless {@link #chainedModifiableReceiver} says the walk cannot see one of them.
+     * Seeding them keeps the fixpoint's recursion pessimism: fernflower's GenericType.appendTypeArguments hands an
+     * element of 'this.arguments' to ExprProcessor.getCastTypeName, which recurses back into it, and the imported
+     * entry kept the whole cycle deep-modifying.
+     */
+    public static volatile boolean DEEP_WALK = System.getenv("DEEPWALK") != null;
+
+    private final Map<MethodInfo, Boolean> deepOnlyRederivableCache = new HashMap<>();
+
+    private boolean deepOnlyRederivable(MethodInfo mi) {
+        return DEEP_WALK && deepOnlyRederivableCache.computeIfAbsent(mi, m -> !chainedModifiableReceiver(m));
+    }
+
+    /*
+     A call whose receiver is another call's result ('getClass(n).getPool()', 'first().getPool()'), of a type whose
+     object can be modified: the element the inner call hands out reaches its container in the fixpoint's summary only,
+     not through the walk's element links (TestModificationOfElementFromGetter). A cast or parentheses around the inner
+     call do not change that.
+     */
+    private boolean chainedModifiableReceiver(MethodInfo mi) {
+        Block body = mi.methodBody();
+        if (body == null || body.isEmpty()) return false;
+        boolean[] found = {false};
+        body.visit(e -> {
+            if (found[0]) return false;
+            if (e instanceof MethodCall mc && mc.object() != null) {
+                Expression o = mc.object();
+                while (true) {
+                    if (o instanceof EnclosedExpression ee) o = ee.inner();
+                    else if (o instanceof Cast c) o = c.expression();
+                    else break;
+                }
+                if (o instanceof MethodCall inner && !immutableForModification(inner.parameterizedType())) {
+                    found[0] = true;
+                    return false;
+                }
+            }
+            return true;
+        });
+        return found[0];
+    }
+
     /** @param structural the summary's modification of {@code v} is structural (#25), not of its hidden content only */
     private void seedVariable(MethodInfo mi, Variable v, boolean skipReceiverRooted, boolean structural) {
         // #59: a deep-only entry is an element's modification ('products.get(k).put(...)': 'p ∈ this.products'). The
         // walk follows the plain element links (project), not every channel there is: it stays a seed, deep-only, and
         // so cannot touch the structural twin, which the walk re-derives
-        if (!structural) skipReceiverRooted = false;
+        if (!structural && !deepOnlyRederivable(mi)) skipReceiverRooted = false;
         switch (v) {
             case This thisVar -> {
                 // P3: receiver-rooted summary entry of a walkable body — re-derived via primitives + E2
