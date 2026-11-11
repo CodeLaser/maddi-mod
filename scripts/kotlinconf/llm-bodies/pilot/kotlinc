@@ -1,0 +1,2 @@
+#!/bin/bash
+exec java -Xmx3g -Xss32m -cp "$(cat "$(dirname "$0")/compiler.cp")" org.jetbrains.kotlin.cli.jvm.K2JVMCompiler "$@"
