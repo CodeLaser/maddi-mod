@@ -14,22 +14,21 @@ import io.codelaser.maddi.modification.prepwork.variable.LinkNature;
 
 /*
 CodeLaser/maddi-mod#92: the implicit '∩' across a join. The second alternative creates 'x ∩ y' through a temporary
-'t' ('x ⊆ t', 't ~ y'); after the join 't' leaves the graph. The overlap must survive, whether the classes are
-computed after every change or once per statement (setImplicitSnapshot).
+'t' ('x ⊆ t', 't ~ y'); after the join 't' leaves the graph. The overlap must survive: the classes are
+computed once per statement (refreshImplicit).
  */
 public class TestImplicitSnapshotJoin {
 
-    private static IncrementalFixpointEngine<String, LinkNature> engine(boolean snapshot) {
+    private static IncrementalFixpointEngine<String, LinkNature> engine() {
         IncrementalFixpointEngine<String, LinkNature> engine = new IncrementalFixpointEngine<>(LinkNature::combine,
                 LinkNature::best, LinkNature::valid, LinkNature::score, LinkNature::reverse,
                 Object::toString, String::compareTo, _ -> true);
         engine.setImplicitLabel(OBJECT_GRAPH_OVERLAPS, _ -> true, (_, _) -> true);
-        engine.setImplicitSnapshot(snapshot);
         return engine;
     }
 
-    private static void joinAndRemove(boolean snapshot, boolean creatorIsFirst) {
-        IncrementalFixpointEngine<String, LinkNature> before = engine(snapshot);
+    private static void joinAndRemove(boolean creatorIsFirst) {
+        IncrementalFixpointEngine<String, LinkNature> before = engine();
         before.addVertex("x");
         before.addVertex("y");
         before.refreshImplicit();
@@ -52,8 +51,8 @@ public class TestImplicitSnapshotJoin {
     }
 
     // 't' links 'x' and 'y' and leaves again without a refresh in between (a variable collapsed into its group)
-    private static void createAndRemove(boolean snapshot) {
-        IncrementalFixpointEngine<String, LinkNature> engine = engine(snapshot);
+    private static void createAndRemove() {
+        IncrementalFixpointEngine<String, LinkNature> engine = engine();
         engine.addVertex("x");
         engine.addVertex("y");
         engine.refreshImplicit();
@@ -71,49 +70,39 @@ public class TestImplicitSnapshotJoin {
     @DisplayName("the classes compose across the alternatives of a join")
     @Test
     public void test5() {
-        for (boolean snapshot : new boolean[]{false, true}) {
-            IncrementalFixpointEngine<String, LinkNature> before = engine(snapshot);
-            before.addVertex("x");
-            before.addVertex("m");
-            before.addVertex("y");
-            before.refreshImplicit();
-            IncrementalFixpointEngine<String, LinkNature> first = before.copy();
-            first.addSymmetricEdge("x", "m", IS_SUBSET_OF, "0");
-            first.refreshImplicit();
-            assertEquals(Set.of(), first.implicitSuccessors("x").keySet());
-            IncrementalFixpointEngine<String, LinkNature> second = before.copy();
-            second.addSymmetricEdge("m", "y", SHARES_ELEMENTS, "0");
-            second.refreshImplicit();
-            assertEquals(Set.of(), second.implicitSuccessors("x").keySet());
-            first.unionWith(second);
-            first.refreshImplicit();
-            assertEquals(Set.of("y"), first.implicitSuccessors("x").keySet());
-        }
+        IncrementalFixpointEngine<String, LinkNature> before = engine();
+        before.addVertex("x");
+        before.addVertex("m");
+        before.addVertex("y");
+        before.refreshImplicit();
+        IncrementalFixpointEngine<String, LinkNature> first = before.copy();
+        first.addSymmetricEdge("x", "m", IS_SUBSET_OF, "0");
+        first.refreshImplicit();
+        assertEquals(Set.of(), first.implicitSuccessors("x").keySet());
+        IncrementalFixpointEngine<String, LinkNature> second = before.copy();
+        second.addSymmetricEdge("m", "y", SHARES_ELEMENTS, "0");
+        second.refreshImplicit();
+        assertEquals(Set.of(), second.implicitSuccessors("x").keySet());
+        first.unionWith(second);
+        first.refreshImplicit();
+        assertEquals(Set.of("y"), first.implicitSuccessors("x").keySet());
     }
 
     @DisplayName("created and removed between two refreshes")
     @Test
     public void test4() {
-        createAndRemove(false);
-        createAndRemove(true);
+        createAndRemove();
     }
 
-    @DisplayName("computed after every change")
-    @Test
-    public void test1() {
-        joinAndRemove(false, true);
-        joinAndRemove(false, false);
-    }
-
-    @DisplayName("computed once per statement, the creating alternative first")
+    @DisplayName("the creating alternative first")
     @Test
     public void test2() {
-        joinAndRemove(true, true);
+        joinAndRemove(true);
     }
 
-    @DisplayName("computed once per statement, the creating alternative second")
+    @DisplayName("the creating alternative second")
     @Test
     public void test3() {
-        joinAndRemove(true, false);
+        joinAndRemove(false);
     }
 }

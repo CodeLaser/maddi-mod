@@ -1,6 +1,5 @@
 package io.codelaser.maddi.modification.link.impl.linkgraph;
 
-import io.codelaser.maddi.modification.link.impl.graph.OverlapStats;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -151,6 +150,7 @@ public record FollowGraph(Graph graph) {
 
         // stream.§$s⊆0:in.§$s
         Set<Edge> block = new HashSet<>();
+        int emitted = 0;
         for (FromPair fromPair : fromList) {
             Variable from = fromPair.emitFrom();
             Stream<Map.Entry<Variable, LinkNature>> all = graph.closureStream(fromPair.queryFrom());
@@ -190,13 +190,7 @@ public record FollowGraph(Graph graph) {
                         && Util.acceptModificationLink(from, to)
                         && block.add(new Edge(from, linkNature, to))) {
                         builder.add(from, linkNature, to);
-                        if (OverlapStats.ON) {
-                            // #92 measurement: what the extracted links are
-                            OverlapStats.link(!LinkNatureImpl.OBJECT_GRAPH_OVERLAPS.equals(linkNature) ? "other"
-                                    : "∩:" + (from.equals(primaryFrom) ? "W" : "p") + (to.equals(primaryTo) ? "W" : "p")
-                                      + ":" + primaryFrom.getClass().getSimpleName().replace("Impl", "")
-                                      + ">" + primaryTo.getClass().getSimpleName().replace("Impl", ""));
-                        }
+                        ++emitted;
                         if (linkNature.isIdenticalToOrAssignedFromTo()
                             && !(primaryTo instanceof ReturnVariable) && !(primaryFrom instanceof ReturnVariable)
                             && !Util.virtual(from)
@@ -236,6 +230,7 @@ public record FollowGraph(Graph graph) {
                 }
             }
         }
+        graph.engine().chargeExtraction(emitted);
         // append the reversed return-targeted facts in canonical order (they were collected iterating
         // unordered graph.variables()); the main loop registered both directions of every emitted link
         // in 'block', so a plain add-check dedups against it

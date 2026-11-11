@@ -101,9 +101,9 @@ public class TestLoopFilledArray extends CommonTest {
     @DisplayName("a[i] = new Entry(in.get(i)) in a for loop, returned")
     @Test
     public void forIdx() {
-        // was '[-] --> -': 'a[i]' left the graph with 'i' (gate NOSCOPELIFT). The graph has no ∩ between a real
-        // variable and hidden content, so the lift keeps the coarser 'a ∩ 0:in', not 'a ∩ 0:in.§$s'
-        assertEquals("[-] --> forIdx∩0:in  MOD[]", mlv("forIdx"));
+        // was '[-] --> -': 'a[i]' left the graph with 'i' (gate NOSCOPELIFT). With the '∩' of #92 computed as
+        // classes, the hidden content is a member: 'a ∩ 0:in.§$s', as in plainIdx
+        assertEquals("[-] --> forIdx∩0:in.§$s  MOD[]", mlv("forIdx"));
     }
 
     @DisplayName("outside a loop, a constant index stays a constant")

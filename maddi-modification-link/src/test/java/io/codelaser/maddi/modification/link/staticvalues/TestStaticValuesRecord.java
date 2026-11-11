@@ -366,10 +366,10 @@ public class TestStaticValuesRecord extends CommonTest {
         assertTrue(rrVi1.isModified());
 
         // vs the old engine: + method.§$s⊆1:rr*.§$s (the old re-flip on previouslyModified destroyed this
-        // same-statement containment; sv keeps it — precision gain) and + method.§$s∩0:in (face variant)
+        // same-statement containment; sv keeps it — precision gain). #92: one '∩', between the hidden contents
         assertEquals("""
                 [0:in.§$s⊆1:rr*.§$s,0:in.§m←1:rr*.§m, 1:rr*.§$s⊇0:in.§$s,1:rr*.§m→0:in.§m] --> \
-                method∩0:in.§$s,method.§$s⊆1:rr*.§$s,method.§$s∩0:in,method.§m←1:rr*.§m,method.§m≡0:in.§m\
+                method.§$s⊆1:rr*.§$s,method.§$s∩0:in.§$s,method.§m←1:rr*.§m\
                 """, mlv.toString());
     }
 
@@ -796,10 +796,10 @@ public class TestStaticValuesRecord extends CommonTest {
             VariableData v2 = VariableDataImpl.of(s2);
             VariableInfo vi2Rv = v2.variableInfo("o");
             assertEquals("""
-                    o∈?b.variables,o∈b.variables,o∈r.variables,o←r.variables[0],o≤b,o≤r\
+                    o∈?b.variables,o∈b.variables,o∩b.variables[0],o∈r.variables,o←r.variables[0],o∩0:s\
                     """, vi2Rv.linkedVariables().toString());
         }
-        assertEquals("[-] --> -", mlvMethod2.toString());
+        assertEquals("[-] --> method2∩0:s*", mlvMethod2.toString());
     }
 
     @Language("java")

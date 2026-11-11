@@ -60,14 +60,17 @@ public class TestSharedVariable extends CommonTest {
         TypeInfo C = X.findSubType("C");
         MethodInfo choose = C.findUniqueMethod("choose", 0);
         MethodLinkedVariables mlvChoose = choose.analysis().getOrCreate(METHOD_LINKS, () -> tlc.doMethod(choose));
+        // #92: the '∩' links come from the classes being computed on the union of the two alternatives
         assertEquals("""
-                [] --> choose.s1∈this.r.list1.§$s,choose.s2∈this.r.list2.§$s\
+                [] --> choose.s1∩choose.s2,choose.s1∈this.r.list1.§$s,choose.s1∩this.r.list2.§$s,\
+                choose.s2∩this.r.list1.§$s,choose.s2∈this.r.list2.§$s\
                 """, mlvChoose.toString());
 
         MethodInfo method = X.findUniqueMethod("method", 2);
         MethodLinkedVariables mlv = method.analysis().getOrCreate(METHOD_LINKS, () -> tlc.doMethod(method));
         assertEquals("""
-                [-, -] --> method.s1∈0:r.list1.§$s,method.s2∈0:r.list2.§$s\
+                [0:r.list1.§$s∩0:r.list2.§$s, -] --> method.s1∩method.s2,method.s1∈0:r.list1.§$s,\
+                method.s1∩0:r.list2.§$s,method.s2∩0:r.list1.§$s,method.s2∈0:r.list2.§$s\
                 """, mlv.toString());
     }
 }

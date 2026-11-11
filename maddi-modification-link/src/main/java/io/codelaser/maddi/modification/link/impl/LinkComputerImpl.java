@@ -41,7 +41,6 @@ import io.codelaser.maddi.modification.common.defaults.ShallowMethodAnalyzer;
 import io.codelaser.maddi.modification.common.util.OwnStaticState;
 import io.codelaser.maddi.modification.common.util.TolerantWrite;
 import io.codelaser.maddi.modification.link.LinkComputer;
-import io.codelaser.maddi.modification.link.impl.graph.OverlapStats;
 import io.codelaser.maddi.modification.link.impl.graph.DegradedAnalysisException;
 import io.codelaser.maddi.modification.link.impl.graph.Fact;
 import io.codelaser.maddi.modification.link.impl.graph.IncrementalFixpointEngine;
@@ -240,42 +239,12 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
 
     // MLVDUMP=<fqn substring> in the environment: print every computed summary of the matching methods (diagnostic)
     private static final String MLV_DUMP = System.getenv("MLVDUMP");
-    // #92: the implicit ∩ only in the last statement's extraction (see Graph.setImplicitHidden)
-    private static final boolean OVL_LAST = Gate.isSet("OVLLAST");
-    // OVLMETHODMS=<ms>: the threshold of the per-method OVLSTATS line (default 1000)
-    private static final long OVLMETHOD_NANOS = 1_000_000L * Long.parseLong(
-            System.getenv().getOrDefault("OVLMETHODMS", "1000"));
-
-    // a variable of the method's summary, or a shared variable grouping one (#92, gate OVLRELEVANT)
-    private static boolean summaryRelevant(Variable v) {
-        Variable p = Util.primary(v);
-        if (p instanceof io.codelaser.maddi.modification.link.impl.localvar.SharedVariable sv) {
-            return sv.variables().stream().anyMatch(LinkComputerImpl::summaryRelevant);
-        }
-        return p instanceof ParameterInfo || p instanceof ReturnVariable || p instanceof This
-               || p instanceof FieldReference;
-    }
-
     @Override
     public MethodLinkedVariables doMethod(MethodInfo method) {
         try {
             TypeInfo typeInfo = method.typeInfo();
             boolean shallow = options.forceShallow() || method.isAbstract() || typeInfo.compilationUnit().externalLibrary();
-            long ovl0 = OverlapStats.ON ? OverlapStats.threadNanos() : 0;
-            long t0 = OverlapStats.ON ? System.nanoTime() : 0;
-            long cross0 = OverlapStats.ON ? OverlapStats.threadCross() : 0;
             MethodLinkedVariables result = doMethod(method, shallow, false, true);
-            if (OverlapStats.ON) {
-                long cross = OverlapStats.threadCross() - cross0;
-                if (cross > 0) System.out.println("OVLCROSS " + cross + " " + method.fullyQualifiedName());
-                long ovl = OverlapStats.threadNanos() - ovl0;
-                long total = System.nanoTime() - t0;
-                OverlapStats.method(total);
-                if (total > OVLMETHOD_NANOS) {
-                    System.out.println("OVLMETHOD " + total / 1_000_000 + "ms overlap=" + ovl / 1_000_000 + "ms "
-                                       + method.fullyQualifiedName());
-                }
-            }
             if (MLV_DUMP != null && method.fullyQualifiedName().contains(MLV_DUMP)) {
                 System.out.println("MLVDUMP " + method.fullyQualifiedName() + " " + result);
             }
@@ -603,11 +572,7 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
             // see Options.objectGraphLinks: the coarse ∩/≤/≥ web is not consumed by linking's applications and
             // is quadratic on deep structures; PRODUCTION excludes those labels from the closure entirely
             boolean nullTerminal = options.nullConstantReturns() && !Gate.isSet("NULLCOMPOSE");
-            // gate NOOVERLAP (#92 measurement): drop only '∩' from the closure, to see what it costs and which
-            // verdicts read it
-            Predicate<LinkNature> valid = options.objectGraphLinks()
-                    ? (Gate.isSet("NOOVERLAP") ? ln -> ln.valid() && ln != LinkNatureImpl.OBJECT_GRAPH_OVERLAPS
-                                               : LinkNature::valid)
+            Predicate<LinkNature> valid = options.objectGraphLinks() ? LinkNature::valid
                     : ln -> ln.valid() && ln != LinkNatureImpl.OBJECT_GRAPH_OVERLAPS
                             && ln != LinkNatureImpl.IS_IN_OBJECT_GRAPH && ln != LinkNatureImpl.OBJECT_GRAPH_CONTAINS;
             IncrementalFixpointEngine<Variable, LinkNature> engine = new IncrementalFixpointEngine<>(LinkNature::combine,
@@ -646,25 +611,14 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                             && (Util.notOwnFieldPath(fact.source(), fact.target())
                                 || !(fact.label().isIdenticalTo() || fact.label() == LinkNatureImpl.IS_ASSIGNED_FROM
                                      || fact.label() == LinkNatureImpl.IS_ASSIGNED_TO)));
-            // CodeLaser/maddi-mod#92: '∩' is computed on demand instead of derived (IncrementalFixpointEngine.implicit).
-            // Opt-in, gate IMPLICIT, while #92 is open: by default '∩' is derived as before (2026-11-08: the class
-            // model changes 10 link/analyzer expectations and ~30 corpus verdicts; Bart has not decided on '∩').
-            // gate NOCHAIN (without IMPLICIT): '∩' derived as before, but never composed with itself
-            boolean implicitOverlap = Gate.isSet("IMPLICIT") && !Gate.isSet("NOIMPLICIT");
-            if (options.objectGraphLinks() && !implicitOverlap && Gate.isSet("NOCHAIN")) {
-                engine.setNonChainingLabel(LinkNatureImpl.OBJECT_GRAPH_OVERLAPS);
-            }
-            if (options.objectGraphLinks() && !Gate.isSet("NOOVERLAP") && implicitOverlap) {
+            // CodeLaser/maddi-mod#92: '∩' is not derived and stored, but computed once per statement from the rest of
+            // the closure (IncrementalFixpointEngine.refreshImplicit)
+            if (options.objectGraphLinks()) {
                 // the same filters as acceptComposite: a constant marker is never the middle of a composition, and
                 // under nullConstantReturns a null constant is an endpoint only of an assignment
                 engine.setImplicitLabel(LinkNatureImpl.OBJECT_GRAPH_OVERLAPS,
                         v -> !(v instanceof MarkerVariable mv && mv.isConstant()),
                         (a, b) -> !nullTerminal || !isNullConstant(a) && !isNullConstant(b));
-                // gate OVLRELEVANT (#92 measurement): '∩' answered only for the summary's variables (parameters,
-                // the return value, this and its fields); every other read sees none
-                if (Gate.isSet("OVLRELEVANT")) engine.setImplicitQuery(LinkComputerImpl::summaryRelevant);
-                // gate OVLSNAPSHOT (#92): '∩' computed once per statement instead of after every change
-                if (Gate.isSet("OVLSNAPSHOT")) engine.setImplicitSnapshot(true);
             }
             Graph graph = new Graph(javaInspector.runtime(), engine);
             this.followGraph = new FollowGraph(graph);
@@ -1370,14 +1324,9 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
             Set<Variable> previouslyModified = computePreviouslyModified(vd, previousVd, stageOfPrevious, false);
             Set<Variable> previouslyStructurallyModified = computePreviouslyModified(vd, previousVd, stageOfPrevious, true);
             linkGraph.graph().refreshImplicit();
-            if (OVL_LAST) {
-                linkGraph.graph().setImplicitHidden(!lastStatement);
-                if (lastStatement) linkGraph.graph().invalidateExtractions();
-            }
             WriteLinksAndModification.WriteResult wr = writeLinksAndModification.go(statement, lastStatement, vd,
                     previouslyModified, previouslyStructurallyModified,
                     r == null ? Map.of() : r.modified(), r == null ? Set.of() : r.deepOnlyModified());
-            if (OVL_LAST) linkGraph.graph().setImplicitHidden(false);
             copyEvalIntoVariableData(wr.newLinks(), vd);
             modificationsOutsideVariableData.addAll(wr.modifiedOutsideVariableData());
             wr.modifiedOutsideVariableData().stream().filter(v -> !wr.modifiedOutsideDeepOnly().contains(v))
@@ -1393,7 +1342,7 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                 handleSubBlocks(statement, vd);
             }
             if (r != null) {
-                // OVLSNAPSHOT: the probe below reads the '∩' of the closure as the extraction's rewrites left it
+                // the probe below reads the '∩' of the closure as the extraction's rewrites left it
                 linkGraph.graph().refreshImplicit();
                 writeOutMethodCallAnalysis(r.writeMethodCalls(), vd);
             }
