@@ -290,7 +290,9 @@ public class ShadowModificationPass {
         // stricter than the engine, downgrading e.g. Element.annotations() (default body
         // List.of()) to the dispatch union the engine deliberately does not compute.
         for (MethodInfo overridden : mi.overrides()) {
-            if (!Util.unionOverImplementations(overridden)) continue;
+            // DISPATCHUNION=1: an overridden concrete source method takes the union too (Util.dispatchUnion); its
+            // own body's evidence stays its own nodes', the edge adds the override's
+            if (!Util.unionOverImplementations(overridden) && !Util.dispatchUnion(overridden)) continue;
             // An OUT-OF-ORDER abstract (jar/aapi) with a decided TRUE is authority, not fixpoint
             // optimism: writeVerdicts never visits it, no union is computed over it, and an E6 edge
             // into it would teleport ONE implementation's evidence to EVERY call site of the

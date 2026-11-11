@@ -855,6 +855,16 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                 methodModified = true;
                 methodStructurallyModified = true;
             }
+            // DISPATCHUNION=1: a call through an overridden concrete method may reach any override, so the body's
+            // verdict is folded with theirs (Util.dispatchUnion, Util.implementationModifies).
+            if (Util.dispatchUnion(methodInfo)) {
+                if (Util.implementationModifies(methodInfo, false)) methodModified = true;
+                if (Util.implementationModifies(methodInfo, true)) methodStructurallyModified = true;
+                for (int i = 0; i < paramsModified.length; i++) {
+                    if (Util.implementationModifiesParameter(methodInfo, i, false)) paramsModified[i] = true;
+                    if (Util.implementationModifiesParameter(methodInfo, i, true)) paramsStructurallyModified[i] = true;
+                }
+            }
             // handed to one of our own functional parameters, whole or an element of it: recorded, not marked; its
             // callers resolve the entry with the function they pass (PassedFunction, CodeLaser/maddi-mod#67, #69)
             Value.Bool nonModifying = ValueImpl.BoolImpl.from(!methodModified);

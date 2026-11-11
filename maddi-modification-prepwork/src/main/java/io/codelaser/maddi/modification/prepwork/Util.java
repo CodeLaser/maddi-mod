@@ -31,6 +31,7 @@ import io.codelaser.maddi.cst.api.element.Element;
 import io.codelaser.maddi.cst.api.expression.IntConstant;
 import io.codelaser.maddi.cst.api.expression.Lambda;
 import io.codelaser.maddi.cst.api.info.FieldInfo;
+import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
@@ -73,6 +74,61 @@ public class Util {
                || isThrowOnlyPlaceholder(methodInfo)
                   && !methodInfo.analysis().getOrDefault(PropertyImpl.IMPLEMENTATIONS,
                 ValueImpl.SetOfMethodInfoImpl.EMPTY).isEmpty();
+    }
+
+    /**
+     * Gate {@code DISPATCHUNION=1} (experiment, CodeLaser/maddi#202, engine work list O2 option 2): see
+     * {@link #dispatchUnion}. Off, a concrete method keeps its own body's verdict (option D). Not final, so that a
+     * test can switch it for one analysis.
+     */
+    public static volatile boolean DISPATCH_UNION = System.getenv("DISPATCHUNION") != null;
+
+    /**
+     * Under {@link #DISPATCH_UNION}: a concrete, overridable source method that source methods override. A call
+     * through it may reach any of them, so its receiver and parameter modification is its own body's AND their
+     * union (the link computer folds it in, {@code copyModificationsIntoMethod}). Unlike a placeholder its body
+     * counts, and everything but modification stays its own. A non-virtual {@code super.m()} call reads the union
+     * too: optimism traded for a little pessimism.
+     */
+    public static boolean dispatchUnion(MethodInfo methodInfo) {
+        return DISPATCH_UNION && !methodInfo.isAbstract() && !methodInfo.isStatic() && !methodInfo.isConstructor()
+               && !methodInfo.isFinal() && !methodInfo.access().isPrivate() && !isThrowOnlyPlaceholder(methodInfo)
+               && !methodInfo.analysis().getOrDefault(PropertyImpl.IMPLEMENTATIONS,
+                ValueImpl.SetOfMethodInfoImpl.EMPTY).isEmpty();
+    }
+
+    /**
+     * Under {@link #dispatchUnion}: does one of the method's implementations modify its receiver (structurally, when
+     * {@code structural})? An undecided implementation counts as modifying, as in the abstract-method fold; the
+     * verdicts only go from modified to unmodified, so a later iteration lifts it once the implementation is decided.
+     */
+    public static boolean implementationModifies(MethodInfo methodInfo, boolean structural) {
+        for (MethodInfo implementation : implementations(methodInfo)) {
+            Value.Bool deep = implementation.analysis().getOrDefault(PropertyImpl.NON_MODIFYING_METHOD,
+                    ValueImpl.BoolImpl.FALSE);
+            Value.Bool v = structural ? implementation.analysis().getOrDefault(
+                    PropertyImpl.STRUCTURALLY_NON_MODIFYING_METHOD, deep) : deep;
+            if (!v.isTrue()) return true;
+        }
+        return false;
+    }
+
+    /** As {@link #implementationModifies}, for the parameter at {@code index}. */
+    public static boolean implementationModifiesParameter(MethodInfo methodInfo, int index, boolean structural) {
+        for (MethodInfo implementation : implementations(methodInfo)) {
+            if (index >= implementation.parameters().size()) continue;
+            ParameterInfo ip = implementation.parameters().get(index);
+            Value.Bool deep = ip.analysis().getOrDefault(PropertyImpl.UNMODIFIED_PARAMETER, ValueImpl.BoolImpl.FALSE);
+            Value.Bool v = structural ? ip.analysis().getOrDefault(PropertyImpl.STRUCTURALLY_UNMODIFIED_PARAMETER, deep)
+                    : deep;
+            if (!v.isTrue()) return true;
+        }
+        return false;
+    }
+
+    private static Iterable<MethodInfo> implementations(MethodInfo methodInfo) {
+        return methodInfo.analysis().getOrDefault(PropertyImpl.IMPLEMENTATIONS, ValueImpl.SetOfMethodInfoImpl.EMPTY)
+                .methodInfoSet();
     }
 
     public static boolean acceptModificationLink(Variable from, Variable to) {

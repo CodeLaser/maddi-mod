@@ -18,6 +18,7 @@
 package io.codelaser.maddi.modification.analyzer.modification;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
@@ -119,6 +120,31 @@ public class TestOptimisticModificationShapes extends CommonTest {
                 static void closeIt(Closeable2 c) { c.close(); }
             }
             """;
+
+    @DisplayName("O2, option 2 (DISPATCHUNION): an overridden concrete method takes the union with its overrides")
+    @Test
+    public void o2dispatchUnion() {
+        boolean before = io.codelaser.maddi.modification.prepwork.Util.DISPATCH_UNION;
+        io.codelaser.maddi.modification.prepwork.Util.DISPATCH_UNION = true;
+        try {
+            TypeInfo X = javaInspector.parse("a.b.O2d", O2_D);
+            List<Info> ao = prepWork(X);
+            var iterating = new IteratingAnalyzerImpl(javaInspector, new IteratingAnalyzerImpl.ConfigurationBuilder()
+                    .setMaxIterations(10)
+                    .setModificationViaReachability(true)
+                    .build());
+            iterating.analyze(ao);
+            MethodInfo close = method(X.findSubType("Closeable2"), "close");
+            assertFalse(close.isNonModifying(), "a call through the default may reach Counter.close, which modifies");
+            MethodInfo closeIt = method(X, "closeIt");
+            assertFalse(closeIt.parameters().getFirst().isUnmodified(), "closeIt(c) modifies c through close()");
+            assertTrue(iterating.messages().stream().noneMatch(m -> m.message().contains("O2d.Counter.close")
+                            && GuardAnalyzerImpl.OVERRIDE_WEAKENS_COMPUTED.equals(m.category())),
+                    "nothing weakens the union");
+        } finally {
+            io.codelaser.maddi.modification.prepwork.Util.DISPATCH_UNION = before;
+        }
+    }
 
     @DisplayName("O2-D: a real default body keeps its verdict; the weakening override is reported")
     @Test

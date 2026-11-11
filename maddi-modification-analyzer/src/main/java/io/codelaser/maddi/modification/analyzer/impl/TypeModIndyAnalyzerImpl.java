@@ -426,8 +426,11 @@ public class TypeModIndyAnalyzerImpl extends CommonAnalyzerImpl implements TypeM
     }
 
     private void handleExplicitlyEmptyMethod(MethodInfo methodInfo) {
-        if (TolerantWrite.setAllowControlledOverwrite(methodInfo.analysis(), PropertyImpl.NON_MODIFYING_METHOD, TRUE, methodInfo)) {
-            DECIDE.debug("MI: Decide non-modifying of method {} = true", methodInfo);
+        // DISPATCHUNION=1: an empty body overridden by modifying methods is no evidence for a call through it
+        boolean union = Util.dispatchUnion(methodInfo);
+        Bool nonModifying = union && Util.implementationModifies(methodInfo, false) ? FALSE : TRUE;
+        if (TolerantWrite.setAllowControlledOverwrite(methodInfo.analysis(), PropertyImpl.NON_MODIFYING_METHOD, nonModifying, methodInfo)) {
+            DECIDE.debug("MI: Decide non-modifying of method {} = {}", methodInfo, nonModifying);
             propertyChanges.incrementAndGet();
         }
         if (TolerantWrite.setAllowControlledOverwrite(methodInfo.analysis(), PropertyImpl.INDEPENDENT_METHOD, INDEPENDENT, methodInfo)) {
@@ -435,8 +438,9 @@ public class TypeModIndyAnalyzerImpl extends CommonAnalyzerImpl implements TypeM
             propertyChanges.incrementAndGet();
         }
         for (ParameterInfo pi : methodInfo.parameters()) {
-            if (TolerantWrite.setAllowControlledOverwrite(pi.analysis(), PropertyImpl.UNMODIFIED_PARAMETER, TRUE, pi)) {
-                DECIDE.debug("MI: Decide unmodified of parameter {} = true", pi);
+            Bool unmodified = union && Util.implementationModifiesParameter(methodInfo, pi.index(), false) ? FALSE : TRUE;
+            if (TolerantWrite.setAllowControlledOverwrite(pi.analysis(), PropertyImpl.UNMODIFIED_PARAMETER, unmodified, pi)) {
+                DECIDE.debug("MI: Decide unmodified of parameter {} = {}", pi, unmodified);
                 propertyChanges.incrementAndGet();
             }
             if (TolerantWrite.setAllowControlledOverwrite(pi.analysis(), PropertyImpl.INDEPENDENT_PARAMETER, INDEPENDENT, pi)) {
@@ -449,7 +453,9 @@ public class TypeModIndyAnalyzerImpl extends CommonAnalyzerImpl implements TypeM
     private void handleGetterSetter(MethodInfo methodInfo, FieldValue fieldValue) {
         assert !methodInfo.isConstructor();
         // getter, setter
-        Bool nonModifying = ValueImpl.BoolImpl.from(!fieldValue.setter());
+        // DISPATCHUNION=1: a getter overridden by modifying methods is modifying through a call to it
+        Bool nonModifying = ValueImpl.BoolImpl.from(!fieldValue.setter()
+                && !(Util.dispatchUnion(methodInfo) && Util.implementationModifies(methodInfo, false)));
         if (TolerantWrite.setAllowControlledOverwrite(methodInfo.analysis(), NON_MODIFYING_METHOD, nonModifying, methodInfo)) {
             propertyChanges.incrementAndGet();
         }
