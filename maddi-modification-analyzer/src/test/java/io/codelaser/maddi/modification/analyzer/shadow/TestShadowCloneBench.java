@@ -341,7 +341,22 @@ public class TestShadowCloneBench extends CommonTest {
         //     args), 9 closed (for-each/while over a collection parameter: ArrayList_AddAt_Copy, Map_Foreach,
         //     toNameClassMap, listToString, cutVectors, ...), 1 divergence opened (Function739845.listeners); by
         //     10-27 one more closed; and one opened between maddi 2d18e29b9 and 35184db60 (getFileAsString's Charset).
-        Assertions.assertEquals(348, totalRev,
+        // ⭐ Re-baselined 2026-11-11 after the maddi slowTest gate 42980371461 (maddi c16436110, maddi-mod b458d03ab):
+        // reverse 348 -> 327, 21 closed and none opened; divergences 48 -> 47. Measured on the Mac with maddi
+        // ws/maddi-bug; maddi-mod b75a81c81 still gives 348 there, so the movers are maddi-mod's. Bisected over
+        // devel's first-parent states:
+        //   maddi-mod fca7d9f6 (merged in 2365b3c5, StaticSideEffects: the group's fixpoint counts every growth of
+        //     a set): 17 closed, all nonModifyingMethod (poissonRand, normalRand, cauchyRand, gammaRand,
+        //     sendHeader x3, createHttpResponse x2, emitTab x3, search, checkDirectory, main, utterBS, Determinant),
+        //     among them the static-state writers #65 opened (10-30 note above): the fixpoint's static side effects
+        //     no longer miss a set that grew in the group's last pass.
+        //   maddi-mod 4477b1bc (merged in 4571f425, #100: modifying an element a getter hands out modifies the
+        //     owner): the divergence nonModifyingMethod Function739845.onChange() [propagated] closed.
+        //   maddi-mod 0ac292e6 (merged in da15d6f1, #102: MODREACH projects a cast receiver): 4 closed, all
+        //     unmodifiedParameter of an Object closed or flushed through a cast (flushIfPossible(Object),
+        //     safelyClose(Object,InputStream), close(Object) x2): the pass now reaches what the fixpoint modifies.
+        //   maddi-mod dba3db0f (#101) is neutral: reverted, the same 327 and 47.
+        Assertions.assertEquals(327, totalRev,
                 "reverse divergences are expected since design A (110695ece) retired the "
                 + "walkable-summary seed channel; re-baseline deliberately, and reclassify");
         // Re-baselined 2026-09-22 for the RECEIVER-DISCLAIMER rule (@IgnoreModifications on a parameter now
@@ -359,10 +374,11 @@ public class TestShadowCloneBench extends CommonTest {
         // classified with the reverse re-baseline above.
         // 2026-10-30: unmodifiedField 12 -> 13, unmodifiedParameter 43 -> 34, {propagated 46 -> 38, seed 10};
         // classified with the reverse re-baseline above.
+        // 2026-11-11: nonModifyingMethod 1 -> 0 {propagated 38 -> 37}, #100's onChange(); classified above.
         Assertions.assertEquals(
-                Map.of("nonModifyingMethod", 1, "unmodifiedField", 13, "unmodifiedParameter", 34),
+                Map.of("unmodifiedField", 13, "unmodifiedParameter", 34),
                 byProperty);
-        Assertions.assertEquals(Map.of("propagated", 38, "seed", 10), byClass);
+        Assertions.assertEquals(Map.of("propagated", 37, "seed", 10), byClass);
     }
 
     private volatile int totalMethods, totalSeeds, totalEdges, totalMissingArgLinks, totalUnprojectedReceivers;
