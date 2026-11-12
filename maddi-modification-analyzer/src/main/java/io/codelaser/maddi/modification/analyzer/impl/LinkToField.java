@@ -110,6 +110,8 @@ class LinkToField {
 
     private static final boolean NO_STATIC_INDEP = Gate.isSet("NOSTATICINDEP");
 
+    private static final boolean NO_OBJECT_GRAPH_INDEP = Gate.isSet("NOOBJECTGRAPHINDEP");
+
     /**
      * Whether {@code variable} (or the variable at the root of its field chain) is a parameter of a method that
      * encloses {@code methodInfo}: the enclosing method of {@code methodInfo}'s local or anonymous class, or of its
@@ -204,7 +206,15 @@ class LinkToField {
             // 'instTL ← this.itl.§$': 'return itl.get()' hands out the object the field holds as its content
             return link.from().parameterizedType();
         }
-        // deliberately NOT judged: ≤/≥ (object graph) and ∩ (overlap). ≤'s to() is the whole container,
+        if (!NO_OBJECT_GRAPH_INDEP && link.linkNature().equals(LinkNatureImpl.IS_IN_OBJECT_GRAPH)
+            && Util.virtual(link.to()) && !Util.isVirtualModification(link.to())) {
+            // 'copy.§$s ≤ this.map.§$$s[-2]': 'new ArrayList<>(map.get(k))' holds objects from inside the field's hidden
+            // content, the elements of one of its values. Judged by what is shared, the FROM side's type without its
+            // arrays (Edge), the same type the ⊆/~ variant judges for a copy of the field's own list, so the two
+            // emissions agree (CodeLaser/maddi-mod#112). Gate NOOBJECTGRAPHINDEP
+            return link.from().parameterizedType().copyWithoutArrays();
+        }
+        // deliberately NOT judged: ≥ (object graph, the other direction) and ∩ (overlap); ≤ only as above. ≤'s to() is the whole container,
         // so judging it reads a DIFFERENT type than the ~/⊆ face variants judge for the same pair, which
         // would re-open the variance fork from the other side; ∩ is a speculative overlap, present
         // identically in both measured worlds. Extend only with a concrete variance witness in hand.

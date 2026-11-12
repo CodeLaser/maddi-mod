@@ -1346,6 +1346,31 @@ public class ShadowModificationPass {
                                             if (container != null) containers.add(container);
                                             if (!NO_CO_ELEMENT) coElements(vd, l.to(), containers);
                                         });
+                                // #112: 'e ≤ 0:x.map.§$$s[-2]', an object from inside a container's hidden content
+                                // (an element of a copy of one of its values): its container, deep-only, as for ∈
+                                if (!NO_OBJECT_GRAPH_MOD) {
+                                    links.stream().filter(l -> l.linkNature() == LinkNatureImpl.IS_IN_OBJECT_GRAPH
+                                                               && Util.virtual(l.to())
+                                                               && !Util.isVirtualModification(l.to())
+                                                               && l.from().fullyQualifiedName()
+                                                                       .equals(v.fullyQualifiedName()))
+                                            .map(l -> Util.firstRealVariable(l.to()))
+                                            .filter(Objects::nonNull)
+                                            .forEach(containers::add);
+                                    // the same fact is often stored on the container's side only: '0:x.map.§$$s ≥ e'
+                                    String vFqn = v.fullyQualifiedName();
+                                    vd.variableInfoStream().forEach(other -> {
+                                        Links ol = other.linkedVariables();
+                                        if (ol == null) return;
+                                        ol.stream().filter(l -> l.linkNature() == LinkNatureImpl.OBJECT_GRAPH_CONTAINS
+                                                                && Util.virtual(l.from())
+                                                                && !Util.isVirtualModification(l.from())
+                                                                && l.to().fullyQualifiedName().equals(vFqn))
+                                                .map(l -> Util.firstRealVariable(l.from()))
+                                                .filter(Objects::nonNull)
+                                                .forEach(containers::add);
+                                    });
+                                }
                             }
                         }
                     }
@@ -1361,6 +1386,7 @@ public class ShadowModificationPass {
      The container's own links name them: 'l.§$s ∋ 0:root' beside 'l.§$s ∋ s'. Gate NOCOELEMENT.
      */
     private static final boolean NO_CO_ELEMENT = Gate.isSet("NOCOELEMENT");
+    private static final boolean NO_OBJECT_GRAPH_MOD = Gate.isSet("NOOBJECTGRAPHMOD");
 
     private static void coElements(VariableData vd, Variable hiddenContent, List<Variable> out) {
         if (!Util.virtual(hiddenContent) || Util.isVirtualModification(hiddenContent)) return;
