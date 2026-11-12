@@ -61,6 +61,8 @@ public record ExpressionVisitor(Runtime runtime,
     private static final boolean NO_CALL_RESULT_FIELD = Gate.isSet("NOCALLRESULTFIELD");
     // gate NOELEMENTOWNER: a modified receiver that is an element of a variable unknown here modifies nothing more
     private static final boolean NO_ELEMENT_OWNER = Gate.isSet("NOELEMENTOWNER");
+    // gate NOCHAINSTRUCTURAL: a chained call does not take its receiver call's structural verdict (#114)
+    private static final boolean NO_CHAIN_STRUCTURAL = Gate.isSet("NOCHAINSTRUCTURAL");
 
     // gate NOGETTERRECEIVER: an inlined getter drops its receiver expression's links and modifications
     private static final boolean NO_GETTER_RECEIVER = Gate.isSet("NOGETTERRECEIVER");
@@ -1010,13 +1012,33 @@ public record ExpressionVisitor(Runtime runtime,
                 .collect(Collectors.toUnmodifiableSet());
         Set<Variable> elementOwners = NO_ELEMENT_OWNER ? Set.of()
                 : ownersOfModifiedElement(objectPrimary, object.links(), modified.all(), variableData, stage);
+        // CodeLaser/maddi-mod#114: 'm.computeIfAbsent(k, ..).add(e)'. computeIfAbsent modifies its receiver m
+        // structurally, but m has links of its own in the object's result, so the filter above, meant for arguments
+        // consumed into a builder, drops it; add's modification then reaches m only through its element (∋), deep.
+        // The receiver of the inner call is no consumed argument: carry its structural modification forward.
+        Set<Variable> innerReceiver = NO_CHAIN_STRUCTURAL ? Set.of() : innerReceiverModified(mc, object, objectModified);
         return r.addModified(modified.all(), modified.deepOnly(), mc.methodInfo())
                 .addModified(elementOwners, elementOwners, mc.methodInfo())
                 .addModified(extraModified, deepOnlyAmong(params, extraModified), null)
                 .addModified(objectModified, object.deepOnlyAmong(objectModified), null)
+                .addModified(innerReceiver, Set.of(), null)
                 .add(new WriteMethodCall(mc, object.links()))
                 .addVariablesRepresentingConstant(params)
                 .addVariablesRepresentingConstant(object);
+    }
+
+    // the receiver variable of the call that is mc's object, and its scopes, as far as that call modified them structurally
+    private static Set<Variable> innerReceiverModified(MethodCall mc, Result object, Set<Variable> alreadyCarried) {
+        Expression o = mc.object();
+        while (o instanceof EnclosedExpression ee) o = ee.inner();
+        if (!(o instanceof MethodCall inner)) return Set.of();
+        Expression io = inner.object();
+        while (io instanceof EnclosedExpression ee) io = ee.inner();
+        if (!(io instanceof VariableExpression ve)) return Set.of();
+        return Util.variableAndScopes(ve.variable())
+                .filter(v -> object.modified().containsKey(v) && !object.deepOnlyModified().contains(v)
+                             && !alreadyCarried.contains(v))
+                .collect(Collectors.toUnmodifiableSet());
     }
 
     private MethodLinkedVariables recurseIntoLinkComputer(MethodInfo methodInfo) {
