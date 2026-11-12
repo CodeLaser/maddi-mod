@@ -966,7 +966,8 @@ class WriteLinksAndModification {
             /*
              'Ctx ctx = getCurrent(); ctx.collector = c;' where 'ctx ← X.current.§$': the local holds the object a
              field holds as its content (a ThreadLocal's), which no group records. The value stored in, or read from,
-             the local's field is then a field of that content: '0:c ≺ X.current.§$'.
+             the local's field is then that field of the content: '0:c → X.current.§$.collector'. Naming the field
+             lets its modification reach the value, as for the store through a static field (#108).
              */
             if (link.linkNature().isIdenticalToOrAssignedFromTo() && fr.scopeVariable() != null
                 && !(fr.scopeVariable() instanceof FieldReference) && !Util.virtual(link.from())) {
@@ -977,7 +978,9 @@ class WriteLinksAndModification {
                         && !(Util.primary(source) instanceof SharedVariable)
                         && !(Util.primary(source) instanceof IntermediateVariable)
                         && !(Util.primary(source) instanceof MarkerVariable)) {
-                        added.add(new LinksImpl.LinkImpl(link.from(), IS_FIELD_OF, source, link.mediated()));
+                        Variable through = runtime.newFieldReference(fr.fieldInfo(),
+                                runtime.newVariableExpression(source), fr.parameterizedType());
+                        added.add(new LinksImpl.LinkImpl(link.from(), link.linkNature(), through, link.mediated()));
                     }
                 }
             }

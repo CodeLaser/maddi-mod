@@ -130,11 +130,16 @@ public class TestThreadLocalContext extends CommonTest {
                 String.valueOf(method(x, "startStatic").analysis().getOrNull(METHOD_LINKS, MethodLinkedVariablesImpl.class)));
         assertEquals("[0:c→this.own*.collector] --> -",
                 String.valueOf(method(x, "startInstance").analysis().getOrNull(METHOD_LINKS, MethodLinkedVariablesImpl.class)));
-        assertEquals("[0:c≺X.current.§$] --> -",
+        assertEquals("[0:c→X.current.§$.collector] --> -",
                 String.valueOf(method(x, "startTL").analysis().getOrNull(METHOD_LINKS, MethodLinkedVariablesImpl.class)));
         for (String setter : List.of("startTL", "startStatic", "startDirect", "startStaticDirect",
                 "startStaticLocalVoid", "startInstance", "instTLSet")) {
             assertEquals("@Dependent", parameter(method(x, setter)), setter);
+        }
+        // stored into a field that is modified elsewhere: modified, however the field is reached (#108)
+        for (String setter : List.of("startTL", "startStatic", "startDirect")) {
+            assertEquals("false", String.valueOf(method(x, setter).parameters().getLast().analysis()
+                    .getOrNull(PropertyImpl.UNMODIFIED_PARAMETER, ValueImpl.BoolImpl.class)), setter);
         }
         // a parameter's field is not the type's state
         assertEquals("@Independent", parameter(method(x, "startParam")));
