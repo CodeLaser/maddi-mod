@@ -645,15 +645,6 @@ public final class NonNullFacts {
         return set;
     }
 
-    private static boolean changesReachedMap(Statement statement) {
-        boolean[] found = {false};
-        statement.visit(e -> {
-            if (e instanceof Expression x && changesReachedMap(x)) found[0] = true;
-            return !found[0];
-        });
-        return found[0];
-    }
-
     private static boolean containsCall(Statement statement) {
         boolean[] call = {false};
         statement.visit(e -> {
