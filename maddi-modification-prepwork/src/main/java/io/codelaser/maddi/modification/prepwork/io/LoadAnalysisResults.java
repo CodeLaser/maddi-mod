@@ -194,15 +194,20 @@ public class LoadAnalysisResults {
     public int goDirTolerant(Codec codec, File directory) throws IOException {
         if (!directory.isDirectory()) throw new UnsupportedEncodingException(directory + " is not a directory");
         try (Stream<Path> jsonFiles = Files.walk(directory.toPath(), 3)
-                .filter(p -> p.toString().endsWith(".json"))) {
+                .filter(p -> p.toString().endsWith(".json"))
+                // a checkpoint directory also holds the incremental state, which is not a results file
+                .filter(p -> !IncrementalState.FILE_NAME.equals(p.getFileName().toString()))) {
             int countPrimaryTypes = 0;
             int skippedFiles = 0;
             for (Path jsonFile : jsonFiles.toList()) {
                 try {
                     countPrimaryTypes += go(codec, jsonFile);
                 } catch (IOException | RuntimeException | AssertionError | StackOverflowError e) {
+                    // the first with its stack trace: a decode failure is a codec gap to fix, and its message alone
+                    // (a NullPointerException) does not say where
+                    if (skippedFiles == 0) LOGGER.warn("Skipping unreadable analysis file {}", jsonFile, e);
+                    else LOGGER.warn("Skipping unreadable analysis file {}: {}", jsonFile, e.toString());
                     ++skippedFiles;
-                    LOGGER.warn("Skipping unreadable analysis file {}: {}", jsonFile, e.toString());
                 }
             }
             if (skippedFiles > 0) {

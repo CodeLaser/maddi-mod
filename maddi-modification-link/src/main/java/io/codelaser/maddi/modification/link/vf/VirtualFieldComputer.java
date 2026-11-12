@@ -325,6 +325,15 @@ public class VirtualFieldComputer {
     // called from destreaming, where the § is already present in the name
     public static TypeInfo makeContainer(Runtime runtime, TypeInfo enclosingType, String name, List<FieldInfo> newFields) {
         TypeInfo newType = runtime.newTypeInfo(enclosingType, name.startsWith("§") ? name : "§" + name);
+        completeContainer(runtime, newType, newFields);
+        return newType;
+    }
+
+    /**
+     * The second half of {@link #makeContainer}, for a reader that needs the container before its fields: their owner
+     * is the container, and their types may name it (the link codec's decoder).
+     */
+    public static void completeContainer(Runtime runtime, TypeInfo newType, List<FieldInfo> newFields) {
         TypeInfo.Builder builder = newType.builder();
         builder.setSynthetic(true)
                 .setTypeNature(TypeNatureEnum.CLASS)
@@ -335,7 +344,6 @@ public class VirtualFieldComputer {
             if (fi.type().typeParameter() != null) builder.addOrSetTypeParameter(fi.type().typeParameter());
         });
         builder.commit();
-        return newType;
     }
 
     // package for testing

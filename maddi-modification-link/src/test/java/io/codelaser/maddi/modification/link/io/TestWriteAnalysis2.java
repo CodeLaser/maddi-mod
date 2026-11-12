@@ -352,6 +352,75 @@ public class TestWriteAnalysis2 extends CommonTest {
         testLink4(mlvOneCC);
     }
 
+    @Language("java")
+    private static final String INPUT5 = """
+            package a.b;
+            import java.util.HashMap;
+            public class C {
+                private final HashMap<String, Integer> a = new HashMap<>();
+                private final HashMap<Long, StringBuilder> b = new HashMap<>();
+                void putA(HashMap<String, Integer> other) { a.putAll(other); }
+                void putB(HashMap<Long, StringBuilder> other) { b.putAll(other); }
+            }
+            """;
+
+    /*
+     Two of HashMap's containers have the same name, java.util.HashMap.§$$, and different fields (String and Integer,
+     Long and StringBuilder). The reader made one object per name, so the second method read back the first one's
+     container (fernflower, 2026-11-12).
+     */
+    @DisplayName("containers with the same name and other fields read back as two")
+    @Test
+    public void test5() throws IOException {
+        TypeInfo C = javaInspector.parse("a.b.C", INPUT5);
+        PrepAnalyzer analyzer = new PrepAnalyzer(runtime, new PrepAnalyzer.Options.Builder().build());
+        analyzer.doPrimaryType(C);
+        LinkComputer tlc = new LinkComputerImpl(javaInspector);
+        MethodInfo putA = C.findUniqueMethod("putA", 1);
+        MethodInfo putB = C.findUniqueMethod("putB", 1);
+        MethodLinkedVariables mlvA = putA.analysis().getOrCreate(METHOD_LINKS, () -> tlc.doMethod(putA));
+        MethodLinkedVariables mlvB = putB.analysis().getOrCreate(METHOD_LINKS, () -> tlc.doMethod(putB));
+
+        Trie<TypeInfo> typeTrie = new Trie<>();
+        typeTrie.add(C.fullyQualifiedName().split("\\."), C);
+        Path dest = Files.createTempDirectory(tempRoot, "writeAnalysis2Test5");
+        Codec codec = new LinkCodec(javaInspector).codec();
+        new WriteAnalysisResults(runtime).write(dest.toFile(), typeTrie, codec);
+        String written = Files.readString(new File(dest.toFile(), "ABC.json").toPath());
+        LOGGER.info("Wrote {}", written);
+        // not vacuous: both definitions of the one name are in the file
+        assertTrue(written.contains("\"U§$$\""), written);
+        assertTrue(written.contains("Tjava.lang.Integer") && written.contains("Tjava.lang.StringBuilder"), written);
+
+        javaInspector.invalidateAllSources();
+        TypeInfo CC = javaInspector.parse("a.b.C", INPUT5);
+        new LoadAnalysisResults(javaInspector.runtime(), javaInspector.mainSources()).go(codec, written);
+        MethodLinkedVariables mlvA2 = CC.findUniqueMethod("putA", 1).analysis()
+                .getOrNull(METHOD_LINKS, MethodLinkedVariablesImpl.class);
+        MethodLinkedVariables mlvB2 = CC.findUniqueMethod("putB", 1).analysis()
+                .getOrNull(METHOD_LINKS, MethodLinkedVariablesImpl.class);
+        assertTrue(containerFieldTypes(mlvA).contains("§$$"), containerFieldTypes(mlvA));
+        assertTrue(containerFieldTypes(mlvB).contains("§$$"), containerFieldTypes(mlvB));
+        assertEquals(mlvA, mlvA2);
+        assertEquals(mlvB, mlvB2);
+        assertEquals(containerFieldTypes(mlvA), containerFieldTypes(mlvA2));
+        assertEquals(containerFieldTypes(mlvB), containerFieldTypes(mlvB2));
+    }
+
+    // the field types of every container a summary's links name, which equality of the variables does not compare
+    private static String containerFieldTypes(MethodLinkedVariables mlv) {
+        java.util.TreeSet<String> out = new java.util.TreeSet<>();
+        mlv.ofParameters().forEach(links -> links.forEach(link -> java.util.stream.Stream.of(link.from(), link.to())
+                .forEach(v -> {
+                    var pt = v.parameterizedType();
+                    if (pt.typeInfo() != null && Util.isContainerType(pt.typeInfo())) {
+                        out.add(pt.typeInfo().fullyQualifiedName() + pt.typeInfo().fields().stream()
+                                .map(f -> f.type().toString()).toList());
+                    }
+                })));
+        return out.toString();
+    }
+
     private void testLink4(MethodLinkedVariables mlvOne) {
         assertEquals("""
                 [0:x∩1:y, 1:y∩0:x] --> oneInstance.§ksvs.§ks∋0:x,oneInstance.§ksvs.§ks∩1:y,oneInstance.§ksvs.§vs∩0:x,oneInstance.§ksvs.§vs∋1:y\

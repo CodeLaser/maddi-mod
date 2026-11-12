@@ -287,6 +287,14 @@ public class AnalysisEngineImpl implements AnalysisEngine {
                 LOGGER.error("SHADOWDIFF failed: {}", e.toString());
             }
         }
+        // CODECAUDIT: what of this analysis a stored copy would bring back (CodecAudit)
+        if (o.environmentGates() && System.getenv("CODECAUDIT") != null) {
+            try {
+                new CodecAudit().run(javaInspector, javaInspector.mainSources(), request.primaryTypes());
+            } catch (RuntimeException | AssertionError | StackOverflowError e) {
+                LOGGER.error("CODECAUDIT failed", e);
+            }
+        }
         List<Message> messages = analyzer.messages();
 
         int fpSets = 0;

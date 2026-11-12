@@ -40,6 +40,7 @@ import io.codelaser.maddi.modification.prepwork.Util;
 import io.codelaser.maddi.modification.prepwork.variable.Links;
 import io.codelaser.maddi.modification.prepwork.variable.ReturnVariable;
 import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
+import io.codelaser.maddi.modification.prepwork.variable.impl.ObjectCreationVariableImpl;
 import io.codelaser.maddi.modification.prepwork.variable.impl.ReturnVariableImpl;
 
 public class LinkCodec {
@@ -110,6 +111,24 @@ public class LinkCodec {
          * it is the element being written, which is the common case.
          */
         private final Map<String, List<MarkerDef>> encodedMarkerVariables = new HashMap<>();
+
+        // the virtual container types being written, so that one met inside its own definition is the short form
+        private final Set<TypeInfo> containersInProgress = new HashSet<>();
+
+        // the marker variables written so far: each is written once, in full, and referred back to afterwards
+        @Override
+        public Object encodingState() {
+            Map<String, List<MarkerDef>> copy = new HashMap<>();
+            encodedMarkerVariables.forEach((k, v) -> copy.put(k, new ArrayList<>(v)));
+            return copy;
+        }
+
+        @SuppressWarnings("unchecked")
+        @Override
+        public void restoreEncodingState(Object state) {
+            encodedMarkerVariables.clear();
+            if (state != null) encodedMarkerVariables.putAll((Map<String, List<MarkerDef>>) state);
+        }
 
         /**
          * The element a marker variable written here belongs to. A parameter shares its method's scope: they are
@@ -195,6 +214,13 @@ public class LinkCodec {
                 return encodeList(context, List.of(encodeString(context, "R"),
                         encodeMethodInfo(context, rv.methodInfo())));
             }
+            if (variable instanceof ObjectCreationVariableImpl oc) {
+                // the object a 'new' made: equal by its position and type, as the analysis made it; left out, every
+                // link naming one was missing from a stored analysis (fernflower: 719 values, 2026-11-12)
+                return encodeList(context, List.of(encodeString(context, "O"), encodeCreationMethod(context, oc),
+                        encodeString(context, oc.index),
+                        encodeType(context, oc.parameterizedType())));
+            }
             if (variable instanceof MarkerVariable mv) {
                 // because they may contain an extensive definition, we cache these marker variables
                 // the name has an "M" appended, so that it does not clash with marker variables generated from
@@ -234,6 +260,20 @@ public class LinkCodec {
                    && !(variable instanceof IntermediateVariable)
                     : "engine-internal variable leaked into persistence: " + variable;
             return super.encodeVariable(context, variable);
+        }
+
+        /*
+         The method an object creation belongs to plays no part in its equality (position and type do); when it is one
+         the codec cannot name (the constructor javac makes for an array creation, which is no member of its type),
+         it is left out and read back as null.
+         */
+        private EncodedValue encodeCreationMethod(Context context, ObjectCreationVariableImpl oc) {
+            if (oc.methodInfo() == null) return encodeList(context, List.of());
+            try {
+                return encodeMethodInfo(context, oc.methodInfo());
+            } catch (RuntimeException e) {
+                return encodeList(context, List.of());
+            }
         }
 
         // links, extra, modified
@@ -303,6 +343,12 @@ public class LinkCodec {
                 MethodInfo methodInfo = decodeMethodInfo(context, list.get(1));
                 return new ReturnVariableImpl(methodInfo);
             }
+            if ("O".equals(s)) {
+                MethodInfo methodInfo = decodeList(context, list.get(1)).isEmpty() ? null
+                        : decodeMethodInfo(context, list.get(1));
+                return new ObjectCreationVariableImpl(methodInfo, decodeString(context, list.get(2)),
+                        decodeType(context, list.get(3)));
+            }
             if ("m".equals(s)) {
                 String name = decodeString(context, list.get(1));
                 // a third element names the element the definition was written under; without it, this one
@@ -351,27 +397,34 @@ public class LinkCodec {
             return super.decodeVariable(context, s, list);
         }
 
-        private final Set<TypeInfo> duplication = new HashSet<>();
-
         @Override
         public Stream<EncodedValue> encodeInfoOutOfContextStream(Context context, TypeAndSorted tas, Info info) {
             if (info instanceof TypeInfo ti && Util.isContainerType(ti)) {
                 String s = "U" + ti.simpleName();
-                Stream<EncodedValue> pre = encodeInfoOutOfContextStream(context,
+                List<EncodedValue> pre = encodeInfoOutOfContextStream(context,
                         null, // tas unused for a type recursion: the base recomputes it from the info
-                        ti.compilationUnitOrEnclosingType().getRight());
-                Stream<EncodedValue> post;
-                int n;
-                if (duplication.add(ti)) {
-                    post = ti.fields()
-                            .stream().map(f -> encodeInfoOutOfContext(context, f));
-                    n = ti.fields().size();
-                } else {
-                    post = Stream.empty();
-                    n = 0;
+                        ti.compilationUnitOrEnclosingType().getRight()).toList();
+                /*
+                 In full wherever it occurs, and its fields as ["v", name, type], without their owner, which is the
+                 container itself. Once per file, as before 2026-11-12, a type's own values -- encoded after its
+                 members' but written before them -- referred to a definition the reader had not met yet; and a field
+                 written with its owner as the prefix referred back to the container being read, which the reader had
+                 not made yet (guava: about 120 types' results lost). Inside its own definition (a field whose type is
+                 the container) it is the short form, 0 fields, which the reader resolves: it registers the container
+                 before it reads the fields.
+                 */
+                if (!containersInProgress.add(ti)) {
+                    return Stream.concat(pre.stream(), Stream.of(encodeString(context, s), encodeInt(context, 0)));
                 }
-                return Stream.concat(Stream.concat(pre, Stream.of(encodeString(context, s))),
-                        Stream.concat(Stream.of(encodeInt(context, n)), post));
+                try {
+                    List<EncodedValue> post = ti.fields().stream().map(f -> encodeList(context, List.of(
+                            encodeString(context, "v"), encodeString(context, f.name()),
+                            encodeType(context, f.type())))).toList();
+                    return Stream.concat(Stream.concat(pre.stream(), Stream.of(encodeString(context, s))),
+                            Stream.concat(Stream.of(encodeInt(context, post.size())), post.stream()));
+                } finally {
+                    containersInProgress.remove(ti);
+                }
             }
             if (info instanceof FieldInfo fi && Util.virtual(fi)) {
                 String s = "V" + fi.name();
@@ -410,6 +463,23 @@ public class LinkCodec {
 
         private final Map<String, TypeInfo> virtualTypes = new HashMap<>();
 
+        /*
+         A container's name does not identify it: HashMap's §$$ of String and Holder and HashMap's §$$ of Statement and
+         List<StatEdge> are both 'java.util.HashMap.§$$'. Reused by name, the second definition read came back as the
+         first one's container, with the first one's field types, and the restored links of every method that named it
+         were wrong (fernflower, 2026-11-12: JADNameProvider.addParentContext, and from there the independence of
+         IVariableNameProvider and ConstantPool after a restore). One object per definition, as the analysis made it.
+         */
+        private final Map<String, TypeInfo> containersByDefinition = new HashMap<>();
+
+        private static String definitionKey(TypeInfo owner, String name, List<EncodedValue> fieldSpecs) {
+            StringBuilder sb = new StringBuilder(owner.fullyQualifiedName()).append('.').append(name);
+            for (EncodedValue spec : fieldSpecs) {
+                sb.append('|').append(spec instanceof D(Node s) ? s.getSource() : spec.toString());
+            }
+            return sb.toString();
+        }
+
         @Override
         protected ParameterizedType decodeSimpleType(Context context, StringLiteral sl) {
             String fqn = unquote(sl.getSource()).substring(1);
@@ -437,16 +507,46 @@ public class LinkCodec {
                 if (numFields == 0) {
                     String fqn = currentType.typeInfo().fullyQualifiedName() + "." + name;
                     containerType = virtualTypes.get(fqn);
-                    assert containerType != null;
+                    assert containerType != null : "Cannot find the virtual container type " + fqn + " among "
+                                                   + virtualTypes.keySet();
+                } else if (isLocalFieldSpec(context, tail.get(1))) {
+                    // since 2026-11-12: the container first, registered, then its fields, owned by it
+                    TypeInfo owner = currentType.typeInfo();
+                    String key = definitionKey(owner, name, tail.subList(1, 1 + numFields));
+                    TypeInfo known = containersByDefinition.get(key);
+                    if (known != null) {
+                        containerType = known;
+                    } else {
+                        containerType = runtime.newTypeInfo(owner, name.startsWith("§") ? name : "§" + name);
+                        containersByDefinition.put(key, containerType);
+                        // the short form inside the definition below refers to this one
+                        virtualTypes.put(owner.fullyQualifiedName() + "." + name, containerType);
+                        virtualTypes.put(containerType.fullyQualifiedName(), containerType);
+                        List<FieldInfo> fields = new ArrayList<>(numFields);
+                        for (EncodedValue spec : tail.subList(1, 1 + numFields)) {
+                            List<EncodedValue> parts = decodeList(context, spec);
+                            fields.add(VirtualFieldComputer.newFieldKeepName(runtime, decodeString(context, parts.get(1)),
+                                    decodeType(context, parts.get(2)), containerType));
+                        }
+                        VirtualFieldComputer.completeContainer(runtime, containerType, fields);
+                    }
                 } else {
                     List<FieldInfo> fields = tail.stream().skip(1).limit(numFields)
                             .map(ev -> (FieldInfo) decodeInfoOutOfContext(context, ev))
                             .toList();
                     String typeName = fields.stream().map(this::nameComponent).collect(Collectors.joining());
                     TypeInfo owner = currentType.typeInfo();
-                    containerType = VirtualFieldComputer.makeContainer(runtime, owner, typeName, fields);
+                    // the same container, written in full again: the one made before, one object per definition
+                    String key = definitionKey(owner, name, tail.subList(1, 1 + numFields));
+                    TypeInfo known = containersByDefinition.get(key);
+                    containerType = known != null ? known
+                            : VirtualFieldComputer.makeContainer(runtime, owner, typeName, fields);
+                    containersByDefinition.put(key, containerType);
                 }
                 virtualTypes.put(containerType.fullyQualifiedName(), containerType);
+                // also under the name the writer gave it, which a later reference uses, and which the name made
+                // from the fields here need not equal
+                virtualTypes.put(currentType.typeInfo().fullyQualifiedName() + "." + name, containerType);
                 return new DR(containerType, new TypeAndSorted(containerType));
             }
             if ('V' == type || 'G' == type) {
@@ -454,10 +554,22 @@ public class LinkCodec {
                 TypeInfo owner = currentType.typeInfo();
                 assert list.size() == pos + 2; // pre, this, one extra
                 ParameterizedType fieldType = decodeType(context, list.get(pos + 1));
-                FieldInfo newField = VirtualFieldComputer.newFieldKeepName(runtime, name, fieldType, owner);
+                // a container's field is the container's own, now that the container is one object per name
+                FieldInfo own = 'V' == type && Util.isContainerType(owner) ? owner.fields().stream()
+                        .filter(f -> f.name().equals(name)).findFirst().orElse(null) : null;
+                FieldInfo newField = own != null ? own
+                        : VirtualFieldComputer.newFieldKeepName(runtime, name, fieldType, owner);
                 return new DR(newField, typeAndSorted);
             }
             return super.decodeInfo(context, currentType, typeAndSorted, type, name, list, pos);
+        }
+
+        // ["v", name, type]: a field of a container's own definition
+        private boolean isLocalFieldSpec(Context context, EncodedValue ev) {
+            if (!isList(ev)) return false;
+            List<EncodedValue> list = decodeList(context, ev);
+            return list.size() == 3 && list.getFirst() instanceof D(Node s) && s instanceof StringLiteral sl
+                   && "v".equals(unquote(sl.getSource()));
         }
 
         private String nameComponent(FieldInfo fieldInfo) {
@@ -473,19 +585,14 @@ public class LinkCodec {
         @Override
         public EncodedValue encodeType(Context context, ParameterizedType type) {
             if (type.typeInfo() != null && Util.isContainerType(type.typeInfo())) {
-                if (!duplication.contains(type.typeInfo())) {
-                    Stream<EncodedValue> name = Stream.of(encodeString(context, "V" + type.typeInfo().fullyQualifiedName()));
-                    Stream<EncodedValue> arrays = Stream.of(encodeInt(context, type.arrays()));
-                    // this one will add to duplication
-                    Stream<EncodedValue> typeStream = encodeInfoOutOfContextStream(context,
-                            null, // tas unused for a type recursion: the base recomputes it from the info
-                            type.typeInfo());
-                    List<EncodedValue> list = Stream.concat(Stream.concat(name, arrays), typeStream).toList();
-                    return encodeList(context, list);
-                } else {
-                    EncodedValue name = encodeString(context, "R" + type.typeInfo().fullyQualifiedName());
-                    return encodeList(context, List.of(name, encodeInt(context, type.arrays())));
-                }
+                // always in full, as encodeInfoOutOfContextStream: the "R" back-reference of older files is still read
+                Stream<EncodedValue> name = Stream.of(encodeString(context, "V" + type.typeInfo().fullyQualifiedName()));
+                Stream<EncodedValue> arrays = Stream.of(encodeInt(context, type.arrays()));
+                Stream<EncodedValue> typeStream = encodeInfoOutOfContextStream(context,
+                        null, // tas unused for a type recursion: the base recomputes it from the info
+                        type.typeInfo());
+                List<EncodedValue> list = Stream.concat(Stream.concat(name, arrays), typeStream).toList();
+                return encodeList(context, list);
             }
             return super.encodeType(context, type);
         }
