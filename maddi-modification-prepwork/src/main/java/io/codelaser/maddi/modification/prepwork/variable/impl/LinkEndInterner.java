@@ -21,6 +21,8 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 
+import io.codelaser.maddi.cst.api.variable.DependentVariable;
+import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.cst.api.variable.Variable;
 
 /**
@@ -34,11 +36,13 @@ import io.codelaser.maddi.cst.api.variable.Variable;
  * {@code lst} of another, and a field whose scope is no variable is named by the scope's line and column, which another
  * file has as well. Shared across methods, an end of one method stood in for an end of another, and verdicts moved
  * (fernflower: 30 lines of the fingerprint). An end is shared only with an equal end of the same class and type, as
- * the engine also keeps equal ends of different types apart.
+ * the engine also keeps equal ends of different types apart, and of the same structure (see sameStructure).
  * <p>
- * Gate {@code INTERNLINKS} (presence): on. Off by default until the proving-corpus A/B is in: on fernflower it moves
- * one verdict (VarVersionsProcessor.$1.processExprent, nonModifying false to true; the lambda only reads the captured
- * map the enclosing method writes, so the change looks right).
+ * Gate {@code INTERNLINKS} (presence): on; off by default. Proving-corpus A/B (2026-11-12, same commit, gate off
+ * against on): activemq, jenkins, langchain4j 0 lines; fernflower, timefold 2; guava 6 (it varies run to run). Each
+ * moved verdict is an anonymous class's or lambda's method going from nonModifying false to true, where the method
+ * modifies nothing of its own (VarVersionsProcessor.$1.processExprent reads a captured map; InvokableTest's Runnables
+ * print captured locals). Fernflower's live heap at iteration 1: 784 -> 588 MB.
  */
 public final class LinkEndInterner implements AutoCloseable {
     private static final boolean OFF = System.getenv("INTERNLINKS") == null;
@@ -74,10 +78,32 @@ public final class LinkEndInterner implements AutoCloseable {
         if (interner == null) return variable;
         Variable known = interner.ends.putIfAbsent(variable, variable);
         if (known == null || known == variable) return variable;
-        if (known.getClass() != variable.getClass()
-            || !Objects.equals(known.parameterizedType(), variable.parameterizedType())) {
-            return variable;
+        return sameStructure(known, variable, 0) ? known : variable;
+    }
+
+    /*
+     Equal is not enough even within one method: a field reference's name is its field and its scope's name, and two
+     equal names can stand for different scope chains (a scope that is a variable, and one that is an expression named
+     by its position). Given the other one, the engine's isPartOf(primary, from) failed (timefold, ActiveMQ) and
+     verdicts moved. Shared only when the structure the engine walks is the same: class, type, field, scope chain.
+     */
+    private static boolean sameStructure(Variable a, Variable b, int depth) {
+        if (a == b) return true;
+        if (a == null || b == null || depth > 32) return false;
+        if (a.getClass() != b.getClass() || !Objects.equals(a.parameterizedType(), b.parameterizedType())) return false;
+        if (a instanceof FieldReference fa && b instanceof FieldReference fb) {
+            return fa.fieldInfo() == fb.fieldInfo()
+                   && fa.isDefaultScope() == fb.isDefaultScope()
+                   && Objects.equals(fa.scope(), fb.scope())
+                   && sameStructure(fa.scopeVariable(), fb.scopeVariable(), depth + 1)
+                   && (fa.scopeVariable() != null || fb.scopeVariable() == null);
         }
-        return known;
+        if (a instanceof DependentVariable da && b instanceof DependentVariable db) {
+            return Objects.equals(da.arrayExpression(), db.arrayExpression())
+                   && Objects.equals(da.indexExpression(), db.indexExpression())
+                   && sameStructure(da.arrayVariable(), db.arrayVariable(), depth + 1)
+                   && (da.arrayVariable() != null || db.arrayVariable() == null);
+        }
+        return true;
     }
 }
