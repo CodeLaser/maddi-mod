@@ -71,6 +71,8 @@ public class VirtualFieldComputer {
     private final GenericsHelper genericsHelper;
     private final Set<TypeInfo> multi2;
     private final ParameterizedType iteratorType;
+    private final ParameterizedType iterableType;
+    private final ParameterizedType mapType;
 
     public static final String VF_CHAR = "§";
     public static final String VF_CONCRETE = "$";
@@ -84,6 +86,8 @@ public class VirtualFieldComputer {
         this.genericsHelper = new GenericsHelperImpl(runtime);
         multi2 = Set.of(iterable.typeInfo(), iterator.typeInfo());
         this.iteratorType = iterator;
+        this.iterableType = iterable;
+        this.mapType = javaInspector.compiledTypesManager().type(java.util.Map.class).asParameterizedType();
     }
 
     // ----- computation of "temporary" virtual fields
@@ -216,7 +220,7 @@ public class VirtualFieldComputer {
                         ? null : typeInfo.parentClass()),
                 typeInfo.interfacesImplemented().stream());
         supers.forEach(superPt -> {
-            if (superPt.typeInfo() == null || superPt.parameters().size() != 1) return;
+            if (superPt.typeInfo() == null || superPt.parameters().size() != 1 || !isContainer(superPt)) return;
             TypeParameter argument = superPt.parameters().getFirst().typeParameter();
             if (argument == null || superPt.parameters().getFirst().arrays() > 0) return;
             int index = ours.indexOf(argument);
@@ -377,6 +381,24 @@ public class VirtualFieldComputer {
 
     // package for testing
     int maxMultiplicityFromMethods(TypeInfo typeInfo) {
+        return computeMaxMultiplicityFromMethods(typeInfo);
+    }
+
+    /*
+     A supertype is a container when it is an Iterable or a Map. Only such a supertype hands its hidden content to a
+     subtype whose own methods say nothing (#113): timefold's 'Phase<Solution_>', its selectors and AssertJ's asserts
+     inherited hidden content from any generic supertype, and the run took 7x as long.
+     */
+    private boolean isContainer(ParameterizedType superPt) {
+        return runtime.isAssignableFrom(iterableType, superPt) || runtime.isAssignableFrom(mapType, superPt);
+    }
+
+    private boolean holdsOneOf(ParameterizedType superPt, List<TypeParameter> ours) {
+        return superPt.parameters().stream().anyMatch(p -> p.typeParameter() != null && p.arrays() == 0
+                                                           && ours.contains(p.typeParameter()));
+    }
+
+    private int computeMaxMultiplicityFromMethods(TypeInfo typeInfo) {
         // base for many computations
         if (multi2.contains(typeInfo)) return 2;
         // an Iterator subtype yields many elements too, whatever its own methods return: ListIterator's next() and
@@ -399,7 +421,10 @@ public class VirtualFieldComputer {
                     Stream.ofNullable(typeInfo.parentClass() == null || typeInfo.parentClass().isJavaLangObject()
                             ? null : typeInfo.parentClass()),
                     typeInfo.interfacesImplemented().stream());
-            multiplicity = supers.map(ParameterizedType::typeInfo).filter(Objects::nonNull)
+            // only a container supertype that holds one of our own type parameters ('extends ArrayList<E>')
+            List<TypeParameter> ours = typeInfo.typeParameters();
+            multiplicity = supers.filter(pt -> pt.typeInfo() != null && isContainer(pt) && holdsOneOf(pt, ours))
+                    .map(ParameterizedType::typeInfo)
                     .mapToInt(this::maxMultiplicityFromMethods).max().orElse(0);
         }
         return multiplicity;
