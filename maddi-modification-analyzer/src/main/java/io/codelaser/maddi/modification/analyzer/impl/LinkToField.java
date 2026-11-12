@@ -21,9 +21,13 @@ import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
+import io.codelaser.maddi.cst.api.expression.MethodCall;
+import io.codelaser.maddi.cst.api.expression.VariableExpression;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
+import io.codelaser.maddi.cst.api.variable.This;
 import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.modification.common.AnalysisHelper;
+import io.codelaser.maddi.modification.common.util.OwnStaticState;
 import io.codelaser.maddi.modification.link.impl.Gate;
 import io.codelaser.maddi.modification.link.impl.LinkNatureImpl;
 import io.codelaser.maddi.modification.prepwork.Util;
@@ -78,11 +82,33 @@ class LinkToField {
         return dynamic == null ? ofDeclaredType : ofDeclaredType.max(dynamic);
     }
 
-    /** A field of the instance, or a variable captured from an enclosing method: see the class comment. */
+    /*
+     A field of the instance, a variable captured from an enclosing method (see the class comment), or the static state
+     the method's type owns. Independence is defined against "the fields" (road-to-immutability §045), and "the
+     definitions make no distinction between static and instance fields" (§050): a static setter that stores its
+     argument in its type's static state, or a static getter that hands it out, links to the type's fields just as an
+     instance one does (fernflower's DecompilerContext, CodeLaser/maddi-mod#107). Ownership as for modification
+     (OwnStaticState); another type's static state is a static side effect, not dependence. Gate NOSTATICINDEP.
+     */
     private static boolean reachesInstance(Variable primaryTo, MethodInfo methodInfo) {
         if (primaryTo instanceof FieldReference fr && fr.scopeIsRecursivelyThis()) return true;
+        if (!NO_STATIC_INDEP && OwnStaticState.staticRoot(primaryTo) instanceof FieldReference root
+            && OwnStaticState.owns(methodInfo, root.fieldInfo().owner())) {
+            return true;
+        }
+        if (!NO_THROUGH_CALL && primaryTo instanceof FieldReference fr && fr.scopeVariable() == null
+            && fr.scope() instanceof MethodCall mc && mc.object() instanceof VariableExpression ve) {
+            // 'this.itl.get().collector', 'X.current.get().collector': a field of what a call on the instance's (or
+            // the type's static) state returns is part of that state's object graph (CodeLaser/maddi-mod#107)
+            return reachesInstance(ve.variable(), methodInfo);
+        }
+        if (primaryTo instanceof This thisVar) return false;
         return isCaptured(primaryTo, methodInfo);
     }
+
+    private static final boolean NO_THROUGH_CALL = Gate.isSet("NOTHROUGHCALL");
+
+    private static final boolean NO_STATIC_INDEP = Gate.isSet("NOSTATICINDEP");
 
     /**
      * Whether {@code variable} (or the variable at the root of its field chain) is a parameter of a method that
@@ -166,6 +192,16 @@ class LinkToField {
         }
         if (link.linkNature().equals(LinkNatureImpl.IS_ELEMENT_OF)) {
             //getFile∈this._mruFileList.§es
+            return link.from().parameterizedType();
+        }
+        if (!NO_THROUGH_CALL && link.linkNature().equals(LinkNatureImpl.IS_FIELD_OF) && Util.virtual(link.to())) {
+            // 'getTL ≺ X.current.§$': the value is a field of the object held as the field's content (a ThreadLocal's,
+            // an AtomicReference's), as '∈' is an element of it (CodeLaser/maddi-mod#107)
+            return link.from().parameterizedType();
+        }
+        if (!NO_THROUGH_CALL && link.linkNature().equals(LinkNatureImpl.IS_ASSIGNED_FROM) && primaryTo != link.to()
+            && Util.virtual(link.to()) && !Util.virtual(link.from())) {
+            // 'instTL ← this.itl.§$': 'return itl.get()' hands out the object the field holds as its content
             return link.from().parameterizedType();
         }
         // deliberately NOT judged: ≤/≥ (object graph) and ∩ (overlap). ≤'s to() is the whole container,
