@@ -197,8 +197,37 @@ public class VirtualFieldComputer {
                     ++i;
                 }
             }
+            if (!NO_INHERIT_MULTIPLICITY) subsetSupertypes(typeInfo, containerType, fieldTm);
         }
         return hiddenContent;
+    }
+
+    /*
+     'class VBStyleCollection<E, K> extends ArrayList<E>' (fernflower): the supertype holds one of our type parameters,
+     so hiddenContentHierarchy's same-set filter leaves it out, and nothing translated ArrayList's E: a call to an
+     inherited method (iterator(), get(i)) linked to nothing, and modifying the elements of a for-each over such a field
+     did not modify it (CodeLaser/maddi-mod#113). Map the supertype's type parameter, through its whole hierarchy, onto
+     our container's component for that parameter.
+     */
+    private void subsetSupertypes(TypeInfo typeInfo, TypeInfo containerType, VirtualFieldTranslationMap fieldTm) {
+        List<TypeParameter> ours = typeInfo.typeParameters();
+        Stream<ParameterizedType> supers = Stream.concat(
+                Stream.ofNullable(typeInfo.parentClass() == null || typeInfo.parentClass().isJavaLangObject()
+                        ? null : typeInfo.parentClass()),
+                typeInfo.interfacesImplemented().stream());
+        supers.forEach(superPt -> {
+            if (superPt.typeInfo() == null || superPt.parameters().size() != 1) return;
+            TypeParameter argument = superPt.parameters().getFirst().typeParameter();
+            if (argument == null || superPt.parameters().getFirst().arrays() > 0) return;
+            int index = ours.indexOf(argument);
+            if (index < 0 || index >= containerType.fields().size()) return;
+            ParameterizedType component = containerType.fields().get(index).type();
+            for (FieldInfo formal : hiddenContentHierarchy(superPt.typeInfo())) {
+                if (formal != null && formal.type().typeParameter() != null) {
+                    fieldTm.put(formal.type().typeParameter(), component);
+                }
+            }
+        });
     }
 
     private @Nullable FieldInfo singleTypeParameter(ParameterizedType pt,
@@ -361,8 +390,23 @@ public class VirtualFieldComputer {
             int m = computeMultiplicity(returnType, true);
             multiplicity = Math.max(multiplicity, m);
         }
+        if (multiplicity == 0 && !NO_INHERIT_MULTIPLICITY && !typeInfo.typeParameters().isEmpty()) {
+            // its own methods say nothing: 'class MyList<E> extends ArrayList<E> { }' (fernflower's VBStyleCollection
+            // adds a few, none returning E). It holds what its supertypes hold; without this it had no hidden content,
+            // and a for-each over it linked its loop variable to nothing (CodeLaser/maddi-mod#113). A type whose own
+            // methods do say (vavr's Option: one T) keeps its own count. Gate NOINHERITMULTIPLICITY
+            Stream<ParameterizedType> supers = Stream.concat(
+                    Stream.ofNullable(typeInfo.parentClass() == null || typeInfo.parentClass().isJavaLangObject()
+                            ? null : typeInfo.parentClass()),
+                    typeInfo.interfacesImplemented().stream());
+            multiplicity = supers.map(ParameterizedType::typeInfo).filter(Objects::nonNull)
+                    .mapToInt(this::maxMultiplicityFromMethods).max().orElse(0);
+        }
         return multiplicity;
     }
+
+    private static final boolean NO_INHERIT_MULTIPLICITY =
+            io.codelaser.maddi.modification.link.impl.Gate.isSet("NOINHERITMULTIPLICITY");
 
     private int computeMultiplicity(ParameterizedType parameterizedType, boolean ignoreMethodParameters) {
         int arrays = parameterizedType.arrays();
