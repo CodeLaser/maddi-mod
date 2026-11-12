@@ -1137,6 +1137,16 @@ class WriteLinksAndModification {
         return any;
     }
 
+    /*
+     #112's ≥ rule leaves alone a variable whose modification face is grouped with the container's: an iterator in the
+     list's object graph ('deque ≥ it', 'it.§m ☷{remove} deque.§m'). The group decides, with its pass set: next() does
+     not modify the deque, remove() does (TestModificationThroughView).
+     */
+    private boolean sharesModificationGroup(Variable modified, Variable container) {
+        return followGraph.graph().eqGroups(modified).anyMatch(group -> group.members().stream()
+                .map(Util::firstRealVariable).anyMatch(container::equals));
+    }
+
     private boolean notLinkedToModified(Links.Builder builder,
                                         Map<Variable, Set<MethodInfo>> modifiedVariablesAndTheirCause) {
         return notLinkedToModified(builder, modifiedVariablesAndTheirCause, false);
@@ -1183,7 +1193,8 @@ class WriteLinksAndModification {
                     || ln == CONTAINS_AS_MEMBER && !structural
                     // #112: 'x.map.§$$s[-2] ≥ e', e from inside the object graph of the field's hidden content (an
                     // element of a copy of one of its values): modifying it modifies x deeply, as ∋ does
-                    || ln == OBJECT_GRAPH_CONTAINS && !structural && !NO_OBJECT_GRAPH_MOD) {
+                    || ln == OBJECT_GRAPH_CONTAINS && !structural && !NO_OBJECT_GRAPH_MOD
+                       && !sharesModificationGroup(toReal, builder.primary())) {
                     // the completion, as for ≡ above: a later variable holding this one as an element (∋) is
                     // modified in turn. vlist.get(i).put(..) modifies vlist through its element, and versions,
                     // which holds vlist, through vlist (CodeLaser/maddi-mod#62)

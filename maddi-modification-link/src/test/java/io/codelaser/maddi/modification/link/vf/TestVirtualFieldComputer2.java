@@ -76,8 +76,11 @@ public class TestVirtualFieldComputer2 extends CommonTest {
         VirtualFieldComputer vfc = new VirtualFieldComputer(javaInspector);
         assertEquals("Type java.util.HashSet<C>", assignment.value().parameterizedType().toString());
         VirtualFieldComputer.VfTm vfTm = vfc.compute(assignment.value().parameterizedType(), true);
+        // AbstractSet has hidden content since CodeLaser/maddi-mod#113: its own methods say nothing about E, so it has
+        // its supertypes' (VirtualFieldComputer.maxMultiplicityFromMethods)
         assertEquals("""
                 VfTm[virtualFields=§m - C[] §cs, formalToConcrete=E=TP#0 in AbstractCollection [] --> C=TP#0 in B []
+                E=TP#0 in AbstractSet [] --> C=TP#0 in B []
                 E=TP#0 in Collection [] --> C=TP#0 in B []
                 E=TP#0 in HashSet [] --> C=TP#0 in B []
                 E=TP#0 in Set [] --> C=TP#0 in B []
