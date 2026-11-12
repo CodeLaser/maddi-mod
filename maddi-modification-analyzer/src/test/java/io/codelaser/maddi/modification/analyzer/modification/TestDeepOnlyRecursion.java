@@ -113,6 +113,53 @@ public class TestDeepOnlyRecursion extends CommonTest {
         }
     }
 
+    @Language("java")
+    private static final String FOR_EACH = """
+            package a.b;
+            import java.util.ArrayList;
+            import java.util.HashMap;
+            import java.util.List;
+            import java.util.Map;
+            public class Owner {
+                public static class C {
+                    private Object pool;
+                    public Object getPool() { if (pool == null) pool = new Object(); return pool; }
+                }
+                private final Map<String, C> classes = new HashMap<>();
+                private final Map<String, List<C>> groups = new HashMap<>();
+                private final List<C> list = new ArrayList<>();
+                public List<C> all() { return list; }
+                public void viaValues() { for (C c : classes.values()) c.getPool(); }
+                public void viaGetter() { for (C c : all()) c.getPool(); }
+                public void viaMapGet(String k) { for (C c : groups.get(k)) c.getPool(); }
+                public void viaField() { for (C c : list) c.getPool(); }
+                public void viaLocal(String k) { List<C> l = groups.get(k); for (C c : l) c.getPool(); }
+                public int reads() { int n = 0; for (C c : all()) if (c != null) n++; return n; }
+            }
+            """;
+
+    @DisplayName("DEEPWALK=1: modifying the elements of a for-each over a call's result still modifies the owner")
+    @Test
+    public void forEachOverCallResult() {
+        boolean before = ShadowModificationPass.DEEP_WALK;
+        ShadowModificationPass.DEEP_WALK = true;
+        try {
+            TypeInfo x = javaInspector.parse("a.b.Owner", FOR_EACH);
+            List<Info> ao = prepWork(x);
+            new IteratingAnalyzerImpl(javaInspector, new IteratingAnalyzerImpl.ConfigurationBuilder()
+                    .setMaxIterations(10).setModificationViaReachability(true).build()).analyze(ao);
+            assertEquals("false/true", m(x, "viaValues"));
+            assertEquals("false/true", m(x, "viaGetter"));
+            // viaMapGet, 'for (C c : groups.get(k)) c.getPool()', two element links deep, is missed with the gate off
+            // too: the fixpoint itself does not see it (true/true either way); not this gate's
+            assertEquals("false/true", m(x, "viaField"));
+            assertEquals("false/true", m(x, "viaLocal"));
+            assertEquals("true/true", m(x, "reads"));
+        } finally {
+            ShadowModificationPass.DEEP_WALK = before;
+        }
+    }
+
     private static String m(TypeInfo typeInfo, String name) {
         MethodInfo mi = typeInfo.methods().stream().filter(m -> m.name().equals(name)).findFirst().orElseThrow();
         return mi.isNonModifying() + "/" + mi.isStructurallyNonModifying();

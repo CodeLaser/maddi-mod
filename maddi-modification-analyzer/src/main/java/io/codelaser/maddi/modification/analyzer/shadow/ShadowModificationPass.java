@@ -605,13 +605,15 @@ public class ShadowModificationPass {
     }
 
     /**
-     * Experiment (CodeLaser/maddi#202), off by default: DEEPWALK=1 leaves a walkable body's deep-only entries to the
-     * walk, as its structural ones, unless {@link #chainedModifiableReceiver} says the walk cannot see one of them.
+     * CodeLaser/maddi#202, on by default (NODEEPWALK=1 restores #59's seeding): a walkable body's deep-only entries are
+     * left to the walk, as its structural ones, unless {@link #chainedModifiableReceiver} says the walk cannot see one
+     * of them. Neutral on langchain4j (FPDUMP byte-identical) and the dogfood ratchet; one reverse divergence more on
+     * the clone bench, a read-only method (TestShadowCloneBench).
      * Seeding them keeps the fixpoint's recursion pessimism: fernflower's GenericType.appendTypeArguments hands an
      * element of 'this.arguments' to ExprProcessor.getCastTypeName, which recurses back into it, and the imported
      * entry kept the whole cycle deep-modifying.
      */
-    public static volatile boolean DEEP_WALK = System.getenv("DEEPWALK") != null;
+    public static volatile boolean DEEP_WALK = System.getenv("NODEEPWALK") == null;
 
     private final Map<MethodInfo, Boolean> deepOnlyRederivableCache = new HashMap<>();
 

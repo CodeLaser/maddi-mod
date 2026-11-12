@@ -356,7 +356,13 @@ public class TestShadowCloneBench extends CommonTest {
         //     unmodifiedParameter of an Object closed or flushed through a cast (flushIfPossible(Object),
         //     safelyClose(Object,InputStream), close(Object) x2): the pass now reaches what the fixpoint modifies.
         //   maddi-mod dba3db0f (#101) is neutral: reverted, the same 327 and 47.
-        Assertions.assertEquals(327, totalRev,
+        // ⭐ Re-baselined 2026-11-12 for DEEPWALK on by default (maddi-mod ws/maddi-bug, CodeLaser/maddi#202): reverse
+        // 327 -> 328, 1 opened and none closed; divergences unchanged (47, same lists). The opened one is
+        // nonModifyingMethod Function16064515_file1957227.getReferenceId(String), which only reads: two for-each
+        // loops over HashSets out of map fields, String.equals and a read-only getUuid. The fixpoint keeps it
+        // modifying; the pass no longer imports that through the deep-only summary entry, so the pass is right.
+        // NODEEPWALK=1 gives 327 again.
+        Assertions.assertEquals(328, totalRev,
                 "reverse divergences are expected since design A (110695ece) retired the "
                 + "walkable-summary seed channel; re-baseline deliberately, and reclassify");
         // Re-baselined 2026-09-22 for the RECEIVER-DISCLAIMER rule (@IgnoreModifications on a parameter now
