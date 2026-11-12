@@ -466,6 +466,7 @@ class WriteLinksAndModification {
                                + " b=" + builder.linkSet());
             System.out.println("RVTRACE groups " + followGraph.graph().printShared(Object::toString).replace("\n", " | "));
         }
+        if (!NO_SCOPE_ALIAS) addScopeAliases(builder);
         dedupReversePairs(builder);
         List<Link> toRemove = new ArrayList<>();
         if (variable instanceof ReturnVariable rv) {
@@ -934,6 +935,86 @@ class WriteLinksAndModification {
 
     // iterateOverShared, but when 'recipientSide' the rep expands only to recipient members (drops pure sources),
     // so an incoming assignment edge is not attributed to a value that merely flows into the collapsed variable.
+    /*
+     CodeLaser/maddi-mod#107: 'Ctx ctx = this.own; ctx.collector = c;' groups {this.own, ctx} and, separately,
+     {ctx.collector, 0:c}. The second group's member is spelled through the local 'ctx', so the parameter's row reads
+     only '0:c → ctx.collector', which the summary drops with 'ctx': the store left no trace on the parameter (fernflower's
+     DecompilerContext.startClass, where 'ctx' comes from a static ThreadLocal). The members of the scope's group hold
+     the same object, so the field reached through 'ctx' is the field reached through 'this.own': each link to a field
+     rooted in a local is also emitted through every member of the local's group that outlives it (a field, a parameter,
+     a static, this). Gate NOSCOPEALIAS.
+     */
+    private static final boolean NO_SCOPE_ALIAS = Gate.isSet("NOSCOPEALIAS");
+
+    private void addScopeAliases(Links.Builder builder) {
+        List<Link> added = new ArrayList<>();
+        for (Link link : builder.linkSet()) {
+            if (!(link.to() instanceof FieldReference fr) || !rootedInLocal(link.to()) || Util.virtual(link.to())) {
+                continue;
+            }
+            // one longer-lived member only: a group joining alternatives ('x = c ? a : b') does not make 'x.f' both
+            // 'a.f' and 'b.f'
+            List<Variable> aliases = scopeAliases(link.to()).stream()
+                    .filter(alias -> !alias.equals(link.to()) && !rootedInLocal(alias)).toList();
+            if (aliases.size() == 1) {
+                Variable alias = aliases.getFirst();
+                if (!alias.equals(link.from()) && !Util.primary(alias).equals(Util.primary(link.from()))
+                    && !isInternalSelfFieldLink(link.from(), alias)) {
+                    added.add(new LinksImpl.LinkImpl(link.from(), link.linkNature(), alias, link.mediated()));
+                }
+            }
+            /*
+             'Ctx ctx = getCurrent(); ctx.collector = c;' where 'ctx ← X.current.§$': the local holds the object a
+             field holds as its content (a ThreadLocal's), which no group records. The value stored in, or read from,
+             the local's field is then that field of the content: '0:c → X.current.§$.collector'. Naming the field
+             lets its modification reach the value, as for the store through a static field (#108).
+             */
+            if (link.linkNature().isIdenticalToOrAssignedFromTo() && fr.scopeVariable() != null
+                && !(fr.scopeVariable() instanceof FieldReference) && !Util.virtual(link.from())) {
+                Variable scope = followGraph.graph().translateForward(fr.scopeVariable());
+                for (Map.Entry<Variable, LinkNature> e : followGraph.graph().closure(scope)) {
+                    Variable source = e.getKey();
+                    if (e.getValue() == IS_ASSIGNED_FROM && Util.virtual(source) && !rootedInLocal(source)
+                        && !(Util.primary(source) instanceof SharedVariable)
+                        && !(Util.primary(source) instanceof IntermediateVariable)
+                        && !(Util.primary(source) instanceof MarkerVariable)) {
+                        Variable through = runtime.newFieldReference(fr.fieldInfo(),
+                                runtime.newVariableExpression(source), fr.parameterizedType());
+                        added.add(new LinksImpl.LinkImpl(link.from(), link.linkNature(), through, link.mediated()));
+                    }
+                }
+            }
+        }
+        for (Link link : added) {
+            if (!builder.contains(link.from(), link.linkNature(), link.to())) {
+                builder.add(link.from(), link.linkNature(), link.to(), link.mediated());
+            }
+        }
+    }
+
+    private static boolean rootedInLocal(Variable variable) {
+        Variable root = Util.primary(variable);
+        return root instanceof io.codelaser.maddi.cst.api.variable.LocalVariable;
+    }
+
+    // 'variable' spelled through every member of the groups along its scope chain (itself included)
+    private List<Variable> scopeAliases(Variable variable) {
+        if (variable instanceof FieldReference fr && fr.scopeVariable() != null) {
+            List<Variable> result = new ArrayList<>();
+            for (Variable scope : scopeAliases(fr.scopeVariable())) {
+                result.add(scope.equals(fr.scopeVariable()) ? fr
+                        : runtime.newFieldReference(fr.fieldInfo(), runtime.newVariableExpression(scope),
+                        fr.parameterizedType()));
+            }
+            return result;
+        }
+        Collection<Variable> shared = followGraph.graph().allShared(variable);
+        if (shared.contains(variable)) return List.copyOf(shared);
+        List<Variable> result = new ArrayList<>(shared);
+        result.addFirst(variable);
+        return result;
+    }
+
     private Stream<Variable> expandShared(Variable variable, boolean recipientSide) {
         if (!recipientSide) return iterateOverShared(variable);
         return iterateOverShared(variable).filter(m -> !followGraph.graph().isPureAssignmentSource(m));

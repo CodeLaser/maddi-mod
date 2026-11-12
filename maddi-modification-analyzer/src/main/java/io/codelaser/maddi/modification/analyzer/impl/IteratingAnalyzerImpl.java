@@ -377,7 +377,11 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                         var evm = info.analysis().getOrNull(PropertyImpl.EVENTUAL_METHOD,
                                 ValueImpl.EventualImpl.class);
                         String evMethod = evm != null && evm.isEventual() ? " eventual=" + evm : "";
-                        v = "method nonModifying=" + b + getset + evNonMod + evMethod;
+                        // FPDUMP_PARAMS also adds the method's independence (the A/B corpus format stays unchanged)
+                        String indMethod = System.getenv("FPDUMP_PARAMS") == null ? ""
+                                : " independent=" + info.analysis().getOrNull(PropertyImpl.INDEPENDENT_METHOD,
+                                ValueImpl.IndependentImpl.class);
+                        v = "method nonModifying=" + b + getset + evNonMod + evMethod + indMethod;
                     } else if (info instanceof FieldInfo) {
                         var b = info.analysis().getOrNull(PropertyImpl.UNMODIFIED_FIELD,
                                 ValueImpl.BoolImpl.class);
