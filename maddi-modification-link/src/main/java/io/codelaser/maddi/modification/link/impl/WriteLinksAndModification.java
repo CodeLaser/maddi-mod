@@ -133,6 +133,7 @@ class WriteLinksAndModification {
                 ? new HashMap<>(expandedModifiedDuringEvaluation)
                 : expand(modifiedDuringEvaluation, deepOnlyDuringEvaluation);
         closeOverModificationGroups(expandedModifiedDuringEvaluation);
+        modifiedElementOf = modifiedElementOf(expandedModifiedDuringEvaluation);
         if (expandedStructurallyModifiedDuringEvaluation != expandedModifiedDuringEvaluation) {
             closeOverModificationGroups(expandedStructurallyModifiedDuringEvaluation);
         }
@@ -201,6 +202,39 @@ class WriteLinksAndModification {
                 : unmarkedModifications.stream().filter(deepOnlyDuringEvaluation::contains)
                 .collect(Collectors.toUnmodifiableSet());
         return new WriteResult(builtNewLinkedVariables, unmarkedModifications, unmarkedDeepOnly, sum);
+    }
+
+    /*
+    CodeLaser/maddi-mod#113 (#26's local half, narrowed): when this evaluation modifies an element of a container's
+    hidden content ('s ∈ l.§$s', s modified), every other variable known to be an element of that same hidden content
+    ('0:root ∈ l.§$s') may be the object modified: 'l.add(root); St s = l.get(0); s.clearTemp()' modifies root. The
+    book's §080 "Propagating modifications" (useAddNewLine). Deep only: the element modified may be another one, so
+    nothing is known about root itself. Only an element's modification triggers it, not any modification of the
+    container's hidden content: an opaque consumer applied to the elements keeps its own channel
+    (MODIFIED_THROUGH_PASSED_FUNCTION). Gate NOCOELEMENT=1 switches it off.
+     */
+    private static final boolean NO_CO_ELEMENT = Gate.isSet("NOCOELEMENT");
+    private Map<Variable, Set<MethodInfo>> modifiedElementOf = Map.of();
+
+    private Map<Variable, Set<MethodInfo>> modifiedElementOf(Map<Variable, Set<MethodInfo>> modified) {
+        if (NO_CO_ELEMENT || modified.isEmpty()) return Map.of();
+        Map<Variable, Set<MethodInfo>> result = new HashMap<>();
+        for (Map.Entry<Variable, Set<MethodInfo>> entry : modified.entrySet()) {
+            Variable m = entry.getKey();
+            if (Util.virtual(m)) continue;
+            for (Map.Entry<Variable, LinkNature> e : followGraph.graph().closure(m)) {
+                Variable container = e.getKey();
+                if (e.getValue() == IS_ELEMENT_OF && Util.virtual(container)
+                    && !Util.isVirtualModification(container)) {
+                    result.merge(container, entry.getValue(), (a, b) -> {
+                        Set<MethodInfo> union = new HashSet<>(a);
+                        union.addAll(b);
+                        return Set.copyOf(union);
+                    });
+                }
+            }
+        }
+        return result;
     }
 
     // the variables modified during the evaluation, expanded to every variable holding the same object
@@ -1115,6 +1149,14 @@ class WriteLinksAndModification {
                                         Map<Variable, Set<MethodInfo>> modifiedVariablesAndTheirCause,
                                         boolean structural) {
         for (Link link : builder) {
+            if (!structural && link.linkNature() == IS_ELEMENT_OF && !modifiedElementOf.isEmpty()) {
+                Set<MethodInfo> causes = modifiedElementOf.get(link.to());
+                if (causes != null) {
+                    // #113: a co-element of a modified element (see modifiedElementOf)
+                    modifiedVariablesAndTheirCause.putIfAbsent(builder.primary(), causes);
+                    return false;
+                }
+            }
             Variable toReal = Util.firstRealVariable(link.to());
             Set<MethodInfo> causesOfModification = modifiedVariablesAndTheirCause.get(toReal);
             if (causesOfModification != null) {

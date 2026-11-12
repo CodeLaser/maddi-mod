@@ -1341,9 +1341,11 @@ public class ShadowModificationPass {
                                 }
                                 links.stream().filter(l -> l.linkNature() == LinkNatureImpl.IS_ELEMENT_OF
                                                            && l.from().fullyQualifiedName().equals(v.fullyQualifiedName()))
-                                        .map(l -> Util.firstRealVariable(l.to()))
-                                        .filter(Objects::nonNull)
-                                        .forEach(containers::add);
+                                        .forEach(l -> {
+                                            Variable container = Util.firstRealVariable(l.to());
+                                            if (container != null) containers.add(container);
+                                            if (!NO_CO_ELEMENT) coElements(vd, l.to(), containers);
+                                        });
                             }
                         }
                     }
@@ -1351,6 +1353,28 @@ public class ShadowModificationPass {
             }
         }
         if (deepOnly) out.forEach(node -> nodes.add(deepOnly(node)));
+    }
+
+    /*
+     CodeLaser/maddi-mod#113, the engine's co-element rule (WriteLinksAndModification.modifiedElementOf): the other
+     known elements of the hidden content a modified element belongs to, at this statement, are modified deep-only.
+     The container's own links name them: 'l.§$s ∋ 0:root' beside 'l.§$s ∋ s'. Gate NOCOELEMENT.
+     */
+    private static final boolean NO_CO_ELEMENT = Gate.isSet("NOCOELEMENT");
+
+    private static void coElements(VariableData vd, Variable hiddenContent, List<Variable> out) {
+        if (!Util.virtual(hiddenContent) || Util.isVirtualModification(hiddenContent)) return;
+        Variable container = Util.firstRealVariable(hiddenContent);
+        if (container == null) return;
+        VariableInfoContainer vic = vd.variableInfoContainerOrNull(container.fullyQualifiedName());
+        if (vic == null) return;
+        Links links = vic.best().linkedVariables();
+        if (links == null) return;
+        String face = hiddenContent.fullyQualifiedName();
+        links.stream().filter(l -> l.linkNature() == LinkNatureImpl.CONTAINS_AS_MEMBER
+                                   && l.from().fullyQualifiedName().equals(face)
+                                   && !Util.virtual(l.to()))
+                .forEach(l -> out.add(l.to()));
     }
 
     /**
