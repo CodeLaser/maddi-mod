@@ -54,6 +54,7 @@ import io.codelaser.maddi.modification.link.impl.translate.TranslateConstants;
 import io.codelaser.maddi.modification.link.vf.VirtualFieldComputer;
 import io.codelaser.maddi.modification.prepwork.Util;
 import io.codelaser.maddi.modification.prepwork.variable.*;
+import io.codelaser.maddi.modification.prepwork.variable.impl.LinkEndInterner;
 import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
 import io.codelaser.maddi.modification.prepwork.variable.impl.ReturnVariableImpl;
 import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
@@ -241,7 +242,8 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
     private static final String MLV_DUMP = System.getenv("MLVDUMP");
     @Override
     public MethodLinkedVariables doMethod(MethodInfo method) {
-        try {
+        // one object per link end within this method's links (LinkEndInterner)
+        try (LinkEndInterner _ = LinkEndInterner.open()) {
             TypeInfo typeInfo = method.typeInfo();
             boolean shallow = options.forceShallow() || method.isAbstract() || typeInfo.compilationUnit().externalLibrary();
             MethodLinkedVariables result = doMethod(method, shallow, false, true);
