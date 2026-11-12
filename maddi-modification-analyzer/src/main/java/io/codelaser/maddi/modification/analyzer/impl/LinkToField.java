@@ -207,7 +207,10 @@ class LinkToField {
             return link.from().parameterizedType();
         }
         if (!NO_OBJECT_GRAPH_INDEP && link.linkNature().equals(LinkNatureImpl.IS_IN_OBJECT_GRAPH)
+            && !(Util.primary(link.from()) instanceof ParameterInfo)
             && Util.virtual(link.to()) && !Util.isVirtualModification(link.to())) {
+            // not for a parameter: 't ≤ this.events.§$s' (a parameter stored inside an element the field holds,
+            // timefold's InMemoryMojoLog) made 250 timefold parameters @Dependent; whether it should is open
             // 'copy.§$s ≤ this.map.§$$s[-2]': 'new ArrayList<>(map.get(k))' holds objects from inside the field's hidden
             // content, the elements of one of its values. Judged by what is shared, the FROM side's type without its
             // arrays (Edge), the same type the ⊆/~ variant judges for a copy of the field's own list, so the two
