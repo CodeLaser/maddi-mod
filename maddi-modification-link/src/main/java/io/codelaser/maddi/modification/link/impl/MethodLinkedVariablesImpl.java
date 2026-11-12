@@ -105,13 +105,26 @@ public class MethodLinkedVariablesImpl implements MethodLinkedVariables, Value {
             list.add(codec.encodeList(context, aList));
         }
         if (!deepOnlyModified.isEmpty()) {
-            // trailing "D"-tagged list, as "A": the deep-only subset of the modified variables (#25)
+            // trailing "DO"-tagged list, as "A": the deep-only subset of the modified variables (#25). Not "D",
+            // which a modified array element starts with too (a DependentVariable encodes as ["D", array, index]):
+            // read as this list, its expressions were decoded as variables, and the file could not be read
             List<Codec.EncodedValue> dList = new ArrayList<>();
-            dList.add(codec.encodeString(context, "D"));
+            dList.add(codec.encodeString(context, "DO"));
             deepOnlyModified.stream().sorted().forEach(v -> dList.add(codec.encodeVariable(context, v)));
             list.add(codec.encodeList(context, dList));
         }
         return codec.encodeList(context, list);
+    }
+
+    /*
+     A file written before the "DO" tag has "D" for the deep-only list. A dependent variable starts with "D" as well,
+     followed by an expression, which is a list whose first element is the expression's name: a word, where a
+     variable's tag is a single letter.
+     */
+    private static boolean isDependentVariable(Codec codec, Codec.Context context, List<Codec.EncodedValue> sub) {
+        if (sub.size() < 3 || !codec.isList(sub.get(1))) return false;
+        List<Codec.EncodedValue> second = codec.decodeList(context, sub.get(1));
+        return !second.isEmpty() && codec.decodeString(context, second.getFirst()).length() > 1;
     }
 
     public static Value decode(Codec codec, Codec.Context context, Codec.EncodedValue ev) {
@@ -130,7 +143,9 @@ public class MethodLinkedVariablesImpl implements MethodLinkedVariables, Value {
             List<Codec.EncodedValue> sub = codec.decodeList(context, e);
             if (!sub.isEmpty() && "A".equals(codec.decodeString(context, sub.getFirst()))) {
                 sub.stream().skip(1).forEach(a -> assignedVariables.add(codec.decodeVariable(context, a)));
-            } else if (!sub.isEmpty() && "D".equals(codec.decodeString(context, sub.getFirst()))) {
+            } else if (!sub.isEmpty() && "DO".equals(codec.decodeString(context, sub.getFirst()))
+                       || !sub.isEmpty() && "D".equals(codec.decodeString(context, sub.getFirst()))
+                          && !isDependentVariable(codec, context, sub)) {
                 sub.stream().skip(1).forEach(d -> deepOnlyVariables.add(codec.decodeVariable(context, d)));
             } else {
                 modifiedVariables.add(codec.decodeVariable(context, e));
