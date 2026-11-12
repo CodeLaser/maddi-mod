@@ -927,6 +927,9 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
                 summaryChangedInfos.add(info); // targets carry only summary-level properties (see TolerantWrite)
             }
         }
+        // the one reader is done, and the next pass resets anyway: a static set left full after the last pass held
+        // the elements of the finished analysis alive, and with them its whole model (a server keeps loading new ones)
+        TolerantWrite.resetChangedTargets();
     }
 
     /**
