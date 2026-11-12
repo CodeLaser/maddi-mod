@@ -78,6 +78,7 @@ import io.codelaser.maddi.modification.link.impl.LinkFactsImpl;
 import io.codelaser.maddi.modification.link.io.LinkCodec;
 import io.codelaser.maddi.modification.prepwork.CarryDerived;
 import io.codelaser.maddi.modification.prepwork.ClearDerived;
+import io.codelaser.maddi.modification.prepwork.MethodAnalyzer;
 import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
 import io.codelaser.maddi.modification.prepwork.io.AnalysisFingerprint;
 import io.codelaser.maddi.modification.prepwork.io.DecoratorImpl;
@@ -85,6 +86,7 @@ import io.codelaser.maddi.modification.prepwork.io.IncrementalState;
 import io.codelaser.maddi.modification.prepwork.io.LoadAnalysisResults;
 import io.codelaser.maddi.modification.prepwork.io.PrepWorkCodec;
 import io.codelaser.maddi.modification.prepwork.io.WriteAnalysisResults;
+import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
 import io.codelaser.maddi.util.Trie;
 
 /**
@@ -151,7 +153,9 @@ public class AnalysisEngineImpl implements AnalysisEngine {
 
     @Override
     public Set<Property> bookkeepingProperties() {
-        return Set.of(PrepAnalyzer.PREPPED);
+        // prep's per-variable data is the analysis' working state, not a result: it prints object identities, so
+        // a client that showed or stored it would see a different value on every run of the same code
+        return Set.of(PrepAnalyzer.PREPPED, VariableDataImpl.VARIABLE_DATA, MethodAnalyzer.VARIABLES_OF_ENCLOSING_METHOD);
     }
 
     // ---- modification

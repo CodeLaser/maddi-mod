@@ -22,7 +22,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import java.util.List;
 
 import org.intellij.lang.annotations.Language;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.RepeatedTest;
+import org.slf4j.LoggerFactory;
+
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
 
 import io.codelaser.maddi.callgraph.ComputeCallGraph;
 import io.codelaser.maddi.cst.api.info.Info;
@@ -39,6 +44,17 @@ import io.codelaser.maddi.graph.G;
  * with {@code parse} also calling itself, and the callers in {@code GenericMain}.
  */
 public class TestRecursiveGroupReproduces extends CommonTest {
+
+    /*
+     INFO, not CommonTest's DEBUG: ten repetitions of a thirty-iteration analysis at DEBUG made a 1.36 GB test report
+     (maddi-audit, laser1, 2026-11-12). The LINKRECHECK lines the assertion points to are WARN, and still appear.
+     Runs after CommonTest.beforeAll, whose name it must not reuse: a static method of that name would hide it.
+     */
+    @BeforeAll
+    public static void quietAnalysis() {
+        ((Logger) LoggerFactory.getLogger("io.codelaser.maddi.modification.link")).setLevel(Level.INFO);
+        ((Logger) LoggerFactory.getLogger("io.codelaser.maddi.modification.analyzer")).setLevel(Level.INFO);
+    }
 
     @Language("java")
     private static final String INPUT = """
