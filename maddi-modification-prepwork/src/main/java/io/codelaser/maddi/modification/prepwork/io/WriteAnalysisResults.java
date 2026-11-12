@@ -27,6 +27,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
@@ -237,12 +238,24 @@ public class WriteAnalysisResults {
     // any not-streamed one. Rides the existing null-skip pathway of the three property streams.
     private int skippedValues;
 
+    /* told of every value that could not be encoded, with the reason (the codec audit, CODECAUDIT) */
+    private BiConsumer<String, Throwable> encodeFailureListener;
+
+    public WriteAnalysisResults setEncodeFailureListener(BiConsumer<String, Throwable> listener) {
+        this.encodeFailureListener = listener;
+        return this;
+    }
+
     private Codec.EncodedPropertyValue encodeOrSkip(Codec codec, Codec.Context context,
                                                     PropertyValueMap.PropertyValue pv) {
+        Object state = codec.encodingState();
         try {
             return codec.encode(context, pv.property(), pv.value());
         } catch (RuntimeException | AssertionError | StackOverflowError e) {
+            // what the failed value registered goes with it: a later value must not refer back to it
+            codec.restoreEncodingState(state);
             ++skippedValues;
+            if (encodeFailureListener != null) encodeFailureListener.accept(pv.property().key(), e);
             LOGGER.warn("Skipping unencodable value for property {} ({}): {}", pv.property().key(),
                     pv.value().getClass().getSimpleName(), e.toString());
             return null;
