@@ -147,3 +147,29 @@ this arm's result is in `testfix-final-src`.
 - **The test suite is the oracle:** fernflower's tests decompile many classes, so they reach a lot of code. A corpus
   with weaker tests keeps more of those NPEs.
 - **maddi's declarations got the same test result with no test feedback at all.**
+
+# Read-only against mutable collections (2026-11-11)
+
+Does the LLM's choice of read-only collection types hold? `step4/colltypes.py` aligns the declarations of maddi's
+translation and the LLM-alone result (with test feedback) by file, function and parameter names, and compares each
+collection type. Kotlin's `List` and `MutableList` are the same `java.util.List` at run time, so the tests cannot see
+this.
+
+- **Two meanings of read-only.** maddi prints a field or a result `List` only when the analysis proves the collection
+  structurally unmodified everywhere (`KotlinReadOnly`). The LLM uses Kotlin's meaning: nobody changes it *through
+  this reference*.
+- **Aligned declarations:** maddi mutable and LLM read-only in 200; both mutable in 750; both read-only in 129;
+  maddi read-only and LLM mutable in 4. Most of the 200 are the two meanings differing, valid Kotlin either way: a
+  getter that returns a field the owner still changes.
+- **Where the LLM's promise breaks:** its code casts a read-only collection back to a mutable type 50 times
+  (`getAllExprents() as MutableList<Exprent>`, `getProtectedRange() as MutableList<BasicBlock>`,
+  `(mapVarNames as MutableMap<…>)[pair] = name`), against about 35 declarations.
+  - 29 casts change the collection right away; the others store it where it is changed later (the flattened graph
+    shares the statements' lists).
+  - All but a few were written in the first translation, not in the compile fix round.
+  - maddi's translation has 0 such casts, the LLM bodies on maddi's declarations 3.
+  - None threw in the tests: every collection behind a cast is a real `ArrayList` or `HashMap`. If one were an
+    immutable value, the change would throw `UnsupportedOperationException`.
+- **So:** the same whole-program question as nullability. A translator that sees one file declares read-only what
+  another file changes, and the compiler then needs a cast where it needed a `!!` for nullability. Mutability errors
+  fail more quietly, though: the cast does not throw.
