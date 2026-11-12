@@ -308,6 +308,36 @@ public record MethodModification(Runtime runtime, VariableData variableData, Sta
         return false;
     }
     /*
+     CodeLaser/maddi-mod#115: a lazy stream stage's function ('list.stream().filter(h -> { h.touch(); return true; })',
+     map, anyMatch) is handed the stream's elements as #99's Consumer is, but the stream must not be starred (#99,
+     TestConsumers). The engine already links the lambda's parameter as an element of the stream's source
+     ('0:list.§$s ∋ 0:h'); what it does not know is that the parameter is modified. These are the lambda parameters that
+     are, structurally; marked modified (deep-only) at the call, the ∋ completion carries that to the source.
+     Lambdas only: a method reference has no parameter variable to link. Gate NOLAZYSTAGEELEMENT.
+     */
+    public static final boolean NO_LAZY_STAGE_ELEMENT = Gate.isSet("NOLAZYSTAGEELEMENT");
+
+    public static Set<Variable> lazyStageModifiedLambdaParameters(MethodCall mc) {
+        if (NO_LAZY_STAGE_ELEMENT || NO_ELEMENT_FUNCTION) return Set.of();
+        MethodInfo methodInfo = mc.methodInfo();
+        if (!methodInfo.typeInfo().compilationUnit().externalLibrary() || methodInfo.isStatic()) return Set.of();
+        List<Expression> arguments = mc.parameterExpressions();
+        Set<Variable> result = new HashSet<>();
+        for (ParameterInfo pi : methodInfo.parameters()) {
+            if (pi.isVarArgs() || pi.index() >= arguments.size() || !PassedFunction.functional(pi)) continue;
+            if (pi.parameterizedType().parameters().stream().noneMatch(MethodModification::ownerTypeParameter)) continue;
+            MethodInfo sam = pi.parameterizedType().typeInfo() == null ? null
+                    : pi.parameterizedType().typeInfo().singleAbstractMethod();
+            if (sam == null || sam.returnType().isVoid()) continue; // void: #99, handsElementsToModifyingFunction
+            if (!(arguments.get(pi.index()) instanceof Lambda lambda)) continue;
+            for (int j = 0; j < sam.parameters().size(); j++) {
+                if (structurallyModifiesArgument(lambda, j)) result.add(lambda.methodInfo().parameters().get(j));
+            }
+        }
+        return result;
+    }
+
+    /*
      Whether the function, applied, changes the object it is handed: its parameter (or an unbound receiver's method) is
      STRUCTURALLY modified. The deep verdict also stars an argument that is only stored into a modified container
      ('j -> add(j)', '0:ii*∈this.set*.§$s', TestForEachLambda): the container changes, not the element.

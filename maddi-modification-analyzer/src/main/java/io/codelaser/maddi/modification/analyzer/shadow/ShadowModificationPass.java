@@ -818,6 +818,14 @@ public class ShadowModificationPass {
                                                                + mc.methodInfo().fullyQualifiedName());
                         }
                     }
+                    // ... and a lazy stream stage's ('helpers.stream().filter(h -> ..)', CodeLaser/maddi-mod#115)
+                    if (!disclaimed && mc.object() != null
+                        && !MethodModification.lazyStageModifiedLambdaParameters(mc).isEmpty()) {
+                        for (Object node : elementSources(mi, vd, mc.object(), 0)) {
+                            seedWithOrigin(deepOnly(node), mi, "elements handed to a modifying function by "
+                                                               + mc.methodInfo().fullyQualifiedName());
+                        }
+                    }
                     // E2: callee receiver -> caller-side receiver nodes (chained receivers resolved
                     // through the inner callee's return-value summary, P2.2a). Mirror of the engine's cone
                     // rule (ReceiverLevel): an abstract callee's node aggregates EVERY implementation through
@@ -1378,6 +1386,31 @@ public class ShadowModificationPass {
             }
         }
         if (deepOnly) out.forEach(node -> nodes.add(deepOnly(node)));
+    }
+
+    /*
+     CodeLaser/maddi-mod#115: what a stream's elements come from. Down the receiver chain through calls whose result's
+     hidden content is (part of) their receiver's ('stream()', 'filter(..)': 'stream.§$s ⊆ this.§$s'), to a variable,
+     projected as usual. The projection of the whole result (projectReceiverChain) follows only links that carry the
+     object's own modification, which these do not.
+     */
+    private Set<Object> elementSources(MethodInfo mi, VariableData vd, Expression receiver, int depth) {
+        Expression e = receiver;
+        while (e instanceof EnclosedExpression ee) e = ee.inner();
+        if (e instanceof VariableExpression ve) return project(mi, vd, ve.variable());
+        if (!(e instanceof MethodCall call) || call.object() == null || depth > 16 || call.methodInfo() == null) {
+            return Set.of();
+        }
+        MethodLinkedVariables mlv = call.methodInfo().analysis().getOrNull(MethodLinkedVariablesImpl.METHOD_LINKS,
+                MethodLinkedVariablesImpl.class);
+        if (mlv == null) return Set.of();
+        boolean fromReceiver = mlv.ofReturnValue().stream().anyMatch(l ->
+                Util.virtual(l.from()) && !Util.isVirtualModification(l.from())
+                && Util.virtual(l.to()) && !Util.isVirtualModification(l.to())
+                && Util.firstRealVariable(l.to()) instanceof This
+                && (l.linkNature() == LinkNatureImpl.IS_SUBSET_OF || l.linkNature() == LinkNatureImpl.SHARES_ELEMENTS
+                    || l.linkNature().isIdenticalToOrAssignedFromTo()));
+        return fromReceiver ? elementSources(mi, vd, call.object(), depth + 1) : Set.of();
     }
 
     /*
