@@ -24,11 +24,13 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Predicate;
 import java.util.stream.Stream;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.codelaser.maddi.cst.api.analysis.Message;
 import io.codelaser.maddi.cst.api.element.Element;
 import io.codelaser.maddi.cst.api.expression.Assignment;
 import io.codelaser.maddi.cst.api.expression.Cast;
@@ -113,7 +115,9 @@ public final class OwnershipPass {
     /** The verdicts, and for one that is negative, the first reason found (the census's worklist). */
     public record Report(Map<MethodInfo, Boolean> fresh, Map<MethodInfo, String> notFreshReason,
                          Map<ParameterInfo, Boolean> borrowed, Map<ParameterInfo, String> notBorrowedReason,
-                         Map<FieldInfo, Owned> owned, Map<FieldInfo, String> notOwnedReason) {
+                         Map<FieldInfo, Owned> owned, Map<FieldInfo, String> notOwnedReason,
+                         Map<MethodInfo, Boolean> finalizer, Map<MethodInfo, String> notFinalizerReason,
+                         List<Message> finalizerViolations, List<String[]> finalizerViolationRows) {
     }
 
     private final boolean closedWorld;
@@ -162,24 +166,32 @@ public final class OwnershipPass {
         }
         Map<MethodInfo, Boolean> verdicts = new LinkedHashMap<>();
         for (MethodInfo methodInfo : methods) verdicts.put(methodInfo, fresh.contains(methodInfo));
-        Transfers transfers = new Transfers(all, methods, fresh, thisEscape, closedWorld);
+        Finalizers finalizers = new Finalizers(all, methods, fresh, thisEscape, closedWorld);
+        Transfers transfers = new Transfers(all, methods, fresh, thisEscape, closedWorld, finalizers::isFinalizer);
         OwnedFields ownedFields = new OwnedFields(analysisOrder, methods, fresh, thisEscape, borrowedParameters,
                 transfers);
-        // a move out of a finalizer needs the moved field owned, and that field is owned because it moves: greatest
-        // fixpoint
+        // a move out of a finalizer needs the moved field owned, and that field is owned because it moves; a computed
+        // finalizer needs a moved field owned (stage 6): greatest fixpoint
         while (true) {
             OwnedFields current = ownedFields;
-            if (!transfers.retainMoves(f -> current.verdicts().get(f) == Owned.OWNED)) break;
+            Predicate<FieldInfo> owned = f -> current.verdicts().get(f) == Owned.OWNED;
+            boolean dropped = finalizers.retain(owned, transfers);
+            dropped |= transfers.retainMoves(owned);
+            if (!dropped) break;
             ownedFields = new OwnedFields(analysisOrder, methods, fresh, thisEscape, borrowedParameters, transfers);
         }
+        finalizers.check();
         long nBorrowed = borrowedParameters.verdicts().values().stream().filter(b -> b).count();
         Map<Owned, Long> byOwned = new java.util.EnumMap<>(Owned.class);
         ownedFields.verdicts().values().forEach(o -> byOwned.merge(o, 1L, Long::sum));
         LOGGER.info("Ownership pass: {} method(s) with a reference result, {} fresh; {} parameter(s), {} borrowed; "
-                    + "{} field(s): {}", methods.size(), fresh.size(), borrowedParameters.verdicts().size(), nBorrowed,
-                ownedFields.verdicts().size(), byOwned);
+                    + "{} field(s): {}; {} finalizer(s) computed of {} candidate(s), {} finalizer violation(s)",
+                methods.size(), fresh.size(), borrowedParameters.verdicts().size(), nBorrowed,
+                ownedFields.verdicts().size(), byOwned, finalizers.computed().size(), finalizers.verdicts().size(),
+                finalizers.violations().size());
         return new Report(verdicts, reason, borrowedParameters.verdicts(), borrowedParameters.reasons(),
-                ownedFields.verdicts(), ownedFields.reasons());
+                ownedFields.verdicts(), ownedFields.reasons(), finalizers.verdicts(), finalizers.reasons(),
+                finalizers.violations(), finalizers.violationRows());
     }
 
     /**
@@ -196,6 +208,11 @@ public final class OwnershipPass {
                                                            + report.notBorrowedReason().getOrDefault(p, "")));
             report.owned().forEach((f, o) -> pw.println("owned\t" + f.fullyQualifiedName() + "\t" + o + "\t"
                                                         + report.notOwnedReason().getOrDefault(f, "")));
+            report.finalizer().forEach((m, b) -> pw.println("finalizer\t" + m.fullyQualifiedName() + "\t" + b + "\t"
+                                                            + report.notFinalizerReason().getOrDefault(m, "")));
+            // the caller as the element, the contracted finalizer as the verdict column
+            report.finalizerViolationRows().forEach(r -> pw.println("finalizerViolation\t" + r[0] + "\t" + r[1]
+                                                                    + "\t" + r[2]));
         } catch (java.io.IOException e) {
             LOGGER.error("Ownership census: cannot write {}", path, e);
         }
@@ -214,6 +231,13 @@ public final class OwnershipPass {
                     ValueImpl.BoolImpl.from(owned == Owned.OWNED));
             fi.analysis().setAllowControlledOverwrite(PropertyImpl.SHARED_IMMUTABLE_FIELD,
                     ValueImpl.BoolImpl.from(owned == Owned.SHARED_IMMUTABLE));
+        });
+        // a computed finalizer (stage 6); a contract is not touched, and a method that is not one gets no value, as
+        // FINALIZER_METHOD has always been absent-means-false
+        report.finalizer().forEach((methodInfo, finalizer) -> {
+            if (finalizer && !methodInfo.isFinalizer()) {
+                methodInfo.analysis().setAllowControlledOverwrite(PropertyImpl.FINALIZER_METHOD, ValueImpl.BoolImpl.TRUE);
+            }
         });
         report.borrowed().forEach((pi, borrowed) -> {
             if (!BorrowedParameters.isContracted(pi)) {
@@ -359,6 +383,15 @@ public final class OwnershipPass {
             if (e instanceof MethodCall mc) {
                 MethodInfo callee = mc.methodInfo();
                 if (callee == null) return "returns an unresolved call";
+                // a fluent call returns its receiver: 'new B().add(x)' is the new B (stage 6's chains), unless the
+                // call may leave 'this' held elsewhere, or dispatch to an override that is not fluent
+                if (callee.isFluent() && !callee.isStatic() && mc.object() != null) {
+                    if (thisEscape.mayLeak(callee)) {
+                        return "fluent " + callee.fullyQualifiedName() + " may leak this: " + thisEscape.why(callee);
+                    }
+                    if (mayDispatchElsewhere(callee)) return "fluent " + callee.fullyQualifiedName() + " may dispatch";
+                    return created(mc.object());
+                }
                 if (analysed.contains(callee)) {
                     deps.add(callee);
                     return null;

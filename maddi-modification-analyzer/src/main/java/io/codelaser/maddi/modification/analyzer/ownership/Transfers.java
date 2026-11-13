@@ -98,8 +98,15 @@ final class Transfers {
     private record Site(MethodInfo caller, List<Expression> arguments, Element call) {
     }
 
+    private final Predicate<MethodInfo> finalizer;
+
+    /**
+     * @param finalizer a {@code @Finalizer}, contracted or computed (stage 6): the methods allowed to move a field of
+     *                  their own object out
+     */
     Transfers(Set<MethodInfo> analysed, Set<MethodInfo> analysedResults, Set<MethodInfo> fresh,
-              ThisEscape thisEscape, boolean closedWorld) {
+              ThisEscape thisEscape, boolean closedWorld, Predicate<MethodInfo> finalizer) {
+        this.finalizer = finalizer;
         Map<MethodInfo, List<Site>> sites = new LinkedHashMap<>();
         Set<MethodInfo> referenced = new HashSet<>();
         for (MethodInfo caller : analysed) {
@@ -157,7 +164,7 @@ final class Transfers {
                         break;
                     }
                     r = handedOver(site, site.arguments().get(pi.index()), analysedResults, fresh, thisEscape, deps,
-                            paramMoves);
+                            paramMoves, finalizer);
                     if (r != null) {
                         r = "at a call in " + site.caller().fullyQualifiedName() + ": " + r;
                         break;
@@ -200,6 +207,13 @@ final class Transfers {
         boolean changed = false;
         for (ParameterInfo pi : List.copyOf(transferred)) {
             for (Move move : moves.getOrDefault(pi, Set.of())) {
+                if (!finalizer.test(move.finalizer())) {
+                    transferred.remove(pi);
+                    reasons.put(pi, "moves " + move.field().name() + " out of " + move.finalizer().name()
+                                    + ", which is not a finalizer");
+                    changed = true;
+                    break;
+                }
                 if (!owned.test(move.field())) {
                     transferred.remove(pi);
                     reasons.put(pi, "moves " + move.field().name() + " out of " + move.finalizer().name()
@@ -228,8 +242,12 @@ final class Transfers {
      * Why {@code method}'s use of its own {@code field} at {@code use} is not a move out of a dying owner; null when it
      * is: the method is a finalizer of the field's type, mentions the field once, and not in a loop or lambda.
      */
-    static String moveOut(MethodInfo method, FieldInfo field, Element use) {
-        if (!method.isFinalizer()) return "passes " + field.name() + " outside a finalizer";
+    boolean isFinalizer(MethodInfo method) {
+        return finalizer.test(method);
+    }
+
+    static String moveOut(MethodInfo method, FieldInfo field, Element use, boolean isFinalizer) {
+        if (!isFinalizer) return "passes " + field.name() + " outside a finalizer";
         if (field.isStatic() || !field.owner().equals(method.typeInfo())) {
             return "passes " + field.name() + ", not a field of the finalizer's object";
         }
@@ -282,7 +300,7 @@ final class Transfers {
     // rule 2
     private static String handedOver(Site site, Expression argument, Set<MethodInfo> analysedResults,
                                      Set<MethodInfo> fresh, ThisEscape thisEscape, Set<ParameterInfo> deps,
-                                     Set<Move> moves) {
+                                     Set<Move> moves, Predicate<MethodInfo> finalizer) {
         Expression e = unwrap(argument);
         if (e instanceof VariableExpression ve) {
             if (ve.variable() instanceof ParameterInfo q && q.methodInfo().equals(site.caller())) {
@@ -290,9 +308,11 @@ final class Transfers {
                 deps.add(q);
                 return null;
             }
-            if (ve.variable() instanceof LocalVariable lv) return local(site, lv, analysedResults, fresh, thisEscape);
+            if (ve.variable() instanceof LocalVariable lv) {
+                return local(site.caller(), site.call(), lv, analysedResults, fresh, thisEscape, true);
+            }
             if (ve.variable() instanceof FieldReference fr && isThisField(fr, fr.fieldInfo())) {
-                String r = moveOut(site.caller(), fr.fieldInfo(), site.call());
+                String r = moveOut(site.caller(), fr.fieldInfo(), site.call(), finalizer.test(site.caller()));
                 if (r != null) return r;
                 moves.add(new Move(site.caller(), fr.fieldInfo()));
                 return null;
@@ -310,9 +330,15 @@ final class Transfers {
     }
 
     // a local: the narrow ordering of rule 2
-    private static String local(Site site, LocalVariable lv, Set<MethodInfo> analysedResults, Set<MethodInfo> fresh,
-                                ThisEscape thisEscape) {
-        MethodInfo caller = site.caller();
+    /**
+     * Rule 2's local, handed over at {@code call} in {@code caller}: declared in the block of the statement holding
+     * the call, mentioned once in it outside loops and lambdas, not after it. With {@code before}, also its life before
+     * the statement: assigned only created values, the receiver of calls that keep nothing of it. Without it (stage
+     * 6's check of a contracted finalizer: only the use after counts), a statement that rebinds the local to the
+     * call's result ({@code s = s.filter(p)}) is no use after.
+     */
+    static String local(MethodInfo caller, Element call, LocalVariable lv, Set<MethodInfo> analysedResults,
+                        Set<MethodInfo> fresh, ThisEscape thisEscape, boolean before) {
         Block[] block = new Block[1];
         int[] index = {-1};
         caller.methodBody().visit((Element e) -> {
@@ -323,7 +349,7 @@ final class Transfers {
                     if (statements.get(i) instanceof LocalVariableCreation lvc
                         && lvc.localVariableStream().anyMatch(lv::equals)) {
                         for (int j = i + 1; j < statements.size(); j++) {
-                            if (contains(statements.get(j), site.call())) {
+                            if (contains(statements.get(j), call)) {
                                 block[0] = b;
                                 index[0] = j;
                                 return false;
@@ -337,11 +363,19 @@ final class Transfers {
         if (block[0] == null) return lv.simpleName() + " is not declared in the block of the call";
         List<Statement> statements = block[0].statements();
         Statement holding = statements.get(index[0]);
-        if (mentions(holding, lv) != 1) return lv.simpleName() + " is mentioned again in the statement of the call";
-        if (insideLoopOrLambda(holding, site.call())) return "the call may run more than once";
-        for (int j = index[0] + 1; j < statements.size(); j++) {
-            if (mentions(statements.get(j), lv) > 0) return lv.simpleName() + " is used after the call";
+        boolean rebinds = !before && holding instanceof ExpressionAsStatement eas
+                          && eas.expression() instanceof Assignment a && a.target().variable().equals(lv)
+                          && contains(a.value(), call);
+        if (mentions(holding, lv) != (rebinds ? 2 : 1)) {
+            return lv.simpleName() + " is mentioned again in the statement of the call";
         }
+        if (insideLoopOrLambda(holding, call)) return "the call may run more than once";
+        if (!rebinds) {
+            for (int j = index[0] + 1; j < statements.size(); j++) {
+                if (mentions(statements.get(j), lv) > 0) return lv.simpleName() + " is used after the call";
+            }
+        }
+        if (!before) return null;
         // before: assigned created values, or the receiver of calls that keep nothing of it
         Set<MethodInfo> freshDeps = new LinkedHashSet<>();
         OwnershipPass.Body body = new OwnershipPass.Body(Set.of(), List.of(), analysedResults, freshDeps, thisEscape,
@@ -467,7 +501,7 @@ final class Transfers {
         return mentions(element, v::equals);
     }
 
-    private static int mentions(Element element, Predicate<Variable> v) {
+    static int mentions(Element element, Predicate<Variable> v) {
         if (element == null) return 0;
         int[] n = new int[1];
         element.visit((Element e) -> {
@@ -494,7 +528,7 @@ final class Transfers {
         return found[0];
     }
 
-    private static boolean insideLoopOrLambda(Statement statement, Element call) {
+    static boolean insideLoopOrLambda(Statement statement, Element call) {
         boolean[] inside = new boolean[1];
         statement.visit((Element e) -> {
             if (inside[0]) return false;
