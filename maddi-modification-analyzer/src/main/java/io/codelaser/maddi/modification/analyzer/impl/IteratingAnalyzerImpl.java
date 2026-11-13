@@ -527,6 +527,9 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
             // not stay set for the code that runs before the next analyze() (TestWarmAnalysisWithCarry
             // .testFreezeDoesNotLeak pins the normal exits)
             TolerantWrite.unfreezeModificationProperties();
+            // the changed targets of the last pass are JVM-wide too, and they are elements of this model: left set,
+            // they kept a model its owner had dropped reachable until the next analysis (TestAnalysedModelRelease)
+            TolerantWrite.resetChangedTargets();
         }
         if (configuration.nullability()) {
             // docs/design/nullability.md M3/B2: one-shot, over the converged link facts. The stored verdicts are the
