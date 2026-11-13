@@ -24,6 +24,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Predicate;
 import java.util.stream.Stream;
 
 import io.codelaser.maddi.cst.api.element.Element;
@@ -233,28 +234,53 @@ final class BorrowedParameters {
             }
         }
         if (methodInfo.methodBody() == null) return null;
-        return body(methodInfo, pi, thisEscape, deps);
+        return body(methodInfo, pi::equals, true, pi.name(), thisEscape, deps);
+    }
+
+    /**
+     * Rules 2 to 4 for a field, once the fixpoint is settled: why the body of {@code methodInfo} may leave what
+     * {@code tracked} names (or a local assigned from it) held where no link shows; null when it does not. A lambda or
+     * anonymous class that reads the field captures its owner, not the field's object: only a local alias captured
+     * counts.
+     */
+    String keptInBody(MethodInfo methodInfo, Predicate<Variable> tracked, String name, ThisEscape thisEscape) {
+        if (methodInfo.methodBody() == null) return null;
+        Set<Dep> deps = new LinkedHashSet<>();
+        String r = body(methodInfo, tracked, false, name, thisEscape, deps);
+        if (r != null) return r;
+        for (Dep dep : deps) {
+            boolean ok = dep.full() ? isBorrowed(dep.parameter()) : isHidden(dep.parameter());
+            if (!ok) {
+                return "passed to " + dep.parameter().methodInfo().fullyQualifiedName() + " "
+                       + dep.parameter().name() + ", which may keep it";
+            }
+        }
+        return null;
     }
 
     // rules 2, 3, 4
-    private String body(MethodInfo methodInfo, ParameterInfo pi, ThisEscape thisEscape, Set<Dep> deps) {
-        Set<Variable> aliases = aliases(methodInfo, pi);
+    // 'capturedDirectly': a lambda mentioning what is tracked holds it (a parameter), or holds its owner (a field)
+    private String body(MethodInfo methodInfo, Predicate<Variable> tracked, boolean capturedDirectly, String name,
+                        ThisEscape thisEscape, Set<Dep> deps) {
+        Set<Variable> locals = localAliases(methodInfo, tracked);
+        Predicate<Variable> aliases = v -> tracked.test(v) || locals.contains(v);
+        Predicate<Variable> captured = capturedDirectly ? aliases : locals::contains;
         String[] found = new String[1];
         methodInfo.methodBody().visit((Element e) -> {
             if (found[0] != null) return false;
             switch (e) {
                 case Lambda lambda -> {
-                    if (mentions(lambda.methodInfo(), aliases)) found[0] = "captured by a lambda";
+                    if (mentions(lambda.methodInfo(), captured)) found[0] = "captured by a lambda";
                     return false;
                 }
                 case MethodReference mr -> {
-                    if (isAlias(mr.scope(), aliases)) found[0] = "captured by " + pi.name() + "::" + mr.methodInfo().name();
+                    if (isAlias(mr.scope(), aliases)) found[0] = "captured by " + name + "::" + mr.methodInfo().name();
                     return false;
                 }
                 case ConstructorCall cc -> {
                     if (cc.anonymousClass() != null) {
                         if (cc.anonymousClass().constructorAndMethodStream()
-                                .anyMatch(m -> m.methodBody() != null && mentions(m, aliases))) {
+                                .anyMatch(m -> m.methodBody() != null && mentions(m, captured))) {
                             found[0] = "captured by an anonymous class";
                             return false;
                         }
@@ -284,7 +310,8 @@ final class BorrowedParameters {
     }
 
     // rule 4: the formal parameters an alias is passed to
-    private void arguments(MethodInfo callee, List<Expression> arguments, Set<Variable> aliases, Set<Dep> deps) {
+    private void arguments(MethodInfo callee, List<Expression> arguments, Predicate<Variable> aliases,
+                           Set<Dep> deps) {
         for (int i = 0; i < arguments.size(); i++) {
             if (!isAlias(arguments.get(i), aliases)) continue;
             if (analysed.contains(callee)) {
@@ -296,10 +323,9 @@ final class BorrowedParameters {
         }
     }
 
-    // the parameter, and the locals assigned from it (or from such a local)
-    private static Set<Variable> aliases(MethodInfo methodInfo, ParameterInfo pi) {
+    // the locals assigned from what is tracked (or from such a local)
+    private static Set<Variable> localAliases(MethodInfo methodInfo, Predicate<Variable> tracked) {
         Set<Variable> aliases = new HashSet<>();
-        aliases.add(pi);
         List<Map.Entry<Variable, Expression>> assignments = new ArrayList<>();
         methodInfo.methodBody().visit((Element e) -> {
             if (e instanceof LocalVariableCreation lvc) {
@@ -313,7 +339,7 @@ final class BorrowedParameters {
         while (changed) {
             changed = false;
             for (Map.Entry<Variable, Expression> a : assignments) {
-                if (!aliases.contains(a.getKey()) && isAlias(a.getValue(), aliases)) {
+                if (!aliases.contains(a.getKey()) && isAlias(a.getValue(), v -> tracked.test(v) || aliases.contains(v))) {
                     aliases.add(a.getKey());
                     changed = true;
                 }
@@ -322,20 +348,20 @@ final class BorrowedParameters {
         return aliases;
     }
 
-    private static boolean isAlias(Expression expression, Set<Variable> aliases) {
+    private static boolean isAlias(Expression expression, Predicate<Variable> aliases) {
         Expression e = expression;
         while (e instanceof Cast || e instanceof EnclosedExpression) {
             e = e instanceof Cast c ? c.expression() : ((EnclosedExpression) e).inner();
         }
-        return e instanceof VariableExpression ve && aliases.contains(ve.variable());
+        return e instanceof VariableExpression ve && aliases.test(ve.variable());
     }
 
-    private static boolean mentions(MethodInfo methodInfo, Set<Variable> aliases) {
+    private static boolean mentions(MethodInfo methodInfo, Predicate<Variable> aliases) {
         if (methodInfo == null || methodInfo.methodBody() == null) return true;
         boolean[] mentions = new boolean[1];
         methodInfo.methodBody().visit((Element e) -> {
             if (mentions[0]) return false;
-            if (e instanceof VariableExpression ve && aliases.contains(ve.variable())) {
+            if (e instanceof VariableExpression ve && aliases.test(ve.variable())) {
                 mentions[0] = true;
                 return false;
             }

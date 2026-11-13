@@ -42,6 +42,7 @@ import io.codelaser.maddi.cst.api.expression.Lambda;
 import io.codelaser.maddi.cst.api.expression.MethodCall;
 import io.codelaser.maddi.cst.api.expression.NullConstant;
 import io.codelaser.maddi.cst.api.expression.VariableExpression;
+import io.codelaser.maddi.cst.api.info.FieldInfo;
 import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
@@ -106,9 +107,13 @@ public final class OwnershipPass {
     private static final Logger LOGGER = LoggerFactory.getLogger(OwnershipPass.class);
     private static final String FRESH_ANNOTATION = "io.codelaser.maddi.annotation.Fresh";
 
-    /** The verdicts, and for one that is false, the first reason found (the census's worklist). */
+    /** Stage 3's verdict on a field: OWNED_FIELD, SHARED_IMMUTABLE_FIELD, or neither. */
+    public enum Owned {OWNED, SHARED_IMMUTABLE, NOT_OWNED}
+
+    /** The verdicts, and for one that is negative, the first reason found (the census's worklist). */
     public record Report(Map<MethodInfo, Boolean> fresh, Map<MethodInfo, String> notFreshReason,
-                         Map<ParameterInfo, Boolean> borrowed, Map<ParameterInfo, String> notBorrowedReason) {
+                         Map<ParameterInfo, Boolean> borrowed, Map<ParameterInfo, String> notBorrowedReason,
+                         Map<FieldInfo, Owned> owned, Map<FieldInfo, String> notOwnedReason) {
     }
 
     public Report go(List<Info> analysisOrder) {
@@ -146,10 +151,15 @@ public final class OwnershipPass {
         }
         Map<MethodInfo, Boolean> verdicts = new LinkedHashMap<>();
         for (MethodInfo methodInfo : methods) verdicts.put(methodInfo, fresh.contains(methodInfo));
+        OwnedFields ownedFields = new OwnedFields(analysisOrder, methods, fresh, thisEscape, borrowedParameters);
         long nBorrowed = borrowedParameters.verdicts().values().stream().filter(b -> b).count();
-        LOGGER.info("Ownership pass: {} method(s) with a reference result, {} fresh; {} parameter(s), {} borrowed",
-                methods.size(), fresh.size(), borrowedParameters.verdicts().size(), nBorrowed);
-        return new Report(verdicts, reason, borrowedParameters.verdicts(), borrowedParameters.reasons());
+        Map<Owned, Long> byOwned = new java.util.EnumMap<>(Owned.class);
+        ownedFields.verdicts().values().forEach(o -> byOwned.merge(o, 1L, Long::sum));
+        LOGGER.info("Ownership pass: {} method(s) with a reference result, {} fresh; {} parameter(s), {} borrowed; "
+                    + "{} field(s): {}", methods.size(), fresh.size(), borrowedParameters.verdicts().size(), nBorrowed,
+                ownedFields.verdicts().size(), byOwned);
+        return new Report(verdicts, reason, borrowedParameters.verdicts(), borrowedParameters.reasons(),
+                ownedFields.verdicts(), ownedFields.reasons());
     }
 
     public static void write(Report report) {
@@ -159,6 +169,12 @@ public final class OwnershipPass {
                 methodInfo.analysis().setAllowControlledOverwrite(PropertyImpl.FRESH_METHOD,
                         ValueImpl.BoolImpl.from(fresh));
             }
+        });
+        report.owned().forEach((fi, owned) -> {
+            fi.analysis().setAllowControlledOverwrite(PropertyImpl.OWNED_FIELD,
+                    ValueImpl.BoolImpl.from(owned == Owned.OWNED));
+            fi.analysis().setAllowControlledOverwrite(PropertyImpl.SHARED_IMMUTABLE_FIELD,
+                    ValueImpl.BoolImpl.from(owned == Owned.SHARED_IMMUTABLE));
         });
         report.borrowed().forEach((pi, borrowed) -> {
             if (!BorrowedParameters.isContracted(pi)) {
@@ -244,23 +260,13 @@ public final class OwnershipPass {
                                              ThisEscape thisEscape) {
         if (methodInfo.methodBody() == null) return "no body";
         List<Expression> returned = new ArrayList<>();
-        Set<LocalVariable> plainLocals = new HashSet<>();
-        List<Assignment> assignments = new ArrayList<>();
         methodInfo.methodBody().visit((Element e) -> {
             if (e instanceof Lambda) return false; // its returns are its own
             if (e instanceof ReturnStatement rs && rs.expression() != null) returned.add(rs.expression());
-            if (e instanceof Block block) {
-                // a local declared by a statement of a block; not a for-each, catch or resource variable, whose value
-                // is assigned by the statement that declares it
-                for (Statement s : block.statements()) {
-                    if (s instanceof LocalVariableCreation lvc) lvc.localVariableStream().forEach(plainLocals::add);
-                }
-            }
-            if (e instanceof Assignment a) assignments.add(a);
             return true;
         });
         if (returned.isEmpty()) return "no return"; // throws on every path: nothing to say
-        Body body = new Body(plainLocals, assignments, analysed, deps, thisEscape, new HashSet<>());
+        Body body = Body.of(methodInfo, analysed, deps, thisEscape);
         for (Expression expression : returned) {
             String r = body.created(expression);
             if (r != null) return r;
@@ -268,8 +274,32 @@ public final class OwnershipPass {
         return null;
     }
 
-    private record Body(Set<LocalVariable> plainLocals, List<Assignment> assignments, Set<MethodInfo> analysed,
-                        Set<MethodInfo> deps, ThisEscape thisEscape, Set<LocalVariable> visiting) {
+    /*
+     Rule 1's evidence for one expression of one body: null when it is created (or null) on every path, else why not.
+     The analysed callees it rests on go to 'deps'. Also used for the values assigned to a field (stage 3).
+     */
+    record Body(Set<LocalVariable> plainLocals, List<Assignment> assignments, Set<MethodInfo> analysed,
+                Set<MethodInfo> deps, ThisEscape thisEscape, Set<LocalVariable> visiting) {
+
+        static Body of(MethodInfo methodInfo, Set<MethodInfo> analysed, Set<MethodInfo> deps, ThisEscape thisEscape) {
+            Set<LocalVariable> plainLocals = new HashSet<>();
+            List<Assignment> assignments = new ArrayList<>();
+            if (methodInfo.methodBody() != null) {
+                methodInfo.methodBody().visit((Element e) -> {
+                    if (e instanceof Lambda) return false; // its locals are its own
+                    if (e instanceof Block block) {
+                        // a local declared by a statement of a block; not a for-each, catch or resource variable,
+                        // whose value is assigned by the statement that declares it
+                        for (Statement s : block.statements()) {
+                            if (s instanceof LocalVariableCreation lvc) lvc.localVariableStream().forEach(plainLocals::add);
+                        }
+                    }
+                    if (e instanceof Assignment a) assignments.add(a);
+                    return true;
+                });
+            }
+            return new Body(plainLocals, assignments, analysed, deps, thisEscape, new HashSet<>());
+        }
 
         String created(Expression expression) {
             Expression e = unwrap(expression);
@@ -345,7 +375,7 @@ public final class OwnershipPass {
 
     // a constant marker ('$_ceN', the link module's MarkerVariable, seen through the API) holding the null constant;
     // as the nullability pass's MethodWalker.isNullMarker
-    private static boolean isNullConstant(Variable variable) {
+    static boolean isNullConstant(Variable variable) {
         return variable instanceof LocalVariable lv && lv.simpleName().startsWith("$_ce")
                && lv.assignmentExpression() instanceof NullConstant;
     }
@@ -357,7 +387,7 @@ public final class OwnershipPass {
      parameter is not borrowed (a callee may capture it; stage 2 decides), or as the receiver of a method that may
      leave 'this' held elsewhere (the summaries have no links for 'this'), or of one that may dispatch to another body.
      */
-    private static String localHandedToBodyThatMayKeepIt(MethodInfo methodInfo, ThisEscape thisEscape,
+    static String localHandedToBodyThatMayKeepIt(MethodInfo methodInfo, ThisEscape thisEscape,
                                                          BorrowedParameters borrowedParameters) {
         String[] found = new String[1];
         methodInfo.methodBody().visit((Element e) -> {
