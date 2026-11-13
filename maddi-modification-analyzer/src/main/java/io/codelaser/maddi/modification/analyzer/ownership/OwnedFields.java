@@ -223,8 +223,8 @@ final class OwnedFields {
      * Stage 5: a finalizer of the field's object moves the field out, handing it over to a parameter that transfers
      * or returning it ({@code fn into_data(self) -> Vec}); the owner is dead after the call, so it keeps nothing.
      */
-    private static boolean movesOut(MethodInfo methodInfo, FieldInfo fieldInfo, Transfers transfers) {
-        if (!methodInfo.isFinalizer() || methodInfo.methodBody() == null) return false;
+    static boolean movesOut(MethodInfo methodInfo, FieldInfo fieldInfo, Transfers transfers) {
+        if (!transfers.isFinalizer(methodInfo) || methodInfo.methodBody() == null) return false;
         if (transfers.movesOut(methodInfo, fieldInfo)) return true;
         Element[] returned = new Element[1];
         methodInfo.methodBody().visit((Element e) -> {
@@ -235,7 +235,7 @@ final class OwnedFields {
             }
             return returned[0] == null;
         });
-        return returned[0] != null && Transfers.moveOut(methodInfo, fieldInfo, returned[0]) == null;
+        return returned[0] != null && Transfers.moveOut(methodInfo, fieldInfo, returned[0], true) == null;
     }
 
     private static boolean isThisField(Variable variable, FieldInfo fieldInfo) {
