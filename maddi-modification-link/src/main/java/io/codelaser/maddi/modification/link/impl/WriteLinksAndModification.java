@@ -1152,14 +1152,17 @@ class WriteLinksAndModification {
      */
     /*
      #62: the overlap is between the primary's own element content (a virtual field of it, not its §m) and a whole
-     variable: that object may be one of the primary's elements, which ∈ would say, had the two element fields matched.
+     variable of the element type: that object may be one of the primary's elements, which ∈ would say, had the two
+     element fields matched.
      */
     private static boolean overlapsAsElement(Variable primary, Link link, Variable toReal) {
         Variable from = link.from();
         if (from.equals(primary) || Util.isVirtualModification(from)) return false;
         if (!primary.equals(Util.firstRealVariable(from))) return false;
-        return link.to().equals(toReal);
+        if (!link.to().equals(toReal)) return false;
+        return Util.isElementTypeOf(toReal.parameterizedType(), from.parameterizedType());
     }
+
 
     private boolean sharesModificationGroup(Variable modified, Variable container) {
         return followGraph.graph().eqGroups(modified).anyMatch(group -> group.members().stream()

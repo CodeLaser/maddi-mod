@@ -1366,7 +1366,9 @@ public class ShadowModificationPass {
                                                                && Util.virtual(l.to())
                                                                && !Util.isVirtualModification(l.to())
                                                                && l.from().fullyQualifiedName()
-                                                                       .equals(v.fullyQualifiedName()))
+                                                                       .equals(v.fullyQualifiedName())
+                                                               && Util.isElementTypeOf(v.parameterizedType(),
+                                                                       l.to().parameterizedType()))
                                             .map(l -> Util.firstRealVariable(l.to()))
                                             .filter(c -> c != null && !c.equals(v))
                                             .forEach(containers::add);

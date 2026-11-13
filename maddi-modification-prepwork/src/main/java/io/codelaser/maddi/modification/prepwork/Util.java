@@ -340,6 +340,18 @@ public class Util {
         return v instanceof DependentVariable dv && dv.indexExpression() instanceof IntConstant ic && ic.constant() < 0;
     }
 
+    /*
+     CodeLaser/maddi-mod#62: an overlap ('tags ∩ this.map.§$$s[-2]') says 'may be one of the elements' only when the variable has the element type: the element field is an
+     array of it ('Set<String>[]' for 'tags'). A whole array filled from a list's elements overlaps them too
+     ('a ∩ 0:in.§$s', TestLoopFilledArray), without being one.
+     */
+    public static boolean isElementTypeOf(ParameterizedType variable, ParameterizedType elementField) {
+        if (variable == null || elementField == null || elementField.arrays() == 0) return false;
+        if (variable.arrays() != elementField.arrays() - 1) return false;
+        return variable.typeInfo() == null || elementField.typeInfo() == null
+               || variable.typeInfo().equals(elementField.typeInfo());
+    }
+
     public static boolean isVirtualModification(Variable variable) {
         return variable instanceof FieldReference fr && isVirtualModificationField(fr.fieldInfo());
     }
