@@ -182,6 +182,12 @@ public class TestLending extends CommonTest {
                     static void start() { Ctx2 c = new Ctx2(); c.counter2 = new ArrayList<>(); CURRENT.set(c); }
                     static List<String> getCounter2() { return current().counter2; }
                 }
+                static class Fluent {
+                    private final List<String> items = new ArrayList<>();
+                    private final Map<String, String> names = new HashMap<>();
+                    Fluent add(String k, String v) { names.put(k, v); items.add(v); return this; }
+                    int n() { return items.size() + names.size(); }
+                }
                 static Keeper viaCall() { List<String> c = Ctx2.getCounter2(); return new Keeper(c); }
 
                 static class Sync {
@@ -211,11 +217,11 @@ public class TestLending extends CommonTest {
         OwnershipPass.Report report = new OwnershipPass(true).go(analysisOrder);
         Map<String, String> owned = new TreeMap<>();
         report.owned().forEach((f, o) -> {
-            if (!Set.of("counter", "counter2", "head").contains(f.name())) return;
+            if (!Set.of("counter", "counter2", "head", "items").contains(f.name())) return;
             owned.put(f.name(), o.name());
             System.out.println("LENDING2 " + f.name() + " = " + o + "  " + report.notOwnedReason().getOrDefault(f, ""));
         });
         report.fresh().forEach((m, b) -> System.out.println("LENDING2 fresh " + m.name() + " " + b));
-        assertEquals(Map.of("counter", "NOT_OWNED", "counter2", "NOT_OWNED", "head", "NOT_OWNED"), owned);
+        assertEquals(Map.of("counter", "NOT_OWNED", "counter2", "NOT_OWNED", "head", "NOT_OWNED", "items", "OWNED"), owned);
     }
 }

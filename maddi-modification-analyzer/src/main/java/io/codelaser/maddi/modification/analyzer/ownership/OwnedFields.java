@@ -324,7 +324,7 @@ final class OwnedFields {
                         : viaOther(link.to(), fieldInfo) ? link.to() : null;
                 // 'this.list → return build.l', in either direction: the field of an object the method creates and
                 // returns receives something, which rule 3 judges
-                if (mine == null || ofNewObject(mine, fresh)) continue;
+                if (mine == null || ofNewObject(mine, fresh) || fluentSelf(mine, fieldInfo)) continue;
                 Variable other = mine == link.from() ? link.to() : link.from();
                 if (accepted.test(other) || OwnershipPass.isNullConstant(other) || immutableOther(other, analysisHelper)
                     || isThisField(root2(other), fieldInfo)) {
@@ -334,6 +334,13 @@ final class OwnedFields {
             }
         }
         return null;
+    }
+
+    // 'return registerTypeAdapter.factories' in a fluent method of the field's type: the result is the receiver itself
+    private static boolean fluentSelf(Variable v, FieldInfo fieldInfo) {
+        return v instanceof FieldReference fr && fr.scopeVariable() instanceof ReturnVariable rv
+               && rv.methodInfo().isFluent()
+               && rv.methodInfo().typeInfo().primaryType().equals(fieldInfo.owner().primaryType());
     }
 
     // the field of an object created, or returned by a fresh method: 'return build.l'; not 'current().counter', the
