@@ -77,6 +77,51 @@ public class Util {
     }
 
     /**
+     * CodeLaser/maddi-mod#117, a soundness rule for the structural verdict. Hidden and accessible content may share
+     * objects: fernflower's Statement keeps its children in 'stats' (hidden content, elements of a collection) and the
+     * first of them again in 'first' (accessible, a field of type Statement). Modifying an element of 'stats' may then
+     * modify the object 'first' points to. Up the owner chain of the container ('sequence' for
+     * 'sequence.stats.§$s'), the first owner whose type has another non-static field whose type is compatible with
+     * the element's: assignable one way or the other, on the erasure. A field whose type is a type parameter is
+     * hidden content itself and does not count; a field of type Object counts. Null when there is none.
+     * Gate NOHIDDENALIAS.
+     */
+    public static Variable hiddenAliasOwner(Variable containerFace, Variable element) {
+        if (NO_HIDDEN_ALIAS) return null;
+        Variable container = firstRealVariable(containerFace);
+        if (!(container instanceof FieldReference)) return null;
+        ParameterizedType elementType = element.parameterizedType();
+        if (elementType == null || elementType.isTypeParameter()) return null;
+        TypeInfo elementTi = elementType.bestTypeInfo();
+        if (elementTi == null) return null;
+        Variable v = container;
+        while (v instanceof FieldReference fr) {
+            Variable owner = fr.scopeVariable();
+            if (owner == null || owner.parameterizedType() == null) return null;
+            TypeInfo ownerType = owner.parameterizedType().bestTypeInfo();
+            if (ownerType != null && hasCompatibleField(ownerType, fr.fieldInfo(), elementTi, elementType.arrays())) {
+                return owner;
+            }
+            v = owner;
+        }
+        return null;
+    }
+
+    public static final boolean NO_HIDDEN_ALIAS = System.getenv("NOHIDDENALIAS") != null;
+
+    private static boolean hasCompatibleField(TypeInfo ownerType, FieldInfo except, TypeInfo elementTi, int arrays) {
+        return Stream.concat(Stream.of(ownerType), ownerType.superTypesExcludingJavaLangObject().stream())
+                .flatMap(t -> t.fields().stream())
+                .filter(f -> !f.isStatic() && !f.equals(except))
+                .map(FieldInfo::type)
+                .filter(ft -> !ft.isTypeParameter() && ft.arrays() == arrays)
+                .map(ParameterizedType::bestTypeInfo)
+                .anyMatch(ti -> ti != null && (ti.isJavaLangObject() || ti.equals(elementTi)
+                                               || elementTi.superTypesExcludingJavaLangObject().contains(ti)
+                                               || ti.superTypesExcludingJavaLangObject().contains(elementTi)));
+    }
+
+    /**
      * On by default since CodeLaser/maddi-mod#116 (CodeLaser/maddi#202, engine work list O2 option 2): see
      * {@link #dispatchUnion}. A non-modifying verdict on a method may not stand when an override modifies: a call
      * through it can reach the override. Gate {@code NODISPATCHUNION=1} restores option D, a concrete method keeping

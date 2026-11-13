@@ -215,6 +215,13 @@ class WriteLinksAndModification {
      */
     private static final boolean NO_CO_ELEMENT = Gate.isSet("NOCOELEMENT");
     private static final boolean NO_OBJECT_GRAPH_MOD = Gate.isSet("NOOBJECTGRAPHMOD");
+
+    /* #117: see Util.hiddenAliasOwner. The container's own variable ('sequence.stats') is left alone: its element
+       is modified, not it. */
+    private static boolean mayAliasAccessibleField(Variable primary, Variable containerFace, Variable element) {
+        Variable container = Util.firstRealVariable(containerFace);
+        return container != null && !container.equals(primary) && Util.hiddenAliasOwner(containerFace, element) != null;
+    }
     private Map<Variable, Set<MethodInfo>> modifiedElementOf = Map.of();
 
     private Map<Variable, Set<MethodInfo>> modifiedElementOf(Map<Variable, Set<MethodInfo>> modified) {
@@ -1191,6 +1198,10 @@ class WriteLinksAndModification {
                 if (ln == CONTAINS_AS_FIELD
                     || ln == SHARES_FIELDS // see impl/TestInstanceOf,2
                     || ln == CONTAINS_AS_MEMBER && !structural
+                    // #117: structurally too, when the element may be the object of an accessible field of the
+                    // container's owner ('sequence.stats.§$s ∋ current', and St.first points to stats.get(0))
+                    || ln == CONTAINS_AS_MEMBER && structural
+                       && mayAliasAccessibleField(builder.primary(), link.from(), toReal)
                     // #112: 'x.map.§$$s[-2] ≥ e', e from inside the object graph of the field's hidden content (an
                     // element of a copy of one of its values): modifying it modifies x deeply, as ∋ does
                     || ln == OBJECT_GRAPH_CONTAINS && !structural && !NO_OBJECT_GRAPH_MOD
