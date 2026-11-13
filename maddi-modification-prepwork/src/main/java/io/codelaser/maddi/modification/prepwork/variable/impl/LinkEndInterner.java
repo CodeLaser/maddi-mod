@@ -86,8 +86,9 @@ public final class LinkEndInterner implements AutoCloseable {
      A real field's reference is shared only when its field is the one its owner declares. A field re-owned by a
      translation (FieldInfo.withOwner, one object per field and owner since CanonicalVirtuals.reowned) used to be a new
      object each time, so that its references were never shared; shared, they moved jenkins' verdicts (28 lines,
-     nonModifying true to false on methods that modify nothing, 2026-11-13) for a reason not found yet. Kept apart as
-     before: the field objects stay one per owner, their references are not shared.
+     nonModifying true to false on methods that modify nothing, 2026-11-13) for a reason not found yet
+     (CodeLaser/maddi-mod#122). Kept apart as before: the field objects stay one per owner, their references are not
+     shared.
      */
     private static boolean shareable(Variable variable) {
         if (!(variable instanceof FieldReference fr)) return true;
