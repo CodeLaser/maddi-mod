@@ -30,6 +30,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.INDEPENDENT_METHOD;
+import static io.codelaser.maddi.cst.impl.analysis.PropertyImpl.INDEPENDENT_PARAMETER;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
@@ -45,6 +46,10 @@ public class TestCopiedMutableElements extends CommonTest {
             import java.util.*;
             public class X {
                 public static class Edge { public boolean labeled; }
+                public record Event(String msg, Edge edge) { }
+                private final List<Event> events = new ArrayList<>();
+                public void log(String msg, Edge edge) { events.add(new Event(msg, edge)); }
+                public void logName(String msg, String name) { events.add(new Event(name, null)); }
                 private final Map<String, List<Edge>> map = new HashMap<>();
                 private final List<Edge> edges = new ArrayList<>();
                 private final Map<String, List<String>> names = new HashMap<>();
@@ -80,6 +85,9 @@ public class TestCopiedMutableElements extends CommonTest {
         assertEquals("@Dependent", independent(x, "copyMap"));
         assertEquals("@Dependent", independent(x, "firstOfMap"));
         assertEquals("@Independent", independent(x, "copyNames"));
+        // #119: a parameter stored inside an element of the field's content shares it with the instance
+        assertEquals("@Dependent", paramIndependent(x, "log", 1));
+        assertEquals("@Independent", paramIndependent(x, "logName", 1));
         MethodInfo reset = find(x, "reset");
         assertEquals("false/true", reset.parameters().getFirst().isUnmodified() + "/"
                                    + reset.parameters().getFirst().isStructurallyUnmodified());
@@ -87,6 +95,11 @@ public class TestCopiedMutableElements extends CommonTest {
 
     private static MethodInfo find(TypeInfo typeInfo, String name) {
         return typeInfo.methods().stream().filter(m -> m.name().equals(name)).findFirst().orElseThrow();
+    }
+
+    private static String paramIndependent(TypeInfo typeInfo, String name, int index) {
+        return "" + find(typeInfo, name).parameters().get(index).analysis()
+                .getOrNull(INDEPENDENT_PARAMETER, ValueImpl.IndependentImpl.class);
     }
 
     private static String independent(TypeInfo typeInfo, String name) {

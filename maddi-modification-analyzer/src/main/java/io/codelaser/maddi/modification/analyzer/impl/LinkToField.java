@@ -211,7 +211,8 @@ class LinkToField {
             // 'copy.§$s ≤ this.map.§$$s[-2]': 'new ArrayList<>(map.get(k))' holds objects from inside the field's hidden
             // content, the elements of one of its values. Judged by what is shared, the FROM side's type without its
             // arrays (Edge), the same type the ⊆/~ variant judges for a copy of the field's own list, so the two
-            // emissions agree (CodeLaser/maddi-mod#112). Gate NOOBJECTGRAPHINDEP
+            // emissions agree (CodeLaser/maddi-mod#112). A parameter stored inside an element of the field's content
+            // ('t ≤ this.events.§$s') is dependent too: it sits in accessible content (#119). Gate NOOBJECTGRAPHINDEP
             return link.from().parameterizedType().copyWithoutArrays();
         }
         // deliberately NOT judged: ≥ (object graph, the other direction) and ∩ (overlap); ≤ only as above. ≤'s to() is the whole container,
