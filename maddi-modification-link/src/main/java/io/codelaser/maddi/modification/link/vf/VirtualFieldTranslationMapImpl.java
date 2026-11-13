@@ -101,8 +101,8 @@ public class VirtualFieldTranslationMapImpl implements VirtualFieldTranslationMa
                     if (out != null) {
                         C c = newTypeNewName(out, fieldInfo.type().arrays(), fieldInfo.type().wildcard());
                         change = true;
-                        FieldInfo newField = runtime.newFieldInfo(VF_CHAR + c.newName, false,
-                                c.newType, owner);
+                        FieldInfo newField = CanonicalVirtuals.translatedField(owner, VF_CHAR + c.newName, c.newType,
+                                () -> runtime.newFieldInfo(VF_CHAR + c.newName, false, c.newType, owner));
                         newFields.add(newField);
                         sbNew.append(newField.simpleName());
                     } else {
@@ -120,11 +120,12 @@ public class VirtualFieldTranslationMapImpl implements VirtualFieldTranslationMa
                 // ok we can make a new contain, with the new name, and the translated fields
                 String cleanNew = sbNew.toString().replace(VF_CHAR, "");
                 String typeName = cleanNew.toUpperCase();
-                TypeInfo container = VirtualFieldComputer.makeContainer(runtime, fr.fieldInfo().owner(), typeName, newFields);
+                TypeInfo container = CanonicalVirtuals.translatedContainer(fr.fieldInfo().owner(), typeName, newFields,
+                        () -> VirtualFieldComputer.makeContainer(runtime, fr.fieldInfo().owner(), typeName, newFields));
                 ParameterizedType containerPt = runtime.newParameterizedType(container, fr.parameterizedType().arrays());
                 String newName = cleanNew + "s".repeat(fr.parameterizedType().arrays());
-                FieldInfo newField = runtime.newFieldInfo(VF_CHAR + newName, false, containerPt,
-                        owner);
+                FieldInfo newField = CanonicalVirtuals.translatedField(owner, VF_CHAR + newName, containerPt,
+                        () -> runtime.newFieldInfo(VF_CHAR + newName, false, containerPt, owner));
                 return runtime.newFieldReference(newField, fr.scope(), newField.type());
             }
         }
@@ -157,7 +158,8 @@ public class VirtualFieldTranslationMapImpl implements VirtualFieldTranslationMa
     private FieldReference handleFieldReference(FieldReference fr, String newName, ParameterizedType newType) {
         TypeInfo owner = owner(fr.scope().parameterizedType());
         String cleanName = newName.replace(VF_CHAR, "");
-        FieldInfo newFieldInfo = runtime.newFieldInfo(VF_CHAR + cleanName, false, newType, owner);
+        FieldInfo newFieldInfo = CanonicalVirtuals.translatedField(owner, VF_CHAR + cleanName, newType,
+                () -> runtime.newFieldInfo(VF_CHAR + cleanName, false, newType, owner));
         Expression tScope = fr.scope().translate(this);
         return runtime.newFieldReference(newFieldInfo, tScope, newType);
     }

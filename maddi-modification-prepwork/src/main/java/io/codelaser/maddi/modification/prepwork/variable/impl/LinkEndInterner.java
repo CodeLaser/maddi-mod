@@ -21,6 +21,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 
+import io.codelaser.maddi.cst.api.info.FieldInfo;
 import io.codelaser.maddi.cst.api.variable.DependentVariable;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.cst.api.variable.Variable;
@@ -73,12 +74,30 @@ public final class LinkEndInterner implements AutoCloseable {
 
     /** the end to keep: an equal end of the same class and type met before in this scope, else this one */
     static Variable intern(Variable variable) {
-        if (OFF) return variable;
+        if (OFF || !shareable(variable)) return variable;
         LinkEndInterner interner = CURRENT.get();
         if (interner == null) return variable;
         Variable known = interner.ends.putIfAbsent(variable, variable);
         if (known == null || known == variable) return variable;
         return sameStructure(known, variable, 0) ? known : variable;
+    }
+
+    /*
+     A real field's reference is shared only when its field is the one its owner declares. A field re-owned by a
+     translation (FieldInfo.withOwner, one object per field and owner since CanonicalVirtuals.reowned) used to be a new
+     object each time, so that its references were never shared; shared, they moved jenkins' verdicts (28 lines,
+     nonModifying true to false on methods that modify nothing, 2026-11-13) for a reason not found yet
+     (CodeLaser/maddi-mod#122). Kept apart as before: the field objects stay one per owner, their references are not
+     shared.
+     */
+    private static boolean shareable(Variable variable) {
+        if (!(variable instanceof FieldReference fr)) return true;
+        FieldInfo fi = fr.fieldInfo();
+        if (fi.name().startsWith("§")) return true;
+        for (FieldInfo declared : fi.owner().fields()) {
+            if (declared == fi) return true;
+        }
+        return false;
     }
 
     /*

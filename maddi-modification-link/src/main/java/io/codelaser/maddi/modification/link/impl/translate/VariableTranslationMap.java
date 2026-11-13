@@ -13,6 +13,7 @@ import io.codelaser.maddi.cst.api.runtime.Runtime;
 import io.codelaser.maddi.cst.api.translate.TranslationMap;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.api.variable.*;
+import io.codelaser.maddi.modification.link.vf.CanonicalVirtuals;
 import io.codelaser.maddi.modification.link.impl.SliceFactory;
 import io.codelaser.maddi.modification.prepwork.Util;
 
@@ -108,7 +109,7 @@ public class VariableTranslationMap implements TranslationMap {
             FieldInfo newField = tm.translateFieldInfo(fr.fieldInfo());
             if (ttScope != fr.scope() || newField != fr.fieldInfo()) {
                 TypeInfo newOwner = owner(runtime, ttScope.parameterizedType());
-                FieldInfo changedOwner = newField.withOwner(newOwner);
+                FieldInfo changedOwner = CanonicalVirtuals.reowned(newField, newOwner);
                 return runtime.newFieldReference(changedOwner, ttScope, fr.parameterizedType());
             }
         } else if (variable instanceof DependentVariable dv) {
