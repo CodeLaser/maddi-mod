@@ -85,6 +85,17 @@ public class TestAnalysedModelRelease extends CommonTest {
         for (WeakReference<TypeInfo> w : model) {
             assertNull(w.get(), "a type of the dropped model is still reachable");
         }
+        // a cleared reference reaches the cache's queue a moment later, on the JVM's Reference Handler thread: until
+        // then size() still counts it (seen as "0 > 1", the message computed after the queue caught up)
+        for (int i = 0; i < 100 && CanonicalVirtuals.size() > before; i++) {
+            System.gc();
+            try {
+                Thread.sleep(10);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
         assertTrue(CanonicalVirtuals.size() <= before,
                 () -> "entries left of the dropped model: " + CanonicalVirtuals.size() + " > " + before);
     }
