@@ -77,11 +77,12 @@ public class Util {
     }
 
     /**
-     * Gate {@code DISPATCHUNION=1} (experiment, CodeLaser/maddi#202, engine work list O2 option 2): see
-     * {@link #dispatchUnion}. Off, a concrete method keeps its own body's verdict (option D). Not final, so that a
-     * test can switch it for one analysis.
+     * On by default since CodeLaser/maddi-mod#116 (CodeLaser/maddi#202, engine work list O2 option 2): see
+     * {@link #dispatchUnion}. A non-modifying verdict on a method may not stand when an override modifies: a call
+     * through it can reach the override. Gate {@code NODISPATCHUNION=1} restores option D, a concrete method keeping
+     * its own body's verdict. Not final, so that a test can switch it for one analysis.
      */
-    public static volatile boolean DISPATCH_UNION = System.getenv("DISPATCHUNION") != null;
+    public static volatile boolean DISPATCH_UNION = System.getenv("NODISPATCHUNION") == null;
 
     /**
      * Under {@link #DISPATCH_UNION}: a concrete, overridable source method that source methods override. A call
