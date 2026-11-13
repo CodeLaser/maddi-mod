@@ -44,3 +44,4 @@ The documents kept next to the code; these describe the current state and are up
 - [roadmap/modification-link-applications.md](roadmap/modification-link-applications.md) — Candidate applications for `maddi-modification-link`
 - [roadmap/prep-analyzer-hardening.md](roadmap/prep-analyzer-hardening.md) — Prep-analyzer hardening roadmap
 - [roadmap/semantic-preconditions-for-relocation.md](roadmap/semantic-preconditions-for-relocation.md) — Semantic preconditions for state-relocating refactorings
+- [related-work/jule-memory-model.md](related-work/jule-memory-model.md) — Jule's memory model and mutability rules, compared with maddi (2026-11-13)
