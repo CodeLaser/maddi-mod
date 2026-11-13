@@ -169,6 +169,70 @@ links and prepwork's last-use data the plan named: narrower, but each step is vi
 
 Stage 3's rules 3 and 4 then accept the parameter, and a field that still fails names the transfer's reason.
 
+**Moves out of a finalizer** (in progress). A `@Finalizer` method (contract, `MethodInfo.isFinalizer()`) may hand
+over its own field: `@Finalizer T build() { return new T(list); }` is Rust's `fn build(self) -> T`, a move instead
+of a copy. Accepted as an argument when the finalizer belongs to the field's type and mentions the field once,
+outside any loop or lambda, and the field is owned. On the builder's side, a finalizer that moves the field out (hands
+it over, or returns `this.f`) does not count against the field's ownership: after the call the owner is dead. The
+two depend on each other: greatest fixpoint over stage 3's verdicts. This trusts the contract's "no use after"; stage
+6 is what checks it.
+
+### Stage 6 — computing and checking `@Finalizer` (plan)
+
+`@Finalizer` (maddi-annotation, `rare`) says that after the call nothing may use the receiver. Today it is a contract
+only, read from source and from the annotated APIs, never computed. Its modification semantics are load-bearing (a
+finalizer call never modifies its receiver: there is no *after* to observe it; this is what keeps stream pipelines
+analysable); its three life-cycle rules are documented but not enforced (`road-to-immutability`, chapter "Other
+annotations"). Stages 2, 3 and 5 supply what both computing and checking need: `@Finalizer` is **transfer of the
+receiver**, and its rules are ownership rules.
+
+| `@Finalizer` rule | In ownership terms |
+|---|---|
+| no method may be called after the finalizer | the receiver is not used after the call: stage 5's check, with the receiver as argument |
+| 1. a type with finalizers has effectively final fields | the owner cannot be swapped out (`FINAL_FIELD`, computed) |
+| 2. a finalizer is called on a field only inside a finalizer | an owner consumes what it owns only while it is itself consumed (Rust: moving out of a field needs `self` by value) |
+| 3. never on a parameter or anything linked to it | a borrowed object cannot be consumed |
+
+**Receiver transfer.** For a method `m`, every call site's receiver must be handed over in stage 5's sense, read
+for the receiver instead of an argument:
+
+- a temporary: a construction, a call to a `FRESH_METHOD`, or a chain of `@Fluent` calls (`FLUENT_METHOD`,
+  computed) on one: `new B().add(x).add(y).build()`;
+- a local with stage 5's ordering: declared in the block of the call's statement, not mentioned after it, the call
+  outside any loop or lambda in it. Before the statement, the receiver of calls, and (wider than stage 5's locals)
+  an argument to parameters that are `BORROWED_PARAMETER`: a borrow ends with its call;
+- `this.f` inside a finalizer of `f`'s owner, with `f` owned (rule 2: a dying owner consumes what it owns);
+- never a parameter of the caller, nor anything that is not a plain local, a temporary or such a field (rule 3).
+
+The object must also never have been shared before: its constructor does not leak `this` (`ThisEscape`), and no
+`@Fluent` link in the chain hides a second holder (a fluent method returns `this`, so the chain holds one object).
+
+**Computing `FINALIZER_METHOD`.** Call-site evidence alone is vacuous: any method called once, on a temporary,
+passes. So a method is computed a finalizer only when it also *needs* to be one: its body moves an owned field out
+(returns `this.f`, or hands it over as above). Need and permission together:
+
+- need (body): the method moves at least one `OWNED_FIELD` of its type out;
+- permission (sites): receiver transfer at every call site, with stage 5's rule 1 (private or package-private, or
+  `OWNERSHIP_WORLD=closed`; no method reference names it; nothing overrides it, or every override is judged too).
+
+This is a greatest fixpoint with stage 3: the moved field is owned only if the method that moves it is a finalizer.
+The computed property is the existing `FINALIZER_METHOD`, so the Rust printer's `self` by value (CodeLaser/maddi#167)
+and the moves above apply unchanged. The modification exemption follows for free and stays sound: nobody observes
+the receiver after the call.
+
+**Checking contracted `@Finalizer`s.** For a contract (source annotation or annotated API), the same receiver-transfer
+test, run on every call site in the analysed sources, finds violations: `Stream s = l.stream(); s.map(f); s.count()`
+uses `s` after `map`, a finalizer in the annotated APIs; a finalizer called on a parameter breaks rule 3; on a field
+outside a finalizer, rule 2. Report them as findings, as other contract violations. A violation of a contract the
+modification exemption relied on makes that exemption unsound at that call site; say so in the finding.
+
+**Census.** Count computed finalizers and their need (which fields they move); count violations of contracted ones,
+split by rule. Expect few computed finalizers (builders' `build()`, `into...` accessors) and some stream reuse.
+
+**Out of scope here.** Inferring a finalizer from intent (a `close()` that releases a resource: that is
+`@Owning`/must-call territory, Checker Framework's Resource Leak Checker); finalizers on library methods without a
+contract; ordering beyond one block (prepwork's variable data would be the route).
+
 ## 4. Working rules
 
 - Runs longer than about 5 minutes or 8 GB go through `lab run` from the workspace root, after committing
