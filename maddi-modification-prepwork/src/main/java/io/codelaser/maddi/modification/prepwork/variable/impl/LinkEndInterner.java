@@ -38,14 +38,14 @@ import io.codelaser.maddi.cst.api.variable.Variable;
  * (fernflower: 30 lines of the fingerprint). An end is shared only with an equal end of the same class and type, as
  * the engine also keeps equal ends of different types apart, and of the same structure (see sameStructure).
  * <p>
- * Gate {@code INTERNLINKS} (presence): on; off by default. Proving-corpus A/B (2026-11-12, same commit, gate off
+ * On by default since 2026-11-13; gate {@code NOINTERNLINKS} (presence) switches it off. Proving-corpus A/B (2026-11-12, same commit, gate off
  * against on): activemq, jenkins, langchain4j 0 lines; fernflower, timefold 2; guava 6 (it varies run to run). Each
  * moved verdict is an anonymous class's or lambda's method going from nonModifying false to true, where the method
  * modifies nothing of its own (VarVersionsProcessor.$1.processExprent reads a captured map; InvokableTest's Runnables
  * print captured locals). Fernflower's live heap at iteration 1: 784 -> 588 MB.
  */
 public final class LinkEndInterner implements AutoCloseable {
-    private static final boolean OFF = System.getenv("INTERNLINKS") == null;
+    private static final boolean OFF = System.getenv("NOINTERNLINKS") != null;
     private static final ThreadLocal<LinkEndInterner> CURRENT = new ThreadLocal<>();
 
     private final Map<Variable, Variable> ends = new HashMap<>();
