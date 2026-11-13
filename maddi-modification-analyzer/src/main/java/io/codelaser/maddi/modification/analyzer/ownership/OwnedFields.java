@@ -45,7 +45,9 @@ import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 import io.codelaser.maddi.modification.common.AnalysisHelper;
+import io.codelaser.maddi.modification.link.impl.LinkNatureImpl;
 import io.codelaser.maddi.modification.prepwork.variable.Link;
+import io.codelaser.maddi.modification.prepwork.variable.LinkNature;
 import io.codelaser.maddi.modification.prepwork.variable.Links;
 import io.codelaser.maddi.modification.prepwork.variable.ObjectCreationVariable;
 import io.codelaser.maddi.modification.prepwork.variable.ReturnVariable;
@@ -237,7 +239,7 @@ final class OwnedFields {
                                 // a getter whose every caller only uses the object it returns (Lending)
                                 || toRoot instanceof ReturnVariable lender && lending.isLent(lender.methodInfo());
             if (isThisField(link.from(), fieldInfo)) {
-                if (!toCreated && !OwnershipPass.isNullConstant(link.to())) {
+                if (!toCreated && !OwnershipPass.isNullConstant(link.to()) && !aboutContents(link.linkNature())) {
                     return "link: " + fieldInfo.name() + " " + link.linkNature() + " " + link.to();
                 }
             } else if (link.from() instanceof FieldReference face && "§m".equals(face.fieldInfo().name())
@@ -252,6 +254,19 @@ final class OwnedFields {
             if (kept != null) return "in " + methodInfo.name() + ": " + kept;
         }
         return null;
+    }
+
+    /*
+     A link from the field that is about its contents, not its object: the other side does not hold the field's object
+     ('this.f ∋ x', 'this.f ~ 0:s' after 'x.add(s)' through a local alias, 'this.f ⊆ …', 'this.f ≻ …', 'this.f ≥ …').
+     The contents are element ownership's question. Still failing: '∈', '∈?', '≺', '≤', '≈', '∩', '≡', '←', '→', any
+     relation in which the field's object may be part of something else.
+     */
+    private static boolean aboutContents(LinkNature nature) {
+        return nature.equals(LinkNatureImpl.CONTAINS_AS_MEMBER) || nature.equals(LinkNatureImpl.COULD_CONTAIN_AS_MEMBER)
+               || nature.equals(LinkNatureImpl.SHARES_ELEMENTS) || nature.equals(LinkNatureImpl.IS_SUBSET_OF)
+               || nature.equals(LinkNatureImpl.IS_SUPERSET_OF) || nature.equals(LinkNatureImpl.CONTAINS_AS_FIELD)
+               || nature.equals(LinkNatureImpl.OBJECT_GRAPH_CONTAINS);
     }
 
     // stage 5: a parameter of the assigning method that every caller hands over, kept by it only in this field
