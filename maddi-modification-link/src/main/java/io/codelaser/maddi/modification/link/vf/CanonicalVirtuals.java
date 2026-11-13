@@ -35,8 +35,14 @@ import io.codelaser.maddi.cst.api.type.ParameterizedType;
  * interner, which shares an end only with an end of the same field object, could not share them.
  * <p>
  * Keys hold their parts by identity (an owner or container type is one object per definition, as made here, and two
- * containers of one name are different definitions); values are weak, so an entry lives as long as some link or
- * variable still uses its field or container, and no older generation of the model stays reachable through this cache.
+ * containers of one name are different definitions), a type by its equals; values are weak.
+ * <p>
+ * Only while an analysis runs ({@link #beginAnalysis()}, {@link #endAnalysis()}); when the last running analysis ends,
+ * the cache is emptied, and outside an analysis every call makes a new object, as before 2026-11-13. A key holds its
+ * owner and types strongly, and an owner reaches, through its analysis, the fields its entries' weak values refer to,
+ * so that entries are never cleared by themselves: kept beyond the analysis, the cache kept a model the refactor
+ * server had dropped alive (8.6 GB, 2026-11-13). Weak keys would not do: a type compared by anything but its equals
+ * moved verdicts on four of the six proving corpora.
  * <p>
  * Gate {@code NOCANONICALVF} (presence): every call makes a new object, the behaviour before 2026-11-13.
  */
@@ -85,7 +91,34 @@ public final class CanonicalVirtuals {
     private static final ReferenceQueue<Object> QUEUE = new ReferenceQueue<>();
     private static final Map<Object, Ref<?>> CACHE = new ConcurrentHashMap<>();
 
+    private static final java.util.concurrent.atomic.AtomicInteger ANALYSES = new java.util.concurrent.atomic.AtomicInteger();
+
     private CanonicalVirtuals() {
+    }
+
+    /** an analysis starts: from now on, until it ends, virtual fields and containers are shared */
+    public static void beginAnalysis() {
+        ANALYSES.incrementAndGet();
+    }
+
+    /** an analysis ends; when no other one runs, nothing of any model stays in the cache */
+    public static void endAnalysis() {
+        if (ANALYSES.decrementAndGet() <= 0) {
+            ANALYSES.set(0);
+            CACHE.clear();
+            while (QUEUE.poll() != null) {
+                // drained: the entries they belonged to are gone
+            }
+        }
+    }
+
+    /** for tests: the number of entries */
+    public static int size() {
+        return CACHE.size();
+    }
+
+    private static boolean active() {
+        return !OFF && ANALYSES.get() > 0;
     }
 
     static FieldInfo field(TypeInfo owner, String name, ParameterizedType type, Supplier<FieldInfo> make) {
@@ -115,19 +148,19 @@ public final class CanonicalVirtuals {
      * ends (2026-11-13). Every field, not only a virtual one, as every field is re-owned there.
      */
     public static FieldInfo reowned(FieldInfo field, TypeInfo newOwner) {
-        if (OFF || field.owner() == newOwner) return field.withOwner(newOwner);
+        if (!active() || field.owner() == newOwner) return field.withOwner(newOwner);
         return get(new ReownedKey(new Id(field), new Id(newOwner)), () -> field.withOwner(newOwner));
     }
 
     private static FieldInfo field(char kind, TypeInfo owner, String name, ParameterizedType type,
                                    Supplier<FieldInfo> make) {
-        if (OFF) return make.get();
+        if (!active()) return make.get();
         return get(new FieldKey(kind, new Id(owner), name, TypeKey.of(type)), make);
     }
 
     private static TypeInfo container(char kind, TypeInfo enclosing, String name, List<FieldInfo> components,
                                       Supplier<TypeInfo> make) {
-        if (OFF) return make.get();
+        if (!active()) return make.get();
         List<FieldKey> parts = components.stream()
                 .map(fi -> new FieldKey('F', new Id(fi.owner()), fi.name(), TypeKey.of(fi.type())))
                 .toList();
