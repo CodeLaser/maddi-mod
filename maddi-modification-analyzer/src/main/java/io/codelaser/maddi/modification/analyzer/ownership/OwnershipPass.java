@@ -117,7 +117,8 @@ public final class OwnershipPass {
                          Map<ParameterInfo, Boolean> borrowed, Map<ParameterInfo, String> notBorrowedReason,
                          Map<FieldInfo, Owned> owned, Map<FieldInfo, String> notOwnedReason,
                          Map<MethodInfo, Boolean> finalizer, Map<MethodInfo, String> notFinalizerReason,
-                         List<Message> finalizerViolations, List<String[]> finalizerViolationRows) {
+                         List<Message> finalizerViolations, List<String[]> finalizerViolationRows,
+                         Map<FieldInfo, Boolean> ownedElements, Map<FieldInfo, String> notOwnedElementsReason) {
     }
 
     private final boolean closedWorld;
@@ -181,17 +182,22 @@ public final class OwnershipPass {
             ownedFields = new OwnedFields(analysisOrder, methods, fresh, thisEscape, borrowedParameters, transfers);
         }
         finalizers.check();
+        OwnedElements ownedElements = new OwnedElements(ownedFields.verdicts(), thisEscape, borrowedParameters,
+                transfers);
         long nBorrowed = borrowedParameters.verdicts().values().stream().filter(b -> b).count();
         Map<Owned, Long> byOwned = new java.util.EnumMap<>(Owned.class);
         ownedFields.verdicts().values().forEach(o -> byOwned.merge(o, 1L, Long::sum));
         LOGGER.info("Ownership pass: {} method(s) with a reference result, {} fresh; {} parameter(s), {} borrowed; "
-                    + "{} field(s): {}; {} finalizer(s) computed of {} candidate(s), {} finalizer violation(s)",
+                    + "{} field(s): {}; elements owned in {} of {} collection field(s); "
+                    + "{} finalizer(s) computed of {} candidate(s), {} finalizer violation(s)",
                 methods.size(), fresh.size(), borrowedParameters.verdicts().size(), nBorrowed,
-                ownedFields.verdicts().size(), byOwned, finalizers.computed().size(), finalizers.verdicts().size(),
+                ownedFields.verdicts().size(), byOwned,
+                ownedElements.verdicts().values().stream().filter(b -> b).count(), ownedElements.verdicts().size(),
+                finalizers.computed().size(), finalizers.verdicts().size(),
                 finalizers.violations().size());
         return new Report(verdicts, reason, borrowedParameters.verdicts(), borrowedParameters.reasons(),
                 ownedFields.verdicts(), ownedFields.reasons(), finalizers.verdicts(), finalizers.reasons(),
-                finalizers.violations(), finalizers.violationRows());
+                finalizers.violations(), finalizers.violationRows(), ownedElements.verdicts(), ownedElements.reasons());
     }
 
     /**
@@ -208,6 +214,8 @@ public final class OwnershipPass {
                                                            + report.notBorrowedReason().getOrDefault(p, "")));
             report.owned().forEach((f, o) -> pw.println("owned\t" + f.fullyQualifiedName() + "\t" + o + "\t"
                                                         + report.notOwnedReason().getOrDefault(f, "")));
+            report.ownedElements().forEach((f, b) -> pw.println("ownedElements\t" + f.fullyQualifiedName() + "\t" + b
+                                                                + "\t" + report.notOwnedElementsReason().getOrDefault(f, "")));
             report.finalizer().forEach((m, b) -> pw.println("finalizer\t" + m.fullyQualifiedName() + "\t" + b + "\t"
                                                             + report.notFinalizerReason().getOrDefault(m, "")));
             // the caller as the element, the contracted finalizer as the verdict column
@@ -239,6 +247,8 @@ public final class OwnershipPass {
                 methodInfo.analysis().setAllowControlledOverwrite(PropertyImpl.FINALIZER_METHOD, ValueImpl.BoolImpl.TRUE);
             }
         });
+        report.ownedElements().forEach((fi, owned) -> fi.analysis().setAllowControlledOverwrite(
+                PropertyImpl.OWNED_ELEMENTS_FIELD, ValueImpl.BoolImpl.from(owned)));
         report.borrowed().forEach((pi, borrowed) -> {
             if (!BorrowedParameters.isContracted(pi)) {
                 pi.analysis().setAllowControlledOverwrite(PropertyImpl.BORROWED_PARAMETER,

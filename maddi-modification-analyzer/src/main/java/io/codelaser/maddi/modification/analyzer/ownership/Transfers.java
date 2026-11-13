@@ -468,7 +468,7 @@ final class Transfers {
     }
 
     // a primitive, or a deeply immutable value: it cannot reach a mutable object
-    private static boolean cannotHold(ParameterizedType type) {
+    static boolean cannotHold(ParameterizedType type) {
         return type.isPrimitiveExcludingVoid() || type.isVoid()
                || new AnalysisHelper().typeImmutable(type).isImmutable();
     }
@@ -478,7 +478,7 @@ final class Transfers {
      content of the receiver, not the receiver itself; elements are not judged (stage 3). A method's own type parameter
      ('<T> T as()') can be anything, the receiver included.
      */
-    private static boolean returnsElement(MethodInfo methodInfo) {
+    static boolean returnsElement(MethodInfo methodInfo) {
         ParameterizedType rt = methodInfo.returnType();
         return rt.isTypeParameter() && rt.typeParameter() != null && !rt.typeParameter().isMethodTypeParameter();
     }
