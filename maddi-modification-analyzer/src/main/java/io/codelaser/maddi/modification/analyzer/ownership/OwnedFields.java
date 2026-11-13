@@ -254,7 +254,7 @@ final class OwnedFields {
         }
         // rule 4 through another instance: the field's own links are those of 'this.f'; 'current.f' or 'other.f' shows
         // in the links of the field or method it is reached from ('Ctx.current.counter→getCounter' is on 'current')
-        String viaOther = linkThroughOtherInstance(fieldInfo, accepted, analysisHelper);
+        String viaOther = linkThroughOtherInstance(fieldInfo, accepted, analysisHelper, fresh);
         if (viaOther != null) return viaOther;
         // rule 5
         for (MethodInfo methodInfo : bodies(fieldInfo)) {
@@ -305,7 +305,7 @@ final class OwnedFields {
     }
 
     private static String linkThroughOtherInstance(FieldInfo fieldInfo, Predicate<Variable> accepted,
-                                                   AnalysisHelper analysisHelper) {
+                                                   AnalysisHelper analysisHelper, Set<MethodInfo> fresh) {
         List<Links> all = new ArrayList<>();
         fieldInfo.owner().primaryType().recursiveSubTypeStreamIncludingLocal()
                 .flatMap(t -> t.fields().stream())
@@ -324,7 +324,7 @@ final class OwnedFields {
                         : viaOther(link.to(), fieldInfo) ? link.to() : null;
                 // 'this.list → return build.l', in either direction: the field of an object the method creates and
                 // returns receives something, which rule 3 judges
-                if (mine == null || ofNewObject(mine)) continue;
+                if (mine == null || ofNewObject(mine, fresh)) continue;
                 Variable other = mine == link.from() ? link.to() : link.from();
                 if (accepted.test(other) || OwnershipPass.isNullConstant(other) || immutableOther(other, analysisHelper)
                     || isThisField(root2(other), fieldInfo)) {
@@ -336,10 +336,12 @@ final class OwnedFields {
         return null;
     }
 
-    // the field of an object the method creates and returns: 'return build.l'
-    private static boolean ofNewObject(Variable v) {
+    // the field of an object created, or returned by a fresh method: 'return build.l'; not 'current().counter', the
+    // field of an existing object a call returns
+    private static boolean ofNewObject(Variable v, Set<MethodInfo> fresh) {
         Variable root = root(v);
-        return root instanceof ReturnVariable || root instanceof ObjectCreationVariable;
+        return root instanceof ObjectCreationVariable
+               || root instanceof ReturnVariable rv && fresh.contains(rv.methodInfo());
     }
 
     // the field reference under any content or modification faces: 'this.children.§$s' -> 'this.children'
@@ -354,13 +356,14 @@ final class OwnedFields {
     // the field itself (or its modification face) reached through a scope other than 'this'
     private static boolean viaOther(Variable v, FieldInfo fieldInfo) {
         Variable w = v instanceof FieldReference face && "§m".equals(face.fieldInfo().name()) ? face.scopeVariable() : v;
-        return w instanceof FieldReference fr && fr.fieldInfo().equals(fieldInfo) && fr.scopeVariable() != null
+        // any explicit scope but 'this': a variable ('current.f', 'other.f') or an expression ('current().f')
+        return w instanceof FieldReference fr && fr.fieldInfo().equals(fieldInfo) && fr.scope() != null
                && !(fr.scopeVariable() instanceof This);
     }
 
     private static boolean isThisField(Variable variable, FieldInfo fieldInfo) {
         return variable instanceof FieldReference fr && fr.fieldInfo().equals(fieldInfo)
-               && (fr.scopeVariable() == null || fr.scopeVariable() instanceof This);
+               && (fr.scope() == null || fr.scopeVariable() instanceof This);
     }
 
     private static Variable root(Variable variable) {

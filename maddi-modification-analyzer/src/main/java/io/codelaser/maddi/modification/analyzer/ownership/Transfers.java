@@ -466,7 +466,7 @@ final class Transfers {
 
     static boolean isThisField(Variable variable, FieldInfo field) {
         return variable instanceof FieldReference fr && fr.fieldInfo().equals(field) && !field.isStatic()
-               && (fr.scopeVariable() == null || fr.scopeVariable() instanceof This);
+               && (fr.scope() == null || fr.scopeVariable() instanceof This);
     }
 
     // a primitive, or a deeply immutable value: it cannot reach a mutable object

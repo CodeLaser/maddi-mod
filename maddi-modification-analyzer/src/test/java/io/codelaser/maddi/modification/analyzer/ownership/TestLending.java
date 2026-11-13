@@ -155,7 +155,8 @@ public class TestLending extends CommonTest {
         assertEquals(ELEMENTS, elements);
     }
 
-    // found by the dynamic agent on fernflower (DecompilerContext.counterContainer, SynchronizedStatement.headexprent)
+    // found by the dynamic agent on fernflower: DecompilerContext.counterContainer (through another instance, Ctx and
+    // Ctx2), SynchronizedStatement.headexprent (a switch expression's arm)
     @Language("java")
     private static final String INPUT2 = """
             package a.b;
@@ -173,6 +174,15 @@ public class TestLending extends CommonTest {
                     int n() { return counter.size(); }
                 }
                 static Keeper viaOther() { List<String> c = Ctx.getCounter(); return new Keeper(c); }
+
+                static class Ctx2 {
+                    private static final ThreadLocal<Ctx2> CURRENT = new ThreadLocal<>();
+                    private List<String> counter2;
+                    static Ctx2 current() { return CURRENT.get(); }
+                    static void start() { Ctx2 c = new Ctx2(); c.counter2 = new ArrayList<>(); CURRENT.set(c); }
+                    static List<String> getCounter2() { return current().counter2; }
+                }
+                static Keeper viaCall() { List<String> c = Ctx2.getCounter2(); return new Keeper(c); }
 
                 static class Sync {
                     private final List<String> head = new ArrayList<>();
@@ -201,11 +211,11 @@ public class TestLending extends CommonTest {
         OwnershipPass.Report report = new OwnershipPass(true).go(analysisOrder);
         Map<String, String> owned = new TreeMap<>();
         report.owned().forEach((f, o) -> {
-            if (!Set.of("counter", "head").contains(f.name())) return;
+            if (!Set.of("counter", "counter2", "head").contains(f.name())) return;
             owned.put(f.name(), o.name());
             System.out.println("LENDING2 " + f.name() + " = " + o + "  " + report.notOwnedReason().getOrDefault(f, ""));
         });
         report.fresh().forEach((m, b) -> System.out.println("LENDING2 fresh " + m.name() + " " + b));
-        assertEquals(Map.of("counter", "NOT_OWNED", "head", "NOT_OWNED"), owned);
+        assertEquals(Map.of("counter", "NOT_OWNED", "counter2", "NOT_OWNED", "head", "NOT_OWNED"), owned);
     }
 }
