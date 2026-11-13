@@ -87,6 +87,10 @@ public class TestLangchain4jCollections {
                         .setFaultTolerant(true)
                         // MODREACH_OFF: the fixpoint's own verdicts, without the reachability pass's final word
                         .setModificationViaReachability(System.getenv("MODREACH_OFF") == null)
+                        // OWNERSHIP: the ownership pass after the fixpoint (docs/roadmap/ownership.md); FPDUMP is
+                        // written before it, so the dump is the A/B of "it changes no other verdict"
+                        .setOwnership(System.getenv("OWNERSHIP") != null)
+                        .setOwnershipClosedWorld("closed".equals(System.getenv("OWNERSHIP_WORLD")))
                         .build());
         analyzer.analyze(order, prep.callGraph().graph());
 

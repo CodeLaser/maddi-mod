@@ -125,6 +125,24 @@ public interface IteratingAnalyzer {
         }
 
         /**
+         * After the fixpoint (and after nullability), run the ownership pass once over the converged link facts
+         * (maddi-mod docs/roadmap/ownership.md): it writes {@code FRESH_METHOD} and changes no other property. Needs
+         * {@link #trackObjectCreations()}, whose creation markers are its evidence. Off by default.
+         */
+        default boolean ownership() {
+            return false;
+        }
+
+        /**
+         * The ownership pass's world (stage 5, transfer): closed when the analysed sources are an application, whose
+         * public methods and constructors are called only from those sources, so that their call sites are all known.
+         * Open (the default) for a library: only private and package-private callees transfer.
+         */
+        default boolean ownershipClosedWorld() {
+            return false;
+        }
+
+        /**
          * The wall-clock budget of one {@link #analyze} call; {@code null} (the default) is unlimited. When the run
          * outlives it, the analyzer throws {@link AnalysisBudgetExceededException} naming the pass and the element
          * count it reached. Checked before every element of every pass, not at pass boundaries only, because a pass

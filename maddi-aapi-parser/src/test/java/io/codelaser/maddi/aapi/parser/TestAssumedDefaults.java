@@ -70,7 +70,7 @@ public class TestAssumedDefaults extends CommonTest {
             Map.entry("java.time.chrono", List.of(24, 8)),
             Map.entry("java.time.format", List.of(9, 6)),
             Map.entry("java.time.temporal", List.of(10, 2)),
-            Map.entry("java.util", List.of(157, 323)),
+            Map.entry("java.util", List.of(153, 323)),
             Map.entry("java.util.concurrent", List.of(186, 75)),
             Map.entry("java.util.concurrent.atomic", List.of(0, 1)),
             Map.entry("java.util.function", List.of(41, 0)),
