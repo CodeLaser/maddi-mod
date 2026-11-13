@@ -67,6 +67,9 @@ public final class CanonicalVirtuals {
     private record FieldKey(char kind, Id owner, String name, TypeKey type) {
     }
 
+    private record ReownedKey(Id field, Id owner) {
+    }
+
     private record ContainerKey(char kind, Id enclosing, String name, List<FieldKey> components) {
     }
 
@@ -103,6 +106,17 @@ public final class CanonicalVirtuals {
     public static TypeInfo translatedContainer(TypeInfo enclosing, String name, List<FieldInfo> components,
                                                Supplier<TypeInfo> make) {
         return container('T', enclosing, name, components, make);
+    }
+
+    /**
+     * A field as seen through another owner ({@link FieldInfo#withOwner}), one per field and owner. A translation that
+     * changes a field reference's scope re-owns its field to the scope's type, and withOwner makes a new field each time:
+     * on fernflower 16M of them, 255k still live at the end of the analysis, each a distinct object under equal link
+     * ends (2026-11-13). Every field, not only a virtual one, as every field is re-owned there.
+     */
+    public static FieldInfo reowned(FieldInfo field, TypeInfo newOwner) {
+        if (OFF || field.owner() == newOwner) return field.withOwner(newOwner);
+        return get(new ReownedKey(new Id(field), new Id(newOwner)), () -> field.withOwner(newOwner));
     }
 
     private static FieldInfo field(char kind, TypeInfo owner, String name, ParameterizedType type,
