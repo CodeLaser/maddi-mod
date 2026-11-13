@@ -44,6 +44,7 @@ import io.codelaser.maddi.cst.api.expression.NullConstant;
 import io.codelaser.maddi.cst.api.expression.VariableExpression;
 import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.statement.Block;
 import io.codelaser.maddi.cst.api.statement.LocalVariableCreation;
@@ -105,19 +106,22 @@ public final class OwnershipPass {
     private static final Logger LOGGER = LoggerFactory.getLogger(OwnershipPass.class);
     private static final String FRESH_ANNOTATION = "io.codelaser.maddi.annotation.Fresh";
 
-    /** The verdicts, and for a method that is not fresh, the first reason found (the census's worklist). */
-    public record Report(Map<MethodInfo, Boolean> fresh, Map<MethodInfo, String> notFreshReason) {
+    /** The verdicts, and for one that is false, the first reason found (the census's worklist). */
+    public record Report(Map<MethodInfo, Boolean> fresh, Map<MethodInfo, String> notFreshReason,
+                         Map<ParameterInfo, Boolean> borrowed, Map<ParameterInfo, String> notBorrowedReason) {
     }
 
     public Report go(List<Info> analysisOrder) {
         Set<MethodInfo> methods = methods(analysisOrder);
-        ThisEscape thisEscape = new ThisEscape(allMethodsAndConstructors(analysisOrder));
+        Set<MethodInfo> all = allMethodsAndConstructors(analysisOrder);
+        ThisEscape thisEscape = new ThisEscape(all);
+        BorrowedParameters borrowedParameters = new BorrowedParameters(all, thisEscape);
         Map<MethodInfo, String> reason = new LinkedHashMap<>();
         Map<MethodInfo, Set<MethodInfo>> dependencies = new LinkedHashMap<>();
         Set<MethodInfo> fresh = new LinkedHashSet<>();
         for (MethodInfo methodInfo : methods) {
             Set<MethodInfo> deps = new LinkedHashSet<>();
-            String r = candidate(methodInfo, methods, deps, thisEscape);
+            String r = candidate(methodInfo, methods, deps, thisEscape, borrowedParameters);
             if (r == null) {
                 fresh.add(methodInfo);
                 dependencies.put(methodInfo, deps);
@@ -142,8 +146,10 @@ public final class OwnershipPass {
         }
         Map<MethodInfo, Boolean> verdicts = new LinkedHashMap<>();
         for (MethodInfo methodInfo : methods) verdicts.put(methodInfo, fresh.contains(methodInfo));
-        LOGGER.info("Ownership pass: {} method(s) with a reference result, {} fresh", methods.size(), fresh.size());
-        return new Report(verdicts, reason);
+        long nBorrowed = borrowedParameters.verdicts().values().stream().filter(b -> b).count();
+        LOGGER.info("Ownership pass: {} method(s) with a reference result, {} fresh; {} parameter(s), {} borrowed",
+                methods.size(), fresh.size(), borrowedParameters.verdicts().size(), nBorrowed);
+        return new Report(verdicts, reason, borrowedParameters.verdicts(), borrowedParameters.reasons());
     }
 
     public static void write(Report report) {
@@ -152,6 +158,12 @@ public final class OwnershipPass {
             if (!isContracted(methodInfo)) {
                 methodInfo.analysis().setAllowControlledOverwrite(PropertyImpl.FRESH_METHOD,
                         ValueImpl.BoolImpl.from(fresh));
+            }
+        });
+        report.borrowed().forEach((pi, borrowed) -> {
+            if (!BorrowedParameters.isContracted(pi)) {
+                pi.analysis().setAllowControlledOverwrite(PropertyImpl.BORROWED_PARAMETER,
+                        ValueImpl.BoolImpl.from(borrowed));
             }
         });
     }
@@ -194,7 +206,7 @@ public final class OwnershipPass {
      Null when the method is a candidate; then its dependencies are in 'deps'.
      */
     private static String candidate(MethodInfo methodInfo, Set<MethodInfo> analysed, Set<MethodInfo> deps,
-                                    ThisEscape thisEscape) {
+                                    ThisEscape thisEscape, BorrowedParameters borrowedParameters) {
         if (isContracted(methodInfo)) {
             return methodInfo.analysis().getOrDefault(PropertyImpl.FRESH_METHOD, ValueImpl.BoolImpl.FALSE).isTrue()
                     ? null : "contract";
@@ -223,7 +235,7 @@ public final class OwnershipPass {
             }
         }
         // rule 4
-        return localHandedToBodyThatMayKeepIt(methodInfo, thisEscape);
+        return localHandedToBodyThatMayKeepIt(methodInfo, thisEscape, borrowedParameters);
     }
 
     // ---- rule 1
@@ -341,23 +353,34 @@ public final class OwnershipPass {
     // ---- rule 4
 
     /*
-     A local handed to a body whose effect the links do not show: as an argument or receiver to a method that may
-     dispatch to another body, or as the receiver of a method that may leave 'this' held elsewhere (the summaries
-     have no links for 'this').
+     A local handed to a body that may keep it where no link shows: as an argument to a method or constructor whose
+     parameter is not borrowed (a callee may capture it; stage 2 decides), or as the receiver of a method that may
+     leave 'this' held elsewhere (the summaries have no links for 'this'), or of one that may dispatch to another body.
      */
-    private static String localHandedToBodyThatMayKeepIt(MethodInfo methodInfo, ThisEscape thisEscape) {
+    private static String localHandedToBodyThatMayKeepIt(MethodInfo methodInfo, ThisEscape thisEscape,
+                                                         BorrowedParameters borrowedParameters) {
         String[] found = new String[1];
         methodInfo.methodBody().visit((Element e) -> {
             if (found[0] != null || e instanceof Lambda) return false;
-            if (e instanceof MethodCall mc && mc.methodInfo() != null) {
-                MethodInfo callee = mc.methodInfo();
-                if (mayDispatchElsewhere(callee) && Stream.concat(Stream.of(mc.object()),
-                        mc.parameterExpressions().stream()).anyMatch(OwnershipPass::isLocal)) {
-                    found[0] = "local passed to " + callee.fullyQualifiedName() + ", which may dispatch to another body";
-                } else if (isLocal(mc.object()) && thisEscape.mayLeak(callee)) {
-                    found[0] = "local is the receiver of " + callee.fullyQualifiedName() + ", which may leak this";
+            MethodInfo callee = e instanceof MethodCall mc ? mc.methodInfo()
+                    : e instanceof ConstructorCall cc && cc.anonymousClass() == null ? cc.constructor() : null;
+            if (callee != null) {
+                List<Expression> arguments = e instanceof MethodCall mc ? mc.parameterExpressions()
+                        : ((ConstructorCall) e).parameterExpressions();
+                if (e instanceof MethodCall mc && isLocal(mc.object())
+                    && (thisEscape.mayLeak(callee) || mayDispatchElsewhere(callee))) {
+                    found[0] = "local is the receiver of " + callee.fullyQualifiedName() + ", which may keep it";
+                    return false;
                 }
-                if (found[0] != null) return false;
+                for (int i = 0; i < arguments.size(); i++) {
+                    if (isLocal(arguments.get(i))) {
+                        String kept = borrowedParameters.keptByCallee(callee, i);
+                        if (kept != null) {
+                            found[0] = "local " + kept;
+                            return false;
+                        }
+                    }
+                }
             }
             return true;
         });

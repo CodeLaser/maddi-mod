@@ -102,6 +102,12 @@ import java.util.function.Supplier;
                 Leaky leaked() { Leaky k = new Leaky(); k.leak(); return k; }
                 Listener listening(Bus bus) { return new Listener(bus); }
                 Capturing capturing(Bus bus) { return new Capturing(bus); }
+                // a callee that captures its argument: no link shows it (stage 2's verdict decides)
+                private java.util.function.IntSupplier task;
+                void capturer(List<String> l) { task = () -> l.size(); }
+                int reader(List<String> l) { return l.size(); }
+                List<String> handedToCapturer() { List<String> r = new ArrayList<>(); capturer(r); return r; }
+                List<String> handedToReader() { List<String> r = new ArrayList<>(); reader(r); return r; }
                 List<String> viaFactory(Factory f) { return f.create(); }
                 List<String> viaNotFresh(NotFresh n) { return n.create(); }
                 List<String> consumed(Consumer<List<String>> c) { List<String> r = new ArrayList<>(); c.accept(r); return r; }
@@ -195,6 +201,8 @@ import java.util.function.Supplier;
             Map.entry("X.leaked", false),
             Map.entry("X.listening", false),
             Map.entry("X.capturing", false),
+            Map.entry("X.handedToCapturer", false),
+            Map.entry("X.handedToReader", true),
             // contracts decide a bodiless method, and are not second-guessed here (Pool breaks it: the guard's job)
             Map.entry("Factory.create", true),
             Map.entry("X.viaFactory", true),

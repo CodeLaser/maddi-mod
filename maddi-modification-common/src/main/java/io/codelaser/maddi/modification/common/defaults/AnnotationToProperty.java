@@ -140,6 +140,7 @@ class AnnotationToProperty {
         Value.Bool container = null;
         Value.Bool fluent = null;
         Value.Bool fresh = null;
+        Value.Bool borrowed = null;
         Value.Bool identity = null;
         Value.Bool unmodified = null;
         Value.Bool structurallyUnmodified = null; // @Modified(hc=true): modified in the hidden content only (#25)
@@ -271,6 +272,8 @@ class AnnotationToProperty {
                 fluent = valueForTrue;
             } else if (Fresh.class.getCanonicalName().equals(fqn)) {
                 fresh = valueForTrue;
+            } else if (Borrowed.class.getCanonicalName().equals(fqn)) {
+                borrowed = valueForTrue;
             } else if (NotNull.class.getCanonicalName().equals(fqn)) {
                 // absent: explicitly not claimed, which also stops a default (an inherited non-null) from applying
                 if (isAbsent) {
@@ -417,6 +420,7 @@ class AnnotationToProperty {
             if (container != null) map.put(PropertyImpl.CONTAINER_PARAMETER, container);
             if (nullability != null) map.put(PropertyImpl.NULLABILITY_PARAMETER, nullability);
             if (unmodified != null) map.put(PropertyImpl.UNMODIFIED_PARAMETER, unmodified);
+            if (borrowed != null) map.put(PropertyImpl.BORROWED_PARAMETER, borrowed);
             if (structurallyUnmodified != null) map.put(PropertyImpl.STRUCTURALLY_UNMODIFIED_PARAMETER, structurallyUnmodified);
             if (ignoreModifications != null) map.put(PropertyImpl.IGNORE_MODIFICATIONS_PARAMETER, ignoreModifications);
             if (eventual != null) map.put(PropertyImpl.EVENTUAL_PARAMETER, eventual);
