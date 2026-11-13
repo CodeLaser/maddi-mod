@@ -56,7 +56,8 @@ import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
  * can only be reached through the object that holds the field. Decided after freshness and borrowing, whose verdicts
  * it reads.
  * <ol>
- *   <li><b>Private.</b> Otherwise anyone may read the field and keep its object.</li>
+ *   <li><b>Private</b>, or, in a closed world (stage 5's {@code OWNERSHIP_WORLD=closed}), mentioned by no body outside
+ *   its primary type. Otherwise anyone may read the field and keep its object.</li>
  *   <li><b>No degraded referrer.</b> No method of the primary type is degraded (its summary is the shallow one).</li>
  *   <li><b>Arrives fresh.</b> The initializer, and every value assigned to the field anywhere in the primary type,
  *   is created for it: freshness's per-path evidence (a construction, null, a call to a fresh method, a local assigned
@@ -70,6 +71,9 @@ import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
  *   {@code f::m}, not the receiver of a method that may leak {@code this}, not passed to a method that may keep it. A
  *   lambda reading the field captures the owner, not the field's object.</li>
  * </ol>
+ * Lending ({@link Lending}): in rule 4, a link to the result of a method whose every caller only uses that result
+ * (a getter, {@code &self.f} in Rust) keeps the field owned.
+ * <p>
  * Stage 5 (transfer, {@link Transfers}): in rules 3 and 4, a parameter of the assigning method whose every caller
  * hands over its argument counts as created, provided the method keeps it in this field only. In rules 4 and 5, a
  * {@code @Finalizer} of the field's object that moves the field out (hands it over, or returns it) keeps nothing:
@@ -85,12 +89,14 @@ final class OwnedFields {
     private final Map<FieldInfo, String> reasons = new LinkedHashMap<>();
 
     OwnedFields(List<Info> analysisOrder, Set<MethodInfo> analysedResults, Set<MethodInfo> fresh,
-                ThisEscape thisEscape, BorrowedParameters borrowedParameters, Transfers transfers) {
+                ThisEscape thisEscape, BorrowedParameters borrowedParameters, Transfers transfers,
+                Set<MethodInfo> closedWorld, Lending lending) {
         AnalysisHelper analysisHelper = new AnalysisHelper();
+        Set<FieldInfo> mentionedOutside = closedWorld == null ? Set.of() : mentionedOutsideTheirType(closedWorld);
         for (FieldInfo fieldInfo : fields(analysisOrder)) {
-            String hard = hard(fieldInfo);
+            String hard = hard(fieldInfo, closedWorld != null, mentionedOutside);
             String sharing = hard != null ? null
-                    : sharing(fieldInfo, analysedResults, fresh, thisEscape, borrowedParameters, transfers);
+                    : sharing(fieldInfo, analysedResults, fresh, thisEscape, borrowedParameters, transfers, lending);
             OwnershipPass.Owned verdict;
             if (hard == null && sharing == null) {
                 verdict = OwnershipPass.Owned.OWNED;
@@ -125,12 +131,47 @@ final class OwnedFields {
     private static final String NOT_PRIVATE = "not private";
 
     // rules 1 and 2
-    private static String hard(FieldInfo fieldInfo) {
+    private static String hard(FieldInfo fieldInfo, boolean closedWorld, Set<FieldInfo> mentionedOutside) {
         boolean degraded = bodies(fieldInfo).stream().anyMatch(m -> m.analysis().getOrDefault(
                 PropertyImpl.DEGRADED_ANALYSIS_METHOD, ValueImpl.BoolImpl.FALSE).isTrue());
         if (degraded) return "a method of " + fieldInfo.owner().primaryType().simpleName() + " is degraded";
-        if (!fieldInfo.access().isPrivate()) return NOT_PRIVATE;
+        if (!fieldInfo.access().isPrivate()) {
+            // a closed world: every access is in the analysed sources, so a field that no body outside its primary
+            // type mentions is private in effect; the other rules already read exactly those bodies
+            if (!closedWorld || mentionedOutside.contains(fieldInfo)) return NOT_PRIVATE;
+        }
         return null;
+    }
+
+    // the fields that some body outside their primary type mentions (any scope: 'other.f', 'this.f' in a subclass)
+    private static Set<FieldInfo> mentionedOutsideTheirType(Set<MethodInfo> all) {
+        Set<FieldInfo> set = new HashSet<>();
+        for (MethodInfo m : all) {
+            if (m.methodBody() == null) continue;
+            TypeInfo primary = m.typeInfo().primaryType();
+            m.methodBody().visit((Element e) -> {
+                if (e instanceof VariableExpression ve && ve.variable() instanceof FieldReference fr
+                    && !fr.fieldInfo().owner().primaryType().equals(primary)) {
+                    set.add(fr.fieldInfo());
+                }
+                return true;
+            });
+        }
+        // a field initializer of another type mentioning the field: 'int n = Other.list.size();'
+        for (MethodInfo m : all) {
+            for (FieldInfo f : m.typeInfo().fields()) {
+                if (f.initializer() == null || f.initializer().isEmpty()) continue;
+                TypeInfo primary = f.owner().primaryType();
+                f.initializer().visit((Element e) -> {
+                    if (e instanceof VariableExpression ve && ve.variable() instanceof FieldReference fr
+                        && !fr.fieldInfo().owner().primaryType().equals(primary)) {
+                        set.add(fr.fieldInfo());
+                    }
+                    return true;
+                });
+            }
+        }
+        return set;
     }
 
     // every body that may refer to a private field: the primary type's, nested and local types included
@@ -144,7 +185,7 @@ final class OwnedFields {
     // rules 3, 4, 5
     private static String sharing(FieldInfo fieldInfo, Set<MethodInfo> analysedResults, Set<MethodInfo> fresh,
                                   ThisEscape thisEscape, BorrowedParameters borrowedParameters,
-                                  Transfers transfers) {
+                                  Transfers transfers, Lending lending) {
         Predicate<Variable> isField = v -> v instanceof FieldReference fr && fr.fieldInfo().equals(fieldInfo);
         // rule 3
         Set<MethodInfo> deps = new LinkedHashSet<>();
@@ -192,7 +233,9 @@ final class OwnedFields {
                                 || toRoot instanceof ParameterInfo pi && transfers.isTransferred(pi)
                                    && (Transfers.keptOnlyIn(pi, fieldInfo, borrowedParameters)
                                        || transfers.receivesMoved(pi, fieldInfo))
-                                || toRoot instanceof ReturnVariable rv && movesOut(rv.methodInfo(), fieldInfo, transfers);
+                                || toRoot instanceof ReturnVariable rv && movesOut(rv.methodInfo(), fieldInfo, transfers)
+                                // a getter whose every caller only uses the object it returns (Lending)
+                                || toRoot instanceof ReturnVariable lender && lending.isLent(lender.methodInfo());
             if (isThisField(link.from(), fieldInfo)) {
                 if (!toCreated && !OwnershipPass.isNullConstant(link.to())) {
                     return "link: " + fieldInfo.name() + " " + link.linkNature() + " " + link.to();

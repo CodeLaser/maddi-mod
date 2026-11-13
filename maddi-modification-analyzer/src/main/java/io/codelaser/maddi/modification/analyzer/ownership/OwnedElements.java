@@ -41,6 +41,7 @@ import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.statement.ExpressionAsStatement;
 import io.codelaser.maddi.cst.api.statement.ForEachStatement;
 import io.codelaser.maddi.cst.api.statement.LocalVariableCreation;
+import io.codelaser.maddi.cst.api.statement.ReturnStatement;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.api.variable.DependentVariable;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
@@ -52,6 +53,7 @@ import io.codelaser.maddi.modification.prepwork.variable.Link;
 import io.codelaser.maddi.modification.prepwork.variable.Links;
 import io.codelaser.maddi.modification.prepwork.variable.MethodLinkedVariables;
 import io.codelaser.maddi.modification.prepwork.variable.ObjectCreationVariable;
+import io.codelaser.maddi.modification.prepwork.variable.ReturnVariable;
 import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
 
 /**
@@ -75,7 +77,8 @@ import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
  *   discarded, cannot hold an object, or is an element; or a for-each's iterable. A lambda or method reference
  *   touching the field or an element, a call with a function argument ({@code forEach}, {@code computeIfAbsent}), a
  *   view ({@code stream()}, {@code iterator()}, {@code subList}), or the field passed as an argument: fails.
- *   Deliberately conservative.</li>
+ *   Deliberately conservative. A method whose every caller only uses its result ({@link Lending}) may return an
+ *   element: its link ({@code ∋ get}) and its return are allowed.</li>
  * </ol>
  */
 final class OwnedElements {
@@ -84,16 +87,16 @@ final class OwnedElements {
     private final Map<FieldInfo, String> reasons = new LinkedHashMap<>();
 
     OwnedElements(Map<FieldInfo, OwnershipPass.Owned> ownedFields, ThisEscape thisEscape,
-                  BorrowedParameters borrowedParameters, Transfers transfers) {
+                  BorrowedParameters borrowedParameters, Transfers transfers, Lending lending) {
         AnalysisHelper analysisHelper = new AnalysisHelper();
         for (Map.Entry<FieldInfo, OwnershipPass.Owned> entry : ownedFields.entrySet()) {
             FieldInfo f = entry.getKey();
             if (!hasMutableElements(f.type(), analysisHelper)) continue;
             String r = entry.getValue() != OwnershipPass.Owned.OWNED ? "the collection is not owned"
-                    : links(f, analysisHelper, borrowedParameters, transfers);
+                    : links(f, analysisHelper, borrowedParameters, transfers, lending);
             if (r == null) {
                 for (MethodInfo m : bodies(f)) {
-                    r = escapes(m, f, thisEscape, borrowedParameters);
+                    r = escapes(m, f, thisEscape, borrowedParameters, lending);
                     if (r != null) {
                         r = "in " + m.name() + ": " + r;
                         break;
@@ -133,13 +136,15 @@ final class OwnedElements {
     // ---- E2
 
     private static String links(FieldInfo f, AnalysisHelper analysisHelper, BorrowedParameters borrowedParameters,
-                                Transfers transfers) {
+                                Transfers transfers, Lending lending) {
         Links links = f.analysis().getOrDefault(LinksImpl.LINKS, LinksImpl.EMPTY);
         for (Link link : links) {
             if (link.linkNature().isDecoration() || !isElement(link.from(), f)) continue;
             Variable to = link.to();
             Variable root = root(to);
             if (root instanceof ObjectCreationVariable || OwnershipPass.isNullConstant(to)) continue;
+            // an element returned by a method whose every caller only uses it (Lending)
+            if (root instanceof ReturnVariable rv && lending.isLent(rv.methodInfo())) continue;
             ParameterizedType type = to.parameterizedType();
             if (type != null && !type.isTypeParameter() && type.typeInfo() != null
                 && analysisHelper.typeImmutable(type).isImmutable()) {
@@ -199,7 +204,8 @@ final class OwnedElements {
      kept.
      */
     private static String escapes(MethodInfo m, FieldInfo f, ThisEscape thisEscape,
-                                  BorrowedParameters borrowedParameters) {
+                                  BorrowedParameters borrowedParameters, Lending lending) {
+        boolean lends = lending.isLent(m);
         if (m.methodBody() == null) return null;
         Predicate<Variable> isField = v -> Transfers.isThisField(v, f);
         Set<LocalVariable> tracked = new HashSet<>();
@@ -296,6 +302,9 @@ final class OwnedElements {
                     Expression it = Transfers.unwrap(fe.expression());
                     if (iterables.contains(it) && isFieldExpr(it, isField)) allowed[0]++;
                 }
+                // a getter whose every caller only uses the element it returns
+                case ReturnStatement rs when lends && rs.expression() != null && isElement.test(rs.expression()) ->
+                        allowed[0]++;
                 default -> {
                 }
             }

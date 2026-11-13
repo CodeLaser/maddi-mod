@@ -483,16 +483,17 @@ final class Transfers {
         return rt.isTypeParameter() && rt.typeParameter() != null && !rt.typeParameter().isMethodTypeParameter();
     }
 
-    /** Through casts, parentheses and identity methods ({@code Objects.requireNonNull(x)} is {@code x}). */
+    /** Through casts, parentheses and pass-through methods ({@code Objects.requireNonNull(x)} is {@code x}). */
     static Expression unwrap(Expression expression) {
         Expression e = expression;
         while (true) {
             if (e instanceof Cast c) e = c.expression();
             else if (e instanceof EnclosedExpression ee) e = ee.inner();
-            else if (e instanceof MethodCall mc && mc.methodInfo() != null && !mc.parameterExpressions().isEmpty()
-                     && mc.methodInfo().analysis().getOrDefault(PropertyImpl.IDENTITY_METHOD,
-                    ValueImpl.BoolImpl.FALSE).isTrue()) {
-                e = mc.parameterExpressions().getFirst();
+            else if (e instanceof MethodCall mc && mc.methodInfo() != null
+                     && OwnershipPass.passThrough(mc.methodInfo()) >= 0
+                     && OwnershipPass.passThrough(mc.methodInfo()) < mc.parameterExpressions().size()) {
+                // returns that argument and keeps it nowhere (not merely @Identity: 'register(x)' may return x)
+                e = mc.parameterExpressions().get(OwnershipPass.passThrough(mc.methodInfo()));
             } else return e;
         }
     }

@@ -167,10 +167,11 @@ public final class OwnershipPass {
         }
         Map<MethodInfo, Boolean> verdicts = new LinkedHashMap<>();
         for (MethodInfo methodInfo : methods) verdicts.put(methodInfo, fresh.contains(methodInfo));
+        Lending lending = new Lending(all, thisEscape, borrowedParameters, closedWorld);
         Finalizers finalizers = new Finalizers(all, methods, fresh, thisEscape, closedWorld);
         Transfers transfers = new Transfers(all, methods, fresh, thisEscape, closedWorld, finalizers::isFinalizer);
         OwnedFields ownedFields = new OwnedFields(analysisOrder, methods, fresh, thisEscape, borrowedParameters,
-                transfers);
+                transfers, closedWorld ? all : null, lending);
         // a move out of a finalizer needs the moved field owned, and that field is owned because it moves; a computed
         // finalizer needs a moved field owned (stage 6): greatest fixpoint
         while (true) {
@@ -179,19 +180,20 @@ public final class OwnershipPass {
             boolean dropped = finalizers.retain(owned, transfers);
             dropped |= transfers.retainMoves(owned);
             if (!dropped) break;
-            ownedFields = new OwnedFields(analysisOrder, methods, fresh, thisEscape, borrowedParameters, transfers);
+            ownedFields = new OwnedFields(analysisOrder, methods, fresh, thisEscape, borrowedParameters, transfers,
+                    closedWorld ? all : null, lending);
         }
         finalizers.check();
         OwnedElements ownedElements = new OwnedElements(ownedFields.verdicts(), thisEscape, borrowedParameters,
-                transfers);
+                transfers, lending);
         long nBorrowed = borrowedParameters.verdicts().values().stream().filter(b -> b).count();
         Map<Owned, Long> byOwned = new java.util.EnumMap<>(Owned.class);
         ownedFields.verdicts().values().forEach(o -> byOwned.merge(o, 1L, Long::sum));
         LOGGER.info("Ownership pass: {} method(s) with a reference result, {} fresh; {} parameter(s), {} borrowed; "
-                    + "{} field(s): {}; elements owned in {} of {} collection field(s); "
+                    + "{} field(s): {}; {} method(s) lend their result; elements owned in {} of {} collection field(s); "
                     + "{} finalizer(s) computed of {} candidate(s), {} finalizer violation(s)",
                 methods.size(), fresh.size(), borrowedParameters.verdicts().size(), nBorrowed,
-                ownedFields.verdicts().size(), byOwned,
+                ownedFields.verdicts().size(), byOwned, lending.lent().size(),
                 ownedElements.verdicts().values().stream().filter(b -> b).count(), ownedElements.verdicts().size(),
                 finalizers.computed().size(), finalizers.verdicts().size(),
                 finalizers.violations().size());
@@ -402,6 +404,11 @@ public final class OwnershipPass {
                     if (mayDispatchElsewhere(callee)) return "fluent " + callee.fullyQualifiedName() + " may dispatch";
                     return created(mc.object());
                 }
+                // 'ensureNotNull(x, "x")', 'Objects.requireNonNull(x)': the argument itself
+                int through = passThrough(callee);
+                if (through >= 0 && through < mc.parameterExpressions().size()) {
+                    return created(mc.parameterExpressions().get(through));
+                }
                 if (analysed.contains(callee)) {
                     deps.add(callee);
                     return null;
@@ -451,6 +458,54 @@ public final class OwnershipPass {
                 else return e;
             }
         }
+    }
+
+    /**
+     * The index of the parameter that the method returns as it is, and keeps nowhere: the call is its argument
+     * ({@code ensureNotNull(x, "x")}, {@code Objects.requireNonNull(x)}); -1 for any other method. Without a body: the
+     * {@code @Identity} contract (the hints), first parameter. With a body: every return is {@code return p}, and
+     * {@code p} is mentioned elsewhere only as an operand ({@code p == null}): nothing can keep it.
+     */
+    static int passThrough(MethodInfo callee) {
+        if (callee.parameters().isEmpty()) return -1;
+        if (callee.methodBody() == null || callee.methodBody().isEmpty()) {
+            return callee.analysis().getOrDefault(PropertyImpl.IDENTITY_METHOD, ValueImpl.BoolImpl.FALSE).isTrue()
+                   && !callee.parameters().getFirst().isVarArgs() ? 0 : -1;
+        }
+        if (mayDispatchElsewhere(callee)) return -1; // an override may keep it
+        ParameterInfo[] returned = {null};
+        boolean[] other = {false};
+        callee.methodBody().visit((Element e) -> {
+            if (other[0]) return false;
+            if (e instanceof Lambda) return false;
+            if (e instanceof ReturnStatement rs) {
+                if (rs.expression() instanceof VariableExpression ve && ve.variable() instanceof ParameterInfo pi
+                    && pi.methodInfo().equals(callee) && (returned[0] == null || returned[0] == pi)) {
+                    returned[0] = pi;
+                } else {
+                    other[0] = true;
+                }
+            }
+            return true;
+        });
+        ParameterInfo pi = returned[0];
+        if (other[0] || pi == null || pi.isVarArgs()) return -1;
+        // every mention: the returns, and operands
+        int[] mentions = {0};
+        int[] allowed = {0};
+        callee.methodBody().visit((Element e) -> {
+            if (e instanceof VariableExpression ve && pi.equals(ve.variable())) mentions[0]++;
+            if (e instanceof ReturnStatement rs && rs.expression() instanceof VariableExpression ve
+                && pi.equals(ve.variable())) {
+                allowed[0]++;
+            }
+            if (e instanceof io.codelaser.maddi.cst.api.expression.BinaryOperator bo) {
+                if (bo.lhs() instanceof VariableExpression ve && pi.equals(ve.variable())) allowed[0]++;
+                if (bo.rhs() instanceof VariableExpression ve && pi.equals(ve.variable())) allowed[0]++;
+            }
+            return true;
+        });
+        return mentions[0] == allowed[0] ? pi.index() : -1;
     }
 
     // ---- rule 2

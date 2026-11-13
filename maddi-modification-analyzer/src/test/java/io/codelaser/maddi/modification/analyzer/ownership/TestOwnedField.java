@@ -69,10 +69,15 @@ public class TestOwnedField extends CommonTest {
                 private List<String> reassigned = new ArrayList<>();
                 List<String> open = new ArrayList<>();
                 private Supplier<Integer> task;
+                private final List<String> ensured = ensure(new ArrayList<>(), "ensured");
+                private final List<String> registered = register(new ArrayList<>());
+                static <T> T ensure(T t, String message) { if (t == null) throw new IllegalArgumentException(message); return t; }
+                static <T> T register(T t) { CACHE.add(t); return t; }
 
                 X(List<String> p, String name) { this.fromParam = p; this.name = name; }
                 static List<String> make() { return new ArrayList<>(); }
-                int size() { return hidden.size() + fromParam.size() + made.size() + notMade.size(); }
+                int size() { return hidden.size() + fromParam.size() + made.size() + notMade.size() + ensured.size()
+                                    + registered.size(); }
                 void add(String s) { hidden.add(s); }
                 List<String> getExposed() { return exposed; }
                 List<String> view() { return Collections.unmodifiableList(viewed); }
@@ -130,7 +135,11 @@ public class TestOwnedField extends CommonTest {
             // a back-pointer: the parent is held by its children's parent field and by whoever holds it
             Map.entry("Node.parent", "NOT_OWNED"),
             // each child is also returned to the caller
-            Map.entry("Node.children", "OWNED")));
+            Map.entry("Node.children", "OWNED"),
+            // ensure returns its argument and keeps it nowhere: the new list
+            Map.entry("X.ensured", "OWNED"),
+            // register returns its argument, but also keeps it
+            Map.entry("X.registered", "NOT_OWNED")));
 
     @DisplayName("OWNED_FIELD: only reachable through its owner")
     @Test
