@@ -212,33 +212,6 @@ public final class CanonicalVirtuals {
         return false;
     }
 
-    /**
-     * for tests: the entries {@link #holdsAny} would find, as opaque handles. A handle holds nothing of the model (a key
-     * refers to its objects weakly) and keeps finding its entry after they are collected: the key's hash is fixed.
-     */
-    public static List<Object> entriesHolding(Object... os) {
-        expunge();
-        List<Object> list = List.of(os);
-        List<Object> keys = new ArrayList<>();
-        for (Map.Entry<Key, Ref> e : CACHE.entrySet()) {
-            boolean holds = refersTo(e.getValue().get(), list);
-            for (Ref part : e.getKey().objects) {
-                if (holds) break;
-                holds = part != null && refersTo(part.get(), list);
-            }
-            if (holds) keys.add(e.getKey());
-        }
-        return keys;
-    }
-
-    /** for tests: how many of these handles ({@link #entriesHolding}) still have their entry */
-    public static int stillHeld(List<Object> handles) {
-        expunge();
-        int n = 0;
-        for (Object h : handles) if (h instanceof Key k && CACHE.containsKey(k)) n++;
-        return n;
-    }
-
     private static boolean refersTo(Object o, List<Object> list) {
         if (o == null) return false;
         for (Object x : list) {
