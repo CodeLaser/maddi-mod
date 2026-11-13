@@ -267,6 +267,32 @@ split by rule. Expect few computed finalizers (builders' `build()`, `into...` ac
 `@Owning`/must-call territory, Checker Framework's Resource Leak Checker); finalizers on library methods without a
 contract; ordering beyond one block (prepwork's variable data would be the route).
 
+### Element ownership — `OWNED_ELEMENTS_FIELD`
+
+**Built 2026-11-13** (`OwnedElements`, tests `TestOwnedElements`, printer `TestJavaToRustOwnedField`). The
+elements of an owned collection, map or other generic object (its hidden content: `this.f.§$s`, a map's
+`§$$s[-1]`/`§$$s[-2]`) are owned too when every element link goes to a creation, `null`, an immutable value, or a
+parameter every caller hands over and its method keeps only there (E2), and no element leaves where no link shows
+(E3: an element only the receiver of a call that keeps nothing, an argument of a call that does not keep it or of a
+call on the collection itself, an operand; no lambda, view or function argument touching it). The printer then
+counts no element type as held through the field: `Vec<T>` of plain values.
+
+Census: fernflower (closed) 3 of 199 collection fields (`LabelHelper.LabelSets.breaks`/`continues`,
+`VarProcessor.hasNotInsideLVT`), gson 0 of 62, langchain4j 0 of 170; the first blocker is nearly always E1 (the
+collection itself is not owned: 149, 50, 164). fernflower translation 1878 → 1877 rustc errors.
+
+Not yet: one verdict per type argument (a `Map<Node, Data>` with shared keys and owned values), arrays, nested
+hidden content (`∈∈`), the same question for results and parameters, and the printer looking inside source generic
+classes (`RustShared.heldIn` descends only into library collections and source classes extending one).
+
+### Annotations
+
+`@Fresh` (method), `@Borrowed` (parameter) and `@Owned` (field; `elements = true` for `OWNED_ELEMENTS_FIELD`) are in
+`maddi-annotation`; `AnnotationToProperty` reads all three, `DecoratorImpl` prints them whenever the pass wrote them
+(`TestOwnershipDecorated`). `@Fresh` and `@Borrowed` are contracts on bodiless and library methods; nothing reads an
+`@Owned` contract yet (the guard on hand-written annotations is out of scope, §5). `SHARED_IMMUTABLE_FIELD` has no
+annotation: `@Immutable` on the type says it.
+
 ## 4. Working rules
 
 - Runs longer than about 5 minutes or 8 GB go through `lab run` from the workspace root, after committing
