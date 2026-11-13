@@ -74,7 +74,8 @@ import io.codelaser.maddi.modification.prepwork.variable.MethodLinkedVariables;
  *     ({@code this(a, null)});</li>
  *     <li>a local declared in the block of the statement holding the call, assigned only created values, that before
  *     that statement is only the receiver of calls that keep nothing of it (they neither may leak {@code this} nor
- *     dispatch elsewhere, and their result is discarded, primitive or immutable: not {@code l.subList(..)}), that the statement mentions once, outside any loop or lambda in it, and that no later
+ *     dispatch elsewhere, and their result is discarded, primitive, immutable or an element: not {@code l.subList(..)}),
+ *     that the statement mentions once, outside any loop or lambda in it, and that no later
  *     statement mentions. Deliberately narrow: no data-flow ordering beyond one block.</li>
  *     <li>a field of the caller's own object, when the caller is a {@code @Finalizer} that mentions it once, outside
  *     loops and lambdas, and the field is owned: a move out of a dying owner ({@link #moveOut}; the "owned" part is a
@@ -385,7 +386,8 @@ final class Transfers {
                 && ve.variable().equals(lv) && mc.methodInfo() != null) {
                 if (thisEscape.mayLeak(mc.methodInfo()) || OwnershipPass.mayDispatchElsewhere(mc.methodInfo())) {
                     found[0] = lv.simpleName() + " is the receiver of " + mc.methodInfo().name() + ", which may keep it";
-                } else if (!discarded.contains(mc) && !cannotHold(mc.parameterizedType())) {
+                } else if (!discarded.contains(mc) && !cannotHold(mc.parameterizedType())
+                           && !returnsElement(mc.methodInfo())) {
                     // l.subList(..), l.iterator(), l.stream(): the result may still reach l
                     found[0] = lv.simpleName() + " is the receiver of " + mc.methodInfo().name()
                                + ", whose result may hold it";
@@ -435,6 +437,16 @@ final class Transfers {
     private static boolean cannotHold(ParameterizedType type) {
         return type.isPrimitiveExcludingVoid() || type.isVoid()
                || new AnalysisHelper().typeImmutable(type).isImmutable();
+    }
+
+    /*
+     a method declared to return a type parameter of its type ('V get(Object)', 'E next()') returns an element, hidden
+     content of the receiver, not the receiver itself; elements are not judged (stage 3). A method's own type parameter
+     ('<T> T as()') can be anything, the receiver included.
+     */
+    private static boolean returnsElement(MethodInfo methodInfo) {
+        ParameterizedType rt = methodInfo.returnType();
+        return rt.isTypeParameter() && rt.typeParameter() != null && !rt.typeParameter().isMethodTypeParameter();
     }
 
     /** Through casts, parentheses and identity methods ({@code Objects.requireNonNull(x)} is {@code x}). */

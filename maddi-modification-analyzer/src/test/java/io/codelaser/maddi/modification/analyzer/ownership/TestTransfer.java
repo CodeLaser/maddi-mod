@@ -149,6 +149,7 @@ public class TestTransfer extends CommonTest {
                     static Sized make() {
                         List<String> l = new ArrayList<>();
                         if (l.isEmpty()) l.add("x");
+                        String first = l.get(0);
                         return new Sized(l);
                     }
                     int size() { return l.size(); }
@@ -231,7 +232,7 @@ public class TestTransfer extends CommonTest {
             Map.entry("Setter.l", "OWNED"),
             // the view v still reaches the list
             Map.entry("View.l", "NOT_OWNED"),
-            // isEmpty's result is a boolean, add's is discarded
+            // isEmpty's result is a boolean, add's is discarded, get's an element
             Map.entry("Sized.l", "OWNED"),
             // a finalizer moves the builder's list into the product
             Map.entry("T1.l", "OWNED"),
