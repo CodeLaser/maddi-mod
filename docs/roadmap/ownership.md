@@ -1,7 +1,7 @@
 # Ownership: `@Fresh`, `@Owned`, `@Borrowed` — implementation brief
 
 **Plan, 2026-11-13.** Stages 1 to 5 are built behind the `OWNERSHIP` gate (`maddi-modification-analyzer`, package
-`analyzer.ownership`); the printer's use of stage 4 is not. This brief is self-contained: it is meant to be handed to a session that has
+`analyzer.ownership`), and the Rust printer reads the verdicts (stage 4). This brief is self-contained: it is meant to be handed to a session that has
 not seen the discussion it came from. Paths are relative to the workspace root (the directory holding `maddi/` and
 `maddi-mod/`).
 
@@ -146,6 +146,16 @@ reassigned from a fresh method (owned); non-private field (not owned); back-poin
 - Only after that, and only on his go-ahead: the Rust printer reads `OWNED_FIELD` so that an owned field of a type
   that is otherwise a shared handle stays a plain field. Measure against the current fernflower translation
   (930 stubs, 12 translated tests passing, as of 2026-11-12).
+
+  **Built 2026-11-13** (maddi `1da2436cd`, `fc53bc9bd`, `d788b34d9`, `47cbd4f14`; gate `NORUSTOWNED` ignores the
+  verdicts; `TestJavaToRustOwnedField`). An `OWNED_FIELD` is no holder for `RustShared` (a class held only in owned
+  fields is not a `Shared` handle) and never a `RustBorrows` view: a plain field, its object moved in. A
+  `FRESH_METHOD` returns its object by value (also one built in a local, which `returnsNew` does not follow), and a
+  fluent chain making an owned result runs, then yields the object. fernflower with sources and tests, `OWNERSHIP=1
+  OWNERSHIP_WORLD=closed`, against the same run with `NORUSTOWNED=1`: rustc errors 1937 → 1878, stubbed functions
+  (counted by `stub.py`'s rustc.json, not comparable with the 930 above) 999 → 994, translated tests 12 → 12. Owned
+  fields fixed 3 errors (`DecompilerContext.properties` no longer a borrow among them); fresh results most of the rest
+  (fernflower's `toJava` family over `TextBuffer`).
 
 ### Stage 5 — transfer
 
