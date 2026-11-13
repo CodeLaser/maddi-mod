@@ -215,6 +215,7 @@ class WriteLinksAndModification {
      */
     private static final boolean NO_CO_ELEMENT = Gate.isSet("NOCOELEMENT");
     private static final boolean NO_OBJECT_GRAPH_MOD = Gate.isSet("NOOBJECTGRAPHMOD");
+    private static final boolean NO_VIEW_ELEMENT_MOD = Gate.isSet("NOVIEWELEMENTMOD");
 
     /* #117: see Util.hiddenAliasOwner. The container's own variable ('sequence.stats') is left alone: its element
        is modified, not it. */
@@ -1149,6 +1150,17 @@ class WriteLinksAndModification {
      list's object graph ('deque ≥ it', 'it.§m ☷{remove} deque.§m'). The group decides, with its pass set: next() does
      not modify the deque, remove() does (TestModificationThroughView).
      */
+    /*
+     #62: the overlap is between the primary's own element content (a virtual field of it, not its §m) and a whole
+     variable: that object may be one of the primary's elements, which ∈ would say, had the two element fields matched.
+     */
+    private static boolean overlapsAsElement(Variable primary, Link link, Variable toReal) {
+        Variable from = link.from();
+        if (from.equals(primary) || Util.isVirtualModification(from)) return false;
+        if (!primary.equals(Util.firstRealVariable(from))) return false;
+        return link.to().equals(toReal);
+    }
+
     private boolean sharesModificationGroup(Variable modified, Variable container) {
         return followGraph.graph().eqGroups(modified).anyMatch(group -> group.members().stream()
                 .map(Util::firstRealVariable).anyMatch(container::equals));
@@ -1205,6 +1217,12 @@ class WriteLinksAndModification {
                     // #112: 'x.map.§$$s[-2] ≥ e', e from inside the object graph of the field's hidden content (an
                     // element of a copy of one of its values): modifying it modifies x deeply, as ∋ does
                     || ln == OBJECT_GRAPH_CONTAINS && !structural && !NO_OBJECT_GRAPH_MOD
+                       && !sharesModificationGroup(toReal, builder.primary())
+                    // #62: 'this.map.§$$s[-2] ∩ tags', tags, a whole object, among the elements of the container: a
+                    // for-each over map.values() ends up there, the view's element field (§$s, from V) and the
+                    // iterated one (§$ss, from Set<String>) differing. Modifying tags modifies the map deeply.
+                    || ln == OBJECT_GRAPH_OVERLAPS && !structural && !NO_VIEW_ELEMENT_MOD
+                       && overlapsAsElement(builder.primary(), link, toReal)
                        && !sharesModificationGroup(toReal, builder.primary())) {
                     // the completion, as for ≡ above: a later variable holding this one as an element (∋) is
                     // modified in turn. vlist.get(i).put(..) modifies vlist through its element, and versions,

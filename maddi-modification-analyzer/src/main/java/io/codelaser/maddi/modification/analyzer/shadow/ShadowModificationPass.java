@@ -1358,6 +1358,19 @@ public class ShadowModificationPass {
                                             Variable aliasOwner = Util.hiddenAliasOwner(l.to(), v);
                                             if (aliasOwner != null) push(todo, aliasOwner);
                                         });
+                                // #62: 'tags ∩ this.map.§$$s[-2]', the whole object overlapping a container's
+                                // element content (a for-each over map.values()): its container, deep-only, as for ∈.
+                                // The engine's WriteLinksAndModification.overlapsAsElement
+                                if (!NO_VIEW_ELEMENT_MOD) {
+                                    links.stream().filter(l -> l.linkNature() == LinkNatureImpl.OBJECT_GRAPH_OVERLAPS
+                                                               && Util.virtual(l.to())
+                                                               && !Util.isVirtualModification(l.to())
+                                                               && l.from().fullyQualifiedName()
+                                                                       .equals(v.fullyQualifiedName()))
+                                            .map(l -> Util.firstRealVariable(l.to()))
+                                            .filter(c -> c != null && !c.equals(v))
+                                            .forEach(containers::add);
+                                }
                                 // #112: 'e ≤ 0:x.map.§$$s[-2]', an object from inside a container's hidden content
                                 // (an element of a copy of one of its values): its container, deep-only, as for ∈
                                 if (!NO_OBJECT_GRAPH_MOD) {
@@ -1424,6 +1437,7 @@ public class ShadowModificationPass {
      */
     private static final boolean NO_CO_ELEMENT = Gate.isSet("NOCOELEMENT");
     private static final boolean NO_OBJECT_GRAPH_MOD = Gate.isSet("NOOBJECTGRAPHMOD");
+    private static final boolean NO_VIEW_ELEMENT_MOD = Gate.isSet("NOVIEWELEMENTMOD");
 
     private static void coElements(VariableData vd, Variable hiddenContent, List<Variable> out) {
         if (!Util.virtual(hiddenContent) || Util.isVirtualModification(hiddenContent)) return;
