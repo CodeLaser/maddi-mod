@@ -285,6 +285,30 @@ Not yet: one verdict per type argument (a `Map<Node, Data>` with shared keys and
 hidden content (`∈∈`), the same question for results and parameters, and the printer looking inside source generic
 classes (`RustShared.heldIn` descends only into library collections and source classes extending one).
 
+### Lending, pass-through calls, effectively private fields
+
+**Built 2026-11-13** (`Lending`, `OwnershipPass.passThrough`, tests `TestLending`, `TestEffectivelyPrivate`).
+
+- **Lending.** A method's result is lent when every call site is known (stage 5's rule 1) and every caller only uses
+  the object: the receiver of a call that keeps nothing, an iterable, an operand, an argument the callee does not
+  keep (stage 2's hidden verdict; in a library an independent parameter, or one independent with hidden content
+  whose type is not a type parameter: `addAll(Collection)` yes, `add(E)` no). Not returned, stored or captured. A
+  link from an owned field to a lent result, or an element returned by a lent method, no longer breaks ownership:
+  Rust's `&self.f`.
+- **Pass-through calls.** A call that returns its argument and keeps it nowhere is that argument in the creation
+  evidence (`ensureNotNull(x, "x")`); stage 5 no longer trusts `@Identity` alone (`register(x)` may return `x` and
+  keep it).
+- **Effectively private.** In a closed world, a non-private field that no body outside its primary type mentions
+  passes rule 1.
+- **Rule 4** accepts a link to a deeply immutable value (`this.f ~ 0:s` after `x.add(s)` through an alias). Not by
+  link nature: `~` also stands for "reachable through a result's fields" (`list ~ build`, `TestTransfer` B3).
+
+Census: fernflower closed world owned fields 83 → 115 (elements 3 → 5 of 199), gson 17 → 24, langchain4j 32
+(library: public getters and constructors). The fernflower translation did not move (1877 rustc errors, 994 stubs,
+12 tests): the newly owned fields are mostly collections, already plain `Vec`/`HashSet` in Rust, whose elements stay
+`Shared` through other holders; only `VarNamesCollector` stopped being `Shared`. For the translation, element
+ownership is what counts, and its first blocker is now the collection's own E2 and E3 more than E1.
+
 ### Annotations
 
 `@Fresh` (method), `@Borrowed` (parameter) and `@Owned` (field; `elements = true` for `OWNED_ELEMENTS_FIELD`) are in
