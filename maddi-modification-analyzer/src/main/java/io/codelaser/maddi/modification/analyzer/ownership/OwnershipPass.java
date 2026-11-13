@@ -116,6 +116,17 @@ public final class OwnershipPass {
                          Map<FieldInfo, Owned> owned, Map<FieldInfo, String> notOwnedReason) {
     }
 
+    private final boolean closedWorld;
+
+    public OwnershipPass() {
+        this(false);
+    }
+
+    /** @param closedWorld stage 5: every public callee's call sites are in the analysed sources */
+    public OwnershipPass(boolean closedWorld) {
+        this.closedWorld = closedWorld;
+    }
+
     public Report go(List<Info> analysisOrder) {
         Set<MethodInfo> methods = methods(analysisOrder);
         Set<MethodInfo> all = allMethodsAndConstructors(analysisOrder);
@@ -151,7 +162,9 @@ public final class OwnershipPass {
         }
         Map<MethodInfo, Boolean> verdicts = new LinkedHashMap<>();
         for (MethodInfo methodInfo : methods) verdicts.put(methodInfo, fresh.contains(methodInfo));
-        OwnedFields ownedFields = new OwnedFields(analysisOrder, methods, fresh, thisEscape, borrowedParameters);
+        Transfers transfers = new Transfers(all, methods, fresh, thisEscape, closedWorld);
+        OwnedFields ownedFields = new OwnedFields(analysisOrder, methods, fresh, thisEscape, borrowedParameters,
+                transfers);
         long nBorrowed = borrowedParameters.verdicts().values().stream().filter(b -> b).count();
         Map<Owned, Long> byOwned = new java.util.EnumMap<>(Owned.class);
         ownedFields.verdicts().values().forEach(o -> byOwned.merge(o, 1L, Long::sum));
@@ -440,7 +453,7 @@ public final class OwnershipPass {
      A source abstract method: any implementation, seen or not. A library abstract method: its source implementations
      (a library method without them is described by its hints). A concrete method: its source overrides.
      */
-    private static boolean mayDispatchElsewhere(MethodInfo callee) {
+    static boolean mayDispatchElsewhere(MethodInfo callee) {
         if (callee.isAbstract()) {
             if (!callee.typeInfo().compilationUnit().externalLibrary()) return true;
             return !callee.analysis().getOrDefault(PropertyImpl.EXTERNAL_IMPLEMENTATIONS,

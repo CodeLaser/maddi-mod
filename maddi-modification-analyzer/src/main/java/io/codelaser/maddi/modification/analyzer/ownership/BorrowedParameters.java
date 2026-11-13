@@ -158,7 +158,7 @@ final class BorrowedParameters {
         return pi.analysis().getOrDefault(PropertyImpl.BORROWED_PARAMETER, ValueImpl.BoolImpl.FALSE).isTrue();
     }
 
-    private boolean isHidden(ParameterInfo pi) {
+    boolean isHidden(ParameterInfo pi) {
         return analysed.contains(pi.methodInfo()) ? hidden.contains(pi) : isBorrowed(pi);
     }
 

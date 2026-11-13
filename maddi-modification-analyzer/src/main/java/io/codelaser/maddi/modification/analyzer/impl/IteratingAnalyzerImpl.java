@@ -142,7 +142,8 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                                     Duration maxDuration,
                                     boolean nullability,
                                     boolean nullabilityOpenWorld,
-                                    boolean ownership) implements Configuration {
+                                    boolean ownership,
+                                    boolean ownershipClosedWorld) implements Configuration {
     }
 
     public static class ConfigurationBuilder {
@@ -157,6 +158,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
         private boolean nullability;
         private boolean nullabilityOpenWorld;
         private boolean ownership;
+        private boolean ownershipClosedWorld;
         private Duration maxDuration; // null = unlimited
         private NearMissPolicy nearMissPolicy = NearMissPolicy.STRICT;
         private CycleBreakingStrategy cycleBreakingStrategy = CycleBreakingStrategy.NONE;
@@ -224,6 +226,11 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
             return this;
         }
 
+        public ConfigurationBuilder setOwnershipClosedWorld(boolean ownershipClosedWorld) {
+            this.ownershipClosedWorld = ownershipClosedWorld;
+            return this;
+        }
+
         public ConfigurationBuilder setFlattenVariableData(boolean flattenVariableData) {
             this.flattenVariableData = flattenVariableData;
             return this;
@@ -239,7 +246,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
             return new ConfigurationImpl(maxIterations, stopWhenCycleDetectedAndNoImprovements, cycleBreakingStrategy,
                     trackObjectCreations, guardContracts, faultTolerant, warnNearMisses, nearMissPolicy,
                     modificationViaReachability, flattenVariableData, maxDuration, nullability,
-                    nullabilityOpenWorld, ownership);
+                    nullabilityOpenWorld, ownership, ownershipClosedWorld);
         }
     }
 
@@ -553,7 +560,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
         if (configuration.ownership()) {
             // docs/roadmap/ownership.md: one-shot, over the converged link facts; adds properties, changes none
             feed(f -> f.stage("ownership"));
-            OwnershipPass.Report report = new OwnershipPass().go(analysisOrder);
+            OwnershipPass.Report report = new OwnershipPass(configuration.ownershipClosedWorld()).go(analysisOrder);
             OwnershipPass.write(report);
             // OWNERSHIP=<absolute path>: the census as a TSV (stage 4); any other value only turns the pass on
             String census = System.getenv("OWNERSHIP");

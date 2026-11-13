@@ -90,6 +90,7 @@ public class TestLangchain4jCollections {
                         // OWNERSHIP: the ownership pass after the fixpoint (docs/roadmap/ownership.md); FPDUMP is
                         // written before it, so the dump is the A/B of "it changes no other verdict"
                         .setOwnership(System.getenv("OWNERSHIP") != null)
+                        .setOwnershipClosedWorld("closed".equals(System.getenv("OWNERSHIP_WORLD")))
                         .build());
         analyzer.analyze(order, prep.callGraph().graph());
 

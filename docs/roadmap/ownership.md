@@ -1,6 +1,7 @@
 # Ownership: `@Fresh`, `@Owned`, `@Borrowed` — implementation brief
 
-**Plan, 2026-11-13.** Nothing is built. This brief is self-contained: it is meant to be handed to a session that has
+**Plan, 2026-11-13.** Stages 1 to 5 are built behind the `OWNERSHIP` gate (`maddi-modification-analyzer`, package
+`analyzer.ownership`); the printer's use of stage 4 is not. This brief is self-contained: it is meant to be handed to a session that has
 not seen the discussion it came from. Paths are relative to the workspace root (the directory holding `maddi/` and
 `maddi-mod/`).
 
@@ -146,13 +147,27 @@ reassigned from a fresh method (owned); non-private field (not owned); back-poin
   that is otherwise a shared handle stays a plain field. Measure against the current fernflower translation
   (930 stubs, 12 translated tests passing, as of 2026-11-12).
 
-### Stage 5 — transfer (later)
+### Stage 5 — transfer
 
 A parameter stored in a field counts as arriving fresh when **every** call site passes an object that is fresh and
-not used after the call. Needs the per-call argument links (`LinkComputerImpl.LINKED_VARIABLES_ARGUMENTS`, on when
-`trackObjectCreations` is) and a last-use check from prepwork's variable data. Closed world only: a method callable
-from outside the analysed code needs a contract. This is what CodeLaser/maddi#202 pattern 3 lacked (moving in an
-independent stored parameter was tried and reverted: Java's callers went on using the object).
+not used after the call. This is what CodeLaser/maddi#202 pattern 3 lacked (moving in an independent stored
+parameter was tried and reverted: Java's callers went on using the object).
+
+Built (`Transfers`, test `TestTransfer`) with a syntactic check of the call sites rather than the per-call argument
+links and prepwork's last-use data the plan named: narrower, but each step is visible in the source.
+
+- **All call sites known.** The callee is private or package-private, or the world is closed (`OWNERSHIP_WORLD=closed`,
+  `Configuration.ownershipClosedWorld`: an application rather than a library). It overrides nothing, nothing
+  overrides it, no method reference names it, the parameter is not variadic, and no field initializer calls it.
+- **Every argument handed over**, through casts, parentheses and `@Identity` methods (`Objects.requireNonNull`):
+  created on the spot (freshness's evidence); a parameter of the caller that is itself transferred and mentioned
+  once (`this(l, 0)`; greatest fixpoint); or a local declared in the block of the call's statement, assigned only
+  created values, before that statement only the receiver of calls that neither may leak `this` nor dispatch
+  elsewhere, mentioned once in the statement outside any loop or lambda, and not after it.
+- **Kept only in this field**: the callee's links from the parameter go to `this.f` only, none reach it, and stage 2's
+  hidden rules hold (a lambda capturing it, a callee that may keep it).
+
+Stage 3's rules 3 and 4 then accept the parameter, and a field that still fails names the transfer's reason.
 
 ## 4. Working rules
 

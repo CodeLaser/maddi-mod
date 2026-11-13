@@ -34,6 +34,7 @@ import io.codelaser.maddi.cst.api.expression.VariableExpression;
 import io.codelaser.maddi.cst.api.info.FieldInfo;
 import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.variable.DependentVariable;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
@@ -67,6 +68,9 @@ import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
  *   {@code f::m}, not the receiver of a method that may leak {@code this}, not passed to a method that may keep it. A
  *   lambda reading the field captures the owner, not the field's object.</li>
  * </ol>
+ * Stage 5 (transfer, {@link Transfers}): in rules 3 and 4, a parameter of the assigning method whose every caller
+ * hands over its argument counts as created, provided the method keeps it in this field only.
+ * <p>
  * A field that fails only rules 3 to 5 or 1, and whose type is immutable (at least with hidden content), is
  * shared-immutable rather than not owned: several holders, nobody modifies, no cycle (Rust's {@code Rc}). Static and
  * primitive fields are not about ownership and get no verdict. A collection field's elements are not judged.
@@ -77,12 +81,12 @@ final class OwnedFields {
     private final Map<FieldInfo, String> reasons = new LinkedHashMap<>();
 
     OwnedFields(List<Info> analysisOrder, Set<MethodInfo> analysedResults, Set<MethodInfo> fresh,
-                ThisEscape thisEscape, BorrowedParameters borrowedParameters) {
+                ThisEscape thisEscape, BorrowedParameters borrowedParameters, Transfers transfers) {
         AnalysisHelper analysisHelper = new AnalysisHelper();
         for (FieldInfo fieldInfo : fields(analysisOrder)) {
             String hard = hard(fieldInfo);
             String sharing = hard != null ? null
-                    : sharing(fieldInfo, analysedResults, fresh, thisEscape, borrowedParameters);
+                    : sharing(fieldInfo, analysedResults, fresh, thisEscape, borrowedParameters, transfers);
             OwnershipPass.Owned verdict;
             if (hard == null && sharing == null) {
                 verdict = OwnershipPass.Owned.OWNED;
@@ -135,7 +139,8 @@ final class OwnedFields {
 
     // rules 3, 4, 5
     private static String sharing(FieldInfo fieldInfo, Set<MethodInfo> analysedResults, Set<MethodInfo> fresh,
-                                  ThisEscape thisEscape, BorrowedParameters borrowedParameters) {
+                                  ThisEscape thisEscape, BorrowedParameters borrowedParameters,
+                                  Transfers transfers) {
         Predicate<Variable> isField = v -> v instanceof FieldReference fr && fr.fieldInfo().equals(fieldInfo);
         // rule 3
         Set<MethodInfo> deps = new LinkedHashSet<>();
@@ -156,6 +161,12 @@ final class OwnedFields {
             if (assignments.isEmpty()) continue;
             OwnershipPass.Body body = OwnershipPass.Body.of(methodInfo, analysedResults, deps, thisEscape);
             for (Assignment a : assignments) {
+                if (handedOver(a.value(), methodInfo, fieldInfo, transfers, borrowedParameters)) continue;
+                if (Transfers.unwrap(a.value()) instanceof VariableExpression ve
+                    && ve.variable() instanceof ParameterInfo pi && pi.methodInfo().equals(methodInfo)) {
+                    String why = transfers.isTransferred(pi) ? "kept elsewhere too" : transfers.reason(pi);
+                    return "assigned in " + methodInfo.name() + " from parameter " + pi.name() + ": " + why;
+                }
                 String r = body.created(a.value());
                 if (r != null) return "assigned in " + methodInfo.name() + ": " + r;
                 if (a.value() instanceof VariableExpression ve && ve.variable() instanceof LocalVariable) {
@@ -172,7 +183,10 @@ final class OwnedFields {
         Links links = fieldInfo.analysis().getOrDefault(LinksImpl.LINKS, LinksImpl.EMPTY);
         for (Link link : links) {
             if (link.linkNature().isDecoration()) continue;
-            boolean toCreated = root(link.to()) instanceof ObjectCreationVariable;
+            Variable toRoot = root(link.to());
+            boolean toCreated = toRoot instanceof ObjectCreationVariable
+                                || toRoot instanceof ParameterInfo pi && transfers.isTransferred(pi)
+                                   && Transfers.keptOnlyIn(pi, fieldInfo, borrowedParameters);
             if (isThisField(link.from(), fieldInfo)) {
                 if (!toCreated && !OwnershipPass.isNullConstant(link.to())) {
                     return "link: " + fieldInfo.name() + " " + link.linkNature() + " " + link.to();
@@ -188,6 +202,14 @@ final class OwnedFields {
             if (kept != null) return "in " + methodInfo.name() + ": " + kept;
         }
         return null;
+    }
+
+    // stage 5: a parameter of the assigning method that every caller hands over, kept by it only in this field
+    private static boolean handedOver(Expression value, MethodInfo methodInfo, FieldInfo fieldInfo,
+                                      Transfers transfers, BorrowedParameters borrowedParameters) {
+        return Transfers.unwrap(value) instanceof VariableExpression ve
+               && ve.variable() instanceof ParameterInfo pi && pi.methodInfo().equals(methodInfo)
+               && transfers.isTransferred(pi) && Transfers.keptOnlyIn(pi, fieldInfo, borrowedParameters);
     }
 
     private static boolean isThisField(Variable variable, FieldInfo fieldInfo) {
