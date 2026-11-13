@@ -62,6 +62,7 @@ import io.codelaser.maddi.modification.analyzer.nullability.World;
 import io.codelaser.maddi.modification.analyzer.shadow.ShadowModificationPass;
 import io.codelaser.maddi.modification.common.util.Culprits;
 import io.codelaser.maddi.modification.common.util.TolerantWrite;
+import io.codelaser.maddi.modification.link.vf.CanonicalVirtuals;
 import io.codelaser.maddi.modification.link.impl.Gate;
 import io.codelaser.maddi.modification.link.impl.LinkComputerImpl;
 
@@ -529,6 +530,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                         Set<Info> initialDirty, Consumer<Info> beforeFirstRecompute) {
         boolean frozenBefore = TolerantWrite.modificationPropertiesFrozen();
         TolerantWrite.insideAnalyze(true);
+        CanonicalVirtuals.beginAnalysis();
         try {
             iterate(analysisOrder, dependencyGraph, initialDirty, beforeFirstRecompute);
             if (SingleIterationAnalyzerImpl.LINK_RECHECK && lastSingleIterationAnalyzer != null) {
@@ -550,8 +552,9 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
             // not stay set for the code that runs before the next analyze() (TestWarmAnalysisWithCarry
             // .testFreezeDoesNotLeak pins the normal exits)
             TolerantWrite.unfreezeModificationProperties();
-            // the changed targets of the last pass are JVM-wide too, and they are elements of this model: left set,
-            // they kept a model its owner had dropped reachable until the next analysis (TestAnalysedModelRelease)
+            // the virtual-field cache and the changed targets of the last pass are JVM-wide as well, and they hold
+            // elements of this model: kept, they kept a model its owner had dropped reachable (TestAnalysedModelRelease)
+            CanonicalVirtuals.endAnalysis();
             TolerantWrite.resetChangedTargets();
         }
         if (configuration.nullability()) {

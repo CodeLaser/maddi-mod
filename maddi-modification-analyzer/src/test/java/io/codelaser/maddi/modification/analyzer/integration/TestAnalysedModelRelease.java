@@ -17,6 +17,7 @@
 
 package io.codelaser.maddi.modification.analyzer.integration;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -27,6 +28,7 @@ import java.util.List;
 import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.Isolated;
 
 import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
@@ -36,11 +38,14 @@ import io.codelaser.maddi.modification.link.vf.CanonicalVirtuals;
 
 /**
  * An analysed model whose owner drops it is released: no static of the analysis keeps it reachable. Two did
- * (2026-11-13): {@link CanonicalVirtuals} held its keys strongly, and a key's owner type reached, through its
- * analysis, the very fields the entry's weak value referred to, so no entry was ever cleared (the refactor server
- * kept a dropped model of 8.6 GB alive through it); and {@code TolerantWrite}'s changed targets of the last pass stayed
- * set after the analysis, until the next one.
+ * (2026-11-13): {@link CanonicalVirtuals}, whose strong keys reached, through the owner's analysis, the fields the
+ * entries' weak values referred to, so that no entry was ever cleared (the refactor server kept a dropped model of
+ * 8.6 GB alive through it); and {@code TolerantWrite}'s changed targets of the last pass, until the next analysis. The
+ * cache is now emptied when the last running analysis ends.
  */
+// Isolated: the cache is JVM-wide and emptied only when no analysis runs, so that the size this test asserts holds only
+// while no other test analyses at the same time (should the module ever run its tests in parallel)
+@Isolated
 public class TestAnalysedModelRelease extends CommonTest {
 
     @Language("java")
@@ -67,8 +72,17 @@ public class TestAnalysedModelRelease extends CommonTest {
     @DisplayName("an analysed model that is dropped is released, and the virtual-field cache holds nothing of it")
     @Test
     public void test() {
-        int before = CanonicalVirtuals.size();
-        List<WeakReference<TypeInfo>> model = analyse();
+        // an outer scope, as an overlapping analysis would be: the cache keeps its entries past analyze()
+        CanonicalVirtuals.beginAnalysis();
+        List<WeakReference<TypeInfo>> model;
+        try {
+            model = analyse();
+            // not vacuous: the analysis filled the cache, and while an analysis runs it holds the model
+            assertTrue(CanonicalVirtuals.size() > 0, "the analysis left nothing in the cache");
+        } finally {
+            CanonicalVirtuals.endAnalysis();
+        }
+        assertEquals(0, CanonicalVirtuals.size(), "the cache keeps entries after the last analysis ended");
 
         // drop every holder of the model this test has
         javaInspector = null;
@@ -85,8 +99,6 @@ public class TestAnalysedModelRelease extends CommonTest {
         for (WeakReference<TypeInfo> w : model) {
             assertNull(w.get(), "a type of the dropped model is still reachable");
         }
-        assertTrue(CanonicalVirtuals.size() <= before,
-                () -> "entries left of the dropped model: " + CanonicalVirtuals.size() + " > " + before);
     }
 
     // in a method of its own, so that no local of the test keeps the model
@@ -96,8 +108,6 @@ public class TestAnalysedModelRelease extends CommonTest {
         new IteratingAnalyzerImpl(javaInspector, new IteratingAnalyzerImpl.ConfigurationBuilder()
                 .setMaxIterations(20).build()).analyze(analysisOrder);
         TypeInfo Y = X.findSubType("Y");
-        // not vacuous: the analysis left the model's own types in the cache
-        assertTrue(CanonicalVirtuals.holdsAny(X, Y), "the analysis left nothing of the model in the cache");
         return List.of(new WeakReference<>(X), new WeakReference<>(Y));
     }
 }
