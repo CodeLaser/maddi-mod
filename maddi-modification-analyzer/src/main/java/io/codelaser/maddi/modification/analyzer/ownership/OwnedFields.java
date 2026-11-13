@@ -37,6 +37,7 @@ import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.statement.ReturnStatement;
+import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.api.variable.DependentVariable;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.cst.api.variable.LocalVariable;
@@ -45,9 +46,7 @@ import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 import io.codelaser.maddi.modification.common.AnalysisHelper;
-import io.codelaser.maddi.modification.link.impl.LinkNatureImpl;
 import io.codelaser.maddi.modification.prepwork.variable.Link;
-import io.codelaser.maddi.modification.prepwork.variable.LinkNature;
 import io.codelaser.maddi.modification.prepwork.variable.Links;
 import io.codelaser.maddi.modification.prepwork.variable.ObjectCreationVariable;
 import io.codelaser.maddi.modification.prepwork.variable.ReturnVariable;
@@ -227,6 +226,7 @@ final class OwnedFields {
             if (!fresh.contains(dep)) return "assigned the result of " + dep.fullyQualifiedName() + ", not fresh";
         }
         // rule 4
+        AnalysisHelper analysisHelper = new AnalysisHelper();
         Links links = fieldInfo.analysis().getOrDefault(LinksImpl.LINKS, LinksImpl.EMPTY);
         for (Link link : links) {
             if (link.linkNature().isDecoration()) continue;
@@ -239,7 +239,7 @@ final class OwnedFields {
                                 // a getter whose every caller only uses the object it returns (Lending)
                                 || toRoot instanceof ReturnVariable lender && lending.isLent(lender.methodInfo());
             if (isThisField(link.from(), fieldInfo)) {
-                if (!toCreated && !OwnershipPass.isNullConstant(link.to()) && !aboutContents(link.linkNature())) {
+                if (!toCreated && !OwnershipPass.isNullConstant(link.to()) && !immutableOther(link.to(), analysisHelper)) {
                     return "link: " + fieldInfo.name() + " " + link.linkNature() + " " + link.to();
                 }
             } else if (link.from() instanceof FieldReference face && "§m".equals(face.fieldInfo().name())
@@ -257,16 +257,15 @@ final class OwnedFields {
     }
 
     /*
-     A link from the field that is about its contents, not its object: the other side does not hold the field's object
-     ('this.f ∋ x', 'this.f ~ 0:s' after 'x.add(s)' through a local alias, 'this.f ⊆ …', 'this.f ≻ …', 'this.f ≥ …').
-     The contents are element ownership's question. Still failing: '∈', '∈?', '≺', '≤', '≈', '∩', '≡', '←', '→', any
-     relation in which the field's object may be part of something else.
+     The other side is deeply immutable ('this.f ~ 0:s' after 'x.add(s)' through a local alias, s a String): an
+     immutable object cannot hold the field's mutable object, whatever the link's nature. Not a reading of the natures
+     themselves: '~' also stands for "reachable through the result's fields" ('list ~ build' when build returns a
+     new T(list)).
      */
-    private static boolean aboutContents(LinkNature nature) {
-        return nature.equals(LinkNatureImpl.CONTAINS_AS_MEMBER) || nature.equals(LinkNatureImpl.COULD_CONTAIN_AS_MEMBER)
-               || nature.equals(LinkNatureImpl.SHARES_ELEMENTS) || nature.equals(LinkNatureImpl.IS_SUBSET_OF)
-               || nature.equals(LinkNatureImpl.IS_SUPERSET_OF) || nature.equals(LinkNatureImpl.CONTAINS_AS_FIELD)
-               || nature.equals(LinkNatureImpl.OBJECT_GRAPH_CONTAINS);
+    private static boolean immutableOther(Variable to, AnalysisHelper analysisHelper) {
+        ParameterizedType type = to.parameterizedType();
+        return type != null && !type.isTypeParameter() && type.typeInfo() != null
+               && analysisHelper.typeImmutable(type).isImmutable();
     }
 
     // stage 5: a parameter of the assigning method that every caller hands over, kept by it only in this field
