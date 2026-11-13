@@ -71,6 +71,8 @@ public class VirtualFieldComputer {
     private final GenericsHelper genericsHelper;
     private final Set<TypeInfo> multi2;
     private final ParameterizedType iteratorType;
+    private final ParameterizedType iterableType;
+    private final ParameterizedType mapType;
 
     public static final String VF_CHAR = "§";
     public static final String VF_CONCRETE = "$";
@@ -84,6 +86,8 @@ public class VirtualFieldComputer {
         this.genericsHelper = new GenericsHelperImpl(runtime);
         multi2 = Set.of(iterable.typeInfo(), iterator.typeInfo());
         this.iteratorType = iterator;
+        this.iterableType = iterable;
+        this.mapType = javaInspector.compiledTypesManager().type(java.util.Map.class).asParameterizedType();
     }
 
     // ----- computation of "temporary" virtual fields
@@ -197,8 +201,37 @@ public class VirtualFieldComputer {
                     ++i;
                 }
             }
+            if (!NO_INHERIT_MULTIPLICITY) subsetSupertypes(typeInfo, containerType, fieldTm);
         }
         return hiddenContent;
+    }
+
+    /*
+     'class VBStyleCollection<E, K> extends ArrayList<E>' (fernflower): the supertype holds one of our type parameters,
+     so hiddenContentHierarchy's same-set filter leaves it out, and nothing translated ArrayList's E: a call to an
+     inherited method (iterator(), get(i)) linked to nothing, and modifying the elements of a for-each over such a field
+     did not modify it (CodeLaser/maddi-mod#113). Map the supertype's type parameter, through its whole hierarchy, onto
+     our container's component for that parameter.
+     */
+    private void subsetSupertypes(TypeInfo typeInfo, TypeInfo containerType, VirtualFieldTranslationMap fieldTm) {
+        List<TypeParameter> ours = typeInfo.typeParameters();
+        Stream<ParameterizedType> supers = Stream.concat(
+                Stream.ofNullable(typeInfo.parentClass() == null || typeInfo.parentClass().isJavaLangObject()
+                        ? null : typeInfo.parentClass()),
+                typeInfo.interfacesImplemented().stream());
+        supers.forEach(superPt -> {
+            if (superPt.typeInfo() == null || superPt.parameters().size() != 1 || !isContainer(superPt)) return;
+            TypeParameter argument = superPt.parameters().getFirst().typeParameter();
+            if (argument == null || superPt.parameters().getFirst().arrays() > 0) return;
+            int index = ours.indexOf(argument);
+            if (index < 0 || index >= containerType.fields().size()) return;
+            ParameterizedType component = containerType.fields().get(index).type();
+            for (FieldInfo formal : hiddenContentHierarchy(superPt.typeInfo())) {
+                if (formal != null && formal.type().typeParameter() != null) {
+                    fieldTm.put(formal.type().typeParameter(), component);
+                }
+            }
+        });
     }
 
     private @Nullable FieldInfo singleTypeParameter(ParameterizedType pt,
@@ -354,6 +387,24 @@ public class VirtualFieldComputer {
 
     // package for testing
     int maxMultiplicityFromMethods(TypeInfo typeInfo) {
+        return computeMaxMultiplicityFromMethods(typeInfo);
+    }
+
+    /*
+     A supertype is a container when it is an Iterable or a Map. Only such a supertype hands its hidden content to a
+     subtype whose own methods say nothing (#113): timefold's 'Phase<Solution_>', its selectors and AssertJ's asserts
+     inherited hidden content from any generic supertype, and the run took 7x as long.
+     */
+    private boolean isContainer(ParameterizedType superPt) {
+        return runtime.isAssignableFrom(iterableType, superPt) || runtime.isAssignableFrom(mapType, superPt);
+    }
+
+    private boolean holdsOneOf(ParameterizedType superPt, List<TypeParameter> ours) {
+        return superPt.parameters().stream().anyMatch(p -> p.typeParameter() != null && p.arrays() == 0
+                                                           && ours.contains(p.typeParameter()));
+    }
+
+    private int computeMaxMultiplicityFromMethods(TypeInfo typeInfo) {
         // base for many computations
         if (multi2.contains(typeInfo)) return 2;
         // an Iterator subtype yields many elements too, whatever its own methods return: ListIterator's next() and
@@ -367,8 +418,26 @@ public class VirtualFieldComputer {
             int m = computeMultiplicity(returnType, true);
             multiplicity = Math.max(multiplicity, m);
         }
+        if (multiplicity == 0 && !NO_INHERIT_MULTIPLICITY && !typeInfo.typeParameters().isEmpty()) {
+            // its own methods say nothing: 'class MyList<E> extends ArrayList<E> { }' (fernflower's VBStyleCollection
+            // adds a few, none returning E). It holds what its supertypes hold; without this it had no hidden content,
+            // and a for-each over it linked its loop variable to nothing (CodeLaser/maddi-mod#113). A type whose own
+            // methods do say (vavr's Option: one T) keeps its own count. Gate NOINHERITMULTIPLICITY
+            Stream<ParameterizedType> supers = Stream.concat(
+                    Stream.ofNullable(typeInfo.parentClass() == null || typeInfo.parentClass().isJavaLangObject()
+                            ? null : typeInfo.parentClass()),
+                    typeInfo.interfacesImplemented().stream());
+            // only a container supertype that holds one of our own type parameters ('extends ArrayList<E>')
+            List<TypeParameter> ours = typeInfo.typeParameters();
+            multiplicity = supers.filter(pt -> pt.typeInfo() != null && isContainer(pt) && holdsOneOf(pt, ours))
+                    .map(ParameterizedType::typeInfo)
+                    .mapToInt(this::maxMultiplicityFromMethods).max().orElse(0);
+        }
         return multiplicity;
     }
+
+    private static final boolean NO_INHERIT_MULTIPLICITY =
+            io.codelaser.maddi.modification.link.impl.Gate.isSet("NOINHERITMULTIPLICITY");
 
     private int computeMultiplicity(ParameterizedType parameterizedType, boolean ignoreMethodParameters) {
         int arrays = parameterizedType.arrays();

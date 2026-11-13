@@ -818,6 +818,14 @@ public class ShadowModificationPass {
                                                                + mc.methodInfo().fullyQualifiedName());
                         }
                     }
+                    // ... and a lazy stream stage's ('helpers.stream().filter(h -> ..)', CodeLaser/maddi-mod#115)
+                    if (!disclaimed && mc.object() != null
+                        && !MethodModification.lazyStageModifiedLambdaParameters(mc).isEmpty()) {
+                        for (Object node : elementSources(mi, vd, mc.object(), 0)) {
+                            seedWithOrigin(deepOnly(node), mi, "elements handed to a modifying function by "
+                                                               + mc.methodInfo().fullyQualifiedName());
+                        }
+                    }
                     // E2: callee receiver -> caller-side receiver nodes (chained receivers resolved
                     // through the inner callee's return-value summary, P2.2a). Mirror of the engine's cone
                     // rule (ReceiverLevel): an abstract callee's node aggregates EVERY implementation through
@@ -1341,9 +1349,36 @@ public class ShadowModificationPass {
                                 }
                                 links.stream().filter(l -> l.linkNature() == LinkNatureImpl.IS_ELEMENT_OF
                                                            && l.from().fullyQualifiedName().equals(v.fullyQualifiedName()))
-                                        .map(l -> Util.firstRealVariable(l.to()))
-                                        .filter(Objects::nonNull)
-                                        .forEach(containers::add);
+                                        .forEach(l -> {
+                                            Variable container = Util.firstRealVariable(l.to());
+                                            if (container != null) containers.add(container);
+                                            if (!NO_CO_ELEMENT) coElements(vd, l.to(), containers);
+                                        });
+                                // #112: 'e ≤ 0:x.map.§$$s[-2]', an object from inside a container's hidden content
+                                // (an element of a copy of one of its values): its container, deep-only, as for ∈
+                                if (!NO_OBJECT_GRAPH_MOD) {
+                                    links.stream().filter(l -> l.linkNature() == LinkNatureImpl.IS_IN_OBJECT_GRAPH
+                                                               && Util.virtual(l.to())
+                                                               && !Util.isVirtualModification(l.to())
+                                                               && l.from().fullyQualifiedName()
+                                                                       .equals(v.fullyQualifiedName()))
+                                            .map(l -> Util.firstRealVariable(l.to()))
+                                            .filter(Objects::nonNull)
+                                            .forEach(containers::add);
+                                    // the same fact is often stored on the container's side only: '0:x.map.§$$s ≥ e'
+                                    String vFqn = v.fullyQualifiedName();
+                                    vd.variableInfoStream().forEach(other -> {
+                                        Links ol = other.linkedVariables();
+                                        if (ol == null) return;
+                                        ol.stream().filter(l -> l.linkNature() == LinkNatureImpl.OBJECT_GRAPH_CONTAINS
+                                                                && Util.virtual(l.from())
+                                                                && !Util.isVirtualModification(l.from())
+                                                                && l.to().fullyQualifiedName().equals(vFqn))
+                                                .map(l -> Util.firstRealVariable(l.from()))
+                                                .filter(Objects::nonNull)
+                                                .forEach(containers::add);
+                                    });
+                                }
                             }
                         }
                     }
@@ -1351,6 +1386,54 @@ public class ShadowModificationPass {
             }
         }
         if (deepOnly) out.forEach(node -> nodes.add(deepOnly(node)));
+    }
+
+    /*
+     CodeLaser/maddi-mod#115: what a stream's elements come from. Down the receiver chain through calls whose result's
+     hidden content is (part of) their receiver's ('stream()', 'filter(..)': 'stream.§$s ⊆ this.§$s'), to a variable,
+     projected as usual. The projection of the whole result (projectReceiverChain) follows only links that carry the
+     object's own modification, which these do not.
+     */
+    private Set<Object> elementSources(MethodInfo mi, VariableData vd, Expression receiver, int depth) {
+        Expression e = receiver;
+        while (e instanceof EnclosedExpression ee) e = ee.inner();
+        if (e instanceof VariableExpression ve) return project(mi, vd, ve.variable());
+        if (!(e instanceof MethodCall call) || call.object() == null || depth > 16 || call.methodInfo() == null) {
+            return Set.of();
+        }
+        MethodLinkedVariables mlv = call.methodInfo().analysis().getOrNull(MethodLinkedVariablesImpl.METHOD_LINKS,
+                MethodLinkedVariablesImpl.class);
+        if (mlv == null) return Set.of();
+        boolean fromReceiver = mlv.ofReturnValue().stream().anyMatch(l ->
+                Util.virtual(l.from()) && !Util.isVirtualModification(l.from())
+                && Util.virtual(l.to()) && !Util.isVirtualModification(l.to())
+                && Util.firstRealVariable(l.to()) instanceof This
+                && (l.linkNature() == LinkNatureImpl.IS_SUBSET_OF || l.linkNature() == LinkNatureImpl.SHARES_ELEMENTS
+                    || l.linkNature().isIdenticalToOrAssignedFromTo()));
+        return fromReceiver ? elementSources(mi, vd, call.object(), depth + 1) : Set.of();
+    }
+
+    /*
+     CodeLaser/maddi-mod#113, the engine's co-element rule (WriteLinksAndModification.modifiedElementOf): the other
+     known elements of the hidden content a modified element belongs to, at this statement, are modified deep-only.
+     The container's own links name them: 'l.§$s ∋ 0:root' beside 'l.§$s ∋ s'. Gate NOCOELEMENT.
+     */
+    private static final boolean NO_CO_ELEMENT = Gate.isSet("NOCOELEMENT");
+    private static final boolean NO_OBJECT_GRAPH_MOD = Gate.isSet("NOOBJECTGRAPHMOD");
+
+    private static void coElements(VariableData vd, Variable hiddenContent, List<Variable> out) {
+        if (!Util.virtual(hiddenContent) || Util.isVirtualModification(hiddenContent)) return;
+        Variable container = Util.firstRealVariable(hiddenContent);
+        if (container == null) return;
+        VariableInfoContainer vic = vd.variableInfoContainerOrNull(container.fullyQualifiedName());
+        if (vic == null) return;
+        Links links = vic.best().linkedVariables();
+        if (links == null) return;
+        String face = hiddenContent.fullyQualifiedName();
+        links.stream().filter(l -> l.linkNature() == LinkNatureImpl.CONTAINS_AS_MEMBER
+                                   && l.from().fullyQualifiedName().equals(face)
+                                   && !Util.virtual(l.to()))
+                .forEach(l -> out.add(l.to()));
     }
 
     /**

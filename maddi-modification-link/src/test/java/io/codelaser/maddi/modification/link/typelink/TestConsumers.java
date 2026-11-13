@@ -126,14 +126,17 @@ public class TestConsumers extends CommonTest {
 
         VariableData vd3 = VariableDataImpl.of(variableInfoStream2.methodBody().statements().get(3));
         VariableInfo rv = vd3.variableInfo("a.b.C.VariableData.variableInfoStream2()");
-        assertEquals("variableInfoStream2∩0:e,variableInfoStream2.§$s≤this.map.§$$s",
+        // CodeLaser/maddi-mod#115: this link-only harness has no analysis of the interface method variableInfo(), read
+        // as modifying, so map's lambda modifies its 'e' and with it the elements of this.map; the analyzer decides it
+        // non-modifying (TestLazyStageElementModification.viaInterface). The modification reshapes the links
+        assertEquals("variableInfoStream2∩0:e,variableInfoStream2∩0:e,variableInfoStream2∩this.map.§$$s,variableInfoStream2.§$s≤this.map",
                 rv.linkedVariables().toString());
 
-        assertEquals("[] --> variableInfoStream2.§$s≤this.map.§$$s",
+        assertEquals("[] --> variableInfoStream2∩this.map*.§$$s,variableInfoStream2.§$s≤this.map*",
                 variableInfoStream2.analysis().getOrNull(METHOD_LINKS, MethodLinkedVariablesImpl.class).toString());
 
         MethodInfo variableInfoStream = vd.findUniqueMethod("variableInfoStream", 0);
-        assertEquals("[] --> variableInfoStream.§$s≤this.map.§$$s",
+        assertEquals("[] --> variableInfoStream.§$s≤this.map*.§$$s",
                 variableInfoStream.analysis().getOrNull(METHOD_LINKS, MethodLinkedVariablesImpl.class).toString());
 
         MethodInfo method = C.findUniqueMethod("method", 1);
@@ -149,7 +152,7 @@ public class TestConsumers extends CommonTest {
         VariableInfo vi1Lambda0 = vd1Lambda.variableInfo(lambda0);
         assertEquals("0:vi∈this.list.§$s", vi1Lambda0.linkedVariables().toString());
 
-        assertEquals("[0:vd.map.§$$s∩this.list*.§$s] --> -",
+        assertEquals("[0:vd.map*.§$$s∩this.list*.§$s] --> -",
                 method.analysis().getOrNull(METHOD_LINKS, MethodLinkedVariablesImpl.class).toString());
     }
 

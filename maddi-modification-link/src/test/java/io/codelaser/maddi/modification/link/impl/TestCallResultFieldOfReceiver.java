@@ -128,11 +128,11 @@ public class TestCallResultFieldOfReceiver extends CommonTest {
     public void deeper() {
         // was 'MOD[]': the inlined getter dropped its receiver's links (gate NOGETTERRECEIVER)
         assertEquals("[-] --> -  MOD[a.b.C.viaGetter(a.b.C.N2):0:parent]", mlv("viaGetter"));
-        // KNOWN GAP, fernflower's setLambdaVars ('parent.getWrapper().getMethods().getWithKey(..)', then a modification
-        // of it): the element held in 'w' only gets '0:parent.parent ≥ w', and a modification does not travel back
-        // over ≥. Letting it travel (deep-only, as ∈) also reads a list iterated read-only as modified, since the
-        // iterator sits in its object graph (TestModificationThroughView), so it needs a sharper link than ≤ here
-        assertEquals("[-] --> -  MOD[]", mlv("viaElement"));
+        // fernflower's setLambdaVars ('parent.getWrapper().getMethods().getWithKey(..)', then a modification of it):
+        // the element held in 'w' only gets '0:parent.parent ≥ w'. Since CodeLaser/maddi-mod#112 a modification
+        // travels back over ≥ (deep-only, as ∈), except from a variable whose modification face is grouped with the
+        // container's: an iterator in a list's object graph keeps its pass-set rule (TestModificationThroughView)
+        assertEquals("[-] --> -  MOD[a.b.C.viaElement(a.b.C.N2):0:parent]", mlv("viaElement"));
         assertEquals("[-] --> -  MOD[a.b.C.viaElementField(a.b.C.N2):0:parent, parent.wrapper, parent.wrapper.h]",
                 mlv("viaElementField"));
     }

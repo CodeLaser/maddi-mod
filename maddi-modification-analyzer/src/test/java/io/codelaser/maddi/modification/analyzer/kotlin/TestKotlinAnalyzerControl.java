@@ -1,6 +1,7 @@
 package io.codelaser.maddi.modification.analyzer.kotlin;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.BeforeAll;
@@ -96,10 +97,17 @@ public class TestKotlinAnalyzerControl extends CommonKotlinAnalyzerTest {
         a.assertSameAsJava("Whens");
     }
 
-    /* the loop over a map's entries and buildList agree; `clearAll` reads `m` unmodified on both sides */
+    /*
+     the loop over a map's entries and buildList agree. `clearAll` clears the map's values: Java's
+     'e.getValue().clear()' modifies `m` (deep) since CodeLaser/maddi-mod#112 (a modification travels back over ≥);
+     Kotlin's destructuring '(_, v)' does not reach `m` yet, as both sides did not before
+     */
     @Test
     public void mapsAndBuilders() {
-        a.assertSameAsJava("Maps");
+        a.assertSameAsJava("Maps", "total", "build", "<init>");
+        String java = a.java("Maps", "clearAll");
+        assertTrue(java.contains("method clearAll: nonModifying=true @Independent | 0: unmodified=false"), java);
+        assertEquals(java.replace("0: unmodified=false", "0: unmodified=true"), a.kotlin("Maps", "clearAll"));
     }
 
     @Test

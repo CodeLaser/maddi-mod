@@ -29,6 +29,7 @@ import io.codelaser.maddi.modification.prepwork.Util;
 import io.codelaser.maddi.modification.prepwork.variable.Link;
 import io.codelaser.maddi.modification.prepwork.variable.LinkNature;
 import io.codelaser.maddi.modification.prepwork.variable.Links;
+import io.codelaser.maddi.modification.prepwork.variable.ObjectCreationVariable;
 import io.codelaser.maddi.modification.prepwork.variable.ReturnVariable;
 import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
 
@@ -46,6 +47,7 @@ import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
 public record LinkFunctionalInterface(Runtime runtime, VirtualFieldComputer virtualFieldComputer,
                                       MethodInfo currentMethod) {
     private static final Logger LOGGER = LoggerFactory.getLogger(LinkFunctionalInterface.class);
+    private static final boolean NO_FRESH_FUNCTION_RESULT = Gate.isSet("NOFRESHFUNCTIONRESULT");
 
     record Triplet(Variable from, LinkNature linkNature, Variable to) {
     }
@@ -215,7 +217,13 @@ public record LinkFunctionalInterface(Runtime runtime, VirtualFieldComputer virt
         List<Triplet> result = new ArrayList<>(nonLocalReturns);
         if (objectPrimary != null && returnPrimary != null) {
             for (Links links : linksList) {
+                // a fresh object the function creates ('k -> new ArrayList<>()', tracked as 'oc:..' under
+                // trackObjectCreations) is no parameter of the function: mapped onto the map source below, it made
+                // the result of 'm.computeIfAbsent(k, X::mk)' assigned from m, and with it from whatever m holds
+                // (CodeLaser/maddi-mod#114). The function's result is then as unrelated to its input as without the
+                // tracking. Gate NOFRESHFUNCTIONRESULT
                 Set<Variable> toPrimaries = links.stream().map(l -> Util.primary(l.to()))
+                        .filter(v -> NO_FRESH_FUNCTION_RESULT || !(v instanceof ObjectCreationVariable))
                         .collect(Collectors.toUnmodifiableSet());
 
                 VirtualFields vfMapSource = virtualFieldComputer.compute(objectPrimary.parameterizedType(),
