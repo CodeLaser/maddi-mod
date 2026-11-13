@@ -320,16 +320,35 @@ final class OwnedFields {
         for (Links links : all) {
             for (Link link : links) {
                 if (link.linkNature().isDecoration()) continue;
-                Variable other = viaOther(link.from(), fieldInfo) ? link.to()
-                        : viaOther(link.to(), fieldInfo) ? link.from() : null;
-                if (other == null || accepted.test(other) || OwnershipPass.isNullConstant(other)
-                    || immutableOther(other, analysisHelper)) {
-                    continue;
+                Variable mine = viaOther(link.from(), fieldInfo) ? link.from()
+                        : viaOther(link.to(), fieldInfo) ? link.to() : null;
+                // 'this.list → return build.l', in either direction: the field of an object the method creates and
+                // returns receives something, which rule 3 judges
+                if (mine == null || ofNewObject(mine)) continue;
+                Variable other = mine == link.from() ? link.to() : link.from();
+                if (accepted.test(other) || OwnershipPass.isNullConstant(other) || immutableOther(other, analysisHelper)
+                    || isThisField(root2(other), fieldInfo)) {
+                    continue; // 'child.parent.children ≻ this.children.§$s': the field's own content
                 }
                 return "link through another instance: " + link.from() + " " + link.linkNature() + " " + link.to();
             }
         }
         return null;
+    }
+
+    // the field of an object the method creates and returns: 'return build.l'
+    private static boolean ofNewObject(Variable v) {
+        Variable root = root(v);
+        return root instanceof ReturnVariable || root instanceof ObjectCreationVariable;
+    }
+
+    // the field reference under any content or modification faces: 'this.children.§$s' -> 'this.children'
+    private static Variable root2(Variable v) {
+        Variable w = v;
+        while (w instanceof FieldReference fr && fr.fieldInfo().name().startsWith("§") && fr.scopeVariable() != null) {
+            w = fr.scopeVariable();
+        }
+        return w;
     }
 
     // the field itself (or its modification face) reached through a scope other than 'this'
