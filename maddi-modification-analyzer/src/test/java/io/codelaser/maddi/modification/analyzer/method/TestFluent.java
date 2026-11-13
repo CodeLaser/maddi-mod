@@ -141,4 +141,54 @@ public class TestFluent extends CommonTest {
         assertSame(FALSE, N.findUniqueMethod("walk", 0).analysis().getOrDefault(PropertyImpl.FLUENT_METHOD, FALSE));
         assertSame(TRUE, N.findUniqueMethod("always", 1).analysis().getOrDefault(PropertyImpl.FLUENT_METHOD, FALSE));
     }
+
+    @Language("java")
+    private static final String INPUT3 = """
+            package a.b;
+            class X {
+                interface Context { }
+                interface RT {
+                    default RT solve(Context context) { return this; }
+                }
+                static class W implements RT {
+                    private final boolean ext;
+                    private final RT bound;
+                    private int k;
+                    W(boolean ext, RT bound) { this.ext = ext; this.bound = bound; }
+                    boolean isExtends() { return ext; }
+                    static W extendsBound(RT t) { return new W(true, t); }
+                    @Override
+                    public RT solve(Context context) {
+                        if (isExtends()) {
+                            return extendsBound(bound.solve(context));
+                        }
+                        return this;
+                    }
+                    W fresh(boolean c) { return c ? this : new W(c, bound); }
+                    W setK(int k) { this.k = k; return this; }
+                    W chained() { return setK(3); }
+                    RT viaSuper(Context c) { return RT.super.solve(c); }
+                    boolean flag() { setK(1); return k > 0; }
+                }
+            }
+            """;
+
+    @DisplayName("fluent: a return of something unlinked (a new object) is not this (maddi-mod#31)")
+    @Test
+    public void test3() {
+        TypeInfo X = javaInspector.parse("a.b.X", INPUT3);
+        List<Info> ao = prepWork(X);
+        analyzer.go(ao);
+        TypeInfo W = X.findSubType("W");
+        TypeInfo RT = X.findSubType("RT");
+        assertSame(TRUE, RT.findUniqueMethod("solve", 1).analysis().getOrDefault(PropertyImpl.FLUENT_METHOD, FALSE));
+        // one path returns a new W: links see only 'this'
+        assertSame(FALSE, W.findUniqueMethod("solve", 1).analysis().getOrDefault(PropertyImpl.FLUENT_METHOD, FALSE));
+        assertSame(FALSE, W.findUniqueMethod("fresh", 1).analysis().getOrDefault(PropertyImpl.FLUENT_METHOD, FALSE));
+        // a fluent call on this, on super: still this
+        assertSame(TRUE, W.findUniqueMethod("setK", 1).analysis().getOrDefault(PropertyImpl.FLUENT_METHOD, FALSE));
+        assertSame(TRUE, W.findUniqueMethod("chained", 0).analysis().getOrDefault(PropertyImpl.FLUENT_METHOD, FALSE));
+        assertSame(TRUE, W.findUniqueMethod("viaSuper", 1).analysis().getOrDefault(PropertyImpl.FLUENT_METHOD, FALSE));
+        assertSame(FALSE, W.findUniqueMethod("flag", 0).analysis().getOrDefault(PropertyImpl.FLUENT_METHOD, FALSE));
+    }
 }
