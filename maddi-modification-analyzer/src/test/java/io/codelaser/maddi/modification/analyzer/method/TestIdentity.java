@@ -313,4 +313,64 @@ public class TestIdentity extends CommonTest {
         assertEquals("a.b.ii.C1.method(a.b.ii.C1.II):0:ii=false, ii2=true", vbm.toString());
 
     }
+
+    /*
+     A null-guarding method returns something else on one branch. 'List.of()' links to nothing, so the return
+     links held only 'rv ← 0:l' and the method came out @Identity; refactor-base then aliased 'nonNull(steps)' to
+     'steps' and dropped the guard ('nonNull(steps).size() == 0' became 'steps.isEmpty()'). Every return must
+     yield the parameter.
+     */
+    @Language("java")
+    private static final String INPUT8 = """
+            package a.b;
+            import java.util.List;
+            import java.util.Objects;
+            class N {
+                static <T> List<T> nonNull(List<T> l) {
+                    return l == null ? List.of() : l;
+                }
+                static <T> List<T> nonNullIf(List<T> l) {
+                    if (l == null) return List.of();
+                    return l;
+                }
+                static <T> List<T> nonNullLocal(List<T> l) {
+                    List<T> r = l;
+                    if (r == null) r = List.of();
+                    return r;
+                }
+                static String orNull(String s) {
+                    return s.isEmpty() ? null : s;
+                }
+                static <T> List<T> checked(List<T> l) {
+                    if (l == null) throw new IllegalArgumentException();
+                    return l;
+                }
+                static <T> List<T> viaLocal(List<T> l) {
+                    List<T> r = l;
+                    return r;
+                }
+                static <T> List<T> conditionalOnItself(List<T> l, boolean b) {
+                    return b ? l : (List<T>) l;
+                }
+                static <T> List<T> viaRequireNonNull(List<T> l) {
+                    return Objects.requireNonNull(l);
+                }
+            }
+            """;
+
+    @DisplayName("a branch returning something other than the parameter is never @Identity")
+    @Test
+    public void test8() {
+        TypeInfo N = javaInspector.parse("a.b.N", INPUT8);
+        List<Info> ao = prepWork(N);
+        analyzer.go(ao);
+
+        for (String name : List.of("nonNull", "nonNullIf", "nonNullLocal", "orNull")) {
+            assertFalse(N.findUniqueMethod(name, 1).isIdentity(), name);
+        }
+        for (String name : List.of("checked", "viaLocal", "viaRequireNonNull")) {
+            assertTrue(N.findUniqueMethod(name, 1).isIdentity(), name);
+        }
+        assertTrue(N.findUniqueMethod("conditionalOnItself", 2).isIdentity());
+    }
 }

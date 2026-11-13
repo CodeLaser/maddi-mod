@@ -34,6 +34,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import io.codelaser.maddi.cst.api.analysis.Message;
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.element.Element;
+import io.codelaser.maddi.cst.api.expression.Assignment;
 import io.codelaser.maddi.cst.api.expression.Cast;
 import io.codelaser.maddi.cst.api.expression.EnclosedExpression;
 import io.codelaser.maddi.cst.api.expression.Expression;
@@ -45,10 +46,12 @@ import io.codelaser.maddi.cst.api.info.FieldInfo;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.statement.LocalVariableCreation;
 import io.codelaser.maddi.cst.api.statement.ReturnStatement;
 import io.codelaser.maddi.cst.api.statement.Statement;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
+import io.codelaser.maddi.cst.api.variable.LocalVariable;
 import io.codelaser.maddi.cst.api.variable.This;
 import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
@@ -337,7 +340,8 @@ public class TypeModIndyAnalyzerImpl extends CommonAnalyzerImpl implements TypeM
             identity = mlv.ofReturnValue().stream().anyMatch(link -> link.from().equals(primaryFrom)
                                                                      && link.linkNature().isIdenticalToOrAssignedFromTo()
                                                                      && link.to().equals(p0))
-                       && mlv.ofReturnValue().stream().allMatch(link -> !link.from().equals(primaryFrom) || link.to().equals(p0));
+                       && mlv.ofReturnValue().stream().allMatch(link -> !link.from().equals(primaryFrom) || link.to().equals(p0))
+                       && everyReturnYields(methodInfo, (ParameterInfo) p0);
         } else {
             identity = false;
         }
@@ -345,6 +349,68 @@ public class TypeModIndyAnalyzerImpl extends CommonAnalyzerImpl implements TypeM
             DECIDE.debug("MI: Decide @Identity of {} = {}", methodInfo, identity);
             propertyChanges.incrementAndGet();
         }
+    }
+
+    /*
+    The links cannot see a branch that returns something unlinked: in 'return l == null ? List.of() : l', List.of()
+    links to nothing, so only 'rv ← 0:l' remains and the link test passes. A consumer that aliases an @Identity call
+    away then drops the null guard (refactor-base rewrote 'nonNull(steps).size() == 0' to 'steps.isEmpty()'). So
+    every return must yield the parameter itself: the parameter, through casts, parentheses and both branches of a
+    conditional; a local variable every assignment of which does; or the first argument of an @Identity call that
+    does. Anything else (a constant, null, a new object, another call) is not the parameter. A method without a body
+    (shallow, hinted) keeps the link verdict.
+     */
+    private static boolean everyReturnYields(MethodInfo methodInfo, ParameterInfo p0) {
+        if (methodInfo.methodBody() == null || methodInfo.methodBody().isEmpty()) return true;
+        List<Expression> returned = new ArrayList<>();
+        Map<LocalVariable, List<Expression>> assigned = new java.util.HashMap<>();
+        methodInfo.methodBody().visit((Element e) -> {
+            if (e instanceof Lambda) return false; // its returns are its own
+            if (e instanceof ReturnStatement rs && rs.expression() != null && !rs.expression().isEmpty()) {
+                returned.add(rs.expression());
+            } else if (e instanceof LocalVariableCreation lvc) {
+                List<LocalVariable> lvs = new ArrayList<>();
+                lvs.add(lvc.localVariable());
+                lvs.addAll(lvc.otherLocalVariables());
+                for (LocalVariable lv : lvs) {
+                    if (lv.assignmentExpression() != null && !lv.assignmentExpression().isEmpty()) {
+                        assigned.computeIfAbsent(lv, _ -> new ArrayList<>()).add(lv.assignmentExpression());
+                    }
+                }
+            } else if (e instanceof Assignment a && a.variableTarget() instanceof LocalVariable lv) {
+                assigned.computeIfAbsent(lv, _ -> new ArrayList<>()).add(a.value());
+            }
+            return true;
+        });
+        if (returned.isEmpty()) return false;
+        return returned.stream().allMatch(r -> yieldsParameter(r, p0, assigned, new HashSet<>()));
+    }
+
+    private static boolean yieldsParameter(Expression expression, ParameterInfo p0,
+                                           Map<LocalVariable, List<Expression>> assigned,
+                                           Set<LocalVariable> seen) {
+        if (expression instanceof Cast cast) return yieldsParameter(cast.expression(), p0, assigned, seen);
+        if (expression instanceof EnclosedExpression enclosed) {
+            return yieldsParameter(enclosed.inner(), p0, assigned, seen);
+        }
+        if (expression instanceof InlineConditional ic) {
+            return yieldsParameter(ic.ifTrue(), p0, assigned, seen) && yieldsParameter(ic.ifFalse(), p0, assigned, seen);
+        }
+        if (expression instanceof VariableExpression ve) {
+            if (ve.variable().equals(p0)) return true;
+            if (ve.variable() instanceof LocalVariable lv) {
+                if (!seen.add(lv)) return true; // a cycle adds no other value
+                List<Expression> values = assigned.get(lv);
+                return values != null && !values.isEmpty()
+                       && values.stream().allMatch(v -> yieldsParameter(v, p0, assigned, seen));
+            }
+            return false;
+        }
+        if (expression instanceof MethodCall mc && mc.methodInfo() != null && mc.methodInfo().isIdentity()
+            && !mc.parameterExpressions().isEmpty()) {
+            return yieldsParameter(mc.parameterExpressions().getFirst(), p0, assigned, seen);
+        }
+        return false;
     }
 
     private void handleParameter(boolean cycleBreakingActive, ParameterInfo pi, MethodLinkedVariables mlv) {
