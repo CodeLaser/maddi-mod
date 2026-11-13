@@ -17,6 +17,7 @@
 
 package io.codelaser.maddi.modification.analyzer.integration;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -66,9 +67,9 @@ public class TestAnalysedModelRelease extends CommonTest {
 
     @DisplayName("an analysed model that is dropped is released, and the virtual-field cache holds nothing of it")
     @Test
-    public void test() {
-        int before = CanonicalVirtuals.size();
-        List<WeakReference<TypeInfo>> model = analyse();
+    public void test() throws InterruptedException {
+        List<Object> entries = new ArrayList<>();
+        List<WeakReference<TypeInfo>> model = analyse(entries);
 
         // drop every holder of the model this test has
         javaInspector = null;
@@ -85,12 +86,18 @@ public class TestAnalysedModelRelease extends CommonTest {
         for (WeakReference<TypeInfo> w : model) {
             assertNull(w.get(), "a type of the dropped model is still reachable");
         }
-        assertTrue(CanonicalVirtuals.size() <= before,
-                () -> "entries left of the dropped model: " + CanonicalVirtuals.size() + " > " + before);
+        // this model's entries only: the cache is static, and the other tests of this JVM fill and empty it meanwhile
+        // (gate run 43407323930 compared the global size). A cleared reference reaches the queue a little after the GC.
+        int left = CanonicalVirtuals.stillHeld(entries);
+        for (int i = 0; i < 100 && left > 0; i++) {
+            Thread.sleep(20);
+            left = CanonicalVirtuals.stillHeld(entries);
+        }
+        assertEquals(0, left, "entries left of the dropped model, of " + entries.size());
     }
 
     // in a method of its own, so that no local of the test keeps the model
-    private List<WeakReference<TypeInfo>> analyse() {
+    private List<WeakReference<TypeInfo>> analyse(List<Object> entries) {
         TypeInfo X = javaInspector.parse("a.b.X", INPUT);
         List<Info> analysisOrder = prepWork(X);
         new IteratingAnalyzerImpl(javaInspector, new IteratingAnalyzerImpl.ConfigurationBuilder()
@@ -98,6 +105,7 @@ public class TestAnalysedModelRelease extends CommonTest {
         TypeInfo Y = X.findSubType("Y");
         // not vacuous: the analysis left the model's own types in the cache
         assertTrue(CanonicalVirtuals.holdsAny(X, Y), "the analysis left nothing of the model in the cache");
+        entries.addAll(CanonicalVirtuals.entriesHolding(X, Y));
         return List.of(new WeakReference<>(X), new WeakReference<>(Y));
     }
 }
