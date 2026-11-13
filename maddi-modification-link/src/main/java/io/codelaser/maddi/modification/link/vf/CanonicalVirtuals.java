@@ -19,7 +19,6 @@ package io.codelaser.maddi.modification.link.vf;
 
 import java.lang.ref.ReferenceQueue;
 import java.lang.ref.WeakReference;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -35,84 +34,58 @@ import io.codelaser.maddi.cst.api.type.ParameterizedType;
  * thousand definitions (2026-11-13), and every link end naming one was a distinct object, so that the link-end
  * interner, which shares an end only with an end of the same field object, could not share them.
  * <p>
- * Nothing of a model is reachable from here. A key holds its objects (an owner or container type, a field, a type
- * parameter) through weak references and compares them by identity, a type by its {@code detailedString()} and the
- * identity of what it names; a value is weak too. The first version held its keys strongly: a key's owner type
- * reached, through its analysis, the very fields the entry's weak value referred to, so no entry was ever cleared, and
- * the refactor server kept a dropped analysed model of 8.6 GB alive through this class (2026-11-13). An entry whose
- * key or value is collected is removed at the next use of the cache; until then it holds nothing but strings.
- * <p>
- * Static rather than per model or run: the virtual field computer is made per method, and the translations that
- * re-own fields are static; there is no object of the run they all reach.
+ * Keys hold their parts by identity (an owner or container type is one object per definition, as made here, and two
+ * containers of one name are different definitions); values are weak, so an entry lives as long as some link or
+ * variable still uses its field or container, and no older generation of the model stays reachable through this cache.
  * <p>
  * Gate {@code NOCANONICALVF} (presence): every call makes a new object, the behaviour before 2026-11-13.
  */
 public final class CanonicalVirtuals {
     private static final boolean OFF = System.getenv("NOCANONICALVF") != null;
 
-    private static final ReferenceQueue<Object> QUEUE = new ReferenceQueue<>();
-    private static final Map<Key, Ref> CACHE = new ConcurrentHashMap<>();
-
-    // a weak reference that knows the entry it belongs to, so that its clearing removes that entry
-    private static final class Ref extends WeakReference<Object> {
-        final Key key;
-
-        Ref(Object referent, Key key) {
-            super(referent, QUEUE);
-            this.key = key;
-        }
-    }
-
-    /*
-     A key: strings, and objects held weakly and compared by identity. Its hash is computed once, from the strings and
-     the identity hashes, so that an entry can be found (and removed) after its objects are gone; two keys are equal
-     only while all their objects are alive and the same.
-     */
-    private static final class Key {
-        private final String text;
-        private final Ref[] objects;
-        private final int hash;
-
-        Key(String text, Object... objects) {
-            this.text = text;
-            this.objects = new Ref[objects.length];
-            int h = text.hashCode();
-            for (int i = 0; i < objects.length; i++) {
-                this.objects[i] = objects[i] == null ? null : new Ref(objects[i], this);
-                h = 31 * h + System.identityHashCode(objects[i]);
-            }
-            this.hash = h;
-        }
-
+    private record Id(Object o) {
         @Override
         public boolean equals(Object other) {
-            if (this == other) return true;
-            if (!(other instanceof Key k) || k.hash != hash || !k.text.equals(text)
-                || k.objects.length != objects.length) {
-                return false;
-            }
-            for (int i = 0; i < objects.length; i++) {
-                Object a = objects[i] == null ? null : objects[i].get();
-                Object b = k.objects[i] == null ? null : k.objects[i].get();
-                if (a != b || a == null && (objects[i] != null || k.objects[i] != null)) return false;
-            }
-            return true;
+            return other instanceof Id(Object p) && p == o;
         }
 
         @Override
         public int hashCode() {
-            return hash;
+            return System.identityHashCode(o);
         }
     }
 
-    private CanonicalVirtuals() {
+    // a type, the object it names compared by identity as well: equal types of two containers of one name are not one
+    private record TypeKey(ParameterizedType type, Id typeInfo) {
+        static TypeKey of(ParameterizedType type) {
+            return new TypeKey(type, new Id(type.typeInfo()));
+        }
     }
 
-    // a type: its text, and the type or type parameter it names by identity (two containers of one name are two)
-    private static void type(ParameterizedType type, StringBuilder text, List<Object> objects) {
-        text.append('|').append(type.detailedString());
-        objects.add(type.typeInfo());
-        objects.add(type.typeParameter());
+    // kind: who made it, so that objects made differently (a computed field has its initializer committed, a field
+    // made by a translation does not) are never given for one another
+    private record FieldKey(char kind, Id owner, String name, TypeKey type) {
+    }
+
+    private record ReownedKey(Id field, Id owner) {
+    }
+
+    private record ContainerKey(char kind, Id enclosing, String name, List<FieldKey> components) {
+    }
+
+    private static final class Ref<T> extends WeakReference<T> {
+        final Object key;
+
+        Ref(T referent, Object key, ReferenceQueue<Object> queue) {
+            super(referent, queue);
+            this.key = key;
+        }
+    }
+
+    private static final ReferenceQueue<Object> QUEUE = new ReferenceQueue<>();
+    private static final Map<Object, Ref<?>> CACHE = new ConcurrentHashMap<>();
+
+    private CanonicalVirtuals() {
     }
 
     static FieldInfo field(TypeInfo owner, String name, ParameterizedType type, Supplier<FieldInfo> make) {
@@ -143,44 +116,35 @@ public final class CanonicalVirtuals {
      */
     public static FieldInfo reowned(FieldInfo field, TypeInfo newOwner) {
         if (OFF || field.owner() == newOwner) return field.withOwner(newOwner);
-        return get(new Key("R", field, newOwner), () -> field.withOwner(newOwner));
+        return get(new ReownedKey(new Id(field), new Id(newOwner)), () -> field.withOwner(newOwner));
     }
 
     private static FieldInfo field(char kind, TypeInfo owner, String name, ParameterizedType type,
                                    Supplier<FieldInfo> make) {
         if (OFF) return make.get();
-        StringBuilder text = new StringBuilder().append(kind).append('|').append(name);
-        List<Object> objects = new ArrayList<>(3);
-        objects.add(owner);
-        type(type, text, objects);
-        return get(new Key(text.toString(), objects.toArray()), make);
+        return get(new FieldKey(kind, new Id(owner), name, TypeKey.of(type)), make);
     }
 
     private static TypeInfo container(char kind, TypeInfo enclosing, String name, List<FieldInfo> components,
                                       Supplier<TypeInfo> make) {
         if (OFF) return make.get();
-        StringBuilder text = new StringBuilder().append(kind).append("C|").append(name);
-        List<Object> objects = new ArrayList<>(1 + 3 * components.size());
-        objects.add(enclosing);
-        for (FieldInfo component : components) {
-            text.append("|f:").append(component.name());
-            objects.add(component.owner());
-            type(component.type(), text, objects);
-        }
-        return get(new Key(text.toString(), objects.toArray()), make);
+        List<FieldKey> parts = components.stream()
+                .map(fi -> new FieldKey('F', new Id(fi.owner()), fi.name(), TypeKey.of(fi.type())))
+                .toList();
+        return get(new ContainerKey(kind, new Id(enclosing), name, parts), make);
     }
 
     @SuppressWarnings("unchecked")
-    private static <T> T get(Key key, Supplier<T> make) {
+    private static <T> T get(Object key, Supplier<T> make) {
         expunge();
-        Ref ref = CACHE.get(key);
+        Ref<?> ref = CACHE.get(key);
         T known = ref == null ? null : (T) ref.get();
         if (known != null) return known;
         // made outside the map's lock: making may make other virtual fields and containers (re-entrant)
         T made = make.get();
-        Ref raced = CACHE.compute(key, (_, current) -> {
+        Ref<?> raced = CACHE.compute(key, (_, current) -> {
             Object value = current == null ? null : current.get();
-            return value != null ? current : new Ref(made, key);
+            return value != null ? current : new Ref<>(made, key, QUEUE);
         });
         T winner = (T) raced.get();
         return winner != null ? winner : made;
@@ -189,38 +153,7 @@ public final class CanonicalVirtuals {
     private static void expunge() {
         java.lang.ref.Reference<?> r;
         while ((r = QUEUE.poll()) != null) {
-            if (r instanceof Ref ref) CACHE.remove(ref.key);
+            if (r instanceof Ref<?> ref) CACHE.remove(ref.key, ref);
         }
-    }
-
-    /** for tests: entries left after removing those whose objects are collected */
-    public static int size() {
-        expunge();
-        return CACHE.size();
-    }
-
-    /** for tests: whether some entry's key or value holds one of these objects, or a field or type they own */
-    public static boolean holdsAny(Object... os) {
-        expunge();
-        List<Object> list = List.of(os);
-        for (Map.Entry<Key, Ref> e : CACHE.entrySet()) {
-            if (refersTo(e.getValue().get(), list)) return true;
-            for (Ref part : e.getKey().objects) {
-                if (part != null && refersTo(part.get(), list)) return true;
-            }
-        }
-        return false;
-    }
-
-    private static boolean refersTo(Object o, List<Object> list) {
-        if (o == null) return false;
-        for (Object x : list) {
-            if (o == x || o instanceof FieldInfo fi && fi.owner() == x
-                || o instanceof TypeInfo ti && ti.compilationUnitOrEnclosingType().isRight()
-                   && ti.compilationUnitOrEnclosingType().getRight() == x) {
-                return true;
-            }
-        }
-        return false;
     }
 }
