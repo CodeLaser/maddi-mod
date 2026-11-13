@@ -21,6 +21,7 @@ import static io.codelaser.maddi.modification.prepwork.StatementIndex.*;
 
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.stream.Stream;
@@ -92,14 +93,13 @@ public class Util {
         if (!(container instanceof FieldReference)) return null;
         ParameterizedType elementType = element.parameterizedType();
         if (elementType == null || elementType.isTypeParameter()) return null;
-        TypeInfo elementTi = elementType.bestTypeInfo();
-        if (elementTi == null) return null;
+        if (elementType.bestTypeInfo() == null) return null;
         Variable v = container;
         while (v instanceof FieldReference fr) {
             Variable owner = fr.scopeVariable();
             if (owner == null || owner.parameterizedType() == null) return null;
             TypeInfo ownerType = owner.parameterizedType().bestTypeInfo();
-            if (ownerType != null && hasCompatibleField(ownerType, fr.fieldInfo(), elementTi, elementType.arrays())) {
+            if (ownerType != null && hasCompatibleField(ownerType, fr.fieldInfo(), elementType)) {
                 return owner;
             }
             v = owner;
@@ -109,16 +109,45 @@ public class Util {
 
     public static final boolean NO_HIDDEN_ALIAS = System.getenv("NOHIDDENALIAS") != null;
 
-    private static boolean hasCompatibleField(TypeInfo ownerType, FieldInfo except, TypeInfo elementTi, int arrays) {
+    private static boolean hasCompatibleField(TypeInfo ownerType, FieldInfo except, ParameterizedType elementType) {
         return Stream.concat(Stream.of(ownerType), ownerType.superTypesExcludingJavaLangObject().stream())
                 .flatMap(t -> t.fields().stream())
                 .filter(f -> !f.isStatic() && !f.equals(except))
                 .map(FieldInfo::type)
-                .filter(ft -> !ft.isTypeParameter() && ft.arrays() == arrays)
-                .map(ParameterizedType::bestTypeInfo)
-                .anyMatch(ti -> ti != null && (ti.isJavaLangObject() || ti.equals(elementTi)
-                                               || elementTi.superTypesExcludingJavaLangObject().contains(ti)
-                                               || ti.superTypesExcludingJavaLangObject().contains(elementTi)));
+                .anyMatch(ft -> !ft.isTypeParameter() && ft.arrays() == elementType.arrays()
+                                && mayBeSameObject(ft, elementType));
+    }
+
+    /*
+     On the erasure, assignable one way or the other; Object is compatible with everything. For the same generic type,
+     the type arguments must agree as well: a 'Map<String, Object>' taken out of one map field is not the field
+     'Map<String, List<String>> tags' (TestMapValueModification). A type parameter or wildcard argument agrees with
+     anything; for two different types (a subtype pair) the arguments are not compared.
+     */
+    private static boolean mayBeSameObject(ParameterizedType a, ParameterizedType b) {
+        TypeInfo ta = a.bestTypeInfo();
+        TypeInfo tb = b.bestTypeInfo();
+        if (ta == null || tb == null) return true;
+        if (ta.isJavaLangObject() || tb.isJavaLangObject()) return true;
+        if (ta.equals(tb)) return argumentsAgree(a, b);
+        return ta.superTypesExcludingJavaLangObject().contains(tb) || tb.superTypesExcludingJavaLangObject().contains(ta);
+    }
+
+    private static boolean argumentsAgree(ParameterizedType a, ParameterizedType b) {
+        List<ParameterizedType> pa = a.parameters();
+        List<ParameterizedType> pb = b.parameters();
+        if (pa.isEmpty() || pb.isEmpty() || pa.size() != pb.size()) return true; // raw: no evidence
+        for (int i = 0; i < pa.size(); i++) {
+            ParameterizedType x = pa.get(i);
+            ParameterizedType y = pb.get(i);
+            if (x.isTypeParameter() || y.isTypeParameter() || x.wildcard() != null || y.wildcard() != null) continue;
+            if (x.arrays() != y.arrays()) return false;
+            TypeInfo tx = x.bestTypeInfo();
+            TypeInfo ty = y.bestTypeInfo();
+            if (tx == null || ty == null) continue;
+            if (!tx.equals(ty) || !argumentsAgree(x, y)) return false;
+        }
+        return true;
     }
 
     /**
