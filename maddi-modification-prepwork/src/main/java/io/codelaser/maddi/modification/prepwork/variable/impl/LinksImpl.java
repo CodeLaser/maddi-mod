@@ -396,6 +396,8 @@ public class LinksImpl implements Links {
         public LinkImpl {
             assert from != null;
             assert to != null;
+            from = LinkEndInterner.intern(from);
+            to = LinkEndInterner.intern(to);
             assert linkNature != null;
             assert doNotStackMOnTopOfVirtualField(from) : "§m stacked on virtual field: " + from;
             assert doNotStackMOnTopOfVirtualField(to) : "§m stacked on virtual field: " + to;

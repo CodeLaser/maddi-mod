@@ -299,6 +299,12 @@ public class VirtualFieldComputer {
     }
 
     public TypeInfo makeContainerType(TypeInfo typeInfo, String typeName, List<FieldInfo> hiddenContentComponents) {
+        // one container per definition (CanonicalVirtuals)
+        return CanonicalVirtuals.container(typeInfo, typeName, hiddenContentComponents,
+                () -> makeContainerTypeNew(typeInfo, typeName, hiddenContentComponents));
+    }
+
+    private TypeInfo makeContainerTypeNew(TypeInfo typeInfo, String typeName, List<FieldInfo> hiddenContentComponents) {
         TypeInfo newType = runtime.newTypeInfo(typeInfo, "§" + typeName);
         newType.builder()
                 .setTypeNature(TypeNatureEnum.CLASS)
@@ -457,7 +463,9 @@ public class VirtualFieldComputer {
     }
 
     public FieldInfo newField(String name, ParameterizedType type, TypeInfo owner) {
-        return newField(runtime, name, type, owner);
+        // one virtual field per owner, name and type (CanonicalVirtuals)
+        String cleanName = VF_CHAR + name.replace(VF_CHAR, "");
+        return CanonicalVirtuals.field(owner, cleanName, type, () -> newFieldKeepName(runtime, cleanName, type, owner));
     }
 
     public static FieldInfo newField(Runtime runtime, String name, ParameterizedType type, TypeInfo owner) {
