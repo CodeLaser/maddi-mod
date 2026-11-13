@@ -98,6 +98,10 @@ import java.util.function.Supplier;
                 List<String> viaShape(Shape s) { return s.make(); }
                 List<String> registered(Registry reg) { List<String> r = new ArrayList<>(); reg.register(r); return r; }
                 List<String> handedToBase(Acceptor a) { List<String> r = new ArrayList<>(); a.accept(r); return r; }
+                // the object registers itself: no link says so, the summaries have no links for 'this'
+                Leaky leaked() { Leaky k = new Leaky(); k.leak(); return k; }
+                Listener listening(Bus bus) { return new Listener(bus); }
+                Capturing capturing(Bus bus) { return new Capturing(bus); }
                 List<String> viaFactory(Factory f) { return f.create(); }
                 List<String> viaNotFresh(NotFresh n) { return n.create(); }
                 List<String> consumed(Consumer<List<String>> c) { List<String> r = new ArrayList<>(); c.accept(r); return r; }
@@ -118,6 +122,10 @@ import java.util.function.Supplier;
                 static class Keeper implements Registry { private final List<List<String>> kept = new ArrayList<>(); public void register(List<String> l) { kept.add(l); } }
                 static class Acceptor { void accept(List<String> l) { } }
                 static class Collector implements Consumer<List<String>> { private final List<List<String>> got = new ArrayList<>(); public void accept(List<String> l) { got.add(l); } }
+                static class Leaky { static final List<Leaky> ALL = new ArrayList<>(); void leak() { ALL.add(this); } }
+                static class Bus { private final List<Object> listeners = new ArrayList<>(); void register(Object o) { listeners.add(o); } }
+                static class Listener { Listener(Bus bus) { bus.register(this); } }
+                static class Capturing { private int count; Capturing(Bus bus) { bus.register((Runnable) () -> count++); } }
                 interface Factory { @Fresh List<String> create(); }
                 static class Pool implements Factory { private final List<String> one = new ArrayList<>(); public List<String> create() { return one; } }
                 interface NotFresh { @Fresh(absent = true) List<String> create(); }
@@ -184,6 +192,9 @@ import java.util.function.Supplier;
             Map.entry("X.handedToBase", false),
             // a library interface with an implementation in the sources, which keeps the argument
             Map.entry("X.consumed", false),
+            Map.entry("X.leaked", false),
+            Map.entry("X.listening", false),
+            Map.entry("X.capturing", false),
             // contracts decide a bodiless method, and are not second-guessed here (Pool breaks it: the guard's job)
             Map.entry("Factory.create", true),
             Map.entry("X.viaFactory", true),

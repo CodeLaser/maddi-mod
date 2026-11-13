@@ -111,12 +111,13 @@ public final class OwnershipPass {
 
     public Report go(List<Info> analysisOrder) {
         Set<MethodInfo> methods = methods(analysisOrder);
+        ThisEscape thisEscape = new ThisEscape(allMethodsAndConstructors(analysisOrder));
         Map<MethodInfo, String> reason = new LinkedHashMap<>();
         Map<MethodInfo, Set<MethodInfo>> dependencies = new LinkedHashMap<>();
         Set<MethodInfo> fresh = new LinkedHashSet<>();
         for (MethodInfo methodInfo : methods) {
             Set<MethodInfo> deps = new LinkedHashSet<>();
-            String r = candidate(methodInfo, methods, deps);
+            String r = candidate(methodInfo, methods, deps, thisEscape);
             if (r == null) {
                 fresh.add(methodInfo);
                 dependencies.put(methodInfo, deps);
@@ -169,6 +170,15 @@ public final class OwnershipPass {
         return methods;
     }
 
+    private static Set<MethodInfo> allMethodsAndConstructors(List<Info> analysisOrder) {
+        Set<MethodInfo> set = new LinkedHashSet<>();
+        for (Info info : analysisOrder) {
+            if (info instanceof MethodInfo methodInfo) set.add(methodInfo);
+            else if (info instanceof TypeInfo typeInfo) typeInfo.constructorAndMethodStream().forEach(set::add);
+        }
+        return set;
+    }
+
     private static boolean applies(MethodInfo methodInfo) {
         return !methodInfo.isConstructor() && !methodInfo.isVoid()
                && !methodInfo.returnType().isPrimitiveExcludingVoid();
@@ -183,7 +193,8 @@ public final class OwnershipPass {
     /*
      Null when the method is a candidate; then its dependencies are in 'deps'.
      */
-    private static String candidate(MethodInfo methodInfo, Set<MethodInfo> analysed, Set<MethodInfo> deps) {
+    private static String candidate(MethodInfo methodInfo, Set<MethodInfo> analysed, Set<MethodInfo> deps,
+                                    ThisEscape thisEscape) {
         if (isContracted(methodInfo)) {
             return methodInfo.analysis().getOrDefault(PropertyImpl.FRESH_METHOD, ValueImpl.BoolImpl.FALSE).isTrue()
                     ? null : "contract";
@@ -197,7 +208,7 @@ public final class OwnershipPass {
             return deps.isEmpty() ? "abstract, no implementation" : null;
         }
         // rule 1
-        String created = createdOnEveryPath(methodInfo, analysed, deps);
+        String created = createdOnEveryPath(methodInfo, analysed, deps, thisEscape);
         if (created != null) return created;
         // rule 2
         MethodLinkedVariables mlv = methodInfo.analysis().getOrNull(MethodLinkedVariablesImpl.METHOD_LINKS,
@@ -212,14 +223,13 @@ public final class OwnershipPass {
             }
         }
         // rule 4
-        String elsewhere = localPassedToMethodThatMayDispatchElsewhere(methodInfo);
-        if (elsewhere != null) return "local passed to " + elsewhere + ", which may dispatch to another body";
-        return null;
+        return localHandedToBodyThatMayKeepIt(methodInfo, thisEscape);
     }
 
     // ---- rule 1
 
-    private static String createdOnEveryPath(MethodInfo methodInfo, Set<MethodInfo> analysed, Set<MethodInfo> deps) {
+    private static String createdOnEveryPath(MethodInfo methodInfo, Set<MethodInfo> analysed, Set<MethodInfo> deps,
+                                             ThisEscape thisEscape) {
         if (methodInfo.methodBody() == null) return "no body";
         List<Expression> returned = new ArrayList<>();
         Set<LocalVariable> plainLocals = new HashSet<>();
@@ -238,7 +248,7 @@ public final class OwnershipPass {
             return true;
         });
         if (returned.isEmpty()) return "no return"; // throws on every path: nothing to say
-        Body body = new Body(plainLocals, assignments, analysed, deps, new HashSet<>());
+        Body body = new Body(plainLocals, assignments, analysed, deps, thisEscape, new HashSet<>());
         for (Expression expression : returned) {
             String r = body.created(expression);
             if (r != null) return r;
@@ -247,11 +257,20 @@ public final class OwnershipPass {
     }
 
     private record Body(Set<LocalVariable> plainLocals, List<Assignment> assignments, Set<MethodInfo> analysed,
-                        Set<MethodInfo> deps, Set<LocalVariable> visiting) {
+                        Set<MethodInfo> deps, ThisEscape thisEscape, Set<LocalVariable> visiting) {
 
         String created(Expression expression) {
             Expression e = unwrap(expression);
-            if (e instanceof NullConstant || e instanceof ConstructorCall) return null;
+            if (e instanceof NullConstant) return null;
+            if (e instanceof ConstructorCall cc) {
+                // a constructor that leaves 'this' held elsewhere (a captured lambda registered on a bus): no link
+                // says so when the capture is indirect
+                if (cc.constructor() != null && cc.anonymousClass() == null && thisEscape.mayLeak(cc.constructor())) {
+                    return "constructor " + cc.constructor().fullyQualifiedName() + " may leak this: "
+                           + thisEscape.why(cc.constructor());
+                }
+                return null;
+            }
             if (e instanceof InlineConditional ic) {
                 String r = created(ic.ifTrue());
                 return r != null ? r : created(ic.ifFalse());
@@ -321,15 +340,24 @@ public final class OwnershipPass {
 
     // ---- rule 4
 
-    private static String localPassedToMethodThatMayDispatchElsewhere(MethodInfo methodInfo) {
+    /*
+     A local handed to a body whose effect the links do not show: as an argument or receiver to a method that may
+     dispatch to another body, or as the receiver of a method that may leave 'this' held elsewhere (the summaries
+     have no links for 'this').
+     */
+    private static String localHandedToBodyThatMayKeepIt(MethodInfo methodInfo, ThisEscape thisEscape) {
         String[] found = new String[1];
         methodInfo.methodBody().visit((Element e) -> {
             if (found[0] != null || e instanceof Lambda) return false;
-            if (e instanceof MethodCall mc && mc.methodInfo() != null && mayDispatchElsewhere(mc.methodInfo())
-                && Stream.concat(Stream.of(mc.object()), mc.parameterExpressions().stream())
-                        .anyMatch(OwnershipPass::isLocal)) {
-                found[0] = mc.methodInfo().fullyQualifiedName();
-                return false;
+            if (e instanceof MethodCall mc && mc.methodInfo() != null) {
+                MethodInfo callee = mc.methodInfo();
+                if (mayDispatchElsewhere(callee) && Stream.concat(Stream.of(mc.object()),
+                        mc.parameterExpressions().stream()).anyMatch(OwnershipPass::isLocal)) {
+                    found[0] = "local passed to " + callee.fullyQualifiedName() + ", which may dispatch to another body";
+                } else if (isLocal(mc.object()) && thisEscape.mayLeak(callee)) {
+                    found[0] = "local is the receiver of " + callee.fullyQualifiedName() + ", which may leak this";
+                }
+                if (found[0] != null) return false;
             }
             return true;
         });
@@ -357,9 +385,20 @@ public final class OwnershipPass {
     }
 
     private static List<MethodInfo> implementations(MethodInfo methodInfo) {
-        List<MethodInfo> list = new ArrayList<>();
+        return List.copyOf(implementationsOf(methodInfo));
+    }
+
+    static Set<MethodInfo> implementationsOf(MethodInfo methodInfo) {
+        Set<MethodInfo> set = new LinkedHashSet<>();
         methodInfo.analysis().getOrDefault(PropertyImpl.IMPLEMENTATIONS, ValueImpl.SetOfMethodInfoImpl.EMPTY)
-                .methodInfoSet().forEach(list::add);
-        return list;
+                .methodInfoSet().forEach(set::add);
+        return set;
+    }
+
+    static Set<MethodInfo> externalImplementationsOf(MethodInfo methodInfo) {
+        Set<MethodInfo> set = new LinkedHashSet<>();
+        methodInfo.analysis().getOrDefault(PropertyImpl.EXTERNAL_IMPLEMENTATIONS, ValueImpl.SetOfMethodInfoImpl.EMPTY)
+                .methodInfoSet().forEach(set::add);
+        return set;
     }
 }
