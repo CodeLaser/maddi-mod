@@ -58,7 +58,7 @@ import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
  *   <li><b>Every use borrows</b>: at each call, the result (or a local that holds it) is only the receiver of a call
  *   that keeps nothing (it neither may leak {@code this} nor dispatch elsewhere, and its result is discarded, cannot
  *   hold an object, or is an element: {@code getList().add(x)}, {@code .size()}, {@code .get(i)}), a for-each's
- *   iterable, an operand, or an argument the callee does not keep: stage 2's hidden verdict for the analysed sources;
+ *   iterable, an operand, or an argument the callee does not keep: stage 2's verdict for the analysed sources;
  *   in a library, an independent parameter, or one independent with hidden content whose type is not a type
  *   parameter ({@code addAll(Collection)} keeps the elements, not the collection; {@code add(E)} keeps its
  *   argument). Not returned, stored, or captured.</li>
@@ -149,8 +149,10 @@ final class Lending {
     private String uses(MethodInfo caller, MethodCall call) {
         Set<LocalVariable> tracked = new HashSet<>();
         Set<Element> discarded = new HashSet<>();
+        Set<Element> yielded = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
         caller.methodBody().visit((Element e) -> {
-            if (e instanceof ExpressionAsStatement eas) discarded.add(eas.expression());
+            OwnershipPass.yieldedArms(e, yielded);
+            if (e instanceof ExpressionAsStatement eas && !yielded.contains(eas)) discarded.add(eas.expression());
             if (e instanceof LocalVariableCreation lvc) {
                 lvc.localVariableStream().forEach(lv -> {
                     if (lv.assignmentExpression() != null && Transfers.unwrap(lv.assignmentExpression()) == call) {
@@ -236,7 +238,9 @@ final class Lending {
 
     // the argument's object is not kept by the callee (its contents may be)
     private boolean keepsNothing(ParameterInfo pi) {
-        if (!pi.methodInfo().typeInfo().compilationUnit().externalLibrary()) return borrowedParameters.isHidden(pi);
+        // the full verdict: these uses are counted, the caller's links are not read (the hidden verdict, without the
+        // parameter's own link keeps, made new Keeper(lent) look like a borrow)
+        if (!pi.methodInfo().typeInfo().compilationUnit().externalLibrary()) return borrowedParameters.isBorrowed(pi);
         if (pi.parameterizedType().isTypeParameter()) return false;
         Value.Independent independent = pi.analysis().getOrDefault(PropertyImpl.INDEPENDENT_PARAMETER,
                 ValueImpl.IndependentImpl.DEPENDENT);

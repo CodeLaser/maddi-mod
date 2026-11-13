@@ -210,11 +210,13 @@ final class OwnedElements {
         Predicate<Variable> isField = v -> Transfers.isThisField(v, f);
         Set<LocalVariable> tracked = new HashSet<>();
         Set<Element> discarded = new HashSet<>();
+        Set<Element> yielded = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
         Set<Element> iterables = new HashSet<>();
         String[] fail = new String[1];
         // the element locals, the discarded calls, the iterables
         m.methodBody().visit((Element e) -> {
-            if (e instanceof ExpressionAsStatement eas) discarded.add(eas.expression());
+            OwnershipPass.yieldedArms(e, yielded);
+            if (e instanceof ExpressionAsStatement eas && !yielded.contains(eas)) discarded.add(eas.expression());
             if (e instanceof ForEachStatement fe) {
                 Expression it = Transfers.unwrap(fe.expression());
                 boolean overElements = isFieldExpr(it, isField)
@@ -324,7 +326,8 @@ final class OwnedElements {
                 allowed[0]++; // back into, or looked up in, the same collection
             } else if (callee != null && !callee.parameters().isEmpty()) {
                 ParameterInfo pi = callee.parameters().get(Math.min(i, callee.parameters().size() - 1));
-                if (!pi.isVarArgs() && borrowedParameters.isHidden(pi)) allowed[0]++;
+                // the full verdict: the caller's links are not read here
+                if (!pi.isVarArgs() && borrowedParameters.isBorrowed(pi)) allowed[0]++;
             }
         }
     }

@@ -558,6 +558,21 @@ public final class OwnershipPass {
      A source abstract method: any implementation, seen or not. A library abstract method: its source implementations
      (a library method without them is described by its hints). A concrete method: its source overrides.
      */
+    /**
+     * The arms of a switch expression ({@code case X -> expr;}) are expression statements whose value is the switch's,
+     * not discarded: added to {@code yielded}, so that a visitor collecting discarded results skips them. Call it on
+     * the switch expression, which a visit reaches before its arms.
+     */
+    static void yieldedArms(Element e, Set<Element> yielded) {
+        if (e instanceof io.codelaser.maddi.cst.api.expression.SwitchExpression se) {
+            for (io.codelaser.maddi.cst.api.statement.SwitchEntry entry : se.entries()) {
+                if (entry.statement() instanceof io.codelaser.maddi.cst.api.statement.ExpressionAsStatement eas) {
+                    yielded.add(eas);
+                }
+            }
+        }
+    }
+
     static boolean mayDispatchElsewhere(MethodInfo callee) {
         if (callee.isAbstract()) {
             if (!callee.typeInfo().compilationUnit().externalLibrary()) return true;

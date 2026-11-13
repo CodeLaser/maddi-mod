@@ -397,9 +397,11 @@ final class Transfers {
         int[] allowed = {0};
         String[] found = new String[1];
         Set<Element> discarded = new HashSet<>();
+        Set<Element> yielded = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
         statement.visit((Element e) -> {
             if (found[0] != null) return false;
-            if (e instanceof ExpressionAsStatement eas) discarded.add(eas.expression());
+            OwnershipPass.yieldedArms(e, yielded);
+            if (e instanceof ExpressionAsStatement eas && !yielded.contains(eas)) discarded.add(eas.expression());
             if (e instanceof Lambda) {
                 if (mentionsIn(e, lv)) found[0] = lv.simpleName() + " is captured";
                 return false;

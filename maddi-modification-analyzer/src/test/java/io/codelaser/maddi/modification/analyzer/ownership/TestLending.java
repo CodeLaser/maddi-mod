@@ -22,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 
 import org.intellij.lang.annotations.Language;
@@ -152,5 +153,59 @@ public class TestLending extends CommonTest {
         });
         assertEquals(OWNED, owned);
         assertEquals(ELEMENTS, elements);
+    }
+
+    // found by the dynamic agent on fernflower (DecompilerContext.counterContainer, SynchronizedStatement.headexprent)
+    @Language("java")
+    private static final String INPUT2 = """
+            package a.b;
+            import java.util.*;
+            public class Y {
+                static class Keeper {
+                    private final List<String> l;
+                    Keeper(List<String> l) { this.l = l; }
+                    int size() { return l.size(); }
+                }
+                static class Ctx {
+                    private static Ctx current = new Ctx();
+                    private final List<String> counter = new ArrayList<>();
+                    static List<String> getCounter() { return current.counter; }
+                    int n() { return counter.size(); }
+                }
+                static Keeper viaOther() { List<String> c = Ctx.getCounter(); return new Keeper(c); }
+
+                static class Sync {
+                    private final List<String> head = new ArrayList<>();
+                    List<String> getHead() { return head; }
+                    int n() { return head.size(); }
+                }
+                static Keeper viaSwitch(Object o) {
+                    List<String> t = switch (o) {
+                        case Sync s -> s.getHead();
+                        default -> null;
+                    };
+                    return new Keeper(t);
+                }
+            }
+            """;
+
+    @DisplayName("lending: a getter of another instance's field, and a call in a switch expression's arm")
+    @Test
+    public void test2() throws IOException {
+        AnalyzerBundle bundle = buildAnalyzerBundle();
+        TypeInfo y = bundle.javaInspector().parse("a.b.Y", INPUT2);
+        List<Info> analysisOrder = bundle.prepAnalyzer().doPrimaryType(y);
+        new IteratingAnalyzerImpl(bundle.javaInspector(), new IteratingAnalyzerImpl.ConfigurationBuilder()
+                .setMaxIterations(10).setModificationViaReachability(true).setTrackObjectCreations(true).build())
+                .analyze(analysisOrder);
+        OwnershipPass.Report report = new OwnershipPass(true).go(analysisOrder);
+        Map<String, String> owned = new TreeMap<>();
+        report.owned().forEach((f, o) -> {
+            if (!Set.of("counter", "head").contains(f.name())) return;
+            owned.put(f.name(), o.name());
+            System.out.println("LENDING2 " + f.name() + " = " + o + "  " + report.notOwnedReason().getOrDefault(f, ""));
+        });
+        report.fresh().forEach((m, b) -> System.out.println("LENDING2 fresh " + m.name() + " " + b));
+        assertEquals(Map.of("counter", "NOT_OWNED", "head", "NOT_OWNED"), owned);
     }
 }

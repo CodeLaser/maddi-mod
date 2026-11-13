@@ -46,8 +46,10 @@ import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 import io.codelaser.maddi.modification.common.AnalysisHelper;
+import io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl;
 import io.codelaser.maddi.modification.prepwork.variable.Link;
 import io.codelaser.maddi.modification.prepwork.variable.Links;
+import io.codelaser.maddi.modification.prepwork.variable.MethodLinkedVariables;
 import io.codelaser.maddi.modification.prepwork.variable.ObjectCreationVariable;
 import io.codelaser.maddi.modification.prepwork.variable.ReturnVariable;
 import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
@@ -228,16 +230,19 @@ final class OwnedFields {
         // rule 4
         AnalysisHelper analysisHelper = new AnalysisHelper();
         Links links = fieldInfo.analysis().getOrDefault(LinksImpl.LINKS, LinksImpl.EMPTY);
+        Predicate<Variable> accepted = other -> {
+            Variable toRoot = root(other);
+            return toRoot instanceof ObjectCreationVariable
+                   || toRoot instanceof ParameterInfo pi && transfers.isTransferred(pi)
+                      && (Transfers.keptOnlyIn(pi, fieldInfo, borrowedParameters)
+                          || transfers.receivesMoved(pi, fieldInfo))
+                   || toRoot instanceof ReturnVariable rv && movesOut(rv.methodInfo(), fieldInfo, transfers)
+                   // a getter whose every caller only uses the object it returns (Lending)
+                   || toRoot instanceof ReturnVariable lender && lending.isLent(lender.methodInfo());
+        };
         for (Link link : links) {
             if (link.linkNature().isDecoration()) continue;
-            Variable toRoot = root(link.to());
-            boolean toCreated = toRoot instanceof ObjectCreationVariable
-                                || toRoot instanceof ParameterInfo pi && transfers.isTransferred(pi)
-                                   && (Transfers.keptOnlyIn(pi, fieldInfo, borrowedParameters)
-                                       || transfers.receivesMoved(pi, fieldInfo))
-                                || toRoot instanceof ReturnVariable rv && movesOut(rv.methodInfo(), fieldInfo, transfers)
-                                // a getter whose every caller only uses the object it returns (Lending)
-                                || toRoot instanceof ReturnVariable lender && lending.isLent(lender.methodInfo());
+            boolean toCreated = accepted.test(link.to());
             if (isThisField(link.from(), fieldInfo)) {
                 if (!toCreated && !OwnershipPass.isNullConstant(link.to()) && !immutableOther(link.to(), analysisHelper)) {
                     return "link: " + fieldInfo.name() + " " + link.linkNature() + " " + link.to();
@@ -247,6 +252,10 @@ final class OwnedFields {
                 return "its object is shared: " + link.from() + " " + link.linkNature() + " " + link.to();
             }
         }
+        // rule 4 through another instance: the field's own links are those of 'this.f'; 'current.f' or 'other.f' shows
+        // in the links of the field or method it is reached from ('Ctx.current.counter→getCounter' is on 'current')
+        String viaOther = linkThroughOtherInstance(fieldInfo, accepted, analysisHelper);
+        if (viaOther != null) return viaOther;
         // rule 5
         for (MethodInfo methodInfo : bodies(fieldInfo)) {
             if (movesOut(methodInfo, fieldInfo, transfers)) continue;
@@ -293,6 +302,41 @@ final class OwnedFields {
             return returned[0] == null;
         });
         return returned[0] != null && Transfers.moveOut(methodInfo, fieldInfo, returned[0], true) == null;
+    }
+
+    private static String linkThroughOtherInstance(FieldInfo fieldInfo, Predicate<Variable> accepted,
+                                                   AnalysisHelper analysisHelper) {
+        List<Links> all = new ArrayList<>();
+        fieldInfo.owner().primaryType().recursiveSubTypeStreamIncludingLocal()
+                .flatMap(t -> t.fields().stream())
+                .forEach(f -> all.add(f.analysis().getOrDefault(LinksImpl.LINKS, LinksImpl.EMPTY)));
+        for (MethodInfo m : bodies(fieldInfo)) {
+            MethodLinkedVariables mlv = m.analysis().getOrNull(MethodLinkedVariablesImpl.METHOD_LINKS,
+                    MethodLinkedVariablesImpl.class);
+            if (mlv == null) continue;
+            all.add(mlv.ofReturnValue());
+            all.addAll(mlv.ofParameters());
+        }
+        for (Links links : all) {
+            for (Link link : links) {
+                if (link.linkNature().isDecoration()) continue;
+                Variable other = viaOther(link.from(), fieldInfo) ? link.to()
+                        : viaOther(link.to(), fieldInfo) ? link.from() : null;
+                if (other == null || accepted.test(other) || OwnershipPass.isNullConstant(other)
+                    || immutableOther(other, analysisHelper)) {
+                    continue;
+                }
+                return "link through another instance: " + link.from() + " " + link.linkNature() + " " + link.to();
+            }
+        }
+        return null;
+    }
+
+    // the field itself (or its modification face) reached through a scope other than 'this'
+    private static boolean viaOther(Variable v, FieldInfo fieldInfo) {
+        Variable w = v instanceof FieldReference face && "§m".equals(face.fieldInfo().name()) ? face.scopeVariable() : v;
+        return w instanceof FieldReference fr && fr.fieldInfo().equals(fieldInfo) && fr.scopeVariable() != null
+               && !(fr.scopeVariable() instanceof This);
     }
 
     private static boolean isThisField(Variable variable, FieldInfo fieldInfo) {
