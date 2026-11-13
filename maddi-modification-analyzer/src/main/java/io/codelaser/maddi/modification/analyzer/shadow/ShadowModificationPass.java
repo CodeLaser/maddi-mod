@@ -1353,6 +1353,10 @@ public class ShadowModificationPass {
                                             Variable container = Util.firstRealVariable(l.to());
                                             if (container != null) containers.add(container);
                                             if (!NO_CO_ELEMENT) coElements(vd, l.to(), containers);
+                                            // #117: the element may be the object of an accessible field of an
+                                            // owner of the container; that owner, in the element's own mode
+                                            Variable aliasOwner = Util.hiddenAliasOwner(l.to(), v);
+                                            if (aliasOwner != null) push(todo, aliasOwner);
                                         });
                                 // #112: 'e ≤ 0:x.map.§$$s[-2]', an object from inside a container's hidden content
                                 // (an element of a copy of one of its values): its container, deep-only, as for ∈
