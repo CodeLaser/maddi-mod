@@ -139,6 +139,7 @@ class AnnotationToProperty {
         Value.Nullability nullability = null;
         Value.Bool container = null;
         Value.Bool fluent = null;
+        Value.Bool fresh = null;
         Value.Bool identity = null;
         Value.Bool unmodified = null;
         Value.Bool structurallyUnmodified = null; // @Modified(hc=true): modified in the hidden content only (#25)
@@ -268,6 +269,8 @@ class AnnotationToProperty {
                 unmodifiableView = valueForTrue;
             } else if (Fluent.class.getCanonicalName().equals(fqn)) {
                 fluent = valueForTrue;
+            } else if (Fresh.class.getCanonicalName().equals(fqn)) {
+                fresh = valueForTrue;
             } else if (NotNull.class.getCanonicalName().equals(fqn)) {
                 // absent: explicitly not claimed, which also stops a default (an inherited non-null) from applying
                 if (isAbsent) {
@@ -364,6 +367,7 @@ class AnnotationToProperty {
         }
         if (info instanceof MethodInfo) {
             if (fluent != null) map.put(PropertyImpl.FLUENT_METHOD, fluent);
+            if (fresh != null) map.put(PropertyImpl.FRESH_METHOD, fresh);
             if (identity != null) map.put(PropertyImpl.IDENTITY_METHOD, identity);
             if (unmodifiableView != null) map.put(PropertyImpl.UNMODIFIABLE_VIEW_METHOD, unmodifiableView);
             if (getSetField != null) map.put(PropertyImpl.GET_SET_FIELD, getSetField);

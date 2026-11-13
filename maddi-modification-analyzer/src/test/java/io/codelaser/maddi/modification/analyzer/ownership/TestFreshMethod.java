@@ -38,8 +38,8 @@ import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
 
 /**
  * {@code FRESH_METHOD} (docs/roadmap/ownership.md stage 1): the result is an object created during the call, or
- * null, and held by nothing outside the call. Each case says why. The evidence is the creation marker
- * ({@code ret ← oc:N}), never the absence of links.
+ * null, and held by nothing outside the call. Each case says why. Every part needs positive evidence, never the
+ * absence of links: "created" is read per return path from the body, "held nowhere else" from the result's links.
  */
 public class TestFreshMethod extends CommonTest {
 
@@ -48,6 +48,7 @@ public class TestFreshMethod extends CommonTest {
             package a.b;
             import java.util.*;
             import java.util.function.Consumer;
+            import io.codelaser.maddi.annotation.Fresh;
 import java.util.function.Supplier;
 
             public class X {
@@ -81,6 +82,14 @@ import java.util.function.Supplier;
                 List<String> listOf() { return List.of(); }
                 List<String> copyOf(List<String> l) { return List.copyOf(l); }
                 String str(int i) { return Integer.toString(i); }
+                // library contracts (@Fresh in the JDK hints)
+                String[] copied(String[] a) { return Arrays.copyOf(a, a.length); }
+                Object[] toArray(List<String> l) { return l.toArray(); }
+                char[] chars(String s) { return s.toCharArray(); }
+                // one path is new, the other has no links at all: the marker of the first does not speak for the second
+                List<String> mixed(boolean b) { return b ? new ArrayList<>() : Collections.emptyList(); }
+                List<String> mixedReturns(boolean b) { if (b) return new ArrayList<>(); return List.of(); }
+                List<String> mixedLocal(boolean b) { List<String> r = new ArrayList<>(); if (b) r = Collections.emptyList(); return r; }
 
                 // dispatch
                 List<String> viaBase(Base base) { return base.make(); }
@@ -89,6 +98,8 @@ import java.util.function.Supplier;
                 List<String> viaShape(Shape s) { return s.make(); }
                 List<String> registered(Registry reg) { List<String> r = new ArrayList<>(); reg.register(r); return r; }
                 List<String> handedToBase(Acceptor a) { List<String> r = new ArrayList<>(); a.accept(r); return r; }
+                List<String> viaFactory(Factory f) { return f.create(); }
+                List<String> viaNotFresh(NotFresh n) { return n.create(); }
                 List<String> consumed(Consumer<List<String>> c) { List<String> r = new ArrayList<>(); c.accept(r); return r; }
 
                 static class Holder {
@@ -107,6 +118,10 @@ import java.util.function.Supplier;
                 static class Keeper implements Registry { private final List<List<String>> kept = new ArrayList<>(); public void register(List<String> l) { kept.add(l); } }
                 static class Acceptor { void accept(List<String> l) { } }
                 static class Collector implements Consumer<List<String>> { private final List<List<String>> got = new ArrayList<>(); public void accept(List<String> l) { got.add(l); } }
+                interface Factory { @Fresh List<String> create(); }
+                static class Pool implements Factory { private final List<String> one = new ArrayList<>(); public List<String> create() { return one; } }
+                interface NotFresh { @Fresh(absent = true) List<String> create(); }
+                static class Maker2 implements NotFresh { public List<String> create() { return new ArrayList<>(); } }
                 static class KeepingAcceptor extends Acceptor { private List<String> kept; @Override void accept(List<String> l) { kept = l; } }
             }
             """;
@@ -123,7 +138,9 @@ import java.util.function.Supplier;
             Map.entry("X.nullOrNew", true),
             Map.entry("X.loop", true),
             Map.entry("X.recurse", true),
-            Map.entry("X.fromHolder", true),
+            // the list is new and only a local holder holds it, but the path returns a getter's result: per-path
+            // evidence cannot see through it (a loss, not an error)
+            Map.entry("X.fromHolder", false),
 
             Map.entry("X.storedToo", false),
             Map.entry("X.addedToParameter", false),
@@ -138,6 +155,12 @@ import java.util.function.Supplier;
             Map.entry("X.listOf", false),
             Map.entry("X.copyOf", false),
             Map.entry("X.str", false),
+            Map.entry("X.copied", true),
+            Map.entry("X.toArray", true),
+            Map.entry("X.chars", true),
+            Map.entry("X.mixed", false),
+            Map.entry("X.mixedReturns", false),
+            Map.entry("X.mixedLocal", false),
 
             // Base.make's body is fresh, but a call may dispatch to Sub.make, which returns a field
             Map.entry("X.viaBase", false),
@@ -152,14 +175,20 @@ import java.util.function.Supplier;
             Map.entry("Shape.make", true),
             Map.entry("Circle.make", true),
             Map.entry("Square.make", true),
-            Map.entry("X.viaShape", false),
+            // through the abstract method, whose implementations are all fresh
+            Map.entry("X.viaShape", true),
             // an abstract method's summary relates the argument's contents to the receiver, not the argument itself
             // ('0:l.§m ≡ this.§m'): Keeper keeps the argument
             Map.entry("X.registered", false),
             // Acceptor.accept keeps nothing, KeepingAcceptor.accept does
             Map.entry("X.handedToBase", false),
             // a library interface with an implementation in the sources, which keeps the argument
-            Map.entry("X.consumed", false)));
+            Map.entry("X.consumed", false),
+            // contracts decide a bodiless method, and are not second-guessed here (Pool breaks it: the guard's job)
+            Map.entry("Factory.create", true),
+            Map.entry("X.viaFactory", true),
+            Map.entry("NotFresh.create", false),
+            Map.entry("X.viaNotFresh", false)));
 
     @DisplayName("FRESH_METHOD: new or null, and held by nothing outside the call")
     @Test
