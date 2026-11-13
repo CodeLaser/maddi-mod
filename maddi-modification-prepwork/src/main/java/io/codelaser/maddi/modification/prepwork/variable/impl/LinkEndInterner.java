@@ -24,6 +24,7 @@ import java.util.Objects;
 import io.codelaser.maddi.cst.api.info.FieldInfo;
 import io.codelaser.maddi.cst.api.variable.DependentVariable;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
+import io.codelaser.maddi.cst.api.variable.LocalVariable;
 import io.codelaser.maddi.cst.api.variable.Variable;
 
 /**
@@ -83,15 +84,15 @@ public final class LinkEndInterner implements AutoCloseable {
     }
 
     /*
-     A real field's reference is shared only when its field is the one its owner declares. A field re-owned by a
-     translation (FieldInfo.withOwner, one object per field and owner since CanonicalVirtuals.reowned) used to be a new
-     object each time, so that its references were never shared; shared, they moved jenkins' verdicts (28 lines,
-     nonModifying true to false on methods that modify nothing, 2026-11-13) for a reason not found yet
-     (CodeLaser/maddi-mod#122). Kept apart as before: the field objects stay one per owner, their references are not
-     shared.
+     Gate NOSHAREREOWNED: a real field's reference is shared only when its field is the one its owner declares, not a
+     field re-owned by a translation (FieldInfo.withOwner). That was the rule until the cause of CodeLaser/maddi-mod#122
+     was found (see sameStructure, locals); it moved no verdict on the six proving corpora once locals are compared by
+     their assignment.
      */
+    private static final boolean REOWNED_APART = System.getenv("NOSHAREREOWNED") != null;
+
     private static boolean shareable(Variable variable) {
-        if (!(variable instanceof FieldReference fr)) return true;
+        if (!REOWNED_APART || !(variable instanceof FieldReference fr)) return true;
         FieldInfo fi = fr.fieldInfo();
         if (fi.name().startsWith("§")) return true;
         for (FieldInfo declared : fi.owner().fields()) {
@@ -105,11 +106,27 @@ public final class LinkEndInterner implements AutoCloseable {
      equal names can stand for different scope chains (a scope that is a variable, and one that is an expression named
      by its position). Given the other one, the engine's isPartOf(primary, from) failed (timefold, ActiveMQ) and
      verdicts moved. Shared only when the structure the engine walks is the same: class, type, field, scope chain.
+     <p>
+     A local is equal to any local of its name, also to another local of that name declared in a sibling block, and
+     only the object, through its assignment expression, tells the two apart: jenkins' QueueItemAuthenticator
+     .authenticate2(Task) declares 'a = authenticate(new WaitingItem(..))' in one branch and 'a = authenticate(task)'
+     in the next. Given one branch's 'a' for the other's (in a scope chain, 'a.delegate'), the link engine kept a callee
+     result it could not translate, and the summary of every caller became modifying (Queue.Item.authenticate2,
+     ReverseBuildTrigger, ...: 18 FPDUMP lines, CodeLaser/maddi-mod#122). Equal assignment expressions are not enough
+     either: two equal calls are still two calls. So two locals in a scope chain are one only when they carry the same
+     assignment expression object.
+     Not for a local that is itself the end (depth 0): required there too, it moved the two verdicts that sharing ends
+     had moved (fernflower VarVersionsProcessor.$1.processExprent, timefold MoveSelectorFactoryTest
+     .applyFilter_nonMovableMoves, back to nonModifying false), and nothing else; on its own it moved nothing.
      */
     private static boolean sameStructure(Variable a, Variable b, int depth) {
         if (a == b) return true;
         if (a == null || b == null || depth > 32) return false;
         if (a.getClass() != b.getClass() || !Objects.equals(a.parameterizedType(), b.parameterizedType())) return false;
+        if (depth > 0 && a instanceof LocalVariable la && b instanceof LocalVariable lb
+            && la.assignmentExpression() != lb.assignmentExpression()) {
+            return false;
+        }
         if (a instanceof FieldReference fa && b instanceof FieldReference fb) {
             return fa.fieldInfo() == fb.fieldInfo()
                    && fa.isDefaultScope() == fb.isDefaultScope()
