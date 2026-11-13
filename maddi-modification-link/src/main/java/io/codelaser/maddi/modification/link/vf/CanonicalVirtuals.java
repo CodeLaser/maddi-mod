@@ -40,7 +40,7 @@ import io.codelaser.maddi.cst.api.type.ParameterizedType;
  * <p>
  * Gate {@code NOCANONICALVF} (presence): every call makes a new object, the behaviour before 2026-11-13.
  */
-final class CanonicalVirtuals {
+public final class CanonicalVirtuals {
     private static final boolean OFF = System.getenv("NOCANONICALVF") != null;
 
     private record Id(Object o) {
@@ -62,10 +62,12 @@ final class CanonicalVirtuals {
         }
     }
 
-    private record FieldKey(Id owner, String name, TypeKey type) {
+    // kind: who made it, so that objects made differently (a computed field has its initializer committed, a field
+    // made by a translation does not) are never given for one another
+    private record FieldKey(char kind, Id owner, String name, TypeKey type) {
     }
 
-    private record ContainerKey(Id enclosing, String name, List<FieldKey> components) {
+    private record ContainerKey(char kind, Id enclosing, String name, List<FieldKey> components) {
     }
 
     private static final class Ref<T> extends WeakReference<T> {
@@ -84,16 +86,38 @@ final class CanonicalVirtuals {
     }
 
     static FieldInfo field(TypeInfo owner, String name, ParameterizedType type, Supplier<FieldInfo> make) {
-        if (OFF) return make.get();
-        return get(new FieldKey(new Id(owner), name, TypeKey.of(type)), make);
+        return field('C', owner, name, type, make);
     }
 
     static TypeInfo container(TypeInfo enclosing, String name, List<FieldInfo> components, Supplier<TypeInfo> make) {
+        return container('C', enclosing, name, components, make);
+    }
+
+    /** a virtual field made by a translation (method call, varargs), one per owner, name and type */
+    public static FieldInfo translatedField(TypeInfo owner, String name, ParameterizedType type,
+                                            Supplier<FieldInfo> make) {
+        return field('T', owner, name, type, make);
+    }
+
+    /** a container made by a translation, one per enclosing type, name and fields */
+    public static TypeInfo translatedContainer(TypeInfo enclosing, String name, List<FieldInfo> components,
+                                               Supplier<TypeInfo> make) {
+        return container('T', enclosing, name, components, make);
+    }
+
+    private static FieldInfo field(char kind, TypeInfo owner, String name, ParameterizedType type,
+                                   Supplier<FieldInfo> make) {
+        if (OFF) return make.get();
+        return get(new FieldKey(kind, new Id(owner), name, TypeKey.of(type)), make);
+    }
+
+    private static TypeInfo container(char kind, TypeInfo enclosing, String name, List<FieldInfo> components,
+                                      Supplier<TypeInfo> make) {
         if (OFF) return make.get();
         List<FieldKey> parts = components.stream()
-                .map(fi -> new FieldKey(new Id(fi.owner()), fi.name(), TypeKey.of(fi.type())))
+                .map(fi -> new FieldKey('F', new Id(fi.owner()), fi.name(), TypeKey.of(fi.type())))
                 .toList();
-        return get(new ContainerKey(new Id(enclosing), name, parts), make);
+        return get(new ContainerKey(kind, new Id(enclosing), name, parts), make);
     }
 
     @SuppressWarnings("unchecked")

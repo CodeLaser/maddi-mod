@@ -33,6 +33,7 @@ import io.codelaser.maddi.modification.link.impl.localvar.AppliedFunctionalInter
 import io.codelaser.maddi.modification.link.impl.localvar.FunctionalInterfaceVariable;
 import io.codelaser.maddi.modification.link.impl.localvar.IntermediateVariable;
 import io.codelaser.maddi.modification.link.impl.translate.VariableTranslationMap;
+import io.codelaser.maddi.modification.link.vf.CanonicalVirtuals;
 import io.codelaser.maddi.modification.link.vf.VirtualFieldComputer;
 import io.codelaser.maddi.modification.link.vf.VirtualFields;
 import io.codelaser.maddi.modification.prepwork.Util;
@@ -309,7 +310,8 @@ public record LinkMethodCall(JavaInspector javaInspector,
             ParameterizedType newType = from.parameterizedType().copyWithOneFewerArrays();
             String nameOneFewerS = simpleName.substring(0, simpleName.length() - 1);
             if (from instanceof FieldReference fr) {
-                FieldInfo fi = runtime.newFieldInfo(nameOneFewerS, false, newType, fr.fieldInfo().owner());
+                FieldInfo fi = CanonicalVirtuals.translatedField(fr.fieldInfo().owner(), nameOneFewerS, newType,
+                        () -> runtime.newFieldInfo(nameOneFewerS, false, newType, fr.fieldInfo().owner()));
                 return runtime.newFieldReference(fi, fr.scope(), newType);
             }
             if (from instanceof LocalVariable) {
