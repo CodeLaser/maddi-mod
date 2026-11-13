@@ -212,6 +212,8 @@ public class AnalysisEngineImpl implements AnalysisEngine {
         if (o.warnNearMisses() != null) builder.setWarnNearMisses(o.warnNearMisses());
         // after the gates: nullability needs trackObjectCreations, which SHADOWDIFF's gate would turn off again
         if (Boolean.TRUE.equals(o.nullability())) builder.setNullability(true);
+        // docs/roadmap/ownership.md: the ownership pass, experimental; after the gates for the same reason
+        if (o.environmentGates() && System.getenv("OWNERSHIP") != null) builder.setOwnership(true);
         IteratingAnalyzer analyzer = new IteratingAnalyzerImpl(javaInspector, builder.build());
         if (request.valueFeed() != null) {
             analyzer.setValueFeed(request.valueFeed());
