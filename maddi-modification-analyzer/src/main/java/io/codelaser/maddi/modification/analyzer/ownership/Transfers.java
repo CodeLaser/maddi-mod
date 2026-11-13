@@ -24,6 +24,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Predicate;
 
 import io.codelaser.maddi.cst.api.element.Element;
 import io.codelaser.maddi.cst.api.expression.Assignment;
@@ -38,8 +39,10 @@ import io.codelaser.maddi.cst.api.expression.VariableExpression;
 import io.codelaser.maddi.cst.api.info.FieldInfo;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
+import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.api.statement.Block;
 import io.codelaser.maddi.cst.api.statement.ExplicitConstructorInvocation;
+import io.codelaser.maddi.cst.api.statement.ExpressionAsStatement;
 import io.codelaser.maddi.cst.api.statement.LocalVariableCreation;
 import io.codelaser.maddi.cst.api.statement.LoopStatement;
 import io.codelaser.maddi.cst.api.statement.Statement;
@@ -49,6 +52,7 @@ import io.codelaser.maddi.cst.api.variable.This;
 import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
+import io.codelaser.maddi.modification.common.AnalysisHelper;
 import io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl;
 import io.codelaser.maddi.modification.prepwork.variable.Link;
 import io.codelaser.maddi.modification.prepwork.variable.Links;
@@ -70,8 +74,11 @@ import io.codelaser.maddi.modification.prepwork.variable.MethodLinkedVariables;
  *     ({@code this(a, null)});</li>
  *     <li>a local declared in the block of the statement holding the call, assigned only created values, that before
  *     that statement is only the receiver of calls that keep nothing of it (they neither may leak {@code this} nor
- *     dispatch elsewhere), that the statement mentions once, outside any loop or lambda in it, and that no later
+ *     dispatch elsewhere, and their result is discarded, primitive or immutable: not {@code l.subList(..)}), that the statement mentions once, outside any loop or lambda in it, and that no later
  *     statement mentions. Deliberately narrow: no data-flow ordering beyond one block.</li>
+ *     <li>a field of the caller's own object, when the caller is a {@code @Finalizer} that mentions it once, outside
+ *     loops and lambdas, and the field is owned: a move out of a dying owner ({@link #moveOut}; the "owned" part is a
+ *     greatest fixpoint with stage 3, {@link #retainMoves}).</li>
  *   </ul></li>
  * </ol>
  * Greatest fixpoint over the caller-parameter dependencies, as the other stages. What the callee does with the
@@ -80,6 +87,12 @@ import io.codelaser.maddi.modification.prepwork.variable.MethodLinkedVariables;
 final class Transfers {
     private final Set<ParameterInfo> transferred = new LinkedHashSet<>();
     private final Map<ParameterInfo, String> reasons = new LinkedHashMap<>();
+    private final Map<ParameterInfo, Set<ParameterInfo>> dependencies = new LinkedHashMap<>();
+    private final Map<ParameterInfo, Set<Move>> moves = new LinkedHashMap<>();
+
+    /** A finalizer handing over a field of its own object: after the call, that object is dead. */
+    record Move(MethodInfo finalizer, FieldInfo field) {
+    }
 
     private record Site(MethodInfo caller, List<Expression> arguments, Element call) {
     }
@@ -122,7 +135,6 @@ final class Transfers {
         // a call in a field initializer is in no body: its argument is not checked, so the callee does not transfer
         Set<FieldInfo> fields = new LinkedHashSet<>();
         analysed.forEach(m -> fields.addAll(m.typeInfo().fields()));
-        Map<ParameterInfo, Set<ParameterInfo>> dependencies = new LinkedHashMap<>();
         for (MethodInfo callee : analysed) {
             String calleeReason = callee(callee, sites, referenced, closedWorld, fields);
             for (ParameterInfo pi : callee.parameters()) {
@@ -136,13 +148,15 @@ final class Transfers {
                     continue;
                 }
                 Set<ParameterInfo> deps = new LinkedHashSet<>();
+                Set<Move> paramMoves = new LinkedHashSet<>();
                 String r = null;
                 for (Site site : sites.get(callee)) {
                     if (pi.index() >= site.arguments().size()) {
                         r = "a call without the argument";
                         break;
                     }
-                    r = handedOver(site, site.arguments().get(pi.index()), analysedResults, fresh, thisEscape, deps);
+                    r = handedOver(site, site.arguments().get(pi.index()), analysedResults, fresh, thisEscape, deps,
+                            paramMoves);
                     if (r != null) {
                         r = "at a call in " + site.caller().fullyQualifiedName() + ": " + r;
                         break;
@@ -151,11 +165,16 @@ final class Transfers {
                 if (r == null) {
                     transferred.add(pi);
                     dependencies.put(pi, deps);
+                    moves.put(pi, paramMoves);
                 } else {
                     reasons.put(pi, r);
                 }
             }
         }
+        propagate();
+    }
+
+    private void propagate() {
         boolean changed = true;
         while (changed) {
             changed = false;
@@ -170,6 +189,55 @@ final class Transfers {
                 }
             }
         }
+    }
+
+    /**
+     * Greatest fixpoint with stage 3: drop the transfers that move a field out of a finalizer when that field is not
+     * owned. Returns whether anything changed.
+     */
+    boolean retainMoves(Predicate<FieldInfo> owned) {
+        boolean changed = false;
+        for (ParameterInfo pi : List.copyOf(transferred)) {
+            for (Move move : moves.getOrDefault(pi, Set.of())) {
+                if (!owned.test(move.field())) {
+                    transferred.remove(pi);
+                    reasons.put(pi, "moves " + move.field().name() + " out of " + move.finalizer().name()
+                                    + ", but that field is not owned");
+                    changed = true;
+                    break;
+                }
+            }
+        }
+        if (changed) propagate();
+        return changed;
+    }
+
+    /** Whether {@code finalizer} hands its {@code field} over to a parameter that transfers. */
+    boolean movesOut(MethodInfo finalizer, FieldInfo field) {
+        Move move = new Move(finalizer, field);
+        return transferred.stream().anyMatch(pi -> moves.get(pi).contains(move));
+    }
+
+    /** Whether the transferred {@code pi} receives {@code field}, moved out of a finalizer of its owner. */
+    boolean receivesMoved(ParameterInfo pi, FieldInfo field) {
+        return transferred.contains(pi) && moves.get(pi).stream().anyMatch(m -> m.field().equals(field));
+    }
+
+    /**
+     * Why {@code method}'s use of its own {@code field} at {@code use} is not a move out of a dying owner; null when it
+     * is: the method is a finalizer of the field's type, mentions the field once, and not in a loop or lambda.
+     */
+    static String moveOut(MethodInfo method, FieldInfo field, Element use) {
+        if (!method.isFinalizer()) return "passes " + field.name() + " outside a finalizer";
+        if (field.isStatic() || !field.owner().equals(method.typeInfo())) {
+            return "passes " + field.name() + ", not a field of the finalizer's object";
+        }
+        if (method.methodBody() == null) return "no body";
+        if (mentions(method.methodBody(), v -> isThisField(v, field)) != 1) {
+            return field.name() + " is used again in " + method.name();
+        }
+        if (insideLoopOrLambda(method.methodBody(), use)) return "the move may run more than once";
+        return null;
     }
 
     boolean isTransferred(ParameterInfo pi) {
@@ -212,7 +280,8 @@ final class Transfers {
 
     // rule 2
     private static String handedOver(Site site, Expression argument, Set<MethodInfo> analysedResults,
-                                     Set<MethodInfo> fresh, ThisEscape thisEscape, Set<ParameterInfo> deps) {
+                                     Set<MethodInfo> fresh, ThisEscape thisEscape, Set<ParameterInfo> deps,
+                                     Set<Move> moves) {
         Expression e = unwrap(argument);
         if (e instanceof VariableExpression ve) {
             if (ve.variable() instanceof ParameterInfo q && q.methodInfo().equals(site.caller())) {
@@ -221,6 +290,12 @@ final class Transfers {
                 return null;
             }
             if (ve.variable() instanceof LocalVariable lv) return local(site, lv, analysedResults, fresh, thisEscape);
+            if (ve.variable() instanceof FieldReference fr && isThisField(fr, fr.fieldInfo())) {
+                String r = moveOut(site.caller(), fr.fieldInfo(), site.call());
+                if (r != null) return r;
+                moves.add(new Move(site.caller(), fr.fieldInfo()));
+                return null;
+            }
             return "passes " + ve.variable().simpleName() + ", which it does not create";
         }
         Set<MethodInfo> freshDeps = new LinkedHashSet<>();
@@ -286,8 +361,10 @@ final class Transfers {
         if (all == 0) return null;
         int[] allowed = {0};
         String[] found = new String[1];
+        Set<Element> discarded = new HashSet<>();
         statement.visit((Element e) -> {
             if (found[0] != null) return false;
+            if (e instanceof ExpressionAsStatement eas) discarded.add(eas.expression());
             if (e instanceof Lambda) {
                 if (mentionsIn(e, lv)) found[0] = lv.simpleName() + " is captured";
                 return false;
@@ -308,6 +385,10 @@ final class Transfers {
                 && ve.variable().equals(lv) && mc.methodInfo() != null) {
                 if (thisEscape.mayLeak(mc.methodInfo()) || OwnershipPass.mayDispatchElsewhere(mc.methodInfo())) {
                     found[0] = lv.simpleName() + " is the receiver of " + mc.methodInfo().name() + ", which may keep it";
+                } else if (!discarded.contains(mc) && !cannotHold(mc.parameterizedType())) {
+                    // l.subList(..), l.iterator(), l.stream(): the result may still reach l
+                    found[0] = lv.simpleName() + " is the receiver of " + mc.methodInfo().name()
+                               + ", whose result may hold it";
                 } else {
                     allowed[0]++;
                 }
@@ -345,9 +426,15 @@ final class Transfers {
         return intoField;
     }
 
-    private static boolean isThisField(Variable variable, FieldInfo field) {
-        return variable instanceof FieldReference fr && fr.fieldInfo().equals(field)
+    static boolean isThisField(Variable variable, FieldInfo field) {
+        return variable instanceof FieldReference fr && fr.fieldInfo().equals(field) && !field.isStatic()
                && (fr.scopeVariable() == null || fr.scopeVariable() instanceof This);
+    }
+
+    // a primitive, or a deeply immutable value: it cannot reach a mutable object
+    private static boolean cannotHold(ParameterizedType type) {
+        return type.isPrimitiveExcludingVoid() || type.isVoid()
+               || new AnalysisHelper().typeImmutable(type).isImmutable();
     }
 
     /** Through casts, parentheses and identity methods ({@code Objects.requireNonNull(x)} is {@code x}). */
@@ -365,10 +452,14 @@ final class Transfers {
     }
 
     private static int mentions(Element element, Variable v) {
+        return mentions(element, v::equals);
+    }
+
+    private static int mentions(Element element, Predicate<Variable> v) {
         if (element == null) return 0;
         int[] n = new int[1];
         element.visit((Element e) -> {
-            if (e instanceof VariableExpression ve && ve.variable().equals(v)) n[0]++;
+            if (e instanceof VariableExpression ve && v.test(ve.variable())) n[0]++;
             return true;
         });
         return n[0];

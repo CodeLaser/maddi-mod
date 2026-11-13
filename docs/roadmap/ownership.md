@@ -169,7 +169,7 @@ links and prepwork's last-use data the plan named: narrower, but each step is vi
 
 Stage 3's rules 3 and 4 then accept the parameter, and a field that still fails names the transfer's reason.
 
-**Moves out of a finalizer** (in progress). A `@Finalizer` method (contract, `MethodInfo.isFinalizer()`) may hand
+**Moves out of a finalizer** (built, `TestTransfer` B1-B4, D). A `@Finalizer` method (contract, `MethodInfo.isFinalizer()`) may hand
 over its own field: `@Finalizer T build() { return new T(list); }` is Rust's `fn build(self) -> T`, a move instead
 of a copy. Accepted as an argument when the finalizer belongs to the field's type and mentions the field once,
 outside any loop or lambda, and the field is owned. On the builder's side, a finalizer that moves the field out (hands

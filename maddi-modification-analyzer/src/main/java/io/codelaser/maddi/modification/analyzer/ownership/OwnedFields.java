@@ -36,6 +36,7 @@ import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
+import io.codelaser.maddi.cst.api.statement.ReturnStatement;
 import io.codelaser.maddi.cst.api.variable.DependentVariable;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.cst.api.variable.LocalVariable;
@@ -47,6 +48,7 @@ import io.codelaser.maddi.modification.common.AnalysisHelper;
 import io.codelaser.maddi.modification.prepwork.variable.Link;
 import io.codelaser.maddi.modification.prepwork.variable.Links;
 import io.codelaser.maddi.modification.prepwork.variable.ObjectCreationVariable;
+import io.codelaser.maddi.modification.prepwork.variable.ReturnVariable;
 import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
 
 /**
@@ -69,7 +71,9 @@ import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
  *   lambda reading the field captures the owner, not the field's object.</li>
  * </ol>
  * Stage 5 (transfer, {@link Transfers}): in rules 3 and 4, a parameter of the assigning method whose every caller
- * hands over its argument counts as created, provided the method keeps it in this field only.
+ * hands over its argument counts as created, provided the method keeps it in this field only. In rules 4 and 5, a
+ * {@code @Finalizer} of the field's object that moves the field out (hands it over, or returns it) keeps nothing:
+ * the owner is dead after the call.
  * <p>
  * A field that fails only rules 3 to 5 or 1, and whose type is immutable (at least with hidden content), is
  * shared-immutable rather than not owned: several holders, nobody modifies, no cycle (Rust's {@code Rc}). Static and
@@ -186,7 +190,9 @@ final class OwnedFields {
             Variable toRoot = root(link.to());
             boolean toCreated = toRoot instanceof ObjectCreationVariable
                                 || toRoot instanceof ParameterInfo pi && transfers.isTransferred(pi)
-                                   && Transfers.keptOnlyIn(pi, fieldInfo, borrowedParameters);
+                                   && (Transfers.keptOnlyIn(pi, fieldInfo, borrowedParameters)
+                                       || transfers.receivesMoved(pi, fieldInfo))
+                                || toRoot instanceof ReturnVariable rv && movesOut(rv.methodInfo(), fieldInfo, transfers);
             if (isThisField(link.from(), fieldInfo)) {
                 if (!toCreated && !OwnershipPass.isNullConstant(link.to())) {
                     return "link: " + fieldInfo.name() + " " + link.linkNature() + " " + link.to();
@@ -198,6 +204,7 @@ final class OwnedFields {
         }
         // rule 5
         for (MethodInfo methodInfo : bodies(fieldInfo)) {
+            if (movesOut(methodInfo, fieldInfo, transfers)) continue;
             String kept = borrowedParameters.keptInBody(methodInfo, isField, fieldInfo.name(), thisEscape);
             if (kept != null) return "in " + methodInfo.name() + ": " + kept;
         }
@@ -210,6 +217,25 @@ final class OwnedFields {
         return Transfers.unwrap(value) instanceof VariableExpression ve
                && ve.variable() instanceof ParameterInfo pi && pi.methodInfo().equals(methodInfo)
                && transfers.isTransferred(pi) && Transfers.keptOnlyIn(pi, fieldInfo, borrowedParameters);
+    }
+
+    /**
+     * Stage 5: a finalizer of the field's object moves the field out, handing it over to a parameter that transfers
+     * or returning it ({@code fn into_data(self) -> Vec}); the owner is dead after the call, so it keeps nothing.
+     */
+    private static boolean movesOut(MethodInfo methodInfo, FieldInfo fieldInfo, Transfers transfers) {
+        if (!methodInfo.isFinalizer() || methodInfo.methodBody() == null) return false;
+        if (transfers.movesOut(methodInfo, fieldInfo)) return true;
+        Element[] returned = new Element[1];
+        methodInfo.methodBody().visit((Element e) -> {
+            if (e instanceof ReturnStatement rs && rs.expression() != null
+                && Transfers.unwrap(rs.expression()) instanceof VariableExpression ve
+                && isThisField(ve.variable(), fieldInfo)) {
+                returned[0] = rs;
+            }
+            return returned[0] == null;
+        });
+        return returned[0] != null && Transfers.moveOut(methodInfo, fieldInfo, returned[0]) == null;
     }
 
     private static boolean isThisField(Variable variable, FieldInfo fieldInfo) {

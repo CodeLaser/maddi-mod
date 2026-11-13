@@ -45,6 +45,7 @@ public class TestTransfer extends CommonTest {
             package a.b;
             import java.util.*;
             import java.util.function.*;
+            import io.codelaser.maddi.annotation.rare.Finalizer;
 
             public class X {
                 static class Plain {
@@ -131,6 +132,73 @@ public class TestTransfer extends CommonTest {
                     static Lam make() { return new Lam(new ArrayList<>()); }
                     int size() { return l.size(); }
                 }
+                static class View {
+                    private final List<String> l;
+                    private View(List<String> l) { this.l = l; }
+                    static List<String> make() {
+                        List<String> l = new ArrayList<>();
+                        List<String> v = l.subList(0, 0);
+                        View w = new View(l);
+                        return v;
+                    }
+                    int size() { return l.size(); }
+                }
+                static class Sized {
+                    private final List<String> l;
+                    private Sized(List<String> l) { this.l = l; }
+                    static Sized make() {
+                        List<String> l = new ArrayList<>();
+                        if (l.isEmpty()) l.add("x");
+                        return new Sized(l);
+                    }
+                    int size() { return l.size(); }
+                }
+                static class T1 {
+                    private final List<String> l;
+                    private T1(List<String> l) { this.l = l; }
+                    int size() { return l.size(); }
+                }
+                static class B1 {
+                    private final List<String> list = new ArrayList<>();
+                    B1 add(String s) { list.add(s); return this; }
+                    @Finalizer T1 build() { return new T1(list); }
+                }
+                static class T2 {
+                    private final List<String> l;
+                    private T2(List<String> l) { this.l = l; }
+                    int size() { return l.size(); }
+                }
+                static class B2 {
+                    private final List<String> list = new ArrayList<>();
+                    B2 add(String s) { list.add(s); return this; }
+                    T2 build() { return new T2(list); }
+                }
+                static class T3 {
+                    private final List<String> l;
+                    private T3(List<String> l) { this.l = l; }
+                    int size() { return l.size(); }
+                }
+                static class B3 {
+                    private final List<String> list = new ArrayList<>();
+                    B3 add(String s) { list.add(s); return this; }
+                    @Finalizer T3 build() { T3 t = new T3(list); list.clear(); return t; }
+                }
+                static class T4 {
+                    private final List<String> l;
+                    private T4(List<String> l) { this.l = l; }
+                    int size() { return l.size(); }
+                }
+                static class B4 {
+                    private final List<String> list = new ArrayList<>();
+                    B4 add(String s) { list.add(s); return this; }
+                    List<String> peek() { return list; }
+                    @Finalizer T4 build() { return new T4(list); }
+                }
+                static class D {
+                    private final List<String> list = new ArrayList<>();
+                    void add(String s) { list.add(s); }
+                    @Finalizer List<String> data() { return list; }
+                }
                 static class Setter {
                     private List<String> l;
                     private void set(List<String> l) { this.l = l; }
@@ -160,7 +228,25 @@ public class TestTransfer extends CommonTest {
             Map.entry("Str.s", "SHARED_IMMUTABLE"),
             // the lambda keeps the list too
             Map.entry("Lam.l", "NOT_OWNED"),
-            Map.entry("Setter.l", "OWNED")));
+            Map.entry("Setter.l", "OWNED"),
+            // the view v still reaches the list
+            Map.entry("View.l", "NOT_OWNED"),
+            // isEmpty's result is a boolean, add's is discarded
+            Map.entry("Sized.l", "OWNED"),
+            // a finalizer moves the builder's list into the product
+            Map.entry("T1.l", "OWNED"),
+            Map.entry("B1.list", "OWNED"),
+            // without @Finalizer the builder may go on using its list
+            Map.entry("T2.l", "NOT_OWNED"),
+            Map.entry("B2.list", "NOT_OWNED"),
+            // the finalizer itself uses the list after handing it over
+            Map.entry("T3.l", "NOT_OWNED"),
+            Map.entry("B3.list", "NOT_OWNED"),
+            // peek hands the list out: not owned, so not moved
+            Map.entry("T4.l", "NOT_OWNED"),
+            Map.entry("B4.list", "NOT_OWNED"),
+            // fn into_data(self) -> Vec
+            Map.entry("D.list", "OWNED")));
 
     private static final Map<String, String> EXPECTED_CLOSED = new TreeMap<>(EXPECTED_OPEN);
 

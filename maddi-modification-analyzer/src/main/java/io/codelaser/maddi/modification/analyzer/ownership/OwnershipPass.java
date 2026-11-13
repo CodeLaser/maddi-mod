@@ -165,6 +165,13 @@ public final class OwnershipPass {
         Transfers transfers = new Transfers(all, methods, fresh, thisEscape, closedWorld);
         OwnedFields ownedFields = new OwnedFields(analysisOrder, methods, fresh, thisEscape, borrowedParameters,
                 transfers);
+        // a move out of a finalizer needs the moved field owned, and that field is owned because it moves: greatest
+        // fixpoint
+        while (true) {
+            OwnedFields current = ownedFields;
+            if (!transfers.retainMoves(f -> current.verdicts().get(f) == Owned.OWNED)) break;
+            ownedFields = new OwnedFields(analysisOrder, methods, fresh, thisEscape, borrowedParameters, transfers);
+        }
         long nBorrowed = borrowedParameters.verdicts().values().stream().filter(b -> b).count();
         Map<Owned, Long> byOwned = new java.util.EnumMap<>(Owned.class);
         ownedFields.verdicts().values().forEach(o -> byOwned.merge(o, 1L, Long::sum));
