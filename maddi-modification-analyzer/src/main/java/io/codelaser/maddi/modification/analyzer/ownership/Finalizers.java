@@ -167,7 +167,9 @@ final class Finalizers {
 
     private static FieldInfo ownField(Expression expression, MethodInfo m) {
         if (Transfers.unwrap(expression) instanceof VariableExpression ve && ve.variable() instanceof FieldReference fr
-            && Transfers.isThisField(fr, fr.fieldInfo()) && fr.fieldInfo().owner().equals(m.typeInfo())) {
+            && Transfers.isThisField(fr, fr.fieldInfo()) && fr.fieldInfo().owner().equals(m.typeInfo())
+            // a field that can be owned (OwnedFields judges no primitive)
+            && !fr.fieldInfo().type().isPrimitiveExcludingVoid()) {
             return fr.fieldInfo();
         }
         return null;

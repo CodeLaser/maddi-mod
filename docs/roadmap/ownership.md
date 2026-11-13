@@ -187,7 +187,31 @@ it over, or returns `this.f`) does not count against the field's ownership: afte
 two depend on each other: greatest fixpoint over stage 3's verdicts. This trusts the contract's "no use after"; stage
 6 is what checks it.
 
-### Stage 6 — computing and checking `@Finalizer` (plan)
+### Stage 6 — computing and checking `@Finalizer`
+
+**Built 2026-11-13** (`Finalizers`, test `TestFinalizer`), as planned below, with these differences:
+
+- Rule 3 has Rust's exception: a contracted finalizer may consume a parameter when no caller uses its argument after
+  the call (every call site known; each argument a temporary, or a local in stage 5's ordering). Without it, every
+  method consuming a `Stream` parameter would be flagged. Only the use after counts here, not stage 5's freshness.
+- The check reads only the use after the call: a temporary passes, a local rebound to the call's result
+  (`s = s.filter(p)`) passes, `this` passes inside a finalizer. Violations are warnings of category
+  `finalizer-violation`, added to the guard's messages (`IteratingAnalyzer.messages()`), and `finalizerViolation`
+  rows in the census.
+- Computing rejects `this` as a receiver, and borrowed-parameter uses before the call are not yet accepted (stage 5's
+  receiver-only rule).
+- A fluent call on a created object is created too (`new B().add(x)`, unless the fluent method may leak `this` or
+  dispatch elsewhere); this also widens stage 1.
+- A computed `FINALIZER_METHOD` is written like a contract, and reads as one afterwards: a later run over the same
+  results (incremental, preloaded) does not recompute it, only checks it. Its callers are then checked as a
+  contract's, so a new caller that uses the object afterwards is reported, not silently accepted.
+
+Census 2026-11-13 (`finalizer` and `finalizerViolation` rows): computed finalizers gson 0, langchain4j 0 (libraries:
+their candidates are public), fernflower closed world 1 (`SwitchPatternHelper.JavacReferenceFinder.findCandidate`);
+contract violations 0 in all three (their stream pipelines are chains, never a reused stream). Stage 1 rose slightly
+through fluent chains (langchain4j fresh 501 → 509).
+
+The plan as written before the build:
 
 `@Finalizer` (maddi-annotation, `rare`) says that after the call nothing may use the receiver. Today it is a contract
 only, read from source and from the annotated APIs, never computed. Its modification semantics are load-bearing (a
