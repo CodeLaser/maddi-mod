@@ -309,6 +309,29 @@ Census: fernflower closed world owned fields 83 → 115 (elements 3 → 5 of 199
 `Shared` through other holders; only `VarNamesCollector` stopped being `Shared`. For the translation, element
 ownership is what counts, and its first blocker is now the collection's own E2 and E3 more than E1.
 
+### Checked at run time (2026-11-13)
+
+A run-time oracle (§5) now exists for `@Owned`: an instrumented test run marks the object a field claimed owned
+holds, records every other heap location that stores it, and reports the holder reading the field while another
+location still holds it. On fernflower's suite (closed world) it contradicted two claims; both were holes in the
+pass, now fixed and in `TestLending.test2`:
+
+- **Lending and element counting read the hidden verdict.** `BorrowedParameters.isHidden` leaves out the
+  parameter's own link keeps; it is for callers whose links already apply the callee's. Counting uses reads no
+  links, so it needs the full verdict: `new MethodWrapper(.., getCounterContainer())` had counted as a borrow.
+- **A switch expression's arm is not a discarded result.** `case X -> s.getHeadexprentList();` is an expression
+  statement whose value is yielded (`OwnershipPass.yieldedArms`), in lending, element counting and transfer.
+- **Rule 4 through another instance.** The field's links are those of `this.f`. A read through another instance
+  (`current.counter`, `getCurrentContext().counterContainer`) shows in the links of the field or method it is
+  reached from, which rule 4 now reads too; not the field of a created or freshly returned object (`return build.l`:
+  rule 3 judges arrival), not the field's own content (`child.parent.children`), not a fluent method's result.
+- **`FieldReference.scopeVariable()` is null for any non-variable scope**, a call's result included; `isThisField`
+  read null as `this`. The scope expression decides.
+
+After the fixes: fernflower 111 owned (115 before), gson 24; no contradiction on either suite. One open question:
+a non-capturing lambda evaluates to one shared instance (JLS 15.27.4), so `() -> new ArrayList<>()` is neither fresh
+nor owned by identity, though it has no state (gson's `Adapter.constructor`).
+
 ### Annotations
 
 `@Fresh` (method), `@Borrowed` (parameter) and `@Owned` (field; `elements = true` for `OWNED_ELEMENTS_FIELD`) are in
