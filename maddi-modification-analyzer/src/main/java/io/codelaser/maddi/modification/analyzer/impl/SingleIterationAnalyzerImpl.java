@@ -379,7 +379,7 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
                     processElement(info, loopCycleBreaking, true, abstractTypes);
                 }
             } else {
-                LOGGER.info("Strata-parallel FIRST iteration: {} threads, {} waves, {} units, {} elements",
+                LOGGER.debug("Strata-parallel FIRST iteration: {} threads, {} waves, {} units, {} elements",
                         PARALLEL_THREADS, firstIterationWaves.size(), units, elements);
                 linkComputer.setLockComputeDisabled(true);
                 try (ExecutorService pool =
@@ -412,7 +412,7 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
         } else if (PARALLEL_THREADS > 1 && !firstIteration
                    && analysisOrder.size() >= MIN_ELEMENTS_FOR_PARALLEL
                    && !(activateCycleBreaking && SEQUENTIAL_CYCLE_BREAKING)) {
-            LOGGER.info("Parallel iteration: {} threads over {} elements", PARALLEL_THREADS, analysisOrder.size());
+            LOGGER.debug("Parallel iteration: {} threads over {} elements", PARALLEL_THREADS, analysisOrder.size());
             List<Future<?>> futures = new ArrayList<>(analysisOrder.size());
             Map<Info, Long> elementMillis = new ConcurrentHashMap<>();
             // A seeded (incremental) analysis clears the links of its seed (ClearDerived) and then runs this
@@ -437,29 +437,17 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
                 linkComputer.setLockComputeDisabled(false);
             }
             joinAll(futures);
-            String slowest = elementMillis.entrySet().stream()
-                    .sorted(Map.Entry.<Info, Long>comparingByValue().reversed())
-                    .limit(10)
-                    .map(e -> e.getKey().fullyQualifiedName() + "=" + e.getValue() + "ms")
-                    .reduce((a, b) -> a + ", " + b).orElse("-");
-            LOGGER.info("Slowest elements: {}", slowest);
+            logSlowest("parallel", elementMillis);
         } else {
             // the same "slowest elements" line the parallel branch prints: the sequential first iteration is
             // the one every corpus probe runs, and it had no per-element figure at all
-            Map<Info, Long> elementMillis = LOGGER.isInfoEnabled() ? new HashMap<>() : null;
+            Map<Info, Long> elementMillis = new HashMap<>();
             for (Info info : analysisOrder) {
                 long t0 = System.nanoTime();
                 processElement(info, loopCycleBreaking, firstIteration, abstractTypes);
-                if (elementMillis != null) elementMillis.put(info, (System.nanoTime() - t0) / 1_000_000);
+                elementMillis.put(info, (System.nanoTime() - t0) / 1_000_000);
             }
-            if (elementMillis != null) {
-                String slowest = elementMillis.entrySet().stream()
-                        .sorted(Map.Entry.<Info, Long>comparingByValue().reversed())
-                        .limit(10)
-                        .map(e -> e.getKey().fullyQualifiedName() + "=" + e.getValue() + "ms")
-                        .reduce((a, b) -> a + ", " + b).orElse("-");
-                LOGGER.info("Slowest elements (sequential, {} elements): {}", analysisOrder.size(), slowest);
-            }
+            logSlowest("sequential", elementMillis);
         }
         long endLoop = System.currentTimeMillis();
         // derived rather than collected during the loop: same content as before, in deterministic
@@ -514,7 +502,7 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
             int changesBeforeRound = propertiesChanged.get();
             int waiting = 0;
             if (sweep) {
-                if (sweepRound == 0) LOGGER.info("Cycle-breaking sweep over {} elements", analysisOrder.size());
+                if (sweepRound == 0) LOGGER.debug("Cycle-breaking sweep over {} elements", analysisOrder.size());
                 for (Info info : analysisOrder) {
                     if (!(info instanceof FieldInfo fieldInfo) || faultTolerant && failed.contains(info)) continue;
                     int changesBefore = propertiesChanged.get();
@@ -555,18 +543,56 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
                 again = true;
             }
         } while (again);
-        if (sweepRound > 0) LOGGER.info("Cycle-breaking sweep: {} extra round(s)", sweepRound);
+        if (sweepRound > 0) LOGGER.debug("Cycle-breaking sweep: {} extra round(s)", sweepRound);
         long end = System.currentTimeMillis();
-        LOGGER.info("Phase timing: main loop {} ms, abstract batch {} ms, 2nd type pass {} ms",
+        LOGGER.debug("Phase timing: main loop {} ms, abstract batch {} ms, 2nd type pass {} ms",
                 endLoop - startLoop, startSecondPass - startAbstract, end - startSecondPass);
         if (linkCacheEnabled()) {
             Map<String, Integer> misses = new TreeMap<>();
             linkCacheMisses.forEach((k, v) -> misses.put(k, v.get()));
-            LOGGER.info("Link cache: {} hit(s), {} check failure(s), misses by first changed property {}",
+            LOGGER.debug("Link cache: {} hit(s), {} check failure(s), misses by first changed property {}",
                     linkCacheHits.getAndSet(0), linkCacheCheckFailures.getAndSet(0), misses);
             linkCacheMisses.clear();
         }
         unionInWriteTargets();
+    }
+
+    /*
+     Per-iteration diagnostics go to DEBUG: a server analysing one file at a time printed a handful of lines per
+     analysis, nearly all of them zero or a few milliseconds. An element slower than SLOW_ELEMENT_MS is still worth
+     seeing in a production log, so those stay at INFO. Env MADDI_SLOW_ELEMENT_MS overrides the threshold.
+     */
+    private static final long SLOW_ELEMENT_MS = slowElementMs();
+
+    private static long slowElementMs() {
+        String v = System.getenv("MADDI_SLOW_ELEMENT_MS");
+        if (v != null) {
+            try {
+                return Long.parseLong(v.trim());
+            } catch (NumberFormatException e) {
+                LOGGER.warn("MADDI_SLOW_ELEMENT_MS={} is not a number; using 5000", v);
+            }
+        }
+        return 5_000L;
+    }
+
+    private static void logSlowest(String mode, Map<Info, Long> elementMillis) {
+        List<Map.Entry<Info, Long>> sorted = elementMillis.entrySet().stream()
+                .sorted(Map.Entry.<Info, Long>comparingByValue().reversed())
+                .toList();
+        String slow = sorted.stream().takeWhile(e -> e.getValue() >= SLOW_ELEMENT_MS)
+                .map(e -> e.getKey().fullyQualifiedName() + "=" + e.getValue() + "ms")
+                .reduce((a, b) -> a + ", " + b).orElse(null);
+        if (slow != null) {
+            LOGGER.info("Slow elements (at least {} ms, {}, {} elements): {}", SLOW_ELEMENT_MS, mode,
+                    elementMillis.size(), slow);
+        }
+        if (LOGGER.isDebugEnabled()) {
+            String slowest = sorted.stream().limit(10)
+                    .map(e -> e.getKey().fullyQualifiedName() + "=" + e.getValue() + "ms")
+                    .reduce((a, b) -> a + ", " + b).orElse("-");
+            LOGGER.debug("Slowest elements ({}, {} elements): {}", mode, elementMillis.size(), slowest);
+        }
     }
 
     // ---- VariableData flatten-snapshot helpers (DESIGN-vardata-flatten.md) --------------------------

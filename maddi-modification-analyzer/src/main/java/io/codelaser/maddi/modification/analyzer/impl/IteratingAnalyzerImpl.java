@@ -651,9 +651,9 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                         if (deps.add(consumer)) added++;
                     }
                 }
-                LOGGER.info("Unioned {} persisted consumption wake edge(s)", added);
+                LOGGER.debug("Unioned {} persisted consumption wake edge(s)", added);
             }
-            LOGGER.info("Worklist narrowing ACTIVE; symmetric reverse adjacency for {} elements", dependersOf.size());
+            LOGGER.debug("Worklist narrowing ACTIVE; symmetric reverse adjacency for {} elements", dependersOf.size());
         } else {
             dependersOf = null;
         }
@@ -704,14 +704,14 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
             // sequential fallback recursed into the seed's cleared callees in another order, and tripped the link
             // computer's work ceiling twice as often as a cold run (fernflower: 150 against 71).
             firstIterationWaves = incremental ? restrictWaves(waves, initialDirty) : waves;
-            LOGGER.info("Computed {} first-iteration waves", firstIterationWaves.size());
+            LOGGER.debug("Computed {} first-iteration waves", firstIterationWaves.size());
         } else {
             firstIterationWaves = null;
         }
         while (true) {
             ++iterations;
             EventualCluster.ITERATION = iterations; // ECASSUME/ECSITE diagnostics AND the warm-up window arithmetic
-            LOGGER.info("{}, cycle breaking active? {}", highlight("Start iteration " + iterations),
+            LOGGER.debug("{}, cycle breaking active? {}", highlight("Start iteration " + iterations),
                     cycleBreakingActive);
             TolerantWrite.resetChangeCounts();
             List<Info> subset;
@@ -720,7 +720,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
             } else {
                 Set<Info> d = dirty;
                 subset = analysisOrder.stream().filter(d::contains).toList();
-                LOGGER.info("Worklist: {} of {} elements dirty", subset.size(), analysisOrder.size());
+                LOGGER.debug("Worklist: {} of {} elements dirty", subset.size(), analysisOrder.size());
             }
             if (budget != null) budget.startPass(iterations, subset.size());
             {
@@ -754,7 +754,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                     iterations == 1 ? firstIterationWaves : null);
             Instant end = Instant.now();
             Duration duration = Duration.between(start, end);
-            LOGGER.info("Duration of single iteration: {} min {} sec {} ms", duration.toMinutesPart(),
+            LOGGER.debug("Duration of single iteration: {} min {} sec {} ms", duration.toMinutesPart(),
                     duration.toSecondsPart(), duration.toMillisPart());
             int propertiesChanged = singleIterationAnalyzer.propertiesChanged();
             {
@@ -777,7 +777,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                     .filter(e -> e.getKey().startsWith(TolerantWrite.RECOMPUTED))
                     .map(e -> e.getKey().substring(TolerantWrite.RECOMPUTED.length()) + "=" + e.getValue())
                     .reduce((a, b) -> a + ", " + b).map(r -> "; recomputed: " + r).orElse("");
-            LOGGER.info("Iteration {} property changes (top 10): {}{}", iterations, topChanges, recomputed);
+            LOGGER.debug("Iteration {} property changes (top 10): {}{}", iterations, topChanges, recomputed);
             // under an active worklist, a zero-change SUBSET iteration is not a fixpoint certificate — only a
             // zero-change FULL pass is; route through the verification branch below instead of stopping here
             boolean done = propertiesChanged == 0 && (dependersOf == null || verifying);
@@ -893,7 +893,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                         // the culprit: why the re-analysed element has a static side effect, the run before may not
                         Object culprit = element.analysis().getOrNull(PropertyImpl.STATIC_SIDE_EFFECTS_CULPRIT_METHOD,
                                 ValueImpl.CulpritImpl.class);
-                        LOGGER.info("Early cutoff: {} moved;\n  prior: {}\n  now:   {}{}", c, prior, now,
+                        LOGGER.debug("Early cutoff: {} moved;\n  prior: {}\n  now:   {}{}", c, prior, now,
                                 culprit == null ? "" : "\n  static side effect: " + culprit);
                     }
                 }
@@ -966,8 +966,8 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                         // same index. UNMODIFIED_FIELD has no such case: see writeVerdicts' javadoc.
                         var counts = pass.writeVerdicts(analysisOrder, report, contracted(singleIterationAnalyzer));
                         TolerantWrite.freezeModificationProperties();
-                        LOGGER.info("MODREACH round {}: {}", modReachRounds, counts.summary());
-                        LOGGER.info("MODREACH round {}: {}", modReachRounds, report.summary());
+                        LOGGER.debug("MODREACH round {}: {}", modReachRounds, counts.summary());
+                        LOGGER.debug("MODREACH round {}: {}", modReachRounds, report.summary());
                         if (INCREMENTAL_REDERIVATION && !counts.weakened() && !counts.changed().isEmpty()
                             && dependersOf != null) {
                             // CodeLaser/maddi-mod#76: this round only strengthened (FALSE->TRUE, null->TRUE). What was
@@ -989,7 +989,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                                     }
                                 }
                             }
-                            LOGGER.info("MODREACH round {}: only strengthened; re-deriving {} element(s) from {} "
+                            LOGGER.debug("MODREACH round {}: only strengthened; re-deriving {} element(s) from {} "
                                         + "changed, without clearing", modReachRounds, seeds.size(),
                                     counts.changed().size());
                             // the eventual family is write-once: the deferral round re-derives it over the new state
@@ -1012,7 +1012,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                                 && singleIterationAnalyzer instanceof SingleIterationAnalyzerImpl sia) {
                                 sia.eventualCluster().resetForRederivation();
                             }
-                            LOGGER.info("MODREACH cleared {} derived values; re-deriving with modification frozen",
+                            LOGGER.debug("MODREACH cleared {} derived values; re-deriving with modification frozen",
                                     cleared);
                             eventualDeferralRounds = 0; // the eventual family was cleared too: re-arm the deferral
                             nextPassKind = "re-derivation after MODREACH round " + modReachRounds;
@@ -1174,7 +1174,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                         dirty = new HashSet<>(scope);
                         verifying = true;
                         nextPassKind = "incremental verification";
-                        LOGGER.info("Run again, properties changed {}", propertiesChanged);
+                        LOGGER.debug("Run again, properties changed {}", propertiesChanged);
                         continue;
                     }
                     // worklist dry (or a zero-change subset round): do NOT stop yet — run one full pass to
@@ -1184,7 +1184,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                     verifying = true;
                 }
             }
-            LOGGER.info("Run again, properties changed {}", propertiesChanged);
+            LOGGER.debug("Run again, properties changed {}", propertiesChanged);
             // TODO any strategy, e.g. after 3 iterations, activate cycle breaking
         }
     }
@@ -1219,7 +1219,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
         var report = pass.go(analysisOrder);
         var counts = pass.writeVerdicts(analysisOrder, report, contracted(singleIterationAnalyzer));
         TolerantWrite.freezeModificationProperties();
-        LOGGER.info("Early cutoff: MODREACH round {}: {}", round, counts.summary());
+        LOGGER.debug("Early cutoff: MODREACH round {}: {}", round, counts.summary());
         Set<Info> rederive = new HashSet<>();
         for (Info c : counts.changed()) {
             Info owner = c instanceof ParameterInfo pi ? pi.methodInfo() : c;
