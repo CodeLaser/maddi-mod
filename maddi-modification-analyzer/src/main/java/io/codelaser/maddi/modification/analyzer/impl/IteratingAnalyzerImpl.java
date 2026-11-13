@@ -381,7 +381,11 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                         String indMethod = System.getenv("FPDUMP_PARAMS") == null ? ""
                                 : " independent=" + info.analysis().getOrNull(PropertyImpl.INDEPENDENT_METHOD,
                                 ValueImpl.IndependentImpl.class);
-                        v = "method nonModifying=" + b + getset + evNonMod + evMethod + indMethod;
+                        // FPDUMP_STRUCT: the structural twin (#25), for an A/B of a structural rule (#117)
+                        String structMethod = System.getenv("FPDUMP_STRUCT") == null ? ""
+                                : " sNonModifying=" + info.analysis().getOrNull(
+                                PropertyImpl.STRUCTURALLY_NON_MODIFYING_METHOD, ValueImpl.BoolImpl.class);
+                        v = "method nonModifying=" + b + structMethod + getset + evNonMod + evMethod + indMethod;
                     } else if (info instanceof FieldInfo) {
                         var b = info.analysis().getOrNull(PropertyImpl.UNMODIFIED_FIELD,
                                 ValueImpl.BoolImpl.class);
@@ -415,7 +419,10 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                                     ValueImpl.SetOfStringsImpl.class);
                             String evUnmod = eup != null && !eup.set().isEmpty()
                                     ? " eventuallyUnmod=" + new TreeSet<>(eup.set()) : "";
-                            pw.println("param unmodified=" + um + " independent=" + ind + evUnmod
+                            String structParam = System.getenv("FPDUMP_STRUCT") == null ? ""
+                                    : " sUnmodified=" + pi.analysis().getOrNull(
+                                    PropertyImpl.STRUCTURALLY_UNMODIFIED_PARAMETER, ValueImpl.BoolImpl.class);
+                            pw.println("param unmodified=" + um + structParam + " independent=" + ind + evUnmod
                                        + " " + pi.fullyQualifiedName());
                         }
                     }
