@@ -553,7 +553,11 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
         if (configuration.ownership()) {
             // docs/roadmap/ownership.md: one-shot, over the converged link facts; adds properties, changes none
             feed(f -> f.stage("ownership"));
-            OwnershipPass.write(new OwnershipPass().go(analysisOrder));
+            OwnershipPass.Report report = new OwnershipPass().go(analysisOrder);
+            OwnershipPass.write(report);
+            // OWNERSHIP=<absolute path>: the census as a TSV (stage 4); any other value only turns the pass on
+            String census = System.getenv("OWNERSHIP");
+            if (census != null && census.startsWith("/")) OwnershipPass.writeTsv(report, java.nio.file.Path.of(census));
         }
     }
 

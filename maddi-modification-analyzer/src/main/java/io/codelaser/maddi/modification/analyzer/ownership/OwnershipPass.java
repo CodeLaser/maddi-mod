@@ -162,6 +162,25 @@ public final class OwnershipPass {
                 ownedFields.verdicts(), ownedFields.reasons());
     }
 
+    /**
+     * The census (docs/roadmap/ownership.md stage 4): one line per verdict, {@code kind, element, verdict, reason};
+     * the reason is the first rule that failed, the worklist of a negative verdict.
+     */
+    public static void writeTsv(Report report, java.nio.file.Path path) {
+        try (java.io.PrintWriter pw = new java.io.PrintWriter(java.nio.file.Files.newBufferedWriter(path))) {
+            pw.println("kind\telement\tverdict\treason");
+            report.fresh().forEach((m, b) -> pw.println("fresh\t" + m.fullyQualifiedName() + "\t" + b + "\t"
+                                                        + report.notFreshReason().getOrDefault(m, "")));
+            report.borrowed().forEach((p, b) -> pw.println("borrowed\t" + p.methodInfo().fullyQualifiedName() + ":"
+                                                           + p.index() + ":" + p.name() + "\t" + b + "\t"
+                                                           + report.notBorrowedReason().getOrDefault(p, "")));
+            report.owned().forEach((f, o) -> pw.println("owned\t" + f.fullyQualifiedName() + "\t" + o + "\t"
+                                                        + report.notOwnedReason().getOrDefault(f, "")));
+        } catch (java.io.IOException e) {
+            LOGGER.error("Ownership census: cannot write {}", path, e);
+        }
+    }
+
     public static void write(Report report) {
         report.fresh().forEach((methodInfo, fresh) -> {
             // a contract was written by the shallow analyzer and is not second-guessed
