@@ -28,6 +28,7 @@ import java.util.List;
 import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.Isolated;
 
 import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
@@ -42,6 +43,9 @@ import io.codelaser.maddi.modification.link.vf.CanonicalVirtuals;
  * 8.6 GB alive through it); and {@code TolerantWrite}'s changed targets of the last pass, until the next analysis. The
  * cache is now emptied when the last running analysis ends.
  */
+// Isolated: the cache is JVM-wide and emptied only when no analysis runs, so that the size this test asserts holds only
+// while no other test analyses at the same time (should the module ever run its tests in parallel)
+@Isolated
 public class TestAnalysedModelRelease extends CommonTest {
 
     @Language("java")
