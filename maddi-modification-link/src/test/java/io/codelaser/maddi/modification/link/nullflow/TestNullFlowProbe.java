@@ -161,7 +161,9 @@ public class TestNullFlowProbe extends CommonTest {
 
         assertEquals("[0:s→this*.f] --> -", summary(t, "set"));
 
-        assertEquals("[] --> lazy←$_ce1,lazy←this*.g", summary(t, "lazy"));
+        // g is a memo (if (g == null) g = ...: prepwork's LazyCacheField, CodeLaser/maddi#208), so writing it does
+        // not modify this
+        assertEquals("[] --> lazy←$_ce1,lazy←this.g", summary(t, "lazy"));
         assertEquals("$_ce1=nonNull", markers(t, "lazy"));
     }
 
