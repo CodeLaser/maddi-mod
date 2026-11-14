@@ -341,6 +341,24 @@ After the fixes: fernflower 109 owned (115 before; also lost `BytecodeMappingTra
 its class keeps, and `RequiresEntry.moduleVersion`, a String, now shared immutable), gson 21; no contradiction on
 either suite.
 
+**`@Borrowed` checked at run time** (2026-11-14; the agent's part 2e walks, at a sampled call's exit, from the result,
+the receiver and the other arguments, for the argument reached through paths the call made). gson and fernflower
+showed what `BorrowedParameters` missed, each now a `TestBorrowedParameter` case:
+- `this(..)` and `super(..)`: the callee's links are not applied to the caller's summary, so its full verdict
+  counts; an anonymous class's `super(..)` arguments were not looked at;
+- a local holding a new object that keeps the parameter, captured (`a = new Adapter(p); return new Factory() {..a..}`);
+- stores no link shows: through `Objects.requireNonNull`, into an interface-typed field, into a node a callee
+  returned (`created.value = value`); aliases now flow through conditionals, identity methods, pattern variables;
+- a view returned (`rv.§m ≡ 0:l.§m`, dependentReturnValue: `Collections.synchronizedList(l)`, `toArray(T[])`);
+- `return p` beside a recursive return;
+- a new object holding it handed on (`new StructContext(.., new LazyLoader(provider))`); an element of varargs or of
+  `Arrays.asList(..)` given to a callee that keeps its elements;
+- **in a recursive method no callee's summary is applied** (CodeLaser/maddi-mod#127): there a callee's full verdict
+  counts, and a library parameter needs a `@Borrowed` contract.
+
+Census after: gson 469 borrowed (523), 18 owned (21); fernflower closed 1358 borrowed (1447), 100 owned (106).
+Left: gson's `toArray(T[])` hint (maddi#211), one untriaged fernflower keep.
+
 ### Annotations
 
 `@Fresh` (method), `@Borrowed` (parameter) and `@Owned` (field; `elements = true` for `OWNED_ELEMENTS_FIELD`) are in
