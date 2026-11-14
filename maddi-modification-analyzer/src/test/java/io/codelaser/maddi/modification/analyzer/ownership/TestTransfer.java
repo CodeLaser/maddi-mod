@@ -200,6 +200,39 @@ public class TestTransfer extends CommonTest {
                     void add(String s) { list.add(s); }
                     @Finalizer List<String> data() { return list; }
                 }
+                interface Supply<T> { T get(); }
+                static class Lambdas {
+                    Supply<List<String>> maker(boolean b) { return b ? () -> new ArrayList<>() : () -> new LinkedList<>(); }
+                }
+                static class LamLocal {
+                    private final Supply<List<String>> m;
+                    private LamLocal(Supply<List<String>> m) { this.m = m; }
+                    private static final Lambdas LAMBDAS = new Lambdas();
+                    static LamLocal make(boolean b) { Supply<List<String>> m = LAMBDAS.maker(b); return new LamLocal(m); }
+                    boolean set() { return m != null; }
+                }
+                static class LamInit {
+                    private final Supply<List<String>> m;
+                    private LamInit(Supply<List<String>> m) { this.m = m; }
+                    static LamInit make() { Supply<List<String>> m = () -> new ArrayList<>(); return new LamInit(m); }
+                    boolean set() { return m != null; }
+                }
+                static class LamDirect {
+                    private final Supply<List<String>> m;
+                    private LamDirect(Supply<List<String>> m) { this.m = m; }
+                    static LamDirect make() { return new LamDirect(() -> new ArrayList<>()); }
+                    int size() { return m.get().size(); }
+                }
+                static class RefDirect {
+                    private final Supply<List<String>> m;
+                    private RefDirect(Supply<List<String>> m) { this.m = m; }
+                    static RefDirect make() { return new RefDirect(ArrayList::new); }
+                    int size() { return m.get().size(); }
+                }
+                static class LamField {
+                    private final Supply<List<String>> m = () -> new ArrayList<>();
+                    int size() { return m.get().size(); }
+                }
                 static class Setter {
                     private List<String> l;
                     private void set(List<String> l) { this.l = l; }
@@ -247,7 +280,15 @@ public class TestTransfer extends CommonTest {
             Map.entry("T4.l", "NOT_OWNED"),
             Map.entry("B4.list", "NOT_OWNED"),
             // fn into_data(self) -> Vec
-            Map.entry("D.list", "OWNED")));
+            Map.entry("D.list", "OWNED"),
+            // a lambda or method reference is not a created object (JLS 15.27.4, 15.13.3): every evaluation may
+            // return the same instance
+            // the local's initializer is not created: before, the declaration was not looked at
+            Map.entry("LamLocal.m", "NOT_OWNED"),
+            Map.entry("LamInit.m", "NOT_OWNED"),
+            Map.entry("LamDirect.m", "NOT_OWNED"),
+            Map.entry("RefDirect.m", "NOT_OWNED"),
+            Map.entry("LamField.m", "NOT_OWNED")));
 
     private static final Map<String, String> EXPECTED_CLOSED = new TreeMap<>(EXPECTED_OPEN);
 
