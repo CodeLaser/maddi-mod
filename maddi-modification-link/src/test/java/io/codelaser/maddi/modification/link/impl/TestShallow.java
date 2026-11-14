@@ -175,7 +175,8 @@ public class TestShallow extends CommonTest {
                 .findFirst().orElseThrow();
         assertEquals("java.util.List.toArray(Object[])", toArrayTs.fullyQualifiedName());
         MethodLinkedVariables mlvToArrayTs = linkComputer.doMethod(toArrayTs);
-        assertEquals("[-] --> toArray.§ts⊆this.§es", mlvToArrayTs.toString());
+        // the result may be the argument (CodeLaser/maddi#211): a view link from the return value to it, none into this
+        assertEquals("[-] --> toArray.§ts⊆this.§es,toArray.§mT≡0:t.§mT", mlvToArrayTs.toString());
 
         MethodInfo toArray = list.findUniqueMethod("toArray", 0);
         MethodLinkedVariables mlvToArray = linkComputer.doMethod(toArray);

@@ -205,7 +205,12 @@ public record ShallowMethodLinkComputer(Runtime runtime, VirtualFieldComputer vi
                         null, null, typeParametersOfSubTo, false, IS_SUBSET_OF,
                         false);
                 // TODO we may have to convert hcThisTps to method parameters
-            } else if (!independent.isIndependent()) {
+            } else if (!independent.isIndependent()
+                       // a parameter of an instance method dependent ONLY on the return value
+                       // (@Independent(dependentReturnValue = true): toArray's T[] a, CodeLaser/maddi#211) says nothing
+                       // about the object, so no link from it into this; its base level is DEPENDENT only because the
+                       // map has an entry (AnnotationToProperty). The view link is sharedModification's, below.
+                       && (methodInfo.isStatic() || !(linkLevelRv == 0 && dependencies.keySet().equals(Set.of(-1))))) {
                 if (hcThis != null && !methodInfo.isStatic()) {
 
                     // *************************************************
