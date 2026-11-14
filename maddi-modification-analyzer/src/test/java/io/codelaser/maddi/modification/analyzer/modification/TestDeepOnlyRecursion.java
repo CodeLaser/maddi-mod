@@ -150,8 +150,8 @@ public class TestDeepOnlyRecursion extends CommonTest {
                     .setMaxIterations(10).setModificationViaReachability(true).build()).analyze(ao);
             assertEquals("false/true", m(x, "viaValues"));
             assertEquals("false/true", m(x, "viaGetter"));
-            // viaMapGet, 'for (C c : groups.get(k)) c.getPool()', two element links deep, is missed with the gate off
-            // too: the fixpoint itself does not see it (true/true either way); not this gate's
+            // two element links deep, 'for (C c : groups.get(k)) c.getPool()' (CodeLaser/maddi-mod#104)
+            assertEquals("false/true", m(x, "viaMapGet"));
             assertEquals("false/true", m(x, "viaField"));
             assertEquals("false/true", m(x, "viaLocal"));
             assertEquals("true/true", m(x, "reads"));

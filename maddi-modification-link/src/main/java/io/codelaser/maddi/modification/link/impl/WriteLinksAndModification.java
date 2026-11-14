@@ -216,6 +216,7 @@ class WriteLinksAndModification {
     private static final boolean NO_CO_ELEMENT = Gate.isSet("NOCOELEMENT");
     private static final boolean NO_OBJECT_GRAPH_MOD = Gate.isSet("NOOBJECTGRAPHMOD");
     private static final boolean NO_VIEW_ELEMENT_MOD = Gate.isSet("NOVIEWELEMENTMOD");
+    private static final boolean NO_ITERATOR_STATE = Gate.isSet("NOITERATORSTATE");
 
     /* #117: see Util.hiddenAliasOwner. The container's own variable ('sequence.stats') is left alone: its element
        is modified, not it. */
@@ -1169,6 +1170,19 @@ class WriteLinksAndModification {
                 .map(Util::firstRealVariable).anyMatch(container::equals));
     }
 
+    /*
+     #104: the same decision when the group is with something else than the container. A for-each over a call's
+     result ('for (C c : groups.get(k))') iterates '$__rv2 = $__rv1.iterator()', grouped '$__rv2.§m ☷{remove}
+     $__rv1.§m' with the lookup's result, not with groups. next() modifies the iterator, not the collection it walks:
+     a group whose pass set holds none of the causes keeps the modification to the iterator.
+     */
+    private boolean modificationStaysInGroup(Variable modified, Set<MethodInfo> causes) {
+        return !NO_ITERATOR_STATE && followGraph.graph().eqGroups(modified).anyMatch(group -> {
+            Set<MethodInfo> pass = group.linkNature().pass();
+            return !pass.isEmpty() && Collections.disjoint(pass, causes);
+        });
+    }
+
     private boolean notLinkedToModified(Links.Builder builder,
                                         Map<Variable, Set<MethodInfo>> modifiedVariablesAndTheirCause) {
         return notLinkedToModified(builder, modifiedVariablesAndTheirCause, false);
@@ -1221,6 +1235,7 @@ class WriteLinksAndModification {
                     // element of a copy of one of its values): modifying it modifies x deeply, as ∋ does
                     || ln == OBJECT_GRAPH_CONTAINS && !structural && !NO_OBJECT_GRAPH_MOD
                        && !sharesModificationGroup(toReal, builder.primary())
+                       && !modificationStaysInGroup(toReal, causesOfModification)
                     // #62: 'this.map.§$$s[-2] ∩ tags', tags, a whole object, among the elements of the container: a
                     // for-each over map.values() ends up there, the view's element field (§$s, from V) and the
                     // iterated one (§$ss, from Set<String>) differing. Modifying tags modifies the map deeply.
