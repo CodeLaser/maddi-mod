@@ -141,6 +141,8 @@ class AnnotationToProperty {
         Value.Bool fluent = null;
         Value.Bool fresh = null;
         Value.Bool borrowed = null;
+        Value.Bool owned = null;
+        Value.Bool ownedElements = null;
         Value.Bool identity = null;
         Value.Bool unmodified = null;
         Value.Bool structurallyUnmodified = null; // @Modified(hc=true): modified in the hidden content only (#25)
@@ -274,6 +276,11 @@ class AnnotationToProperty {
                 fresh = valueForTrue;
             } else if (Borrowed.class.getCanonicalName().equals(fqn)) {
                 borrowed = valueForTrue;
+            } else if (Owned.class.getCanonicalName().equals(fqn)) {
+                // nothing reads a field contract yet (a field with a body around it is computed); the round trip of
+                // the decorated output, and a future guard on hand-written @Owned, do
+                owned = valueForTrue;
+                if (!isAbsent) ownedElements = ValueImpl.BoolImpl.from(ae.extractBoolean("elements"));
             } else if (NotNull.class.getCanonicalName().equals(fqn)) {
                 // absent: explicitly not claimed, which also stops a default (an inherited non-null) from applying
                 if (isAbsent) {
@@ -408,6 +415,8 @@ class AnnotationToProperty {
             if (structurallyUnmodified != null) map.put(PropertyImpl.STRUCTURALLY_UNMODIFIED_FIELD, structurallyUnmodified);
             if (isFinal != null) map.put(PropertyImpl.FINAL_FIELD, isFinal);
             if (ignoreModifications != null) map.put(PropertyImpl.IGNORE_MODIFICATIONS_FIELD, ignoreModifications);
+            if (owned != null) map.put(PropertyImpl.OWNED_FIELD, owned);
+            if (ownedElements != null) map.put(PropertyImpl.OWNED_ELEMENTS_FIELD, ownedElements);
             if (finalAfter != null && !finalAfter.isBlank()) {
                 map.put(PropertyImpl.EVENTUALLY_FINAL_FIELD,
                         new ValueImpl.SetOfStringsImpl(ValueImpl.EventualImpl.labelToFields(finalAfter)));

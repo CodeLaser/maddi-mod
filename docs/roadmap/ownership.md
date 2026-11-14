@@ -267,6 +267,79 @@ split by rule. Expect few computed finalizers (builders' `build()`, `into...` ac
 `@Owning`/must-call territory, Checker Framework's Resource Leak Checker); finalizers on library methods without a
 contract; ordering beyond one block (prepwork's variable data would be the route).
 
+### Element ownership — `OWNED_ELEMENTS_FIELD`
+
+**Built 2026-11-13** (`OwnedElements`, tests `TestOwnedElements`, printer `TestJavaToRustOwnedField`). The
+elements of an owned collection, map or other generic object (its hidden content: `this.f.§$s`, a map's
+`§$$s[-1]`/`§$$s[-2]`) are owned too when every element link goes to a creation, `null`, an immutable value, or a
+parameter every caller hands over and its method keeps only there (E2), and no element leaves where no link shows
+(E3: an element only the receiver of a call that keeps nothing, an argument of a call that does not keep it or of a
+call on the collection itself, an operand; no lambda, view or function argument touching it). The printer then
+counts no element type as held through the field: `Vec<T>` of plain values.
+
+Census: fernflower (closed) 3 of 199 collection fields (`LabelHelper.LabelSets.breaks`/`continues`,
+`VarProcessor.hasNotInsideLVT`), gson 0 of 62, langchain4j 0 of 170; the first blocker is nearly always E1 (the
+collection itself is not owned: 149, 50, 164). fernflower translation 1878 → 1877 rustc errors.
+
+Not yet: one verdict per type argument (a `Map<Node, Data>` with shared keys and owned values), arrays, nested
+hidden content (`∈∈`), the same question for results and parameters, and the printer looking inside source generic
+classes (`RustShared.heldIn` descends only into library collections and source classes extending one).
+
+### Lending, pass-through calls, effectively private fields
+
+**Built 2026-11-13** (`Lending`, `OwnershipPass.passThrough`, tests `TestLending`, `TestEffectivelyPrivate`).
+
+- **Lending.** A method's result is lent when every call site is known (stage 5's rule 1) and every caller only uses
+  the object: the receiver of a call that keeps nothing, an iterable, an operand, an argument the callee does not
+  keep (stage 2's hidden verdict; in a library an independent parameter, or one independent with hidden content
+  whose type is not a type parameter: `addAll(Collection)` yes, `add(E)` no). Not returned, stored or captured. A
+  link from an owned field to a lent result, or an element returned by a lent method, no longer breaks ownership:
+  Rust's `&self.f`.
+- **Pass-through calls.** A call that returns its argument and keeps it nowhere is that argument in the creation
+  evidence (`ensureNotNull(x, "x")`); stage 5 no longer trusts `@Identity` alone (`register(x)` may return `x` and
+  keep it).
+- **Effectively private.** In a closed world, a non-private field that no body outside its primary type mentions
+  passes rule 1.
+- **Rule 4** accepts a link to a deeply immutable value (`this.f ~ 0:s` after `x.add(s)` through an alias). Not by
+  link nature: `~` also stands for "reachable through a result's fields" (`list ~ build`, `TestTransfer` B3).
+
+Census: fernflower closed world owned fields 83 → 115 (elements 3 → 5 of 199), gson 17 → 24, langchain4j 32
+(library: public getters and constructors). The fernflower translation did not move (1877 rustc errors, 994 stubs,
+12 tests): the newly owned fields are mostly collections, already plain `Vec`/`HashSet` in Rust, whose elements stay
+`Shared` through other holders; only `VarNamesCollector` stopped being `Shared`. For the translation, element
+ownership is what counts, and its first blocker is now the collection's own E2 and E3 more than E1.
+
+### Checked at run time (2026-11-13)
+
+A run-time oracle (§5) now exists for `@Owned`: an instrumented test run marks the object a field claimed owned
+holds, records every other heap location that stores it, and reports the holder reading the field while another
+location still holds it. On fernflower's suite (closed world) it contradicted two claims; both were holes in the
+pass, now fixed and in `TestLending.test2`:
+
+- **Lending and element counting read the hidden verdict.** `BorrowedParameters.isHidden` leaves out the
+  parameter's own link keeps; it is for callers whose links already apply the callee's. Counting uses reads no
+  links, so it needs the full verdict: `new MethodWrapper(.., getCounterContainer())` had counted as a borrow.
+- **A switch expression's arm is not a discarded result.** `case X -> s.getHeadexprentList();` is an expression
+  statement whose value is yielded (`OwnershipPass.yieldedArms`), in lending, element counting and transfer.
+- **Rule 4 through another instance.** The field's links are those of `this.f`. A read through another instance
+  (`current.counter`, `getCurrentContext().counterContainer`) shows in the links of the field or method it is
+  reached from, which rule 4 now reads too; not the field of a created or freshly returned object (`return build.l`:
+  rule 3 judges arrival), not the field's own content (`child.parent.children`), not a fluent method's result.
+- **`FieldReference.scopeVariable()` is null for any non-variable scope**, a call's result included; `isThisField`
+  read null as `this`. The scope expression decides.
+
+After the fixes: fernflower 111 owned (115 before), gson 24; no contradiction on either suite. One open question:
+a non-capturing lambda evaluates to one shared instance (JLS 15.27.4), so `() -> new ArrayList<>()` is neither fresh
+nor owned by identity, though it has no state (gson's `Adapter.constructor`).
+
+### Annotations
+
+`@Fresh` (method), `@Borrowed` (parameter) and `@Owned` (field; `elements = true` for `OWNED_ELEMENTS_FIELD`) are in
+`maddi-annotation`; `AnnotationToProperty` reads all three, `DecoratorImpl` prints them whenever the pass wrote them
+(`TestOwnershipDecorated`). `@Fresh` and `@Borrowed` are contracts on bodiless and library methods; nothing reads an
+`@Owned` contract yet (the guard on hand-written annotations is out of scope, §5). `SHARED_IMMUTABLE_FIELD` has no
+annotation: `@Immutable` on the type says it.
+
 ## 4. Working rules
 
 - Runs longer than about 5 minutes or 8 GB go through `lab run` from the workspace root, after committing

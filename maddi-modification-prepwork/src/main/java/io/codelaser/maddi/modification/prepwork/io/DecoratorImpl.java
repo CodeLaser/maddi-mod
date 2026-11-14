@@ -81,6 +81,10 @@ public class DecoratorImpl implements Qualification.Decorator {
     private final AnnotationExpression allowInterruptAnnotation;
     private final AnnotationExpression finalizerAnnotation;
     private final AnnotationExpression staticSideEffectsAnnotation;
+    // the ownership pass's verdicts (maddi-mod docs/roadmap/ownership.md): present only when it ran
+    private final AnnotationExpression freshAnnotation;
+    private final AnnotationExpression borrowedAnnotation;
+    private final TypeInfo ownedTi;
 
     private final Set<Class<?>> importsNeeded = new HashSet<>();
     // EXPLICIT mode: print every computed verdict, including the ones this decorator otherwise leaves to a default.
@@ -139,6 +143,11 @@ public class DecoratorImpl implements Qualification.Decorator {
         finalizerAnnotation = runtime.newAnnotationExpressionBuilder().setTypeInfo(finalizerTi).build();
         TypeInfo staticSideEffectsTi = runtime.getFullyQualified(StaticSideEffects.class, true, sourceSetOfRequest);
         staticSideEffectsAnnotation = runtime.newAnnotationExpressionBuilder().setTypeInfo(staticSideEffectsTi).build();
+        freshAnnotation = runtime.newAnnotationExpressionBuilder()
+                .setTypeInfo(runtime.getFullyQualified(Fresh.class, true, sourceSetOfRequest)).build();
+        borrowedAnnotation = runtime.newAnnotationExpressionBuilder()
+                .setTypeInfo(runtime.getFullyQualified(Borrowed.class, true, sourceSetOfRequest)).build();
+        ownedTi = runtime.getFullyQualified(Owned.class, true, sourceSetOfRequest);
         commutableTi = runtime.getFullyQualified(Commutable.class, true, sourceSetOfRequest);
         getSetTi = runtime.getFullyQualified(GetSet.class, true, sourceSetOfRequest);
     }
@@ -182,6 +191,10 @@ public class DecoratorImpl implements Qualification.Decorator {
         Property propertyUnmodifiableView = null;
         Property propertyFluent = null;
         Property propertyFinalizer = null;
+        Property propertyFresh = null;
+        Property propertyBorrowed = null;
+        Property propertyOwned = null;
+        boolean ownedElements = false;
         // the declared type of the value whose nullability is printed, and its property (explicit mode only:
         // user-facing null annotations are NullabilityDecorator's, in the flavour the user chose)
         ParameterizedType nullabilityType = null;
@@ -234,6 +247,7 @@ public class DecoratorImpl implements Qualification.Decorator {
                 propertyAllowInterrupt = methodInfo.allowsInterrupts() ? METHOD_ALLOWS_INTERRUPTS : null;
                 propertyFinalizer = methodInfo.analysis().getOrDefault(FINALIZER_METHOD, FALSE).isTrue()
                         ? FINALIZER_METHOD : null;
+                propertyFresh = !noReturn && analysis.getOrDefault(FRESH_METHOD, FALSE).isTrue() ? FRESH_METHOD : null;
                 commutableData = analysis.getOrNull(COMMUTABLE_METHODS, ValueImpl.CommutableDataImpl.class);
                 fieldValue = methodInfo.getSetField();
                 getSetEquivalent = analysis.getOrNull(GET_SET_EQUIVALENT, ValueImpl.GetSetEquivalentImpl.class);
@@ -256,6 +270,8 @@ public class DecoratorImpl implements Qualification.Decorator {
                 Value.SetOfStrings eff = analysis.getOrDefault(EVENTUALLY_FINAL_FIELD,
                         ValueImpl.SetOfStringsImpl.EMPTY_SET);
                 if (!eff.set().isEmpty()) eventuallyFinalLabels = eff.set();
+                propertyOwned = analysis.getOrDefault(OWNED_FIELD, FALSE).isTrue() ? OWNED_FIELD : null;
+                ownedElements = propertyOwned != null && analysis.getOrDefault(OWNED_ELEMENTS_FIELD, FALSE).isTrue();
             }
             case ParameterInfo pi -> {
                 boolean isUnmodified = analysis.getOrDefault(UNMODIFIED_PARAMETER, FALSE).isTrue();
@@ -276,6 +292,7 @@ public class DecoratorImpl implements Qualification.Decorator {
                 propertyNullability = NULLABILITY_PARAMETER;
                 nullabilityType = pi.parameterizedType();
                 propertyIgnoreModifications = pi.isIgnoreModifications() ? IGNORE_MODIFICATIONS_PARAMETER : null;
+                propertyBorrowed = analysis.getOrDefault(BORROWED_PARAMETER, FALSE).isTrue() ? BORROWED_PARAMETER : null;
                 Value.VariableToTypeInfoSet casts = analysis.getOrDefault(DOWNCAST_PARAMETER, ValueImpl.VariableToTypeInfoSetImpl.EMPTY);
                 if (!casts.variableToTypeInfoSet().isEmpty() && !pi.isUnmodified()) {
                     downcast = DOWNCAST_PARAMETER;
@@ -325,6 +342,20 @@ public class DecoratorImpl implements Qualification.Decorator {
         if (propertyFluent != null) {
             importsNeeded.add(Fluent.class);
             list.add(new AnnotationProperty(fluentAnnotation, propertyFluent));
+        }
+        if (propertyFresh != null) {
+            importsNeeded.add(Fresh.class);
+            list.add(new AnnotationProperty(freshAnnotation, propertyFresh));
+        }
+        if (propertyBorrowed != null) {
+            importsNeeded.add(Borrowed.class);
+            list.add(new AnnotationProperty(borrowedAnnotation, propertyBorrowed));
+        }
+        if (propertyOwned != null) {
+            importsNeeded.add(Owned.class);
+            var b = runtime.newAnnotationExpressionBuilder().setTypeInfo(ownedTi);
+            if (ownedElements) b.addKeyValuePair("elements", runtime.constantTrue());
+            list.add(new AnnotationProperty(b.build(), propertyOwned));
         }
         if (propertyAllowInterrupt != null) {
             importsNeeded.add(AllowsInterrupt.class);

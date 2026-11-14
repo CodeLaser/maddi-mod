@@ -397,9 +397,11 @@ final class Transfers {
         int[] allowed = {0};
         String[] found = new String[1];
         Set<Element> discarded = new HashSet<>();
+        Set<Element> yielded = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
         statement.visit((Element e) -> {
             if (found[0] != null) return false;
-            if (e instanceof ExpressionAsStatement eas) discarded.add(eas.expression());
+            OwnershipPass.yieldedArms(e, yielded);
+            if (e instanceof ExpressionAsStatement eas && !yielded.contains(eas)) discarded.add(eas.expression());
             if (e instanceof Lambda) {
                 if (mentionsIn(e, lv)) found[0] = lv.simpleName() + " is captured";
                 return false;
@@ -464,11 +466,11 @@ final class Transfers {
 
     static boolean isThisField(Variable variable, FieldInfo field) {
         return variable instanceof FieldReference fr && fr.fieldInfo().equals(field) && !field.isStatic()
-               && (fr.scopeVariable() == null || fr.scopeVariable() instanceof This);
+               && (fr.scope() == null || fr.scopeVariable() instanceof This);
     }
 
     // a primitive, or a deeply immutable value: it cannot reach a mutable object
-    private static boolean cannotHold(ParameterizedType type) {
+    static boolean cannotHold(ParameterizedType type) {
         return type.isPrimitiveExcludingVoid() || type.isVoid()
                || new AnalysisHelper().typeImmutable(type).isImmutable();
     }
@@ -478,21 +480,22 @@ final class Transfers {
      content of the receiver, not the receiver itself; elements are not judged (stage 3). A method's own type parameter
      ('<T> T as()') can be anything, the receiver included.
      */
-    private static boolean returnsElement(MethodInfo methodInfo) {
+    static boolean returnsElement(MethodInfo methodInfo) {
         ParameterizedType rt = methodInfo.returnType();
         return rt.isTypeParameter() && rt.typeParameter() != null && !rt.typeParameter().isMethodTypeParameter();
     }
 
-    /** Through casts, parentheses and identity methods ({@code Objects.requireNonNull(x)} is {@code x}). */
+    /** Through casts, parentheses and pass-through methods ({@code Objects.requireNonNull(x)} is {@code x}). */
     static Expression unwrap(Expression expression) {
         Expression e = expression;
         while (true) {
             if (e instanceof Cast c) e = c.expression();
             else if (e instanceof EnclosedExpression ee) e = ee.inner();
-            else if (e instanceof MethodCall mc && mc.methodInfo() != null && !mc.parameterExpressions().isEmpty()
-                     && mc.methodInfo().analysis().getOrDefault(PropertyImpl.IDENTITY_METHOD,
-                    ValueImpl.BoolImpl.FALSE).isTrue()) {
-                e = mc.parameterExpressions().getFirst();
+            else if (e instanceof MethodCall mc && mc.methodInfo() != null
+                     && OwnershipPass.passThrough(mc.methodInfo()) >= 0
+                     && OwnershipPass.passThrough(mc.methodInfo()) < mc.parameterExpressions().size()) {
+                // returns that argument and keeps it nowhere (not merely @Identity: 'register(x)' may return x)
+                e = mc.parameterExpressions().get(OwnershipPass.passThrough(mc.methodInfo()));
             } else return e;
         }
     }
