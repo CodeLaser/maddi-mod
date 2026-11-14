@@ -1070,7 +1070,6 @@ public record ExpressionVisitor(Runtime runtime,
      recursive callee of another cycle still gets the empty one. Gate NONARROWRECURSION restores the old rule.
      */
     static final boolean NO_NARROW_RECURSION = System.getenv("NONARROWRECURSION") != null;
-    static final boolean RECURSION_MARKS_NOTHING = System.getenv("RECURSIONMARKSNOTHING") != null;
     /*
      #127: inside a recursive method, only callees WITHOUT a source body (library, JDK) keep their summary: those are
      what the issue is about (Deque.push, Map.put, List.getFirst), and they are cheap. Keeping the summaries of source
