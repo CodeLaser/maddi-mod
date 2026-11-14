@@ -615,10 +615,38 @@ public class ShadowModificationPass {
      */
     public static volatile boolean DEEP_WALK = System.getenv("NODEEPWALK") == null;
 
-    private final Map<MethodInfo, Boolean> deepOnlyRederivableCache = new HashMap<>();
+    private final Map<MethodInfo, Set<Object>> chainedRootsCache = new HashMap<>();
 
-    private boolean deepOnlyRederivable(MethodInfo mi) {
-        return DEEP_WALK && deepOnlyRederivableCache.computeIfAbsent(mi, m -> !chainedModifiableReceiver(m));
+    /*
+     CodeLaser/maddi-mod#127: is the deep-only summary entry 'v' of 'mi' left to the walk? A chained modifiable receiver
+     only threatens the entries rooted where that chain is rooted: jenkins' UpstreamCause.print(listener, depth) has
+     'listener.getLogger().println(...)', and that kept the deep-only 'this.upstreamCauses' as a seed -- an entry the
+     summary holds only through the fixpoint's verdict on 'cause.print(listener)' (pessimistic: UserIdCause.getUserName),
+     which made the whole print cycle modifying. NOPERROOTCHAIN=1 restores the method-wide rule.
+     */
+    private boolean deepOnlyRederivable(MethodInfo mi, Variable v) {
+        if (!DEEP_WALK) return false;
+        Set<Object> roots = chainedRootsCache.computeIfAbsent(mi, this::chainedModifiableReceiverRoots);
+        if (roots.isEmpty()) return true;
+        if (NO_PER_ROOT_CHAIN || roots.contains(ANY_ROOT)) return false;
+        Object root = variableRoot(v);
+        return root != null && !roots.contains(root);
+    }
+
+    static final boolean NO_PER_ROOT_CHAIN = System.getenv("NOPERROOTCHAIN") != null;
+    private static final Object ANY_ROOT = new Object();
+    private static final Object THIS_ROOT = new Object();
+
+    // the root of a summary entry: THIS_ROOT for this and this-scoped fields, the parameter itself; null = unknown
+    private static Object variableRoot(Variable v) {
+        return switch (v) {
+            case This _ -> THIS_ROOT;
+            case FieldReference fr when fr.scopeIsRecursivelyThis() -> THIS_ROOT;
+            case FieldReference fr when fr.scopeVariable() != null && !fr.isStatic() -> variableRoot(fr.scopeVariable());
+            case ParameterInfo pi -> pi;
+            case DependentVariable dv when dv.arrayVariable() != null -> variableRoot(dv.arrayVariable());
+            default -> null;
+        };
     }
 
     /*
@@ -627,27 +655,52 @@ public class ShadowModificationPass {
      not through the walk's element links (TestModificationOfElementFromGetter). A cast or parentheses around the inner
      call do not change that.
      */
-    private boolean chainedModifiableReceiver(MethodInfo mi) {
+    private Set<Object> chainedModifiableReceiverRoots(MethodInfo mi) {
         Block body = mi.methodBody();
-        if (body == null || body.isEmpty()) return false;
-        boolean[] found = {false};
+        if (body == null || body.isEmpty()) return Set.of();
+        Set<Object> roots = new HashSet<>();
+        Set<Variable> assigned = new HashSet<>();
         body.visit(e -> {
-            if (found[0]) return false;
+            if (e instanceof Assignment a && a.variableTarget() != null) assigned.add(a.variableTarget());
+            return true;
+        });
+        body.visit(e -> {
+            if (roots.contains(ANY_ROOT)) return false;
             if (e instanceof MethodCall mc && mc.object() != null) {
-                Expression o = mc.object();
-                while (true) {
-                    if (o instanceof EnclosedExpression ee) o = ee.inner();
-                    else if (o instanceof Cast c) o = c.expression();
-                    else break;
-                }
+                Expression o = unwrap(mc.object());
                 if (o instanceof MethodCall inner && !immutableForModification(inner.parameterizedType())) {
-                    found[0] = true;
-                    return false;
+                    roots.add(expressionRoot(inner, assigned));
                 }
             }
             return true;
         });
-        return found[0];
+        return roots;
+    }
+
+    private static Expression unwrap(Expression e) {
+        Expression o = e;
+        while (true) {
+            if (o instanceof EnclosedExpression ee) o = ee.inner();
+            else if (o instanceof Cast c) o = c.expression();
+            else return o;
+        }
+    }
+
+    // where a call chain starts: THIS_ROOT, a parameter the body never assigns, or ANY_ROOT (locals, statics, ...)
+    private static Object expressionRoot(Expression e, Set<Variable> assigned) {
+        Expression o = unwrap(e);
+        if (o instanceof MethodCall mc) {
+            if (mc.object() == null) return mc.methodInfo() != null && mc.methodInfo().isStatic() ? ANY_ROOT : THIS_ROOT;
+            if (mc.object() instanceof TypeExpression) return ANY_ROOT;
+            return expressionRoot(mc.object(), assigned);
+        }
+        if (o instanceof VariableExpression ve) {
+            Variable v = ve.variable();
+            if (v instanceof LocalVariable) return ANY_ROOT;
+            Object r = variableRoot(v);
+            return r == null || r instanceof ParameterInfo pi && assigned.contains(pi) ? ANY_ROOT : r;
+        }
+        return ANY_ROOT;
     }
 
     /** @param structural the summary's modification of {@code v} is structural (#25), not of its hidden content only */
@@ -655,7 +708,7 @@ public class ShadowModificationPass {
         // #59: a deep-only entry is an element's modification ('products.get(k).put(...)': 'p ∈ this.products'). The
         // walk follows the plain element links (project), not every channel there is: it stays a seed, deep-only, and
         // so cannot touch the structural twin, which the walk re-derives
-        if (!structural && !deepOnlyRederivable(mi)) skipReceiverRooted = false;
+        if (!structural && !deepOnlyRederivable(mi, v)) skipReceiverRooted = false;
         switch (v) {
             case This thisVar -> {
                 // P3: receiver-rooted summary entry of a walkable body — re-derived via primitives + E2
