@@ -96,6 +96,14 @@ public class TestLazyCacheField extends CommonTest {
                     @Override public int hashCode() { return 1; }
                     @Override public String name() { return "k"; }
                 }
+                static class ClearingKey implements Keyed {
+                    @Override public boolean equals(Object o) {
+                        if (o instanceof List<?> list) list.clear();
+                        return o == this;
+                    }
+                    @Override public int hashCode() { return 2; }
+                    @Override public String name() { return "c"; }
+                }
             }
             """;
 
@@ -108,7 +116,8 @@ public class TestLazyCacheField extends CommonTest {
                 .setModificationViaReachability(true)
                 .build()).analyze(ao);
         StringBuilder sb = new StringBuilder();
-        for (String typeName : List.of("VarVersion", "StrLike", "Counter", "Keyed", "CountingKey")) {
+        for (String typeName : List.of("VarVersion", "StrLike", "Counter", "Keyed", "CountingKey",
+                "ClearingKey")) {
             TypeInfo t = X.findSubType(typeName);
             for (FieldInfo f : t.fields()) {
                 sb.append(typeName).append('.').append(f.name()).append(" ignoreMod=").append(f.isIgnoreModifications())
@@ -140,6 +149,8 @@ public class TestLazyCacheField extends CommonTest {
                 CountingKey.n ignoreMod=false
                 CountingKey.hashCode nonModifying=true
                 CountingKey.equals nonModifying=false o=true
+                ClearingKey.hashCode nonModifying=true
+                ClearingKey.equals nonModifying=true o=false
                 Lookup.get pair=true
                 """, sb.toString());
     }

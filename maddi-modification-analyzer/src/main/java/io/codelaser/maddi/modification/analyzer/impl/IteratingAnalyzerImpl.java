@@ -1233,11 +1233,12 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
             case MethodInfo mi -> mi.isAbstract()
                     && (s.contractResolution().resolve(mi, PropertyImpl.NON_MODIFYING_METHOD).decided()
                         || AbstractMethodAnalyzerImpl.isObjectQueryRedeclaration(mi));
+            // a bodiless method's parameter: its contract, or Object's (#124); one of a method with a body: an
+            // explicit @NotModified(contract = true) (#125)
             case ParameterInfo pi -> pi.methodInfo().isAbstract()
-                    && (s.contractResolution().resolve(pi, PropertyImpl.UNMODIFIED_PARAMETER).decided()
-                        || AbstractMethodAnalyzerImpl.isObjectQueryRedeclaration(pi.methodInfo()))
                     ? s.contractResolution().resolve(pi, PropertyImpl.UNMODIFIED_PARAMETER).decided()
-                    : io.codelaser.maddi.modification.prepwork.Util.explicitNotModifiedContractOnBody(pi); // #125
+                      || AbstractMethodAnalyzerImpl.isObjectQueryRedeclaration(pi.methodInfo())
+                    : io.codelaser.maddi.modification.prepwork.Util.explicitNotModifiedContractOnBody(pi);
             default -> false;
         }
                 : _ -> false;
