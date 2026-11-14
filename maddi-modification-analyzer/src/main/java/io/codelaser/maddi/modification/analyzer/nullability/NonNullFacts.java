@@ -772,7 +772,7 @@ public final class NonNullFacts {
 
     // a call that may change a map reached through pure calls: not itself pure, not a map read
     private static boolean changesReachedMap(Expression call) {
-        if (call instanceof ConstructorCall cc) return cc.constructor() != null || cc.anonymousClass() != null;
+        if (call instanceof ConstructorCall cc) return cc.callsConstructorOfCreatedType() || cc.isAnonymousCreation();
         if (!(call instanceof MethodCall mc)) return false;
         MethodInfo mi = mc.methodInfo();
         return mi == null || !MAP_READS.contains(mi.name()) && !mi.isNonModifying() && !libraryGetter(mi);
@@ -1054,7 +1054,7 @@ public final class NonNullFacts {
         List<Expression> handed = new ArrayList<>();
         switch (call) {
             case ConstructorCall cc -> {
-                if (cc.constructor() == null) return cc.anonymousClass() != null; // 'new byte[n]', '{ a, b }'
+                if (!cc.callsConstructorOfCreatedType()) return cc.isAnonymousCreation(); // 'new byte[n]', '{ a, b }'
                 if (cc.anonymousClass() != null || !library(cc.constructor())) return true;
                 handed.addAll(cc.parameterExpressions());
             }
@@ -1508,7 +1508,7 @@ public final class NonNullFacts {
                     record(cc, facts);
                     for (Expression argument : cc.parameterExpressions()) effects(argument, facts);
                     whenCalled.put(cc, Set.copyOf(facts));
-                    if (cc.constructor() != null) demanded(cc.constructor(), cc.parameterExpressions(), facts);
+                    if (cc.callsConstructorOfCreatedType()) demanded(cc.constructor(), cc.parameterExpressions(), facts);
                     callMade(facts, cc);
                     return false;
                 }

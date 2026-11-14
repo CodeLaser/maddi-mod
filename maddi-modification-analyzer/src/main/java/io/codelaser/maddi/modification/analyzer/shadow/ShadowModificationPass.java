@@ -851,7 +851,7 @@ public class ShadowModificationPass {
                     for (Object node : projectModificationIdenticals(mi, vd, mc.object(), mc.methodInfo())) {
                         addEdge(mc.methodInfo(), node);
                     }
-                } else if (e instanceof ConstructorCall cc && cc.constructor() != null) {
+                } else if (e instanceof ConstructorCall cc && cc.callsConstructorOfCreatedType()) {
                     seedBoundaryCalleeParameters(mi, cc.constructor());
                     handleCallSite(mi, vd, cc.constructor(), cc.analysis(), cc.parameterExpressions(), null, null);
                 }
@@ -1209,7 +1209,7 @@ public class ShadowModificationPass {
                 }
                 return out;
             }
-            case ConstructorCall cc when cc.constructor() != null -> {
+            case ConstructorCall cc when cc.callsConstructorOfCreatedType() -> {
                 // a fresh object: modification of its graph implicates the arguments its
                 // constructor captures into fields (IS_ASSIGNED_TO this-scoped targets)
                 MethodInfo ctor = cc.constructor();
@@ -1787,7 +1787,7 @@ public class ShadowModificationPass {
         return switch (e) {
             case Assignment a when a.variableTarget() != null -> "assigns " + targetName(a.variableTarget());
             case MethodCall mc when mc.methodInfo() != null -> Culprits.describeCall(mc, mc.methodInfo());
-            case ConstructorCall cc when cc.constructor() != null -> Culprits.describeCall(cc, cc.constructor());
+            case ConstructorCall cc when cc.callsConstructorOfCreatedType() -> Culprits.describeCall(cc, cc.constructor());
             default -> "modifies";
         };
     }
@@ -1977,7 +1977,7 @@ public class ShadowModificationPass {
         if (init instanceof ArrayInitializer ai) return ai.expressions().isEmpty();
         if (!(init instanceof ConstructorCall cc)) return false;
         if (cc.arrayInitializer() != null) return cc.arrayInitializer().expressions().isEmpty();
-        if (cc.anonymousClass() != null || cc.constructor() == null) return false;
+        if (!cc.callsConstructorOfCreatedType()) return false;
         return exactlyImmutable(cc.constructor().typeInfo());
     }
 

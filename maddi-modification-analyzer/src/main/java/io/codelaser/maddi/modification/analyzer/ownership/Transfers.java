@@ -117,7 +117,7 @@ final class Transfers {
                         if (mr.methodInfo() != null) referenced.add(mr.methodInfo());
                     }
                     case ConstructorCall cc -> {
-                        if (cc.constructor() != null && cc.anonymousClass() == null) {
+                        if (cc.callsConstructorOfCreatedType()) {
                             sites.computeIfAbsent(cc.constructor(), _ -> new ArrayList<>())
                                     .add(new Site(caller, cc.parameterExpressions(), cc));
                         }

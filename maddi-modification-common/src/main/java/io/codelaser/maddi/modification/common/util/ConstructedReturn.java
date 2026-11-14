@@ -190,7 +190,7 @@ final class ConstructedReturn {
         private TypeInfo constructs(Expression e) {
             if (e instanceof Cast cast) return constructs(cast.expression());
             if (e instanceof ConstructorCall cc) {
-                if (cc.anonymousClass() != null || cc.arrayInitializer() != null || cc.constructor() == null
+                if (cc.arrayInitializer() != null || !cc.callsConstructorOfCreatedType()
                     || cc.parameterizedType().arrays() > 0) {
                     return null;
                 }

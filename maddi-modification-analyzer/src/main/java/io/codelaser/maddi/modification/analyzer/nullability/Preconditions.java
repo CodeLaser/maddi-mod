@@ -234,7 +234,7 @@ final class Preconditions {
                 if (e instanceof MethodCall mc) {
                     callee = mc.methodInfo();
                     arguments = mc.parameterExpressions();
-                } else if (e instanceof ConstructorCall cc && cc.constructor() != null && cc.anonymousClass() == null) {
+                } else if (e instanceof ConstructorCall cc && cc.callsConstructorOfCreatedType()) {
                     callee = cc.constructor();
                     arguments = cc.parameterExpressions();
                 } else if (e instanceof ExplicitConstructorInvocation eci && eci.methodInfo() != null) {

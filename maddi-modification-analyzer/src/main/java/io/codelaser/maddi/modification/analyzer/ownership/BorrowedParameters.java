@@ -284,7 +284,7 @@ final class BorrowedParameters {
                             found[0] = "captured by an anonymous class";
                             return false;
                         }
-                    } else if (cc.constructor() != null) {
+                    } else if (cc.callsConstructorOfCreatedType()) {
                         arguments(cc.constructor(), cc.parameterExpressions(), aliases, deps);
                     }
                 }

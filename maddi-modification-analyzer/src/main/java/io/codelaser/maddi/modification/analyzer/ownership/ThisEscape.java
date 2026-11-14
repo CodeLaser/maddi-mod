@@ -131,7 +131,7 @@ final class ThisEscape {
                         found[0] = "an anonymous class captures this";
                         return false;
                     }
-                    if (cc.constructor() != null && cc.constructor().typeInfo().isInnerClass() && cc.object() == null) {
+                    if (cc.callsConstructorOfCreatedType() && cc.constructor().typeInfo().isInnerClass() && cc.object() == null) {
                         found[0] = "an inner class instance captures this";
                         return false;
                     }

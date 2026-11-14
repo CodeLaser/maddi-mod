@@ -757,7 +757,7 @@ final class MethodWalker {
                 }
                 if (e instanceof MethodCall mc && mc.methodInfo() != null) {
                     callSite(mi, own, statement, mc, mc.methodInfo(), mc.analysis(), mc.parameterExpressions());
-                } else if (e instanceof ConstructorCall cc && cc.constructor() != null) {
+                } else if (e instanceof ConstructorCall cc && cc.callsConstructorOfCreatedType()) {
                     callSite(mi, own, statement, cc, cc.constructor(), cc.analysis(), cc.parameterExpressions());
                 }
                 if (e instanceof ConstructorCall cc) {
@@ -1333,7 +1333,7 @@ final class MethodWalker {
         if (unwrappedArgument instanceof Lambda lambda) callResults.libraryCallback(lambda, pi);
         // 'getUniqueNext(graph, new HashSet<>(mapNext.values()))': a library copy constructor as the argument copies
         // its argument's content into the parameter's slots (fernflower FinallyProcessor)
-        if (unwrappedArgument instanceof ConstructorCall copy && copy.constructor() != null
+        if (unwrappedArgument instanceof ConstructorCall copy && copy.callsConstructorOfCreatedType()
             && !index.analysed.contains(copy.constructor()) && copy.parameterizedType() != null
             && copy.parameterizedType().arrays() == 0) {
             callResults.contentCopies(mi, scope, pi, copy.constructor(), copy.parameterExpressions());

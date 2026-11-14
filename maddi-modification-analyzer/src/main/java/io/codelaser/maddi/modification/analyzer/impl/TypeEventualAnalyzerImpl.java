@@ -1410,13 +1410,13 @@ public class TypeEventualAnalyzerImpl extends CommonAnalyzerImpl implements Type
             for (int i = 0; i < ccArgs.size(); i++) {
                 Expression arg = ccArgs.get(i);
                 Set<String> argLabels = commitLabels(walk, arg, ctx, depth);
-                if (argLabels == null && cc.constructor() != null) {
+                if (argLabels == null && cc.callsConstructorOfCreatedType()) {
                     // the container ride-along, argument position (the fluent-copy constructor)
                     argLabels = containerArgumentLabels(walk, cc.constructor(), i, arg, ctx);
                 }
                 if (argLabels == null) {
                     if (siteDebug()) ecsite("CC arg " + i + " bail at "
-                            + (cc.constructor() == null ? "?" : cc.constructor().fullyQualifiedName()));
+                            + (!cc.callsConstructorOfCreatedType() ? "?" : cc.constructor().fullyQualifiedName()));
                     return null;
                 }
                 acc.addAll(argLabels);
@@ -1630,7 +1630,7 @@ public class TypeEventualAnalyzerImpl extends CommonAnalyzerImpl implements Type
         Expression object = mc.object();
         while (object instanceof EnclosedExpression ee) object = ee.inner();
         if (object instanceof Cast cast) object = cast.expression();
-        if (!(object instanceof ConstructorCall cc) || cc.constructor() == null) return null;
+        if (!(object instanceof ConstructorCall cc) || !cc.callsConstructorOfCreatedType()) return null;
         Value.Bool calleeNonMod = mc.methodInfo().analysis()
                 .getOrNull(NON_MODIFYING_METHOD, ValueImpl.BoolImpl.class);
         if (calleeNonMod != null && calleeNonMod.isTrue()) return null; // nothing to excuse

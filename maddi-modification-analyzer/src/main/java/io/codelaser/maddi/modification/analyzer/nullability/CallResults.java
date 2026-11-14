@@ -359,7 +359,7 @@ final class CallResults {
      new object, which is the target's ('l = new ArrayList<>(c)'): the argument's slots flow into the target's.
      */
     private void constructorCopies(MethodInfo mi, Scope scope, Object target, Expression value) {
-        if (target == null || !(NonNullFacts.unwrap(value) instanceof ConstructorCall cc) || cc.constructor() == null
+        if (target == null || !(NonNullFacts.unwrap(value) instanceof ConstructorCall cc) || !cc.callsConstructorOfCreatedType()
             || cc.parameterizedType() == null || cc.parameterizedType().arrays() > 0) return;
         contentCopies(mi, scope, target, cc.constructor(), cc.parameterExpressions());
         // an analysed generic class: an argument to a parameter typed with the class's type variables inside a

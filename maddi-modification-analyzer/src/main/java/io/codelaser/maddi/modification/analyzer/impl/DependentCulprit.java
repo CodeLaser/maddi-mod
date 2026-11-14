@@ -178,7 +178,7 @@ final class DependentCulprit {
             case Assignment a when a.variableTarget() instanceof FieldReference fr ->
                     "assigns " + fr.fieldInfo().name() + " = " + text(a.value());
             case MethodCall mc when mc.methodInfo() != null -> Culprits.describeCall(mc, mc.methodInfo());
-            case ConstructorCall cc when cc.constructor() != null -> Culprits.describeCall(cc, cc.constructor());
+            case ConstructorCall cc when cc.callsConstructorOfCreatedType() -> Culprits.describeCall(cc, cc.constructor());
             default -> "links it";
         };
     }

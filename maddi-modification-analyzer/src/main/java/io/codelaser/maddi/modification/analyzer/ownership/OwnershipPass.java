@@ -382,7 +382,7 @@ public final class OwnershipPass {
             if (e instanceof ConstructorCall cc) {
                 // a constructor that leaves 'this' held elsewhere (a captured lambda registered on a bus): no link
                 // says so when the capture is indirect
-                if (cc.constructor() != null && cc.anonymousClass() == null && thisEscape.mayLeak(cc.constructor())) {
+                if (cc.callsConstructorOfCreatedType() && thisEscape.mayLeak(cc.constructor())) {
                     return "constructor " + cc.constructor().fullyQualifiedName() + " may leak this: "
                            + thisEscape.why(cc.constructor());
                 }

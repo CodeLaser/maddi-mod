@@ -1608,7 +1608,7 @@ abstract class IsolationCore {
                         // interface has no constructor, so the cc.constructor() branch below never reaches it
                         visitNestedTypeBodies(cc.anonymousClass(), ds(cc));
                     }
-                    if (cc.constructor() != null) {
+                    if (cc.callsConstructorOfCreatedType()) {
                         // stub the constructed type first, so the constructor lands on the stub, not the real type
                         ParameterizedType constructed = ensureTypes(cc.parameterizedType(), ds(cc));
                         // 'new IParameter[n]' carries a SYNTHETIC constructor -- Factory.newArrayCreationConstructor,

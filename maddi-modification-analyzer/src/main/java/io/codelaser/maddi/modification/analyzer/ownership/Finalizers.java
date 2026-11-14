@@ -112,7 +112,7 @@ final class Finalizers {
                     argSites.computeIfAbsent(mc.methodInfo(), _ -> new ArrayList<>())
                             .add(new ArgSite(caller, mc.parameterExpressions(), mc));
                 }
-                if (e instanceof ConstructorCall cc && cc.constructor() != null) {
+                if (e instanceof ConstructorCall cc && cc.callsConstructorOfCreatedType()) {
                     argSites.computeIfAbsent(cc.constructor(), _ -> new ArrayList<>())
                             .add(new ArgSite(caller, cc.parameterExpressions(), cc));
                 }
