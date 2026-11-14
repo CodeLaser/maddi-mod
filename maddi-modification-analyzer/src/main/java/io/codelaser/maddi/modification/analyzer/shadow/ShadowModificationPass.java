@@ -1376,9 +1376,12 @@ public class ShadowModificationPass {
                                 // #112: 'e ≤ 0:x.map.§$$s[-2]', an object from inside a container's hidden content
                                 // (an element of a copy of one of its values): its container, deep-only, as for ∈
                                 if (!NO_OBJECT_GRAPH_MOD) {
+                                    // #104: or the whole container, 'c ≤ this.nested' (for (C c : nested.get(i))), as
+                                    // the engine's ≥ rule takes either face
                                     links.stream().filter(l -> l.linkNature() == LinkNatureImpl.IS_IN_OBJECT_GRAPH
-                                                               && Util.virtual(l.to())
-                                                               && !Util.isVirtualModification(l.to())
+                                                               && (Util.virtual(l.to())
+                                                                   ? !Util.isVirtualModification(l.to())
+                                                                   : !NO_WHOLE_CONTAINER && !l.to().equals(v))
                                                                && l.from().fullyQualifiedName()
                                                                        .equals(v.fullyQualifiedName()))
                                             .map(l -> Util.firstRealVariable(l.to()))
@@ -1440,6 +1443,7 @@ public class ShadowModificationPass {
     private static final boolean NO_CO_ELEMENT = Gate.isSet("NOCOELEMENT");
     private static final boolean NO_OBJECT_GRAPH_MOD = Gate.isSet("NOOBJECTGRAPHMOD");
     private static final boolean NO_VIEW_ELEMENT_MOD = Gate.isSet("NOVIEWELEMENTMOD");
+    private static final boolean NO_WHOLE_CONTAINER = Gate.isSet("NOWHOLECONTAINER");
 
     private static void coElements(VariableData vd, Variable hiddenContent, List<Variable> out) {
         if (!Util.virtual(hiddenContent) || Util.isVirtualModification(hiddenContent)) return;
