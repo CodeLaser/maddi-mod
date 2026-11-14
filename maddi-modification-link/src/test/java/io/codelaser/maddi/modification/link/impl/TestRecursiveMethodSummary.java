@@ -16,9 +16,9 @@ import io.codelaser.maddi.modification.link.LinkComputer;
 import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
 
 /**
- * CodeLaser/maddi-mod#127: in a method that is part of a recursion, a call to a callee OUTSIDE the recursion (a library
- * method, a plain helper) keeps its summary. Only a call back into the recursion gets the empty one. The recursive
- * variants must link {@code t} exactly as the flat ones do.
+ * CodeLaser/maddi-mod#127: in a method that is part of a recursion, a call to a library method (no source body) keeps
+ * its summary. Calls back into the recursion, and to source callees, get the empty one (the latter for cost: see
+ * ExpressionVisitor.RECURSION_SOURCE_SUMMARIES). The recursive variants must link {@code t} exactly as the flat ones do.
  */
 public class TestRecursiveMethodSummary extends CommonTest {
 
