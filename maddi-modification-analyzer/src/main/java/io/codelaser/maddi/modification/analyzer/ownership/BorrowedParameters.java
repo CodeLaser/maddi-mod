@@ -55,6 +55,7 @@ import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 import io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl;
 import io.codelaser.maddi.modification.prepwork.variable.Link;
 import io.codelaser.maddi.modification.prepwork.variable.Links;
+import io.codelaser.maddi.modification.prepwork.Util;
 import io.codelaser.maddi.modification.prepwork.variable.MethodLinkedVariables;
 
 /**
@@ -265,8 +266,9 @@ final class BorrowedParameters {
      (a library method whose hints say dependentReturnValue, Collections.synchronizedList; Collection.toArray(T[])).
      */
     private static boolean itself(Variable v, ParameterInfo pi, boolean face) {
-        return pi.equals(v) || face && v instanceof FieldReference fr && "§m".equals(fr.fieldInfo().name())
-                               && pi.equals(fr.scopeVariable());
+        // any modification face: '§m', and the face a T[] gets, named after the type parameter ('§mT', toArray(T[]))
+        return pi.equals(v) || face && Util.isVirtualModification(v)
+                               && pi.equals(((FieldReference) v).scopeVariable());
     }
 
     /**

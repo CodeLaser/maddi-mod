@@ -37,9 +37,9 @@ import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
 /**
  * {@code Collection.toArray(T[] a)} writes the elements into {@code a} when they fit, and then returns {@code a}
  * itself (CodeLaser/maddi#211). A method that delegates to it (gson's {@code NonNullElementWrapperList}) therefore
- * modifies its argument. It may also return it, so the argument is not borrowed: that half is still open, because a
- * dependent return value (the hint's {@code @Independent(dependentReturnValue = true)}) gives a view link, not the
- * {@code ret ← 0:a} that BorrowedParameters' rule 1 reads. When it is fixed, toArray's line becomes borrowed=false.
+ * modifies its argument. It may also return it, so the argument is not borrowed: the hint's
+ * {@code @Independent(dependentReturnValue = true)} gives {@code toArray.§mT ≡ 0:a.§mT}, which BorrowedParameters'
+ * rule 1 reads as a view of the argument returned (link: TestToArrayFaceLink).
  */
 public class TestToArrayArgument extends CommonTest {
 
@@ -73,7 +73,7 @@ public class TestToArrayArgument extends CommonTest {
                     .append('\n');
         }
         assertEquals("""
-                toArray unmodified=false borrowed=true
+                toArray unmodified=false borrowed=false
                 count unmodified=true borrowed=true
                 """, sb.toString());
     }

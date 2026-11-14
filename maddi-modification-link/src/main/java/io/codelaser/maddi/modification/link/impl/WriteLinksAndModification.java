@@ -341,6 +341,17 @@ class WriteLinksAndModification {
 
     On top of that, we add the relevant modification links kept in VirtualModificationIdenticals.
     */
+    // 'rv.§m ≡ 0:p.§m' or 'rv.§m ≡ this.f.§m': both ends faces, the other end a parameter or a field (not a local or an
+    // intermediate, which the summary drops anyway)
+    private static boolean returnFaceToSummarised(Link link) {
+        if (!link.linkNature().isIdenticalTo() || !Util.isVirtualModification(link.from())
+            || !Util.isVirtualModification(link.to())) {
+            return false;
+        }
+        Variable other = Util.firstRealVariable(link.to());
+        return other instanceof ParameterInfo || other instanceof FieldReference;
+    }
+
     private List<Link> doVariableReturnRecompute(Statement statement,
                                                  boolean lastStatement,
                                                  VariableInfo vi,
@@ -496,10 +507,15 @@ class WriteLinksAndModification {
         // finally, modification edges
         // a pass-carrying ☷ edge is kept on its own: it IS the relation between the two objects (an inner-class
         // instance and its outer 'this', 'it.§m ☷{remove} this.§m'); nothing else links them
+        // A return value's face identical to a parameter's or a field's is kept even when nothing else links the
+        // two: a library method whose hints say dependentReturnValue may return its argument itself
+        // ('toArray.§mT ≡ 0:t.§mT', Collection.toArray(T[]): the content comes from the receiver, so no other link
+        // reaches 'a'), and the face is all the summary has to say so (CodeLaser/maddi#211).
         followGraph.graph().virtualModificationEdgeStream(variable)
                 .filter(link -> builder.containsPrimaryOf(link.to())
                                 || !link.linkNature().pass().isEmpty()
-                                   && !Util.firstRealVariable(link.from()).equals(Util.firstRealVariable(link.to())))
+                                   && !Util.firstRealVariable(link.from()).equals(Util.firstRealVariable(link.to()))
+                                || variable instanceof ReturnVariable && returnFaceToSummarised(link))
                 .filter(link -> !builder.contains(link.from(), link.linkNature(), link.to()))
                 .forEach(link -> builder.add(link.from(), link.linkNature(), link.to()));
 
