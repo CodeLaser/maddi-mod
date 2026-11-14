@@ -106,6 +106,14 @@ public class TestBorrowedParameter extends CommonTest {
                 List<String> sync(List<String> l) { return Collections.synchronizedList(l); }
                 int viewDiscarded(List<String> l) { return Collections.synchronizedList(l).size(); }
                 static class Node { List<String> value; }
+                static class Tree {
+                    List<Tree> children = new ArrayList<>();
+                    List<String> data;
+                    static Tree firstData(Tree t) {
+                        if (t.data != null) return t;
+                        return t.children.isEmpty() ? null : firstData(t.children.get(0));
+                    }
+                }
                 static class TreeMap2<K, V> {
                     static final class N<K, V> { final K key; V value; N<K, V> left; N(K key) { this.key = key; } }
                     private N<K, V> root;
@@ -222,6 +230,7 @@ public class TestBorrowedParameter extends CommonTest {
             Map.entry("X.holderCaptured:l", false),
             Map.entry("TreeMap2.put:value", false),
             Map.entry("X.view:m", false),
+            Map.entry("Tree.firstData:t", false),
             Map.entry("X.sync:l", false),
             Map.entry("X.viewDiscarded:l", true),
             Map.entry("Json.add:value", false),

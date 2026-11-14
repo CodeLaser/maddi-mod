@@ -42,6 +42,7 @@ import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.statement.ExplicitConstructorInvocation;
 import io.codelaser.maddi.cst.api.statement.LocalVariableCreation;
+import io.codelaser.maddi.cst.api.statement.ReturnStatement;
 import io.codelaser.maddi.cst.api.variable.DependentVariable;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.cst.api.variable.LocalVariable;
@@ -82,7 +83,7 @@ import io.codelaser.maddi.modification.prepwork.variable.MethodLinkedVariables;
  *   <li><b>Stores</b> no link shows, when no link shows any keep: an alias (through casts, conditionals and identity
  *   methods) assigned to a field or an array element, but one of a local holding only new objects
  *   ({@code this.s = Objects.requireNonNull(s)} into an interface-typed field; {@code created.value = value} into a
- *   node a callee returned).</li>
+ *   node a callee returned); returned ({@code return stat} beside a recursive return).</li>
  * </ol>
  * Aliases flow through the same casts, conditionals and identity methods everywhere.
  * Rules 4 and 5 are a greatest fixpoint, as for freshness. A {@code @Borrowed} contract decides a parameter of a
@@ -343,6 +344,11 @@ final class BorrowedParameters {
                     // rule 7: stored in a field or an array element, where links may not show it (an identity call,
                     // a field whose type counts as immutable, a node a callee returned)
                     found[0] = "stored in " + a.target().variable().simpleName();
+                    return false;
+                }
+                case ReturnStatement rs when stores && rs.expression() != null && isAlias(rs.expression(), aliases) -> {
+                    // returned, where no link shows it (a recursive method whose other returns hide this one)
+                    found[0] = "returned";
                     return false;
                 }
                 case ExplicitConstructorInvocation eci -> {
