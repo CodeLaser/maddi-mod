@@ -34,6 +34,7 @@ import io.codelaser.maddi.cst.api.expression.ConstructorCall;
 import io.codelaser.maddi.cst.api.expression.EnclosedExpression;
 import io.codelaser.maddi.cst.api.expression.Expression;
 import io.codelaser.maddi.cst.api.expression.InlineConditional;
+import io.codelaser.maddi.cst.api.expression.InstanceOf;
 import io.codelaser.maddi.cst.api.expression.Lambda;
 import io.codelaser.maddi.cst.api.expression.MethodCall;
 import io.codelaser.maddi.cst.api.expression.MethodReference;
@@ -503,6 +504,10 @@ final class BorrowedParameters {
                 lvc.localVariableStream().forEach(lv -> assignments.add(Map.entry(lv, lv.assignmentExpression())));
             } else if (e instanceof Assignment a && a.target().variable() instanceof LocalVariable lv) {
                 assignments.add(Map.entry(lv, a.value()));
+            } else if (e instanceof InstanceOf io && io.patternVariable() != null
+                       && io.patternVariable().localVariable() != null) {
+                // 'statement instanceof SwitchStatement s': s is the same object
+                assignments.add(Map.entry(io.patternVariable().localVariable(), io.expression()));
             }
             return true;
         });

@@ -91,6 +91,7 @@ public class TestBorrowedParameter extends CommonTest {
                 void consume(Consumer<List<String>> c, List<String> l) { c.accept(l); }
                 void receiverLeaks(Leaky k) { k.leak(); }
                 void viaSink(Sink s, List<String> l) { s.put(l); }
+                void viaPattern(Registry r, Object o) { if (o instanceof List<?> l) r.register((List<String>) l); }
 
                 // found by the run-time check on gson (rust part 2e)
                 Object anonSuper(List<String> l) { return new Base(l) { }; }
@@ -237,6 +238,8 @@ public class TestBorrowedParameter extends CommonTest {
             // a contract decides a bodiless method, and is not second-guessed (KeepingSink breaks it: the guard's job)
             Map.entry("Sink.put:l", true),
             Map.entry("X.viaSink:l", true),
+            // a pattern variable is the same object
+            Map.entry("X.viaPattern:o", false),
             // this(..) and super(..): the callee's links are not the caller's
             Map.entry("Pair.<init>:b", false),
             Map.entry("Sub.<init>:s", false),
