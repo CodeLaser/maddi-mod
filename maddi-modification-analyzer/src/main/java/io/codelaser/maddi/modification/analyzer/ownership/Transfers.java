@@ -393,7 +393,9 @@ final class Transfers {
     private static String usesBefore(Statement statement, LocalVariable lv, OwnershipPass.Body body,
                                      ThisEscape thisEscape) {
         int all = mentions(statement, lv);
-        if (all == 0) return null;
+        // the declaration names the local without a VariableExpression: its initializer must still be created
+        boolean declares = statement instanceof LocalVariableCreation lvc && lvc.localVariableStream().anyMatch(lv::equals);
+        if (all == 0 && !declares) return null;
         int[] allowed = {0};
         String[] found = new String[1];
         Set<Element> discarded = new HashSet<>();
