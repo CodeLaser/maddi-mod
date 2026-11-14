@@ -33,6 +33,7 @@ import io.codelaser.maddi.cst.api.expression.Cast;
 import io.codelaser.maddi.cst.api.expression.ConstructorCall;
 import io.codelaser.maddi.cst.api.expression.EnclosedExpression;
 import io.codelaser.maddi.cst.api.expression.Expression;
+import io.codelaser.maddi.cst.api.expression.InlineConditional;
 import io.codelaser.maddi.cst.api.expression.Lambda;
 import io.codelaser.maddi.cst.api.expression.MethodCall;
 import io.codelaser.maddi.cst.api.expression.MethodReference;
@@ -41,7 +42,10 @@ import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.statement.ExplicitConstructorInvocation;
 import io.codelaser.maddi.cst.api.statement.LocalVariableCreation;
+import io.codelaser.maddi.cst.api.variable.DependentVariable;
+import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.cst.api.variable.LocalVariable;
+import io.codelaser.maddi.cst.api.variable.This;
 import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
@@ -60,18 +64,26 @@ import io.codelaser.maddi.modification.prepwork.variable.MethodLinkedVariables;
  *   ({@code ret ← 0:l}, {@code ret.held ← 0:l}). Links from or to its contents ({@code 0:l.§$s ~ this.list.§$s},
  *   {@code ret ∈ 0:l.§$s}) do not count.</li>
  *   <li><b>Captures</b>, which no link shows ({@code return () -> l.size();} has no link to {@code l}): the parameter,
- *   or a local assigned from it, is not mentioned by a lambda, {@code l::m}, or an anonymous class.</li>
+ *   a local assigned from it, or a local holding a new object it was handed to ({@code h = new Holder(l)}), is not
+ *   mentioned by a lambda, {@code l::m}, or an anonymous class. Nor is it an argument of an anonymous class's
+ *   {@code super(..)}.</li>
  *   <li><b>{@code this}</b>, which has no links: the parameter is not the receiver of a method that may leak it
  *   ({@link ThisEscape}).</li>
  *   <li><b>Callees.</b> Passed to a method or constructor of the analysed sources, the callee must not keep it in a
  *   way its links do not show (rules 2 to 6, its "hidden" verdict): its link keeps are applied at the call site and
  *   are rule 1's in the caller, so {@code new Holder(l).size()} borrows {@code l} and {@code return new Holder(l)}
- *   does not. Passed to a library method that sources implement, every such implementation's parameter must be
+ *   does not. Not so for {@code this(..)} and {@code super(..)}, whose callee's links do not reach the caller's
+ *   summary: there the callee's full verdict counts. Passed to a library method that sources implement, every such implementation's parameter must be
  *   borrowed outright: the summary applied is not theirs. Other library methods are described by their hints.</li>
  *   <li><b>Dispatch.</b> A call through the method may run an override: every implementation's parameter must be
  *   borrowed. A source abstract method without implementations borrows nothing.</li>
  *   <li>A degraded method (its summary is the shallow one) borrows nothing.</li>
+ *   <li><b>Stores</b> no link shows, when no link shows any keep: an alias (through casts, conditionals and identity
+ *   methods) assigned to a field or an array element, but one of a local holding only new objects
+ *   ({@code this.s = Objects.requireNonNull(s)} into an interface-typed field; {@code created.value = value} into a
+ *   node a callee returned).</li>
  * </ol>
+ * Aliases flow through the same casts, conditionals and identity methods everywhere.
  * Rules 4 and 5 are a greatest fixpoint, as for freshness. A {@code @Borrowed} contract decides a parameter of a
  * bodiless method.
  */
@@ -234,7 +246,8 @@ final class BorrowedParameters {
             }
         }
         if (methodInfo.methodBody() == null) return null;
-        return body(methodInfo, pi::equals, true, pi.name(), thisEscape, deps);
+        // rule 7 only where no link shows a keep: those are applied at the call site
+        return body(methodInfo, pi::equals, true, !linkReasons.containsKey(pi), pi.name(), thisEscape, deps);
     }
 
     /**
@@ -246,7 +259,7 @@ final class BorrowedParameters {
     String keptInBody(MethodInfo methodInfo, Predicate<Variable> tracked, String name, ThisEscape thisEscape) {
         if (methodInfo.methodBody() == null) return null;
         Set<Dep> deps = new LinkedHashSet<>();
-        String r = body(methodInfo, tracked, false, name, thisEscape, deps);
+        String r = body(methodInfo, tracked, false, false, name, thisEscape, deps);
         if (r != null) return r;
         for (Dep dep : deps) {
             boolean ok = dep.full() ? isBorrowed(dep.parameter()) : isHidden(dep.parameter());
@@ -260,11 +273,16 @@ final class BorrowedParameters {
 
     // rules 2, 3, 4
     // 'capturedDirectly': a lambda mentioning what is tracked holds it (a parameter), or holds its owner (a field)
-    private String body(MethodInfo methodInfo, Predicate<Variable> tracked, boolean capturedDirectly, String name,
-                        ThisEscape thisEscape, Set<Dep> deps) {
+    private String body(MethodInfo methodInfo, Predicate<Variable> tracked, boolean capturedDirectly, boolean stores,
+                        String name, ThisEscape thisEscape, Set<Dep> deps) {
         Set<Variable> locals = localAliases(methodInfo, tracked);
         Predicate<Variable> aliases = v -> tracked.test(v) || locals.contains(v);
-        Predicate<Variable> captured = capturedDirectly ? aliases : locals::contains;
+        // a local holding a new object that was handed an alias ('Holder h = new Holder(l)'): capturing it captures
+        // what the object keeps; the constructor's verdict is not known yet, so any hand-over counts
+        Set<Variable> holders = localHolders(methodInfo, aliases);
+        Set<Variable> newLocals = newLocals(methodInfo);
+        Predicate<Variable> captured = capturedDirectly ? v -> aliases.test(v) || holders.contains(v)
+                : v -> locals.contains(v) || holders.contains(v);
         String[] found = new String[1];
         methodInfo.methodBody().visit((Element e) -> {
             if (found[0] != null) return false;
@@ -284,8 +302,17 @@ final class BorrowedParameters {
                             found[0] = "captured by an anonymous class";
                             return false;
                         }
+                        // its super(..) arguments: no link of the call shows what the superclass keeps
+                        if (cc.parameterExpressions().stream().anyMatch(a -> isAlias(a, aliases))) {
+                            MethodInfo superConstructor = cc.constructor();
+                            if (superConstructor == null || superConstructor.typeInfo() == cc.anonymousClass()) {
+                                found[0] = "passed to the constructor of an anonymous class";
+                                return false;
+                            }
+                            arguments(superConstructor, cc.parameterExpressions(), aliases, deps, true);
+                        }
                     } else if (cc.constructor() != null) {
-                        arguments(cc.constructor(), cc.parameterExpressions(), aliases, deps);
+                        arguments(cc.constructor(), cc.parameterExpressions(), aliases, deps, false);
                     }
                 }
                 case MethodCall mc -> {
@@ -295,11 +322,22 @@ final class BorrowedParameters {
                             found[0] = "receiver of " + callee.fullyQualifiedName() + ", which may leak this";
                             return false;
                         }
-                        arguments(callee, mc.parameterExpressions(), aliases, deps);
+                        arguments(callee, mc.parameterExpressions(), aliases, deps, false);
                     }
                 }
+                case Assignment a when stores && !tracked.test(a.target().variable()) && isAlias(a.value(), aliases)
+                                       && storesOutside(a.target().variable(), newLocals) -> {
+                    // rule 7: stored in a field or an array element, where links may not show it (an identity call,
+                    // a field whose type counts as immutable, a node a callee returned)
+                    found[0] = "stored in " + a.target().variable().simpleName();
+                    return false;
+                }
                 case ExplicitConstructorInvocation eci -> {
-                    if (eci.methodInfo() != null) arguments(eci.methodInfo(), eci.parameterExpressions(), aliases, deps);
+                    // this(..), super(..): the callee's link keeps are not applied to the caller's summary, so its
+                    // full verdict is needed
+                    if (eci.methodInfo() != null) {
+                        arguments(eci.methodInfo(), eci.parameterExpressions(), aliases, deps, true);
+                    }
                 }
                 default -> {
                 }
@@ -309,14 +347,14 @@ final class BorrowedParameters {
         return found[0];
     }
 
-    // rule 4: the formal parameters an alias is passed to
+    // rule 4: the formal parameters an alias is passed to; 'full' when the callee's links do not reach the caller's
     private void arguments(MethodInfo callee, List<Expression> arguments, Predicate<Variable> aliases,
-                           Set<Dep> deps) {
+                           Set<Dep> deps, boolean full) {
         for (int i = 0; i < arguments.size(); i++) {
             if (!isAlias(arguments.get(i), aliases)) continue;
             if (analysed.contains(callee)) {
                 ParameterInfo formal = formal(callee, i);
-                if (formal != null && applies(formal)) deps.add(new Dep(formal, false));
+                if (formal != null && applies(formal)) deps.add(new Dep(formal, full));
             } else {
                 libraryDependencies(callee, i).forEach(p -> deps.add(new Dep(p, true)));
             }
@@ -348,12 +386,92 @@ final class BorrowedParameters {
         return aliases;
     }
 
-    private static boolean isAlias(Expression expression, Predicate<Variable> aliases) {
-        Expression e = expression;
+    // the locals assigned a constructor call (not an anonymous class) with an alias among its arguments
+    private static Set<Variable> localHolders(MethodInfo methodInfo, Predicate<Variable> aliases) {
+        Set<Variable> holders = new HashSet<>();
+        methodInfo.methodBody().visit((Element e) -> {
+            if (e instanceof LocalVariableCreation lvc) {
+                lvc.localVariableStream().forEach(lv -> {
+                    if (handsOver(lv.assignmentExpression(), aliases)) holders.add(lv);
+                });
+            } else if (e instanceof Assignment a && a.target().variable() instanceof LocalVariable lv
+                       && handsOver(a.value(), aliases)) {
+                holders.add(lv);
+            }
+            return true;
+        });
+        return holders;
+    }
+
+    private static boolean handsOver(Expression value, Predicate<Variable> aliases) {
+        Expression e = value;
         while (e instanceof Cast || e instanceof EnclosedExpression) {
             e = e instanceof Cast c ? c.expression() : ((EnclosedExpression) e).inner();
         }
-        return e instanceof VariableExpression ve && aliases.test(ve.variable());
+        return e instanceof ConstructorCall cc && cc.parameterExpressions().stream().anyMatch(a -> isAlias(a, aliases));
+    }
+
+    // through casts, parentheses, either branch of a conditional, and identity methods (Objects.requireNonNull)
+    private static boolean isAlias(Expression expression, Predicate<Variable> aliases) {
+        Expression e = expression;
+        while (true) {
+            if (e instanceof Cast c) e = c.expression();
+            else if (e instanceof EnclosedExpression ee) e = ee.inner();
+            else if (e instanceof InlineConditional ic) {
+                return isAlias(ic.ifTrue(), aliases) || isAlias(ic.ifFalse(), aliases);
+            } else if (e instanceof MethodCall mc && mc.methodInfo() != null) {
+                int through = OwnershipPass.passThrough(mc.methodInfo());
+                if (through < 0 || through >= mc.parameterExpressions().size()) return false;
+                e = mc.parameterExpressions().get(through);
+            } else {
+                return e instanceof VariableExpression ve && aliases.test(ve.variable());
+            }
+        }
+    }
+
+    // a field or an array element, not one of a local that holds only new objects (their links tell)
+    private static boolean storesOutside(Variable target, Set<Variable> newLocals) {
+        Variable v = target;
+        while (v instanceof DependentVariable dv) v = dv.arrayVariable();
+        if (v == target && !(v instanceof FieldReference)) return false; // a local
+        while (v instanceof FieldReference fr) {
+            if (fr.scope() == null || fr.isStatic()) return true;
+            if (!(fr.scope() instanceof VariableExpression ve)) return true;
+            if (ve.variable() instanceof This) return true;
+            v = ve.variable();
+            if (newLocals.contains(v)) return false;
+            if (v instanceof LocalVariable || v instanceof ParameterInfo) return true;
+        }
+        return !newLocals.contains(v);
+    }
+
+    // the locals whose every value is a new object (not an anonymous class)
+    private static Set<Variable> newLocals(MethodInfo methodInfo) {
+        Set<Variable> all = new HashSet<>();
+        Set<Variable> notNew = new HashSet<>();
+        methodInfo.methodBody().visit((Element e) -> {
+            if (e instanceof LocalVariableCreation lvc) {
+                lvc.localVariableStream().forEach(lv -> {
+                    all.add(lv);
+                    Expression init = lv.assignmentExpression();
+                    if (init != null && !(init instanceof io.codelaser.maddi.cst.api.expression.EmptyExpression)
+                        && !isNew(init)) notNew.add(lv);
+                });
+            } else if (e instanceof Assignment a && a.target().variable() instanceof LocalVariable lv && !isNew(a.value())) {
+                notNew.add(lv);
+            }
+            return true;
+        });
+        all.removeAll(notNew);
+        return all;
+    }
+
+    private static boolean isNew(Expression value) {
+        Expression e = value;
+        while (e instanceof Cast || e instanceof EnclosedExpression) {
+            e = e instanceof Cast c ? c.expression() : ((EnclosedExpression) e).inner();
+        }
+        return e instanceof ConstructorCall cc && cc.anonymousClass() == null;
     }
 
     private static boolean mentions(MethodInfo methodInfo, Predicate<Variable> aliases) {

@@ -92,6 +92,53 @@ public class TestBorrowedParameter extends CommonTest {
                 void receiverLeaks(Leaky k) { k.leak(); }
                 void viaSink(Sink s, List<String> l) { s.put(l); }
 
+                // found by the run-time check on gson (rust part 2e)
+                Object anonSuper(List<String> l) { return new Base(l) { }; }
+                void checked(List<String> l) { stored = Objects.requireNonNull(l); }
+                void conditional(List<String> l) { stored = l == null ? new ArrayList<>() : l; }
+                private final Node root = new Node();
+                Node find() { return root; }
+                void intoNode(List<String> l) { Node n = find(); n.value = l; }
+                int localNew(List<String> l) { Node n = new Node(); n.value = l; return n.value.size(); }
+                Supplier<Holder> holderCaptured(List<String> l) { Holder h = new Holder(l); return () -> h; }
+                static class Node { List<String> value; }
+                static class TreeMap2<K, V> {
+                    static final class N<K, V> { final K key; V value; N<K, V> left; N(K key) { this.key = key; } }
+                    private N<K, V> root;
+                    N<K, V> find(K key, boolean create) {
+                        N<K, V> n = root;
+                        while (n != null) { if (n.key.equals(key)) return n; n = n.left; }
+                        if (!create) return null;
+                        N<K, V> created = new N<>(key);
+                        created.left = root;
+                        root = created;
+                        return created;
+                    }
+                    public V put(K key, V value) {
+                        N<K, V> created = find(key, true);
+                        V result = created.value;
+                        created.value = value;
+                        return result;
+                    }
+                }
+                static class Json {
+                    static final Json NULL = new Json();
+                    private final TreeMap2<String, Json> members = new TreeMap2<>();
+                    public void add(String property, Json value) { members.put(property, value == null ? NULL : value); }
+                }
+                interface Strategy { String name(String s); }
+                static class Builder {
+                    private Strategy strategy;
+                    public Builder set(Strategy s) { this.strategy = Objects.requireNonNull(s); return this; }
+                }
+                static class Pair {
+                    private final List<String> a;
+                    private final List<String> b;
+                    Pair(List<String> a, List<String> b, boolean x) { this.a = a; this.b = b; }
+                    Pair(List<String> b) { this(new ArrayList<>(), b, true); }
+                }
+                static class Base { protected final List<String> base; Base(List<String> base) { this.base = base; } }
+                static class Sub extends Base { Sub(List<String> s) { super(s); } }
                 static class Holder { private final List<String> held; Holder(List<String> held) { this.held = held; } int size() { return held.size(); } }
                 interface Registry { void register(List<String> l); }
                 static class Keeper implements Registry { private final List<List<String>> kept = new ArrayList<>(); public void register(List<String> l) { kept.add(l); } }
@@ -155,7 +202,23 @@ public class TestBorrowedParameter extends CommonTest {
             Map.entry("X.receiverLeaks:k", false),
             // a contract decides a bodiless method, and is not second-guessed (KeepingSink breaks it: the guard's job)
             Map.entry("Sink.put:l", true),
-            Map.entry("X.viaSink:l", true)));
+            Map.entry("X.viaSink:l", true),
+            // this(..) and super(..): the callee's links are not the caller's
+            Map.entry("Pair.<init>:b", false),
+            Map.entry("Sub.<init>:s", false),
+            // an anonymous class's super(..) arguments
+            Map.entry("X.anonSuper:l", false),
+            // stored through an identity method, a conditional, into a field of an object found elsewhere
+            Map.entry("X.checked:l", false),
+            Map.entry("X.conditional:l", false),
+            Map.entry("X.intoNode:l", false),
+            // into a new object that dies with the call
+            Map.entry("X.localNew:l", true),
+            // a local holding an object that keeps it, captured
+            Map.entry("X.holderCaptured:l", false),
+            Map.entry("TreeMap2.put:value", false),
+            Map.entry("Json.add:value", false),
+            Map.entry("Builder.set:s", false)));
 
     @DisplayName("BORROWED_PARAMETER: nothing that outlives the call holds the argument")
     @Test
