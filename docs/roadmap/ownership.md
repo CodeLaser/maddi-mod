@@ -328,9 +328,18 @@ pass, now fixed and in `TestLending.test2`:
 - **`FieldReference.scopeVariable()` is null for any non-variable scope**, a call's result included; `isThisField`
   read null as `this`. The scope expression decides.
 
-After the fixes: fernflower 111 owned (115 before), gson 24; no contradiction on either suite. One open question:
-a non-capturing lambda evaluates to one shared instance (JLS 15.27.4), so `() -> new ArrayList<>()` is neither fresh
-nor owned by identity, though it has no state (gson's `Adapter.constructor`).
+- **A transferred local's initializer was not read.** `Transfers.usesBefore` skipped statements without a
+  `VariableExpression` of the local, and its declaration has none: `T c = get(..); new Adapter(c)` handed over the
+  result of a method that is not fresh. gson's `Adapter.constructor` fields held non-capturing lambdas, shared
+  between adapters.
+
+**A lambda is not a created object** (decided 2026-11-14): JLS 15.27.4 and 15.13.3 let every evaluation of a lambda
+or method reference return the same instance, so neither is fresh, and the run-time check counts a shared stateless
+object as a contradiction.
+
+After the fixes: fernflower 109 owned (115 before; also lost `BytecodeMappingTracer.lineNumberTable`, an attribute
+its class keeps, and `RequiresEntry.moduleVersion`, a String, now shared immutable), gson 21; no contradiction on
+either suite.
 
 ### Annotations
 
