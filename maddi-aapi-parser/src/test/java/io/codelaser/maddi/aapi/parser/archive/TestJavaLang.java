@@ -364,7 +364,9 @@ public class TestJavaLang extends CommonTest {
         Value.Independent independentP2 = p2.analysis().getOrDefault(INDEPENDENT_PARAMETER, DEPENDENT);
         assertTrue(independentP2.isIndependent());
         assertEquals("N", p2.analysis().getOrDefault(NULLABILITY_PARAMETER, UNSPECIFIED).toString());
-        assertSame(TRUE, p2.analysis().getOrDefault(UNMODIFIED_PARAMETER, FALSE));
+        // dest is written into: @Modified in the JDK hints since CodeLaser/maddi#205 (maddi b274ccee0). The default is
+        // TRUE, so that a missing value fails too
+        assertSame(FALSE, p2.analysis().getOrDefault(UNMODIFIED_PARAMETER, TRUE));
     }
 
 
