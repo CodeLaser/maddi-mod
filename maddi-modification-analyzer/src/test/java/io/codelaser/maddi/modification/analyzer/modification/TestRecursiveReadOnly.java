@@ -74,10 +74,10 @@ public class TestRecursiveReadOnly extends CommonTest {
     @DisplayName("the fixpoint alone: the cycles keep their modified value (the issue's numbers)")
     @Test
     public void fixpointAlone() {
-        // since #127 a call back into the recursion marks nothing while its verdict is undecided: contains:x and
-        // get:n are now unmodified in the fixpoint alone too; size/sizeAll (a two-method cycle over a list) are not
+        // since #127 a call back into the recursion marks nothing while its verdict is undecided: contains:x, get:n
+        // and head are now right in the fixpoint alone too; size/sizeAll (a two-method cycle over a list) are not
         assertEquals("{contains=true, contains:x=true, depth=true, depth:n=true, get=true, get:n=true, size=true, "
                      + "size:n=false, sizeAll=true, sizeAll:ns=false}", run("a.b.Node", NODE, false));
-        assertEquals("{firstOf=true, head=false, headLoop=true}", run("a.b.Stat", STAT, false));
+        assertEquals("{firstOf=true, head=true, headLoop=true}", run("a.b.Stat", STAT, false)); // #127: head too
     }
 }
