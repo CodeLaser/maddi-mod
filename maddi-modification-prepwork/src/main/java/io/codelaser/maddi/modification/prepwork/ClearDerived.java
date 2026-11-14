@@ -31,6 +31,7 @@ import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.statement.LocalTypeDeclaration;
 import io.codelaser.maddi.cst.api.statement.Statement;
+import io.codelaser.maddi.modification.prepwork.callgraph.LazyCacheField;
 import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
 
 /**
@@ -68,6 +69,8 @@ public class ClearDerived {
             case FieldInfo fi -> {
                 clear(fi.analysisOfInitializer());
                 if (fi.initializer() != null && !fi.initializer().isEmpty()) body(fi.initializer());
+                // a recognised memo field's disclaimer is derived by prep, not by the analysis (maddi#208)
+                LazyCacheField.restoreIgnoreModifications(fi);
             }
             default -> {
             }

@@ -126,20 +126,27 @@ public class ComputePartOfConstructionFinalField {
 
         Set<MethodInfo> partOfConstruction = computePartOfConstruction(typeInfo, constructorsAndMethodsOfPrimaryType, callGraph);
         typeInfo.analysis().set(PART_OF_CONSTRUCTION, new ValueImpl.SetOfInfoImpl(partOfConstruction));
+        Map<FieldInfo, Set<MethodInfo>> assigningMethods = new HashMap<>();
         Map<FieldInfo, Boolean> effectivelyFinalFieldMap = computeEffectivelyFinalFields(typeInfo, callGraph,
-                partOfConstruction, constructorsAndMethodsOfPrimaryType);
+                partOfConstruction, constructorsAndMethodsOfPrimaryType, assigningMethods);
         for (Map.Entry<FieldInfo, Boolean> entry : effectivelyFinalFieldMap.entrySet()) {
             FieldInfo fieldInfo = entry.getKey();
+            boolean isEffectivelyFinal = entry.getValue();
             if (!fieldInfo.analysis().haveAnalyzedValueFor(PropertyImpl.FINAL_FIELD)) {
-                boolean isEffectivelyFinal = entry.getValue();
                 fieldInfo.analysis().set(PropertyImpl.FINAL_FIELD, ValueImpl.BoolImpl.from(isEffectivelyFinal));
+            }
+            // maddi#208: a non-final field whose only writes are a memo is disclaimed like @IgnoreModifications
+            if (!isEffectivelyFinal && !fieldInfo.isPropertyFinal()
+                && LazyCacheField.isLazyCache(fieldInfo, assigningMethods.getOrDefault(fieldInfo, Set.of()))) {
+                LazyCacheField.mark(fieldInfo);
             }
         }
     }
 
     private Map<FieldInfo, Boolean> computeEffectivelyFinalFields(TypeInfo typeInfo, G<Info> callGraph,
                                                                   Set<MethodInfo> partOfConstruction,
-                                                                  List<MethodInfo> constructorsAndMethodsOfPrimaryType) {
+                                                                  List<MethodInfo> constructorsAndMethodsOfPrimaryType,
+                                                                  Map<FieldInfo, Set<MethodInfo>> assigningMethods) {
         Map<FieldInfo, Boolean> effectivelyFinalFieldMap = new HashMap<>();
         for (FieldInfo fieldInfo : typeInfo.fields()) {
             assert fieldInfo.access() != null : "Field " + fieldInfo + " has null access.";
@@ -159,6 +166,7 @@ public class ComputePartOfConstructionFinalField {
                             // so methodInfo references toField... check whether that is an assignment, or simply a read
                             if (isAssigned(methodInfo, fieldInfo)) {
                                 effectivelyFinalFieldMap.put(fieldInfo, false);
+                                assigningMethods.computeIfAbsent(fieldInfo, _ -> new HashSet<>()).add(methodInfo);
                             }
                         }
                     }
@@ -171,14 +179,18 @@ public class ComputePartOfConstructionFinalField {
             // private fields (fernflower's ClassesProcessor reassigns ClassesProcessor.Inner's fields). Such methods
             // have no field->method edge (their typeInfo is not the owner), so we check them directly. isAssigned
             // returns false when the method does not assign the field.
-            if (effectivelyFinalFieldMap.get(fieldInfo)) {
+            // (also for a field already known to be non-final: a memo field must have no writer elsewhere, and a
+            // writer in another type disqualifies it in LazyCacheField.isLazyCache)
+            boolean finalSoFar = effectivelyFinalFieldMap.get(fieldInfo);
+            if (finalSoFar || assigningMethods.containsKey(fieldInfo)) {
                 for (MethodInfo methodInfo : constructorsAndMethodsOfPrimaryType) {
                     TypeInfo methodType = methodInfo.typeInfo();
                     if (methodType != fieldInfo.owner()
                         && notInConstructionOfSameStaticType(methodInfo, fieldInfo, partOfConstruction)
                         && isAssigned(methodInfo, fieldInfo)) {
                         effectivelyFinalFieldMap.put(fieldInfo, false);
-                        break;
+                        assigningMethods.computeIfAbsent(fieldInfo, _ -> new HashSet<>()).add(methodInfo);
+                        if (finalSoFar) break;
                     }
                 }
             }

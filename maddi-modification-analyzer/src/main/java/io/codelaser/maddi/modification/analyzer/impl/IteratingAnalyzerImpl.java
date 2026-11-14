@@ -1229,10 +1229,13 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
     private static Predicate<Info> contracted(SingleIterationAnalyzer singleIterationAnalyzer) {
         return singleIterationAnalyzer instanceof SingleIterationAnalyzerImpl s
                 ? info -> switch (info) {
+            // maddi-mod#124: a bodiless equals/hashCode/toString/compareTo is contracted by Object's declaration
             case MethodInfo mi -> mi.isAbstract()
-                    && s.contractResolution().resolve(mi, PropertyImpl.NON_MODIFYING_METHOD).decided();
+                    && (s.contractResolution().resolve(mi, PropertyImpl.NON_MODIFYING_METHOD).decided()
+                        || AbstractMethodAnalyzerImpl.isObjectQueryRedeclaration(mi));
             case ParameterInfo pi -> pi.methodInfo().isAbstract()
-                    && s.contractResolution().resolve(pi, PropertyImpl.UNMODIFIED_PARAMETER).decided();
+                    && (s.contractResolution().resolve(pi, PropertyImpl.UNMODIFIED_PARAMETER).decided()
+                        || AbstractMethodAnalyzerImpl.isObjectQueryRedeclaration(pi.methodInfo()));
             default -> false;
         }
                 : _ -> false;

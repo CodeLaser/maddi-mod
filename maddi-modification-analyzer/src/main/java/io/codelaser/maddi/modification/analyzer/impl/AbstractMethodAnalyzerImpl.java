@@ -65,36 +65,73 @@ public class AbstractMethodAnalyzerImpl extends CommonAnalyzerImpl implements Ab
         for (MethodInfo methodInfo : abstractMethods) {
             Value.SetOfMethodInfo implementations = methodInfo.analysis().getOrDefault(IMPLEMENTATIONS,
                     ValueImpl.SetOfMethodInfoImpl.EMPTY);
+            boolean queryByContract = isObjectQueryRedeclaration(methodInfo);
+            if (queryByContract) {
+                // maddi-mod#124: no fold over the implementations; the empty fold is TRUE
+                for (ParameterInfo pi : methodInfo.parameters()) {
+                    unmodified(List.of(), pi);
+                    structurallyUnmodified(List.of(), pi);
+                }
+                methodNonModifying(List.of(), methodInfo);
+                methodStructurallyNonModifying(List.of(), methodInfo);
+            }
             if (implementations.isEmpty()) {
                 if (firstIteration) doMethodWithoutImplementation(methodInfo);
             } else if (!methodInfo.isAbstract()) {
                 // a throw-only placeholder (Util.isThrowOnlyPlaceholder): only MODIFICATION is the union; its body
                 // keeps deciding independence, downcasts and the eventual properties
                 Iterable<MethodInfo> concreteImplementations = implementations.methodInfoSet();
-                for (ParameterInfo pi : methodInfo.parameters()) {
-                    unmodified(concreteImplementations, pi);
-                    structurallyUnmodified(concreteImplementations, pi);
+                if (!queryByContract) {
+                    for (ParameterInfo pi : methodInfo.parameters()) {
+                        unmodified(concreteImplementations, pi);
+                        structurallyUnmodified(concreteImplementations, pi);
+                    }
+                    methodNonModifying(concreteImplementations, methodInfo);
+                    methodStructurallyNonModifying(concreteImplementations, methodInfo);
                 }
-                methodNonModifying(concreteImplementations, methodInfo);
-                methodStructurallyNonModifying(concreteImplementations, methodInfo);
                 methodUnmodifiableView(concreteImplementations, methodInfo);
             } else {
                 Iterable<MethodInfo> concreteImplementations = implementations.methodInfoSet();
                 for (ParameterInfo pi : methodInfo.parameters()) {
-                    unmodified(concreteImplementations, pi);
-                    structurallyUnmodified(concreteImplementations, pi);
+                    if (!queryByContract) {
+                        unmodified(concreteImplementations, pi);
+                        structurallyUnmodified(concreteImplementations, pi);
+                    }
                     independent(concreteImplementations, pi);
                     collectDowncast(concreteImplementations, pi);
                     if (EventualCluster.ENABLED) parameterEventuallyUnmodified(concreteImplementations, pi);
                 }
-                methodNonModifying(concreteImplementations, methodInfo);
-                methodStructurallyNonModifying(concreteImplementations, methodInfo);
+                if (!queryByContract) {
+                    methodNonModifying(concreteImplementations, methodInfo);
+                    methodStructurallyNonModifying(concreteImplementations, methodInfo);
+                }
                 methodUnmodifiableView(concreteImplementations, methodInfo);
                 methodIndependent(concreteImplementations, methodInfo);
                 methodEventual(concreteImplementations, methodInfo);
                 methodEventuallyNonModifying(concreteImplementations, methodInfo);
             }
         }
+    }
+
+    /**
+     * maddi-mod#124, CodeLaser/maddi#208: a bodiless re-declaration of {@code equals(Object)}, {@code hashCode()},
+     * {@code toString()} or {@code compareTo(T)} takes the contract of the method it re-declares: a query that leaves
+     * its receiver and its argument unmodified. Folding over the implementations instead made guava's
+     * {@code Function.equals} modifying, and #116's dispatch union carried that into every equals family that calls
+     * it. An implementation whose body does modify keeps that verdict on itself; the memo idiom that was the usual
+     * reason ({@code if (hash == 0) hash = ...}) is no modification any more (prepwork's {@code LazyCacheField}).
+     */
+    static boolean isObjectQueryRedeclaration(MethodInfo methodInfo) {
+        if (!methodInfo.isAbstract() || methodInfo.isStatic()) return false;
+        int n = methodInfo.parameters().size();
+        return switch (methodInfo.name()) {
+            case "equals" -> n == 1 && methodInfo.parameters().getFirst().parameterizedType().isJavaLangObject()
+                             && methodInfo.returnType().isBooleanOrBoxedBoolean();
+            case "hashCode" -> n == 0 && methodInfo.returnType().isInt();
+            case "toString" -> n == 0 && methodInfo.returnType().isJavaLangString();
+            case "compareTo" -> n == 1 && methodInfo.returnType().isInt();
+            default -> false;
+        };
     }
 
     // no implementation means we can completely ignore it
