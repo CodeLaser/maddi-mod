@@ -1927,6 +1927,10 @@ public class ShadowModificationPass {
             // parameters/fields (the writer's immutable guard stopped the WRITE but not the walk) —
             // fernflower cause-chain diagnosis 2026-07-19.
             if (immutableTyped(node)) continue;
+            // #125: neither does a parameter its author contracted unmodified on a method with a body
+            // (Util.explicitNotModifiedContractOnBody): the #116 union may reach it through an override, but that
+            // is the override's breach, which the guard reports, not a modification of the callers' arguments
+            if (node instanceof ParameterInfo pi && Util.explicitNotModifiedContractOnBody(pi)) continue;
             Set<Object> deepOnly = structural ? deepOnlySuccessors.getOrDefault(node, Set.of()) : Set.of();
             for (Object next : successors.getOrDefault(node, Set.of())) {
                 if (!deepOnly.contains(next) && reached.add(next)) {

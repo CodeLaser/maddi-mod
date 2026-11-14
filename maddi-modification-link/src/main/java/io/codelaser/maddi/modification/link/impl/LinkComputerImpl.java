@@ -903,6 +903,14 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                     if (Util.implementationModifiesParameter(methodInfo, i, true)) paramsStructurallyModified[i] = true;
                 }
             }
+            // #125: an explicit @NotModified(contract = true) on a parameter of a method with a body decides it,
+            // over the body and over the dispatch union above (Util.explicitNotModifiedContractOnBody)
+            for (ParameterInfo pi : methodInfo.parameters()) {
+                if (Util.explicitNotModifiedContractOnBody(pi)) {
+                    paramsModified[pi.index()] = false;
+                    paramsStructurallyModified[pi.index()] = false;
+                }
+            }
             // handed to one of our own functional parameters, whole or an element of it: recorded, not marked; its
             // callers resolve the entry with the function they pass (PassedFunction, CodeLaser/maddi-mod#67, #69)
             Value.Bool nonModifying = ValueImpl.BoolImpl.from(!methodModified);

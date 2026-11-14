@@ -966,6 +966,22 @@ public class GuardAnalyzerImpl extends CommonAnalyzerImpl implements GuardAnalyz
                         methodInfo.fullyQualifiedName() + " overrides " + parent.fullyQualifiedName()
                         + " but is modifying, violating its @NotModified contract");
             }
+            // #125: the parameter arm. The contracted parent parameter is trusted (it transmits no modification to
+            // its callers' arguments); an override that modifies the argument breaks the promise, and is reported
+            int n = Math.min(parent.parameters().size(), methodInfo.parameters().size());
+            for (int i = 0; i < n; i++) {
+                ParameterInfo parentPi = parent.parameters().get(i);
+                ParameterInfo pi = methodInfo.parameters().get(i);
+                Value.Bool unmodified = pi.analysis().getOrNull(UNMODIFIED_PARAMETER, ValueImpl.BoolImpl.class);
+                if (unmodified != null && unmodified.isFalse()
+                    && io.codelaser.maddi.modification.prepwork.Util.explicitNotModifiedContractOnBody(parentPi)) {
+                    reportViolation(pi, blameParameterModified(methodInfo, pi),
+                            MessageImpl.cause(parentPi, "@NotModified(contract = true) here"),
+                            "parameter '" + pi.simpleName() + "' of " + methodInfo.fullyQualifiedName()
+                            + " is modified, violating the @NotModified contract on parameter '"
+                            + parentPi.simpleName() + "' of " + parent.fullyQualifiedName());
+                }
+            }
             if (contracts.get(INDEPENDENT_METHOD) instanceof Value.Independent ind && ind.isAtLeastIndependentHc()) {
                 Value.Independent miInd = methodInfo.analysis().getOrNull(INDEPENDENT_METHOD,
                         ValueImpl.IndependentImpl.class);
