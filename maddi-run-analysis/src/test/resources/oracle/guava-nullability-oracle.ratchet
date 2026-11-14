@@ -34,6 +34,12 @@
 # 2026-11-05, maddi f6f4387a3 / maddi-mod c3ba74bf (devel with #85's two regression fixes and CBSWEEP on by default), on
 # laser1: 229 unsafe, 1,779 noise. 63 noise rows leave, 1 arrives: d5f1cfd1 stops a cycle of delegating overrides
 # (Ordering.min/max and the reverse orderings) from overruling a demand (CodeLaser/maddi-mod#85).
+# 2026-11-14, re-recorded without a code change behind it: 229 unsafe, 1,812 noise, the same on devel at maddi
+# 2216c5216 / maddi-mod 5138988f (the Mac) and on the code that recorded 1,779, maddi f6f4387a3 / maddi-mod c3ba74bf,
+# and b6c3699d itself (both on laser1). Nothing in the repositories moved it: maddi is built from source, the hint jars
+# are committed, guava's sources, classes and input configuration date from 2026-10-13, and neither machine's JDK
+# changed after 2026-11-05. The cause of the +33 is not known (a library jar resolved from the Gradle cache, or a
+# 1,779 measured on a state that was not committed, remain).
 unsafe	229
-noise	1779
+noise	1812
 noiseSlack	20
