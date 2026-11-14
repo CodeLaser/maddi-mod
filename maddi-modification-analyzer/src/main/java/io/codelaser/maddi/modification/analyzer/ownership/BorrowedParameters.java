@@ -62,7 +62,8 @@ import io.codelaser.maddi.modification.prepwork.variable.MethodLinkedVariables;
  *   <li><b>Links.</b> No link goes from the parameter itself to anything ({@code 0:l → this.stored},
  *   {@code 0:l ∈∈ this.all.§$ss}, {@code 1:l ∈ 0:m.§$$s}), and no link from elsewhere reaches the parameter itself
  *   ({@code ret ← 0:l}, {@code ret.held ← 0:l}). Links from or to its contents ({@code 0:l.§$s ~ this.list.§$s},
- *   {@code ret ∈ 0:l.§$s}) do not count.</li>
+ *   {@code ret ∈ 0:l.§$s}) do not count, but its modification face does: {@code rv.§m ≡ 0:l.§m} is a view of it
+ *   that outlives the call ({@code Collections.synchronizedList(l)} returned).</li>
  *   <li><b>Captures</b>, which no link shows ({@code return () -> l.size();} has no link to {@code l}): the parameter,
  *   a local assigned from it, or a local holding a new object it was handed to ({@code h = new Holder(l)}), is not
  *   mentioned by a lambda, {@code l::m}, or an anonymous class. Nor is it an argument of an anonymous class's
@@ -235,10 +236,13 @@ final class BorrowedParameters {
         if (mlv == null) return "no summary";
         for (Links links : (Iterable<Links>) Stream.concat(Stream.of(mlv.ofReturnValue()),
                 mlv.ofParameters().stream())::iterator) {
+            // the modification face counts with the return value only: a view returned; between two parameters,
+            // 'r.§m ≡ l.§m' is shared modification, not a keep ('r.register(l)' with a @Borrowed contract has it)
+            boolean ofReturn = links == mlv.ofReturnValue();
             for (Link link : links) {
                 if (link.linkNature().isDecoration()) continue;
-                String kept = pi.equals(link.from()) ? pi.name() + " " + link.linkNature() + " " + link.to()
-                        : pi.equals(link.to()) ? link.from() + " " + link.linkNature() + " " + pi.name() : null;
+                String kept = itself(link.from(), pi, ofReturn) || itself(link.to(), pi, ofReturn)
+                        ? link.from() + " " + link.linkNature() + " " + link.to() : null;
                 if (kept != null) {
                     linkReasons.putIfAbsent(pi, "kept: " + kept);
                     break;
@@ -248,6 +252,15 @@ final class BorrowedParameters {
         if (methodInfo.methodBody() == null) return null;
         // rule 7 only where no link shows a keep: those are applied at the call site
         return body(methodInfo, pi::equals, true, !linkReasons.containsKey(pi), pi.name(), thisEscape, deps);
+    }
+
+    /*
+     The parameter itself, or its modification face: 'rv.§m ≡ 0:l.§m' is a view of the parameter that outlives the call
+     (a library method whose hints say dependentReturnValue, Collections.synchronizedList; Collection.toArray(T[])).
+     */
+    private static boolean itself(Variable v, ParameterInfo pi, boolean face) {
+        return pi.equals(v) || face && v instanceof FieldReference fr && "§m".equals(fr.fieldInfo().name())
+                               && pi.equals(fr.scopeVariable());
     }
 
     /**

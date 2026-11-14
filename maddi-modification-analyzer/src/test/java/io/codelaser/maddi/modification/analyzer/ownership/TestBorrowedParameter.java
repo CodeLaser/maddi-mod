@@ -101,6 +101,10 @@ public class TestBorrowedParameter extends CommonTest {
                 void intoNode(List<String> l) { Node n = find(); n.value = l; }
                 int localNew(List<String> l) { Node n = new Node(); n.value = l; return n.value.size(); }
                 Supplier<Holder> holderCaptured(List<String> l) { Holder h = new Holder(l); return () -> h; }
+                // a view of the parameter returned keeps it (rv.§m ≡ 0:m.§m, the hints' dependentReturnValue)
+                Set<String> view(Map<String, Boolean> m) { return Collections.newSetFromMap(m); }
+                List<String> sync(List<String> l) { return Collections.synchronizedList(l); }
+                int viewDiscarded(List<String> l) { return Collections.synchronizedList(l).size(); }
                 static class Node { List<String> value; }
                 static class TreeMap2<K, V> {
                     static final class N<K, V> { final K key; V value; N<K, V> left; N(K key) { this.key = key; } }
@@ -217,6 +221,9 @@ public class TestBorrowedParameter extends CommonTest {
             // a local holding an object that keeps it, captured
             Map.entry("X.holderCaptured:l", false),
             Map.entry("TreeMap2.put:value", false),
+            Map.entry("X.view:m", false),
+            Map.entry("X.sync:l", false),
+            Map.entry("X.viewDiscarded:l", true),
             Map.entry("Json.add:value", false),
             Map.entry("Builder.set:s", false)));
 
