@@ -30,12 +30,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Predicate;
 
 import io.codelaser.maddi.cst.api.analysis.Message;
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.element.Element;
 import io.codelaser.maddi.cst.api.expression.Assignment;
 import io.codelaser.maddi.cst.api.expression.Cast;
+import io.codelaser.maddi.cst.api.expression.ConstructorCall;
 import io.codelaser.maddi.cst.api.expression.EnclosedExpression;
 import io.codelaser.maddi.cst.api.expression.Expression;
 import io.codelaser.maddi.cst.api.expression.InlineConditional;
@@ -155,16 +157,22 @@ public class TypeModIndyAnalyzerImpl extends CommonAnalyzerImpl implements TypeM
     // gate NOVIEWOFTYPEPARAMETER: a call whose formal result is a type parameter is a view by the callee's verdict
     private static final boolean NO_VIEW_OF_TYPE_PARAMETER = System.getenv("NOVIEWOFTYPEPARAMETER") != null;
     private static final boolean ALL_VALUES_FLUENT_OFF = System.getenv("NOALLVALUESFLUENT") != null;
+    private static final boolean NO_FLUENT_RETURNS = System.getenv("NOFLUENTRETURNS") != null;
 
     private static boolean isThis(MethodInfo methodInfo, Variable v) {
         return v instanceof This thisVar
                && (thisVar.typeInfo() == methodInfo.typeInfo()
-                   || thisVar.typeInfo().typeHierarchyExcludingJLOStream().anyMatch(h -> h.equals(methodInfo.typeInfo())));
+                   || thisVar.typeInfo().typeHierarchyExcludingJLOStream().anyMatch(h -> h.equals(methodInfo.typeInfo()))
+                   // 'super' / 'I.super': the same object, seen as a supertype (maddi-mod#31)
+                   || thisVar.writeSuper() && methodInfo.typeInfo().typeHierarchyExcludingJLOStream()
+                           .anyMatch(h -> h.equals(thisVar.typeInfo())));
     }
 
     private void doFluentAnalysis(MethodInfo methodInfo, MethodLinkedVariables mlv) {
         boolean identityFluent;
-        if (methodInfo.hasReturnValue() && !mlv.ofReturnValue().isEmpty()) {
+        // a primitive cannot be the receiver (maddi-mod#31: javaparser's 'boolean Node.remove(Node)' came out @Fluent)
+        if (methodInfo.hasReturnValue() && !methodInfo.returnType().isPrimitiveExcludingVoid()
+            && !mlv.ofReturnValue().isEmpty()) {
             if (ALL_VALUES_FLUENT_OFF) {
                 identityFluent = mlv.ofReturnValue().stream().anyMatch(v -> isThis(methodInfo, v.to()));
             } else {
@@ -175,7 +183,10 @@ public class TypeModIndyAnalyzerImpl extends CommonAnalyzerImpl implements TypeM
                         .filter(v -> v.from().equals(rv)
                                      && (v.linkNature().isIdenticalTo() || v.linkNature().isAssignedFrom()))
                         .map(Link::to).toList();
-                identityFluent = !values.isEmpty() && values.stream().allMatch(v -> isThis(methodInfo, v));
+                identityFluent = !values.isEmpty() && values.stream().allMatch(v -> isThis(methodInfo, v))
+                                 // the links do not see a return of something unlinked (a new object): every
+                                 // return must yield this (maddi-mod#31); gate NOFLUENTRETURNS
+                                 && (NO_FLUENT_RETURNS || everyReturnYields(methodInfo, v -> isThis(methodInfo, v)));
             }
         } else {
             identityFluent = false;
@@ -341,7 +352,7 @@ public class TypeModIndyAnalyzerImpl extends CommonAnalyzerImpl implements TypeM
                                                                      && link.linkNature().isIdenticalToOrAssignedFromTo()
                                                                      && link.to().equals(p0))
                        && mlv.ofReturnValue().stream().allMatch(link -> !link.from().equals(primaryFrom) || link.to().equals(p0))
-                       && everyReturnYields(methodInfo, (ParameterInfo) p0);
+                       && everyReturnYields(methodInfo, v -> v.equals(p0));
         } else {
             identity = false;
         }
@@ -359,13 +370,17 @@ public class TypeModIndyAnalyzerImpl extends CommonAnalyzerImpl implements TypeM
     conditional; a local variable every assignment of which does; or the first argument of an @Identity call that
     does. Anything else (a constant, null, a new object, another call) is not the parameter. A method without a body
     (shallow, hinted) keeps the link verdict.
+    The same holds for @Fluent with 'this' as the target (CodeLaser/maddi-mod#31): 'return isX() ? extendsBound(t)
+    : this' links only to this. A call of a @Fluent method on something that yields the target yields it too
+    ('return setComment(null)', 'return super.solve(c)').
      */
-    private static boolean everyReturnYields(MethodInfo methodInfo, ParameterInfo p0) {
+    private static boolean everyReturnYields(MethodInfo methodInfo, Predicate<Variable> target) {
         if (methodInfo.methodBody() == null || methodInfo.methodBody().isEmpty()) return true;
         List<Expression> returned = new ArrayList<>();
         Map<LocalVariable, List<Expression>> assigned = new java.util.HashMap<>();
         methodInfo.methodBody().visit((Element e) -> {
             if (e instanceof Lambda) return false; // its returns are its own
+            if (e instanceof ConstructorCall cc && cc.anonymousClass() != null) return false; // so are its methods'
             if (e instanceof ReturnStatement rs && rs.expression() != null && !rs.expression().isEmpty()) {
                 returned.add(rs.expression());
             } else if (e instanceof LocalVariableCreation lvc) {
@@ -383,32 +398,36 @@ public class TypeModIndyAnalyzerImpl extends CommonAnalyzerImpl implements TypeM
             return true;
         });
         if (returned.isEmpty()) return false;
-        return returned.stream().allMatch(r -> yieldsParameter(r, p0, assigned, new HashSet<>()));
+        return returned.stream().allMatch(r -> yields(r, target, assigned, new HashSet<>()));
     }
 
-    private static boolean yieldsParameter(Expression expression, ParameterInfo p0,
-                                           Map<LocalVariable, List<Expression>> assigned,
-                                           Set<LocalVariable> seen) {
-        if (expression instanceof Cast cast) return yieldsParameter(cast.expression(), p0, assigned, seen);
+    private static boolean yields(Expression expression, Predicate<Variable> target,
+                                  Map<LocalVariable, List<Expression>> assigned,
+                                  Set<LocalVariable> seen) {
+        if (expression instanceof Cast cast) return yields(cast.expression(), target, assigned, seen);
         if (expression instanceof EnclosedExpression enclosed) {
-            return yieldsParameter(enclosed.inner(), p0, assigned, seen);
+            return yields(enclosed.inner(), target, assigned, seen);
         }
         if (expression instanceof InlineConditional ic) {
-            return yieldsParameter(ic.ifTrue(), p0, assigned, seen) && yieldsParameter(ic.ifFalse(), p0, assigned, seen);
+            return yields(ic.ifTrue(), target, assigned, seen) && yields(ic.ifFalse(), target, assigned, seen);
         }
         if (expression instanceof VariableExpression ve) {
-            if (ve.variable().equals(p0)) return true;
+            if (target.test(ve.variable())) return true;
             if (ve.variable() instanceof LocalVariable lv) {
                 if (!seen.add(lv)) return true; // a cycle adds no other value
                 List<Expression> values = assigned.get(lv);
                 return values != null && !values.isEmpty()
-                       && values.stream().allMatch(v -> yieldsParameter(v, p0, assigned, seen));
+                       && values.stream().allMatch(v -> yields(v, target, assigned, seen));
             }
             return false;
         }
-        if (expression instanceof MethodCall mc && mc.methodInfo() != null && mc.methodInfo().isIdentity()
-            && !mc.parameterExpressions().isEmpty()) {
-            return yieldsParameter(mc.parameterExpressions().getFirst(), p0, assigned, seen);
+        if (expression instanceof MethodCall mc && mc.methodInfo() != null) {
+            if (mc.methodInfo().isIdentity() && !mc.parameterExpressions().isEmpty()
+                && yields(mc.parameterExpressions().getFirst(), target, assigned, seen)) {
+                return true;
+            }
+            return mc.methodInfo().isFluent() && mc.object() != null && !mc.object().isEmpty()
+                   && yields(mc.object(), target, assigned, seen);
         }
         return false;
     }
