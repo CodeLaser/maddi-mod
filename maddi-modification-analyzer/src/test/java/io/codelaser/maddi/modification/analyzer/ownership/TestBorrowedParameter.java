@@ -110,6 +110,8 @@ public class TestBorrowedParameter extends CommonTest {
                     private final List<Tree> stats = new ArrayList<>();
                     Seq(Tree... ts) { stats.addAll(Arrays.asList(ts)); }
                     static Seq pair(Tree head, Tree tail) { return new Seq(head, tail); }
+                    Seq(List<Tree> l) { stats.addAll(l); }
+                    Seq(Tree a, Tree b, int n) { this(Arrays.asList(a, b)); }
                 }
                 static class Ctx {
                     private final Holder h;
@@ -253,6 +255,7 @@ public class TestBorrowedParameter extends CommonTest {
             Map.entry("Tree.firstData:t", false),
             Map.entry("Scc.visit:t", false),
             Map.entry("Seq.pair:head", false),
+            Map.entry("Seq.<init>:a", false),
             Map.entry("Ctx.make:l", false),
             Map.entry("X.addHolder:l", false),
             Map.entry("Scc.flat:t", false),

@@ -40,6 +40,7 @@ import io.codelaser.maddi.cst.api.expression.MethodReference;
 import io.codelaser.maddi.cst.api.expression.VariableExpression;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
+import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.api.statement.ExplicitConstructorInvocation;
 import io.codelaser.maddi.cst.api.statement.LocalVariableCreation;
 import io.codelaser.maddi.cst.api.statement.ReturnStatement;
@@ -408,8 +409,19 @@ final class BorrowedParameters {
             // 'new LazyLoader(provider)' passed on: whatever keeps the new object keeps the alias (its links do not
             // always show it)
             boolean held = !alias && holds(argument, aliases);
-            if (!alias && !held) continue;
+            boolean element = !alias && !held && asElement(argument, aliases);
+            if (!alias && !held && !element) continue;
             ParameterInfo formal = formal(callee, i);
+            if (element) {
+                // 'this(Arrays.asList(head, tail))': an element of a new collection; borrowing the collection allows
+                // keeping its elements
+                if (formal != null && applies(formal)
+                    && (analysed.contains(callee) ? keepsElements(formal) : !isBorrowed(formal))) {
+                    return "an element of a new collection passed to " + callee.fullyQualifiedName()
+                           + ", which keeps its elements";
+                }
+                continue;
+            }
             if (analysed.contains(callee)) {
                 if (formal == null || !applies(formal)) continue;
                 deps.add(new Dep(formal, full || held));
@@ -452,6 +464,23 @@ final class BorrowedParameters {
             else if (x instanceof DependentVariable dv) x = dv.arrayVariable();
             else return false;
         }
+    }
+
+    // a static library call taking an alias and returning a collection or array: Arrays.asList(a, b), List.of(a)
+    private boolean asElement(Expression expression, Predicate<Variable> aliases) {
+        Expression e = expression;
+        while (e instanceof Cast || e instanceof EnclosedExpression) {
+            e = e instanceof Cast c ? c.expression() : ((EnclosedExpression) e).inner();
+        }
+        if (!(e instanceof MethodCall mc) || mc.methodInfo() == null || !mc.methodInfo().isStatic()
+            || analysed.contains(mc.methodInfo())) return false;
+        ParameterizedType type = mc.methodInfo().returnType();
+        boolean container = type.arrays() > 0 || type.typeInfo() != null
+                && type.typeInfo().fullyQualifiedName().startsWith("java.util.")
+                && (type.typeInfo().fullyQualifiedName().endsWith("List")
+                    || type.typeInfo().fullyQualifiedName().endsWith("Set")
+                    || type.typeInfo().fullyQualifiedName().endsWith("Collection"));
+        return container && mc.parameterExpressions().stream().anyMatch(a -> isAlias(a, aliases));
     }
 
     // an alias, or a new object (not an anonymous class) one of whose arguments holds one
