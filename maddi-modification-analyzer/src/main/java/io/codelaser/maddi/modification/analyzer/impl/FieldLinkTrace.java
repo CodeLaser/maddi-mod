@@ -41,12 +41,16 @@ import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
  number of links and the '$_' markers among their targets. It tells a field that read a method before its last
  computation from a method whose computations differ (fernflower's StructContext.loader, 2026-11-10: a link to one
  marker present in some runs and absent in others).
+ FIELDLINKTRACE_GREP=text also lists, among the markers, every link whose rendering contains the text (maddi-mod#128:
+ which method offers a given link, and in which pass).
  */
 final class FieldLinkTrace {
     private static final Logger LOGGER = LoggerFactory.getLogger(FieldLinkTrace.class);
     private static final Set<String> FIELDS = System.getenv("FIELDLINKTRACE") == null ? Set.of()
             : Arrays.stream(System.getenv("FIELDLINKTRACE").split(",")).map(String::strip)
             .collect(Collectors.toUnmodifiableSet());
+
+    private static final String GREP = System.getenv("FIELDLINKTRACE_GREP");
 
     private FieldLinkTrace() {
     }
@@ -92,6 +96,7 @@ final class FieldLinkTrace {
             ++n;
             String to = String.valueOf(l.to());
             if (to.startsWith("$_")) markers.add(to);
+            if (GREP != null && l.toString().contains(GREP)) markers.add(l.toString());
         }
         return n + " link(s), markers " + markers;
     }

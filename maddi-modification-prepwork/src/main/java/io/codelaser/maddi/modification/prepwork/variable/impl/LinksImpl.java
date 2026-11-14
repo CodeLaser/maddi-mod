@@ -159,6 +159,25 @@ public class LinksImpl implements Links {
         return mine.compareTo(theirs) < 0; // equal mass: smaller canonical rendering wins, arbitrarily but totally
     }
 
+    /**
+     * Content equality next to the primary-only {@link #equals}: without it {@code TolerantWrite.setLatestWins}
+     * sees every recomputation of a field's links as "nothing changed" and keeps the first value (maddi-mod#128).
+     * A link's own equality is from/to only, so the nature and the mediation are compared here.
+     */
+    @Override
+    public boolean sameContent(Value other) {
+        if (!(other instanceof LinksImpl o) || !equals(o) || linkSet.size() != o.linkSet.size()) return false;
+        return contentKey(this).equals(contentKey(o));
+    }
+
+    private static java.util.Set<java.util.List<Object>> contentKey(LinksImpl links) {
+        java.util.Set<java.util.List<Object>> set = new java.util.HashSet<>();
+        for (Link link : links.linkSet) {
+            set.add(java.util.Arrays.asList(link.from(), link.linkNature(), link.to(), link.mediated()));
+        }
+        return set;
+    }
+
     @Override
     public @NotNull Iterator<Link> iterator() {
         return linkSet.iterator();

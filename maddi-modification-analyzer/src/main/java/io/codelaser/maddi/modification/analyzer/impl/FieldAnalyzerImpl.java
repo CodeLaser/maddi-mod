@@ -135,7 +135,10 @@ public class FieldAnalyzerImpl extends CommonAnalyzerImpl implements FieldAnalyz
                     return false;
                 }
             }
-            if (TolerantWrite.setAllowControlledOverwrite(fieldInfo.analysis(), LinksImpl.LINKS, linkedVariables, fieldInfo)) {
+            // latest wins (maddi-mod#128): the links are a function of the methods' current variable data. The first
+            // iteration's value carries the pessimism of callees not yet decided as extra links; "richer wins"
+            // kept it for good in a cold run, where a seeded run, starting from decided callees, never computes it
+            if (TolerantWrite.setLatestWins(fieldInfo.analysis(), LinksImpl.LINKS, linkedVariables, fieldInfo)) {
                 DECIDE.debug("FI: Decide linked variables of field {} = {}", fieldInfo, linkedVariables);
                 propertyChanges.incrementAndGet();
             }
