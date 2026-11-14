@@ -1071,6 +1071,13 @@ public record ExpressionVisitor(Runtime runtime,
      */
     static final boolean NO_NARROW_RECURSION = System.getenv("NONARROWRECURSION") != null;
     static final boolean RECURSION_MARKS_NOTHING = System.getenv("RECURSIONMARKSNOTHING") != null;
+    /*
+     #127: inside a recursive method, only callees WITHOUT a source body (library, JDK) keep their summary: those are
+     what the issue is about (Deque.push, Map.put, List.getFirst), and they are cheap. Keeping the summaries of source
+     callees too (gate RECURSIONSOURCESUMMARIES) pushed Guava from 0 to 18+ and Fernflower from 5 to 12 methods over
+     the work ceiling, and made a read-only Fernflower cycle (GenericType.appendCastName...) modifying.
+     */
+    static final boolean RECURSION_SOURCE_SUMMARIES = System.getenv("RECURSIONSOURCESUMMARIES") != null;
 
     private static boolean recursive(MethodInfo methodInfo) {
         return methodInfo.analysis().getOrDefault(PropertyImpl.RECURSIVE_METHOD, ValueImpl.BoolImpl.FALSE).isTrue();
@@ -1083,7 +1090,9 @@ public record ExpressionVisitor(Runtime runtime,
 
     private MethodLinkedVariables recurseIntoLinkComputer(MethodInfo methodInfo) {
         if (methodInfo.equals(currentMethod)
-            || recursive(currentMethod) && (NO_NARROW_RECURSION || recursive(methodInfo))) {
+            || recursive(currentMethod) && (NO_NARROW_RECURSION || recursive(methodInfo)
+                                            || !RECURSION_SOURCE_SUMMARIES
+                                               && !methodInfo.typeInfo().compilationUnit().externalLibrary())) {
             // direct recursion, lambda to enclosing method
             return new MethodLinkedVariablesImpl(LinksImpl.EMPTY,
                     methodInfo.parameters().stream().map(_ -> LinksImpl.EMPTY).toList(), Set.of());
