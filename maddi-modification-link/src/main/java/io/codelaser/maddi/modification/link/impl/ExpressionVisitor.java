@@ -1062,10 +1062,22 @@ public record ExpressionVisitor(Runtime runtime,
                 .collect(Collectors.toUnmodifiableSet());
     }
 
+    /*
+     CodeLaser/maddi-mod#127: the empty summary stands for a call back into the recursion only. RECURSIVE_METHOD on the
+     current method alone (7c2a827e: a lambda calling its enclosing method) emptied EVERY call in a recursive body,
+     library calls included: 'component.push(t)' in a recursive 'visit(t)' linked nothing. A callee that is not itself
+     recursive cannot be in the current method's cycle, so it keeps its summary. There is no cycle identity, so a
+     recursive callee of another cycle still gets the empty one. Gate NONARROWRECURSION restores the old rule.
+     */
+    private static final boolean NO_NARROW_RECURSION = System.getenv("NONARROWRECURSION") != null;
+
+    private static boolean recursive(MethodInfo methodInfo) {
+        return methodInfo.analysis().getOrDefault(PropertyImpl.RECURSIVE_METHOD, ValueImpl.BoolImpl.FALSE).isTrue();
+    }
+
     private MethodLinkedVariables recurseIntoLinkComputer(MethodInfo methodInfo) {
         if (methodInfo.equals(currentMethod)
-            || currentMethod.analysis().getOrDefault(PropertyImpl.RECURSIVE_METHOD, ValueImpl.BoolImpl.FALSE)
-                    .isTrue()) {
+            || recursive(currentMethod) && (NO_NARROW_RECURSION || recursive(methodInfo))) {
             // direct recursion, lambda to enclosing method
             return new MethodLinkedVariablesImpl(LinksImpl.EMPTY,
                     methodInfo.parameters().stream().map(_ -> LinksImpl.EMPTY).toList(), Set.of());
