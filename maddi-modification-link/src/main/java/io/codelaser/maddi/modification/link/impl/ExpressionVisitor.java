@@ -1070,6 +1070,7 @@ public record ExpressionVisitor(Runtime runtime,
      recursive callee of another cycle still gets the empty one. Gate NONARROWRECURSION restores the old rule.
      */
     static final boolean NO_NARROW_RECURSION = System.getenv("NONARROWRECURSION") != null;
+    static final boolean RECURSION_MARKS_NOTHING = System.getenv("RECURSIONMARKSNOTHING") != null;
 
     private static boolean recursive(MethodInfo methodInfo) {
         return methodInfo.analysis().getOrDefault(PropertyImpl.RECURSIVE_METHOD, ValueImpl.BoolImpl.FALSE).isTrue();

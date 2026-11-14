@@ -109,8 +109,9 @@ public record MethodModification(Runtime runtime, VariableData variableData, Sta
         // the decision rests on the callee's verdict: recompute this method when it changes (worklist)
         if (inRecursion) dependsOn.accept(methodInfo);
         if (objectPrimary != null && !methodInfo.isFinalizer()
-            && !(inRecursion && methodInfo.analysis().getOrNull(PropertyImpl.NON_MODIFYING_METHOD,
-                ValueImpl.BoolImpl.class) == null)) {
+            && !(inRecursion && (ExpressionVisitor.RECURSION_MARKS_NOTHING
+                                 || methodInfo.analysis().getOrNull(PropertyImpl.NON_MODIFYING_METHOD,
+                ValueImpl.BoolImpl.class) == null))) {
             if (methodInfo.isModifying() && !methodInfo.isIgnoreModification()) {
                 if (ReceiverLevel.enabled() && receiverExcused(objectPrimary, receiverType, methodInfo)) {
                     receiverExcused = true;
@@ -132,8 +133,9 @@ public record MethodModification(Runtime runtime, VariableData variableData, Sta
             for (ParameterInfo pi : methodInfo.parameters()) {
                 // an unmodified parameter with entries: it, or an element of it, reaches a function (PassedFunction)
                 boolean throughOnly = !pi.isModified() && !pi.isVarArgs() && PassedFunction.hasEntries(pi);
-                if (inRecursion && pi.analysis().getOrNull(PropertyImpl.UNMODIFIED_PARAMETER,
-                        ValueImpl.BoolImpl.class) == null) {
+                if (inRecursion && (ExpressionVisitor.RECURSION_MARKS_NOTHING
+                                    || pi.analysis().getOrNull(PropertyImpl.UNMODIFIED_PARAMETER,
+                        ValueImpl.BoolImpl.class) == null)) {
                     continue; // #127: undecided in the recursion, see above
                 }
                 if ((!pi.isModified() && !throughOnly) || pi.isIgnoreModifications()
