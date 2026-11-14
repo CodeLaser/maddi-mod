@@ -29,6 +29,7 @@ import java.util.stream.Stream;
 import org.jetbrains.annotations.NotNull;
 
 import io.codelaser.maddi.cst.api.element.Element;
+import io.codelaser.maddi.cst.api.expression.AnnotationExpression;
 import io.codelaser.maddi.cst.api.expression.IntConstant;
 import io.codelaser.maddi.cst.api.expression.Lambda;
 import io.codelaser.maddi.cst.api.info.FieldInfo;
@@ -157,6 +158,30 @@ public class Util {
      * its own body's verdict. Not final, so that a test can switch it for one analysis.
      */
     public static volatile boolean DISPATCH_UNION = System.getenv("NODISPATCHUNION") == null;
+
+    private static final String NOT_MODIFIED_FQN = "io.codelaser.maddi.annotation.NotModified";
+
+    /**
+     * CodeLaser/maddi-mod#125: {@code @NotModified(contract = true)} written on a parameter of a method WITH a body.
+     * On a bodiless method a contract decides the parameter by itself ({@code ContractResolution}); a body can be
+     * computed, so there the annotation is an expectation the guard checks, unless the author opts in explicitly with
+     * {@code contract = true} (the annotation's own documentation: "to override the computation of the analyzer").
+     * Then the parameter is unmodified whatever the body and the #116 dispatch union say, and it transmits no
+     * modification to the arguments of its callers. The parameter's OWN annotation only: an override keeps computing
+     * its own verdict, and the guard reports one that breaks the contract. Gate NOBODYPARAMETERCONTRACT.
+     */
+    public static final boolean NO_BODY_PARAMETER_CONTRACT = System.getenv("NOBODYPARAMETERCONTRACT") != null;
+
+    public static boolean explicitNotModifiedContractOnBody(ParameterInfo pi) {
+        if (NO_BODY_PARAMETER_CONTRACT || pi.methodInfo().isAbstract() || pi.annotations().isEmpty()) return false;
+        for (AnnotationExpression ae : pi.annotations()) {
+            if (ae.typeInfo() != null && NOT_MODIFIED_FQN.equals(ae.typeInfo().fullyQualifiedName())
+                && ae.extractBoolean("contract") && !ae.extractBoolean("absent")) {
+                return true;
+            }
+        }
+        return false;
+    }
 
     /**
      * Under {@link #DISPATCH_UNION}: a concrete, overridable source method that source methods override. A call

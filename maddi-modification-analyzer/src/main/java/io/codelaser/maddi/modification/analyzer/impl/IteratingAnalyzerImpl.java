@@ -1235,7 +1235,9 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                         || AbstractMethodAnalyzerImpl.isObjectQueryRedeclaration(mi));
             case ParameterInfo pi -> pi.methodInfo().isAbstract()
                     && (s.contractResolution().resolve(pi, PropertyImpl.UNMODIFIED_PARAMETER).decided()
-                        || AbstractMethodAnalyzerImpl.isObjectQueryRedeclaration(pi.methodInfo()));
+                        || AbstractMethodAnalyzerImpl.isObjectQueryRedeclaration(pi.methodInfo()))
+                    ? s.contractResolution().resolve(pi, PropertyImpl.UNMODIFIED_PARAMETER).decided()
+                    : io.codelaser.maddi.modification.prepwork.Util.explicitNotModifiedContractOnBody(pi); // #125
             default -> false;
         }
                 : _ -> false;
