@@ -106,6 +106,26 @@ public class TestBorrowedParameter extends CommonTest {
                 List<String> sync(List<String> l) { return Collections.synchronizedList(l); }
                 int viewDiscarded(List<String> l) { return Collections.synchronizedList(l).size(); }
                 static class Node { List<String> value; }
+                static class Seq {
+                    private final List<Tree> stats = new ArrayList<>();
+                    Seq(Tree... ts) { stats.addAll(Arrays.asList(ts)); }
+                    static Seq pair(Tree head, Tree tail) { return new Seq(head, tail); }
+                }
+                static class Ctx {
+                    private final Holder h;
+                    Ctx(Holder h) { this.h = h; }
+                    static Ctx make(List<String> l) { return new Ctx(new Holder(l)); }
+                }
+                private final List<Holder> holders = new ArrayList<>();
+                void addHolder(List<String> l) { holders.add(new Holder(l)); }
+                static class Scc {
+                    private final Deque<Tree> component = new ArrayDeque<>();
+                    private final Map<Tree, Integer> indices = new HashMap<>();
+                    void visit(Tree t) { component.push(t); indices.put(t, indices.size()); for (Tree c : t.children) visit(c); }
+                    void flat(Tree t) { component.push(t); indices.put(t, indices.size()); }
+                    static Set<Tree> label(Tree t) { Set<Tree> s = new HashSet<>(); for (Tree c : t.children) s.addAll(label(c)); s.add(t); return s; }
+                    static Set<Tree> labelFlat(Tree t) { Set<Tree> s = new HashSet<>(); s.add(t); return s; }
+                }
                 static class Tree {
                     List<Tree> children = new ArrayList<>();
                     List<String> data;
@@ -231,6 +251,13 @@ public class TestBorrowedParameter extends CommonTest {
             Map.entry("TreeMap2.put:value", false),
             Map.entry("X.view:m", false),
             Map.entry("Tree.firstData:t", false),
+            Map.entry("Scc.visit:t", false),
+            Map.entry("Seq.pair:head", false),
+            Map.entry("Ctx.make:l", false),
+            Map.entry("X.addHolder:l", false),
+            Map.entry("Scc.flat:t", false),
+            Map.entry("Scc.label:t", false),
+            Map.entry("Scc.labelFlat:t", false),
             Map.entry("X.sync:l", false),
             Map.entry("X.viewDiscarded:l", true),
             Map.entry("Json.add:value", false),

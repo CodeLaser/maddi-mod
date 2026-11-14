@@ -85,7 +85,10 @@ import io.codelaser.maddi.modification.prepwork.variable.MethodLinkedVariables;
  *   ({@code this.s = Objects.requireNonNull(s)} into an interface-typed field; {@code created.value = value} into a
  *   node a callee returned); returned ({@code return stat} beside a recursive return).</li>
  * </ol>
- * Aliases flow through the same casts, conditionals and identity methods everywhere.
+ * Aliases flow through the same casts, conditionals and identity methods everywhere. A new object holding an alias
+ * ({@code new LazyLoader(provider)}) handed on counts as the alias, with the callee's full verdict; an alias among a
+ * varargs array whose elements the callee keeps is kept. In a recursive method no link shows a callee
+ * (CodeLaser/maddi-mod#127): callees' full verdicts count, and a library parameter needs a {@code @Borrowed} contract.
  * Rules 4 and 5 are a greatest fixpoint, as for freshness. A {@code @Borrowed} contract decides a parameter of a
  * bodiless method.
  */
@@ -295,6 +298,10 @@ final class BorrowedParameters {
         // what the object keeps; the constructor's verdict is not known yet, so any hand-over counts
         Set<Variable> holders = localHolders(methodInfo, aliases);
         Set<Variable> newLocals = newLocals(methodInfo);
+        // in a recursive method, the link engine applies no callee's summary (CodeLaser/maddi-mod#127): no link
+        // shows what a callee keeps, so a callee's full verdict counts, and a library method needs a contract
+        boolean linksIncomplete = methodInfo.analysis().getOrDefault(PropertyImpl.RECURSIVE_METHOD,
+                ValueImpl.BoolImpl.FALSE).isTrue();
         Predicate<Variable> captured = capturedDirectly ? v -> aliases.test(v) || holders.contains(v)
                 : v -> locals.contains(v) || holders.contains(v);
         String[] found = new String[1];
@@ -323,10 +330,19 @@ final class BorrowedParameters {
                                 found[0] = "passed to the constructor of an anonymous class";
                                 return false;
                             }
-                            arguments(superConstructor, cc.parameterExpressions(), aliases, deps, true);
+                            String r = arguments(superConstructor, cc.parameterExpressions(), aliases, deps, true);
+                            if (r != null) {
+                                found[0] = r;
+                                return false;
+                            }
                         }
                     } else if (cc.constructor() != null) {
-                        arguments(cc.constructor(), cc.parameterExpressions(), aliases, deps, false);
+                        String r = arguments(cc.constructor(), cc.parameterExpressions(), aliases, deps,
+                                linksIncomplete);
+                        if (r != null) {
+                            found[0] = r;
+                            return false;
+                        }
                     }
                 }
                 case MethodCall mc -> {
@@ -336,7 +352,18 @@ final class BorrowedParameters {
                             found[0] = "receiver of " + callee.fullyQualifiedName() + ", which may leak this";
                             return false;
                         }
-                        arguments(callee, mc.parameterExpressions(), aliases, deps, false);
+                        if (linksIncomplete && !analysed.contains(callee)) {
+                            String r = libraryWithoutContract(callee, mc.parameterExpressions(), aliases);
+                            if (r != null) {
+                                found[0] = r;
+                                return false;
+                            }
+                        }
+                        String r = arguments(callee, mc.parameterExpressions(), aliases, deps, linksIncomplete);
+                        if (r != null) {
+                            found[0] = r;
+                            return false;
+                        }
                     }
                 }
                 case Assignment a when stores && !tracked.test(a.target().variable()) && isAlias(a.value(), aliases)
@@ -355,7 +382,11 @@ final class BorrowedParameters {
                     // this(..), super(..): the callee's link keeps are not applied to the caller's summary, so its
                     // full verdict is needed
                     if (eci.methodInfo() != null) {
-                        arguments(eci.methodInfo(), eci.parameterExpressions(), aliases, deps, true);
+                        String r = arguments(eci.methodInfo(), eci.parameterExpressions(), aliases, deps, true);
+                        if (r != null) {
+                            found[0] = r;
+                            return false;
+                        }
                     }
                 }
                 default -> {
@@ -367,17 +398,71 @@ final class BorrowedParameters {
     }
 
     // rule 4: the formal parameters an alias is passed to; 'full' when the callee's links do not reach the caller's
-    private void arguments(MethodInfo callee, List<Expression> arguments, Predicate<Variable> aliases,
-                           Set<Dep> deps, boolean full) {
+    // the reason when an argument is kept outright: a new object holding an alias handed to a callee that may keep
+    // it, or an alias passed among a varargs array whose elements the callee keeps
+    private String arguments(MethodInfo callee, List<Expression> arguments, Predicate<Variable> aliases,
+                             Set<Dep> deps, boolean full) {
         for (int i = 0; i < arguments.size(); i++) {
-            if (!isAlias(arguments.get(i), aliases)) continue;
+            Expression argument = arguments.get(i);
+            boolean alias = isAlias(argument, aliases);
+            // 'new LazyLoader(provider)' passed on: whatever keeps the new object keeps the alias (its links do not
+            // always show it)
+            boolean held = !alias && holds(argument, aliases);
+            if (!alias && !held) continue;
+            ParameterInfo formal = formal(callee, i);
             if (analysed.contains(callee)) {
-                ParameterInfo formal = formal(callee, i);
-                if (formal != null && applies(formal)) deps.add(new Dep(formal, full));
+                if (formal == null || !applies(formal)) continue;
+                deps.add(new Dep(formal, full || held));
+                if (formal.isVarArgs() && !(i == arguments.size() - 1 && arguments.size() == callee.parameters().size()
+                                            && argument.parameterizedType() != null
+                                            && argument.parameterizedType().arrays() > 0)
+                    && keepsElements(formal)) {
+                    return "passed among the varargs of " + callee.fullyQualifiedName() + ", whose elements it keeps";
+                }
             } else {
+                if (held && formal != null && applies(formal) && !isBorrowed(formal)) {
+                    return "a new object holding it passed to " + callee.fullyQualifiedName();
+                }
                 libraryDependencies(callee, i).forEach(p -> deps.add(new Dep(p, true)));
             }
         }
+        return null;
+    }
+
+    // the callee's links reach the parameter's contents (its elements, for a varargs array)
+    private static boolean keepsElements(ParameterInfo formal) {
+        MethodLinkedVariables mlv = formal.methodInfo().analysis().getOrNull(MethodLinkedVariablesImpl.METHOD_LINKS,
+                MethodLinkedVariablesImpl.class);
+        if (mlv == null) return true;
+        for (Links links : (Iterable<Links>) Stream.concat(Stream.of(mlv.ofReturnValue()),
+                mlv.ofParameters().stream())::iterator) {
+            for (Link link : links) {
+                if (link.linkNature().isDecoration()) continue;
+                if (based(link.from(), formal) || based(link.to(), formal)) return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean based(Variable v, ParameterInfo formal) {
+        Variable x = v;
+        while (true) {
+            if (formal.equals(x)) return true;
+            if (x instanceof FieldReference fr && fr.scopeVariable() != null) x = fr.scopeVariable();
+            else if (x instanceof DependentVariable dv) x = dv.arrayVariable();
+            else return false;
+        }
+    }
+
+    // an alias, or a new object (not an anonymous class) one of whose arguments holds one
+    private static boolean holds(Expression expression, Predicate<Variable> aliases) {
+        if (isAlias(expression, aliases)) return true;
+        Expression e = expression;
+        while (e instanceof Cast || e instanceof EnclosedExpression) {
+            e = e instanceof Cast c ? c.expression() : ((EnclosedExpression) e).inner();
+        }
+        return e instanceof ConstructorCall cc && cc.anonymousClass() == null
+               && cc.parameterExpressions().stream().anyMatch(a -> holds(a, aliases));
     }
 
     // the locals assigned from what is tracked (or from such a local)
@@ -403,6 +488,17 @@ final class BorrowedParameters {
             }
         }
         return aliases;
+    }
+
+    // an alias passed to a library method whose parameter has no @Borrowed contract (or value)
+    private String libraryWithoutContract(MethodInfo callee, List<Expression> arguments, Predicate<Variable> aliases) {
+        for (int i = 0; i < arguments.size(); i++) {
+            if (!isAlias(arguments.get(i), aliases)) continue;
+            ParameterInfo formal = formal(callee, i);
+            if (formal == null || !applies(formal) || isBorrowed(formal)) continue;
+            return "passed to " + callee.fullyQualifiedName() + " in a recursive method, whose links show no callee";
+        }
+        return null;
     }
 
     // the locals assigned a constructor call (not an anonymous class) with an alias among its arguments
