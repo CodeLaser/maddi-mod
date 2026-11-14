@@ -210,6 +210,7 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
     @Override
     public void reset() {
         this.diagPass.incrementAndGet();
+        this.provisionalDemand.clear();
         this.countSourceMethods.set(0);
         this.propertiesChanged.set(0);
     }
@@ -265,18 +266,52 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
     public MethodLinkedVariables recurseMethod(MethodInfo method) {
         MethodLinkedVariables alreadyDone = method.analysis().getOrNull(METHOD_LINKS, MethodLinkedVariablesImpl.class);
         if (alreadyDone != null) return alreadyDone;
+        if (!NO_PROVISIONAL_DEMAND) {
+            MethodLinkedVariables provisional = provisionalDemand.get(method);
+            if (provisional != null) {
+                ++IN_PROGRESS_FALLBACKS.get()[0]; // what is built on it is provisional as well
+                return provisional;
+            }
+        }
         try {
             TypeInfo typeInfo = method.typeInfo();
             boolean shallow = options.forceShallow() || typeInfo.compilationUnit().externalLibrary();
-            return doMethod(method, shallow, true, true);
+            if (NO_PROVISIONAL_DEMAND || shallow) return doMethod(method, shallow, true, true);
+            int[] fallbacks = IN_PROGRESS_FALLBACKS.get();
+            int before = fallbacks[0];
+            MethodLinkedVariables mlv = doMethod(method, false, false, true);
+            if (fallbacks[0] == before) {
+                if (TolerantWrite.setAllowControlledOverwrite(method.analysis(), METHOD_LINKS, mlv, method)) {
+                    propertiesChanged.incrementAndGet();
+                }
+            } else {
+                provisionalDemand.put(method, mlv);
+            }
+            return mlv;
         } catch (RuntimeException | AssertionError | StackOverflowError e) {
             LOGGER.error("Caught exception recursively computing {}", method, e);
             throw e;
         }
     }
 
+    /*
+     An on-demand computation (recurseMethod) during which a method on this thread's computation stack had to stand in
+     shallow (it was in progress: a recursive group) is PROVISIONAL: the caller uses it, but it is not the method's
+     methodLinks. Stored, it stayed for good: a full computation of the method finds more modified variables, and
+     methodLinks' modified set may only shrink (MethodLinkedVariablesImpl.overwriteAllowed), so every later
+     analysis-order result was refused as a downgrade, and not counted as a change. Which member of the group was
+     reached on demand first, nested in which other, varies with the scheduling: fernflower's
+     SwitchPatternHelper.JavacReferenceFinder.findCandidate() kept a pass-1 summary that no recomputation reproduces,
+     and that under-reports what it modifies (CodeLaser/maddi-mod#103: 7 refused overwrites). Kept per pass (reset):
+     the callers of one pass reuse it, as they reused the stored value. Gate NOPROVISIONALDEMAND: stored, as before.
+     */
+    private static final boolean NO_PROVISIONAL_DEMAND = System.getenv("NOPROVISIONALDEMAND") != null;
+    private static final ThreadLocal<int[]> IN_PROGRESS_FALLBACKS = ThreadLocal.withInitial(() -> new int[1]);
+    private final Map<MethodInfo, MethodLinkedVariables> provisionalDemand = new ConcurrentHashMap<>();
+
     @Override
     public MethodLinkedVariables doMethodShallowDoNotWrite(MethodInfo methodInfo) {
+        ++IN_PROGRESS_FALLBACKS.get()[0];
         return doMethod(methodInfo, true, false, false);
     }
 
@@ -387,6 +422,7 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
         } else {
             // we're already analyzing methodInfo... so we return a shallow copy, not written out!
             LOGGER.debug("Fall-back to shallow for {}", methodInfo);
+            ++IN_PROGRESS_FALLBACKS.get()[0];
             tlv = doMethod(methodInfo, true, false, false);
         }
         return tlv;
