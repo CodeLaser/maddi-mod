@@ -1069,10 +1069,15 @@ public record ExpressionVisitor(Runtime runtime,
      recursive cannot be in the current method's cycle, so it keeps its summary. There is no cycle identity, so a
      recursive callee of another cycle still gets the empty one. Gate NONARROWRECURSION restores the old rule.
      */
-    private static final boolean NO_NARROW_RECURSION = System.getenv("NONARROWRECURSION") != null;
+    static final boolean NO_NARROW_RECURSION = System.getenv("NONARROWRECURSION") != null;
 
     private static boolean recursive(MethodInfo methodInfo) {
         return methodInfo.analysis().getOrDefault(PropertyImpl.RECURSIVE_METHOD, ValueImpl.BoolImpl.FALSE).isTrue();
+    }
+
+    /** #127: a call from {@code current} back into its recursion (as far as RECURSIVE_METHOD can tell) */
+    static boolean inRecursion(MethodInfo current, MethodInfo callee) {
+        return callee.equals(current) || recursive(current) && recursive(callee);
     }
 
     private MethodLinkedVariables recurseIntoLinkComputer(MethodInfo methodInfo) {
