@@ -37,10 +37,10 @@ import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
  * TestRecursionThroughAbstract); the reachability pass, on in production (AnalysisEngineImpl), upgrades it.
  * <p>
  * One condition on the corpus shapes: {@code lst.get(i).containsExpr(expr)} needs a METHOD_LINKS summary of
- * {@code List.get} to project the receiver chain. The link computer gives every callee of a RECURSIVE_METHOD an
- * empty summary without storing one (ExpressionVisitor.recurseIntoLinkComputer), so when only recursive methods call
- * {@code List.get}, the pass taints the method's parameters and keeps their FALSE. {@code firstOf} is the caller
- * that a corpus normally has.
+ * {@code List.get} to project the receiver chain. Until CodeLaser/maddi-mod#127 the link computer gave every callee of
+ * a RECURSIVE_METHOD an empty summary without storing one (ExpressionVisitor.recurseIntoLinkComputer), so when only
+ * recursive methods called {@code List.get}, the pass tainted the method's parameters and kept their FALSE. Since #127
+ * only a callee in the recursion gets the empty summary. {@code firstOf} is the caller that a corpus normally has.
  */
 public class TestRecursiveCycleReadOnly extends CommonTest {
 
@@ -270,9 +270,9 @@ public class TestRecursiveCycleReadOnly extends CommonTest {
                    + " removeMin=" + method(X.findSubType("Avl"), "removeMin").parameters().getFirst().isUnmodified()
                    + " removeMin2=" + method(X.findSubType("Avl2"), "removeMin").parameters().getFirst().isUnmodified()
                    + " listProduct=" + method(X, "listProduct").parameters().getFirst().isUnmodified();
-        // PINS a defect: listProduct's 'nums.get(start).multiply(..)' is a receiver chain through List.get, which has no
-        // METHOD_LINKS when only a RECURSIVE_METHOD calls it (see the class comment); on guava another caller has it
-        assertEquals("getProperty=true containsKey=true lookFor=true removeMin=true removeMin2=true listProduct=false", s);
+        // listProduct's 'nums.get(start).multiply(..)' is a receiver chain through List.get, which had no METHOD_LINKS
+        // when only a RECURSIVE_METHOD called it (see the class comment); pinned as false until #127 fixed it
+        assertEquals("getProperty=true containsKey=true lookFor=true removeMin=true removeMin2=true listProduct=true", s);
     }
 
     // nacos' ClassUtils.resolveGenericTypeByInterface: a call on an element of an array that a call returns. The summary's
@@ -327,11 +327,13 @@ public class TestRecursiveCycleReadOnly extends CommonTest {
 
     private static final String EXPECTED = "contains=true get=true size=true sizeAll=true depth=true head=true headLoop=true";
 
-    // PINS THE DEFECT, deliberately: the fixpoint alone keeps the cycles' FALSE; the reachability pass is the authority
+    // PINS THE DEFECT, deliberately: the fixpoint alone keeps the cycles' FALSE; the reachability pass is the authority.
+    // Since #127 a call back into the recursion marks nothing while its verdict is undecided, so the one-method
+    // cycles (contains, get, head) come out right in the fixpoint alone too; the size/sizeAll pair still does not
     @DisplayName("without reachability the read-only cycles stay modified")
     @Test
     public void fixpoint() {
-        assertEquals("contains=false get=false size=false sizeAll=false depth=true head=false headLoop=true",
+        assertEquals("contains=true get=true size=false sizeAll=false depth=true head=true headLoop=true",
                 verdicts(false));
     }
 

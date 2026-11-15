@@ -84,7 +84,9 @@ public class TestRecursionThroughAbstract extends CommonTest {
         // downgrades needed here — the FALSE is simply self-consistent) never leaves it. The repair
         // channel is the MODREACH cutover (testModReach below); a fixpoint-side fix would need the
         // downgrade direction the monotone discipline forbids.
-        assertEquals("direct=false C.name=false I.name=false",
+        // Since #127 a call back into the recursion marks nothing while its verdict is undecided, which repairs
+        // the plain self-recursion (direct); name() recurses through the abstract I.name, and stays pinned.
+        assertEquals("direct=true C.name=false I.name=false",
                 "direct=" + nonModifying(C, "direct")
                 + " C.name=" + nonModifying(C, "name")
                 + " I.name=" + nonModifying(I, "name"));

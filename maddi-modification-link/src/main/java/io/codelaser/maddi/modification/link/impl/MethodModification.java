@@ -98,7 +98,19 @@ public record MethodModification(Runtime runtime, VariableData variableData, Sta
         // the static type of the receiver EXPRESSION (a cast counts), for the receiver rules (ReceiverLevel)
         ParameterizedType receiverType = mc.object() == null ? null : mc.object().parameterizedType();
         boolean receiverExcused = false;
-        if (objectPrimary != null && !methodInfo.isFinalizer()) {
+        /*
+         #127: a call back into the current recursion. Its verdicts are the cycle's own, and while undecided they read
+         as modifying, which the cycle then sustains: 'parameters.getFirst().bestTypeInfo()' in a read-only recursive
+         bestTypeInfo() made 'parameters' modified once List.getFirst kept its summary. An undecided in-recursion
+         verdict marks nothing; a decided FALSE (the body modifies directly) marks when the worklist recomputes.
+         */
+        boolean inRecursion = !ExpressionVisitor.NO_NARROW_RECURSION && currentMethod != null
+                              && ExpressionVisitor.inRecursion(currentMethod, methodInfo);
+        // the decision rests on the callee's verdict: recompute this method when it changes (worklist)
+        if (inRecursion) dependsOn.accept(methodInfo);
+        if (objectPrimary != null && !methodInfo.isFinalizer()
+            && !(inRecursion && methodInfo.analysis().getOrNull(PropertyImpl.NON_MODIFYING_METHOD,
+                ValueImpl.BoolImpl.class) == null)) {
             if (methodInfo.isModifying() && !methodInfo.isIgnoreModification()) {
                 if (ReceiverLevel.enabled() && receiverExcused(objectPrimary, receiverType, methodInfo)) {
                     receiverExcused = true;
@@ -120,6 +132,10 @@ public record MethodModification(Runtime runtime, VariableData variableData, Sta
             for (ParameterInfo pi : methodInfo.parameters()) {
                 // an unmodified parameter with entries: it, or an element of it, reaches a function (PassedFunction)
                 boolean throughOnly = !pi.isModified() && !pi.isVarArgs() && PassedFunction.hasEntries(pi);
+                if (inRecursion && pi.analysis().getOrNull(PropertyImpl.UNMODIFIED_PARAMETER,
+                        ValueImpl.BoolImpl.class) == null) {
+                    continue; // #127: undecided in the recursion, see above
+                }
                 if ((!pi.isModified() && !throughOnly) || pi.isIgnoreModifications()
                     || parameterExcusedByCone(pi, receiverType)) {
                     continue;

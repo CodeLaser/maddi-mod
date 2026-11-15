@@ -1062,10 +1062,36 @@ public record ExpressionVisitor(Runtime runtime,
                 .collect(Collectors.toUnmodifiableSet());
     }
 
+    /*
+     CodeLaser/maddi-mod#127: the empty summary stands for a call back into the recursion only. RECURSIVE_METHOD on the
+     current method alone (7c2a827e: a lambda calling its enclosing method) emptied EVERY call in a recursive body,
+     library calls included: 'component.push(t)' in a recursive 'visit(t)' linked nothing. A callee that is not itself
+     recursive cannot be in the current method's cycle, so it keeps its summary. There is no cycle identity, so a
+     recursive callee of another cycle still gets the empty one. Gate NONARROWRECURSION restores the old rule.
+     */
+    static final boolean NO_NARROW_RECURSION = System.getenv("NONARROWRECURSION") != null;
+    /*
+     #127: inside a recursive method, only callees WITHOUT a source body (library, JDK) keep their summary: those are
+     what the issue is about (Deque.push, Map.put, List.getFirst), and they are cheap. Keeping the summaries of source
+     callees too (gate RECURSIONSOURCESUMMARIES) pushed Guava from 0 to 18+ and Fernflower from 5 to 12 methods over
+     the work ceiling, and made a read-only Fernflower cycle (GenericType.appendCastName...) modifying.
+     */
+    static final boolean RECURSION_SOURCE_SUMMARIES = System.getenv("RECURSIONSOURCESUMMARIES") != null;
+
+    private static boolean recursive(MethodInfo methodInfo) {
+        return methodInfo.analysis().getOrDefault(PropertyImpl.RECURSIVE_METHOD, ValueImpl.BoolImpl.FALSE).isTrue();
+    }
+
+    /** #127: a call from {@code current} back into its recursion (as far as RECURSIVE_METHOD can tell) */
+    static boolean inRecursion(MethodInfo current, MethodInfo callee) {
+        return callee.equals(current) || recursive(current) && recursive(callee);
+    }
+
     private MethodLinkedVariables recurseIntoLinkComputer(MethodInfo methodInfo) {
         if (methodInfo.equals(currentMethod)
-            || currentMethod.analysis().getOrDefault(PropertyImpl.RECURSIVE_METHOD, ValueImpl.BoolImpl.FALSE)
-                    .isTrue()) {
+            || recursive(currentMethod) && (NO_NARROW_RECURSION || recursive(methodInfo)
+                                            || !RECURSION_SOURCE_SUMMARIES
+                                               && !methodInfo.typeInfo().compilationUnit().externalLibrary())) {
             // direct recursion, lambda to enclosing method
             return new MethodLinkedVariablesImpl(LinksImpl.EMPTY,
                     methodInfo.parameters().stream().map(_ -> LinksImpl.EMPTY).toList(), Set.of());
