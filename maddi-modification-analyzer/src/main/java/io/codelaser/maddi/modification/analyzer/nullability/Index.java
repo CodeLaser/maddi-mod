@@ -382,9 +382,15 @@ final class Index {
         return null;
     }
 
-    // the superclass constructor an anonymous class's creation calls: the one of that arity, when there is exactly one
+    // the superclass constructor an anonymous class's creation calls: the one the front end resolved (maddi#194); from
+    // a front end that does not say, the one of that arity, when there is exactly one
     MethodInfo anonymousSuperConstructor(ConstructorCall cc) {
         TypeInfo anonymous = cc.anonymousClass();
+        MethodInfo resolved = anonymous == null ? null : cc.constructor();
+        if (resolved != null) {
+            return resolved.parameters().stream().noneMatch(ParameterInfo::isVarArgs) && analysed.contains(resolved)
+                    ? resolved : null;
+        }
         if (anonymous == null || anonymous.parentClass() == null || anonymous.parentClass().typeInfo() == null) return null;
         int n = cc.parameterExpressions().size();
         List<MethodInfo> candidates = anonymous.parentClass().typeInfo().constructors().stream()

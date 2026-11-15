@@ -248,7 +248,7 @@ public class StaticSideEffectAnalyzerImpl {
     private static MethodInfo callee(Element e) {
         return switch (e) {
             case MethodCall mc -> mc.methodInfo();
-            case ConstructorCall cc -> cc.constructor();
+            case ConstructorCall cc -> cc.callsConstructorOfCreatedType() ? cc.constructor() : null;
             case ExplicitConstructorInvocation eci -> eci.methodInfo();
             case MethodReference mr -> mr.methodInfo();
             default -> null;

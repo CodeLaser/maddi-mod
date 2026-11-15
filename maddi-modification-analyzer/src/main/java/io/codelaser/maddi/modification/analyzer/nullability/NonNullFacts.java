@@ -969,7 +969,8 @@ public final class NonNullFacts {
     }
 
     private static MethodInfo callee(Expression call) {
-        return call instanceof MethodCall mc ? mc.methodInfo() : call instanceof ConstructorCall cc ? cc.constructor() : null;
+        return call instanceof MethodCall mc ? mc.methodInfo()
+                : call instanceof ConstructorCall cc && cc.callsConstructorOfCreatedType() ? cc.constructor() : null;
     }
 
     // may the call remove the key: one on the map itself other than a read, or one handed the map (callMade)

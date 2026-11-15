@@ -288,7 +288,7 @@ final class Transfers {
     private static boolean mentionsCall(Expression expression, MethodInfo callee) {
         boolean[] found = new boolean[1];
         expression.visit((Element e) -> {
-            if (e instanceof ConstructorCall cc && callee.equals(cc.constructor())
+            if (e instanceof ConstructorCall cc && cc.callsConstructorOfCreatedType() && callee.equals(cc.constructor())
                 || e instanceof MethodCall mc && callee.equals(mc.methodInfo())) {
                 found[0] = true;
             }

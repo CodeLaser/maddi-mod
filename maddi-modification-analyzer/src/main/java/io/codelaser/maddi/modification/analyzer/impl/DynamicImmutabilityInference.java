@@ -206,7 +206,7 @@ public class DynamicImmutabilityInference {
 
         List<Expression> arguments = new ArrayList<>();
         forEachMethodOfPrimaryType(owner.typeInfo(), mi -> mi.methodBody().visit(e -> {
-            if (e instanceof ConstructorCall cc && cc.constructor() == owner) {
+            if (e instanceof ConstructorCall cc && cc.callsConstructorOfCreatedType() && cc.constructor() == owner) {
                 collectArgument(cc.parameterExpressions(), pi, arguments);
             } else if (e instanceof MethodCall mc && mc.methodInfo() == owner) {
                 collectArgument(mc.parameterExpressions(), pi, arguments);

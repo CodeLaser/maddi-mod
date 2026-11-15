@@ -175,7 +175,9 @@ public class CarryDerived {
     }
 
     private static MethodInfo calleeInfo(Expression call) {
-        return call instanceof MethodCall mc ? mc.methodInfo() : ((ConstructorCall) call).constructor();
+        if (call instanceof MethodCall mc) return mc.methodInfo();
+        ConstructorCall cc = (ConstructorCall) call;
+        return cc.callsConstructorOfCreatedType() ? cc.constructor() : null;
     }
 
     // the calls of a body in visit order, as body() walks it: a lambda's and a local type's are their own methods'

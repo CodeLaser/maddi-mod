@@ -195,7 +195,8 @@ final class Lending {
                     }
                     arguments(c.parameterExpressions(), c.methodInfo(), isLent, allowed);
                 }
-                case ConstructorCall cc -> arguments(cc.parameterExpressions(), cc.constructor(), isLent, allowed);
+                case ConstructorCall cc -> arguments(cc.parameterExpressions(),
+                        cc.callsConstructorOfCreatedType() ? cc.constructor() : null, isLent, allowed);
                 case BinaryOperator bo -> {
                     if (isLent.test(bo.lhs())) allowed[0]++;
                     if (isLent.test(bo.rhs())) allowed[0]++;
