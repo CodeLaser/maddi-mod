@@ -53,8 +53,16 @@ public class ElementSummary {
         if (info instanceof MethodInfo mi) {
             for (ParameterInfo pi : mi.parameters()) append(sb, pi.index() + ":", pi.analysis());
         }
-        return sb.toString();
+        return POSITION.matcher(sb).replaceAll("");
     }
+
+    /*
+     A string literal in a link prints as its source position ("stringConstant@853-70:853-73"), which moves with every
+     line added above it: after an edit, every method whose summary links to a literal read as moved, and the seeded
+     run fell back to the cold analysis (fernflower's Statement.toString(int), maddi-mod#128). The position goes;
+     which literal it is makes no difference to a dependent.
+     */
+    private static final java.util.regex.Pattern POSITION = java.util.regex.Pattern.compile("@\\d+-\\d+:\\d+-\\d+");
 
     /**
      * The summaries of every element of {@code primaryTypes}, theirs and their nested types', anonymous and local
