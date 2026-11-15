@@ -74,11 +74,13 @@ public class TestKotlinCollectionReadsVsJava {
             "FilterIsInstanceArr", "SeqPlus", "OrEmptyCall", "Decode", "StringBytes",
             "RangeContains", "MatchValues", "KClassName", "FileExt", "DequeFirst", "DelegateRead", "SumInt", "SumLong",
             "JavaClass",
-            "MapIndexed", "MaxBy", "ZipArr", "FilterValues", "ToMapPairs", "ArrTakeWhile", "ArrIsEmpty", "CharsString", "SeqFlatMapIterable", "SeqWithIndex", "IndexedVal", "MatchDestructured", "ProgressionFirst", "LazyMode", "FileWrite", "PathWrite", "ToRegexOpt", "SeqBuilder", "MapIndex", "OnEach", "ArrAsList", "ArrBinarySearch", "FirstNotNull", "FindLast", "SumOfSel", "MinOfSel", "ArrOrEmpty", "MinDouble", "MinFloat", "MaxComparable", "Control");
+            "MapIndexed", "MaxBy", "ZipArr", "FilterValues", "ToMapPairs", "ArrTakeWhile", "ArrIsEmpty", "CharsString", "SeqFlatMapIterable", "SeqWithIndex", "IndexedVal", "MatchDestructured", "ProgressionFirst", "LazyMode", "FileWrite", "PathWrite", "ToRegexOpt", "SeqBuilder", "MapIndex", "OnEach", "ArrAsList", "ArrBinarySearch", "FirstNotNull", "FindLast", "SumOfSel", "MinOfSel", "ArrOrEmpty", "MinDouble", "MinFloat", "MaxComparable",
+            "ToTypedArr", "Unzip", "MapPlusMap", "MapGetValue", "MapAll", "MapMapNotNull", "SetMinus", "ArrDistinct", "ArrPartition", "ArrAssociateWith", "WithIndex", "JoinTo", "FlatMapTo", "StackTrace", "CtxPlus", "CtxGet", "CharRangeIn", "UuidJava", "Control");
 
     private static final String KOTLIN = """
             package a
             import kotlin.io.path.writeText
+            import kotlin.uuid.toJavaUuid
             class JoinToString(private val s: List<String>) { fun f(): String = s.joinToString() }
             class IsNotEmpty(private val s: Collection<String>) { fun f(): Boolean = s.isNotEmpty() }
             class SingleOrNull(private val s: List<String>) { fun f(): String? = s.singleOrNull() }
@@ -133,6 +135,25 @@ public class TestKotlinCollectionReadsVsJava {
             class MapIndexed(private val s: List<String>) { fun f(): List<String> = s.mapIndexed { i, x -> x + i } }
             class MaxBy(private val s: List<String>) { fun f(): String? = s.maxByOrNull { it.length } }
             class ZipArr(private val s: Array<String>) { fun f(l: List<String>): List<Pair<String, String>> = l.zip(s) }
+            class ToTypedArr(private val s: Collection<String>) { fun f(): Array<String> = s.toTypedArray() }
+            class Unzip(private val s: List<Pair<String, Int>>) { fun f(): Pair<List<String>, List<Int>> = s.unzip() }
+            class MapPlusMap(private val s: Map<String, Int>) { fun f(m: Map<String, Int>): Map<String, Int> = s + m }
+            class MapGetValue(private val s: Map<String, Int>) { fun f(): Int = s.getValue("x") }
+            class MapAll(private val s: Map<String, Int>) { fun f(): Boolean = s.all { it.value > 0 } }
+            class MapMapNotNull(private val s: Map<String, Int>) { fun f(): List<String> = s.mapNotNull { it.key } }
+            class SetMinus(private val s: Set<String>) { fun f(): Set<String> = s - "x" }
+            class ArrDistinct(private val s: Array<String>) { fun f(): List<String> = s.distinct() }
+            class ArrPartition(private val s: Array<String>) { fun f(): Pair<List<String>, List<String>> = s.partition { it.isEmpty() } }
+            class ArrAssociateWith(private val s: Array<String>) { fun f(): Map<String, Int> = s.associateWith { it.length } }
+            class WithIndex(private val s: List<String>) { fun f(): Int = s.withIndex().count() }
+            class JoinTo(private val s: List<String>) { fun f(): String = s.joinTo(StringBuilder()).toString() }
+            class FlatMapTo(private val s: List<String>) { fun f(): MutableList<Char> = s.flatMapTo(mutableListOf()) { it.toList() } }
+            class StackTrace(private val s: Throwable) { fun f(): String = s.stackTraceToString() }
+            class CtxPlus(private val s: kotlin.coroutines.CoroutineContext) { fun f(c: kotlin.coroutines.CoroutineContext): kotlin.coroutines.CoroutineContext = s + c }
+            class CtxGet(private val s: kotlin.coroutines.CoroutineContext) { fun f(): kotlin.coroutines.ContinuationInterceptor? = s[kotlin.coroutines.ContinuationInterceptor.Key] }
+            class CharRangeIn(private val s: CharRange) { fun f(c: Char): Boolean = c in s }
+            @OptIn(kotlin.uuid.ExperimentalUuidApi::class)
+            class UuidJava(private val s: kotlin.uuid.Uuid) { fun f(): java.util.UUID = s.toJavaUuid() }
             class FilterValues(private val s: Map<String, String>) { fun f(): Map<String, String> = s.filterValues { it.isEmpty() } }
             class ToMapPairs(private val s: Array<Pair<String, String>>) { fun f(): Map<String, String> = s.toMap() }
             class ArrTakeWhile(private val s: Array<String>) { fun f(): List<String> = s.takeWhile { it.isEmpty() } }
@@ -242,6 +263,11 @@ public class TestKotlinCollectionReadsVsJava {
         // ⚠ Every negative control in these notes was measured with the stdlib on the class path ONLY; the setup has since
         // been made the one a build tool hands over (see above), and the rows still agree with Java under it.
         // SeqBuilder needs the right overload too (ResolvedOverloadTest: `yieldAll(list)` bound the draining Iterator one).
+        // The census batch of 2026-11-15 (#15; the four Kotlin corpora, uncontracted calls that read a data argument as
+        // modified): ToTypedArr through UuidJava. Against the archive before their contracts, all were false except
+        // ToTypedArr and JoinTo. ToTypedArr is REIFIED (ACC_SYNTHETIC, no method to contract): the front end lowers it
+        // to Collection.toArray(new T[0]), which the jdk archive contracts, so it was true as soon as the lowering
+        // was in. JoinTo's receiver, an Iterable, is unmodified by default; it guards parity.
         // isNotEmpty and orEmpty are @InlineOnly: no method for a contract to name. They were the two rows left wrong by
         // the contracts, and the front end's lowering to the call kotlinc inlines (TestInlineOnlyLowering) fixed them.
         assertEquals("""
@@ -325,6 +351,24 @@ public class TestKotlinCollectionReadsVsJava {
                 a.MinDouble true
                 a.MinFloat true
                 a.MaxComparable true
+                a.ToTypedArr true
+                a.Unzip true
+                a.MapPlusMap true
+                a.MapGetValue true
+                a.MapAll true
+                a.MapMapNotNull true
+                a.SetMinus true
+                a.ArrDistinct true
+                a.ArrPartition true
+                a.ArrAssociateWith true
+                a.WithIndex true
+                a.JoinTo true
+                a.FlatMapTo true
+                a.StackTrace true
+                a.CtxPlus true
+                a.CtxGet true
+                a.CharRangeIn true
+                a.UuidJava true
                 a.Control false""", verdicts);
     }
 
