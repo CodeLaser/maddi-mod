@@ -108,9 +108,10 @@ public class TestParseAnalyzeWrite extends CommonTest {
         // 43 units naming org.eclipse.collections types; libs/guava, in libs.jar since 2026-10-12 but compiled through
         // its own factory, naming com.google.common.collect ones) are in the same position as the Kotlin ones: no library jar on the
         // shared factory, so how many units survive is javac's recovery (21 of 43 EC units on JDK 27). They are
-        // counted apart, not pinned.
+        // counted apart, not pinned. So are libs/kotlinx's (2026-11-15), compiled through a factory of its own too.
         long sideLoadedUnits = types.stream().filter(t -> t.packageName().endsWith(".libs.eclipsecollections")
-                                                        || t.packageName().endsWith(".libs.guava")).count();
+                                                        || t.packageName().endsWith(".libs.guava")
+                                                        || t.packageName().endsWith(".libs.kotlinx")).count();
         LOGGER.info("Side-loaded hint units parsed on the shared factory: {}", sideLoadedUnits);
         // + OrgAssertjCoreApi (libs/assertj, 2026-10-11): it names AssertJ types in full and imports none, so, like
         // the Kotlin units that import nothing from kotlin.*, it survives whatever the shared factory carries

@@ -74,6 +74,13 @@ dependencies {
     testImplementation("org.mockito:mockito-core:5.23.0") // libs/mockito
     testImplementation("commons-io:commons-io:2.20.0") // libs/commonsio
     testImplementation("com.fasterxml.jackson.core:jackson-databind:2.20.2") // libs/jackson
+    // and for the kotlinx hints (libs/kotlinx, in libs.jar): the versions the Exposed corpus resolves (2026-11-15)
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm:1.11.0")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactive:1.11.0")
+    testImplementation("org.reactivestreams:reactive-streams:1.0.4")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-serialization-core-jvm:1.11.0")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-serialization-json-jvm:1.11.0")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-datetime-jvm:0.7.1-0.6.x-compat")
 
     testRuntimeOnly("info.picocli:picocli:4.7.7")
     testRuntimeOnly("org.junit.jupiter:junit-jupiter:5.9.2")

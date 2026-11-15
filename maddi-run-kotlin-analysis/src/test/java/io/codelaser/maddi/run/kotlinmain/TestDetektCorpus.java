@@ -118,7 +118,8 @@ public class TestDetektCorpus {
     private static final List<String> JDK_ANNOTATED_APIS = List.of(
             "../../maddi/maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles/jdk",
             // and the Kotlin ones, which a Kotlin corpus needs for the same reason
-            "../../maddi/maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles/libs/kotlin");
+            "../../maddi/maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles/libs/kotlin",
+            "../../maddi/maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles/libs/kotlinx");
 
     /**
      * Prep <b>and</b> the iterating modification/immutability analysis, over the whole project — the first time

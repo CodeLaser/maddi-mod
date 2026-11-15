@@ -81,7 +81,7 @@ public class CompileAnalysisHints {
     // pre-rename file name is the giveaway.
     static final List<String> LIBRARIES = List.of("jdk", "libs/test", "libs/log", "libs/kotlin", "libs/assertj",
             "libs/guava", "libs/hamcrest", "libs/junitparams", "libs/mockito",
-            "libs/commonsio", "libs/jackson");
+            "libs/commonsio", "libs/jackson", "libs/kotlinx");
     /**
      * Compiled like {@link #LIBRARIES}, but NOT packed into {@code libs.jar} and NOT in
      * {@code LoadAnalysisResults.ANALYZED_RESULTS}: campaign hints for third-party libraries (the analysis-hints
@@ -103,6 +103,7 @@ public class CompileAnalysisHints {
     static final Path RESULTS_BASE_DIR = Path.of(RESULTS_BASE);
     static final String KOTLIN_LIBRARY = "libs/kotlin";
     static final String ASSERTJ_LIBRARY = "libs/assertj";
+    static final String KOTLINX_LIBRARY = "libs/kotlinx";
     static final String JDK_LIBRARY = "jdk";
     /**
      * The JDK feature release the committed {@code jdk/} results (and so {@code openjdk.jar}) were generated on.
@@ -226,6 +227,15 @@ public class CompileAnalysisHints {
                 compile(new AnalysisHintsCompiler(libraryJavaInspectorFactory("com.fasterxml.jackson.",
                         ObjectMapper.class, JsonParser.class,
                         JsonInclude.class), null, jdkPreload), library, resultsBase);
+            } else if (KOTLINX_LIBRARY.equals(library)) {
+                // as for AssertJ: one factory over the kotlinx jars (coroutines core and reactive, serialization core
+                // and json, datetime), with kotlin-stdlib and reactive-streams, which their signatures name
+                // (kotlin.time.Instant, org.reactivestreams.Publisher); the library-call census of 2026-11-15
+                compile(new AnalysisHintsCompiler(libraryJavaInspectorFactory("kotlinx.",
+                        kotlinx.coroutines.flow.Flow.class, kotlinx.coroutines.reactive.AwaitKt.class,
+                        kotlinx.serialization.KSerializer.class, kotlinx.serialization.json.Json.class,
+                        kotlinx.datetime.LocalDate.class, org.reactivestreams.Publisher.class,
+                        Lazy.class), null, jdkPreload), library, resultsBase);
             } else if (JUNIT_PARAMS_LIBRARY.equals(library)) {
                 // junit-jupiter-params is not on the shared factory, which carries junit-jupiter-api only; the api and
                 // platform-commons jars too, which its class files reference (otherwise JUnitException and
