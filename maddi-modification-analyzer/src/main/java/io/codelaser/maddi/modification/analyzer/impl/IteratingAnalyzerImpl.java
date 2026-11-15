@@ -926,7 +926,8 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                         // the culprit: why the re-analysed element has a static side effect, the run before may not
                         Object culprit = element.analysis().getOrNull(PropertyImpl.STATIC_SIDE_EFFECTS_CULPRIT_METHOD,
                                 ValueImpl.CulpritImpl.class);
-                        LOGGER.debug("Early cutoff: {} moved;\n  prior: {}\n  now:   {}{}", c, prior, now,
+                        // at INFO: a fall-back is rare, and this line is the only one that names its cause (#128)
+                        LOGGER.info("Early cutoff: {} moved;\n  prior: {}\n  now:   {}{}", c, prior, now,
                                 culprit == null ? "" : "\n  static side effect: " + culprit);
                     }
                 }
