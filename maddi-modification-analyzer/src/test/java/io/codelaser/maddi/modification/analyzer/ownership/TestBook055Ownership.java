@@ -36,9 +36,9 @@ import io.codelaser.maddi.modification.analyzer.CommonTest;
 import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
 
 /**
- * The examples of road-to-immutability §087, "Ownership": the book states these verdicts.
+ * The examples of road-to-immutability §055, "Ownership": the book states these verdicts.
  */
-public class TestBook087Ownership extends CommonTest {
+public class TestBook055Ownership extends CommonTest {
 
     @Language("java")
     private static final String INPUT = """
@@ -101,17 +101,108 @@ public class TestBook087Ownership extends CommonTest {
                     }
                     public int size() { return tokens.size(); }
                 }
+
+                public static final class Palette {
+                    private final List<String> colors;
+                    private Palette(List<String> colors) { this.colors = colors; }
+                    public static Palette of(String... names) {
+                        List<String> list = new ArrayList<>();
+                        for (String name : names) list.add(name);
+                        return new Palette(list);
+                    }
+                    public String color(int i) { return colors.get(i); }
+                }
+
+                public static final class PublicPalette {
+                    private final List<String> colors;
+                    public PublicPalette(List<String> colors) { this.colors = colors; }
+                    public static PublicPalette of(String... names) {
+                        List<String> list = new ArrayList<>();
+                        for (String name : names) list.add(name);
+                        return new PublicPalette(list);
+                    }
+                    public String color(int i) { return colors.get(i); }
+                }
+
+                public static final class ViewPalette {
+                    private final List<String> colors;
+                    private ViewPalette(List<String> colors) { this.colors = Collections.unmodifiableList(colors); }
+                    public static ViewPalette of(String... names) {
+                        List<String> list = new ArrayList<>();
+                        for (String name : names) list.add(name);
+                        return new ViewPalette(list);
+                    }
+                    public String color(int i) { return colors.get(i); }
+                }
+
+                public static final class PublicViewPalette {
+                    private final List<String> colors;
+                    public PublicViewPalette(List<String> colors) { this.colors = Collections.unmodifiableList(colors); }
+                    public String color(int i) { return colors.get(i); }
+                }
+
+                public static final class CopiedPalette {
+                    private final List<String> colors;
+                    private CopiedPalette(List<String> colors) { this.colors = List.copyOf(colors); }
+                    public static CopiedPalette of(String... names) {
+                        List<String> list = new ArrayList<>();
+                        for (String name : names) list.add(name);
+                        return new CopiedPalette(list);
+                    }
+                    public String color(int i) { return colors.get(i); }
+                }
             }
             """;
 
-    @DisplayName("§087's examples")
+    // §055 and §060 "Ownership and eventual immutability": the palettes, a list handed over to the constructor
+    private static final Map<String, String> PALETTES = Map.of(
+            "Palette", "@Immutable(hc=true) @Independent owned",
+            "ViewPalette", "@Immutable(hc=true) @Independent -",
+            "CopiedPalette", "@Immutable(hc=true) @Independent -",
+            "PublicViewPalette", "@FinalFields @Dependent -");
+
+    @DisplayName("§055's examples")
     @Test
     public void test() throws IOException {
+        Map<String, String> actual = run(false);
+        Map<String, String> expected = new TreeMap<>(Map.ofEntries(
+                Map.entry("Lines.copy()", "fresh"),
+                Map.entry("Lines.sorted()", "fresh"),
+                Map.entry("Lines.orEmpty()", "-"),
+                Map.entry("Lines.registered()", "-"),
+                Map.entry("Lines.countEmpty(list)", "borrowed"),
+                Map.entry("Lines.addAll(c)", "borrowed"),
+                Map.entry("Lines.add(line)", "-"),
+                Map.entry("Lines.printer(list)", "-"),
+                Map.entry("Lines.lines", "owned"),
+                Map.entry("Document.lines", "owned"),
+                Map.entry("Document.buffer", "owned"),
+                Map.entry("Document.tags", "-"),
+                Map.entry("Document.index", "-"),
+                Map.entry("Parser.tokens", "owned"),
+                Map.entry("PublicPalette", "@FinalFields @Dependent -")));
+        PALETTES.forEach(expected::put);
+        actual.keySet().retainAll(expected.keySet());
+        assertEquals(expected, actual);
+    }
+
+    @DisplayName("§060's palettes in a closed world: the public constructor's list is owned, the type still dependent")
+    @Test
+    public void closedWorld() throws IOException {
+        Map<String, String> actual = run(true);
+        Map<String, String> expected = new TreeMap<>(PALETTES);
+        expected.put("PublicPalette", "@FinalFields @Dependent owned");
+        actual.keySet().retainAll(expected.keySet());
+        assertEquals(expected, actual);
+    }
+
+    private Map<String, String> run(boolean closedWorld) throws IOException {
         AnalyzerBundle bundle = buildAnalyzerBundle();
         TypeInfo x = bundle.javaInspector().parse("a.b.X", INPUT);
         List<Info> analysisOrder = bundle.prepAnalyzer().doPrimaryType(x);
         new IteratingAnalyzerImpl(bundle.javaInspector(), new IteratingAnalyzerImpl.ConfigurationBuilder()
-                .setMaxIterations(10).setModificationViaReachability(true).setOwnership(true).build())
+                .setMaxIterations(10).setModificationViaReachability(true).setOwnership(true)
+                .setOwnershipClosedWorld(closedWorld).build())
                 .analyze(analysisOrder);
         new OwnershipPass().go(analysisOrder);
         Map<String, String> actual = new TreeMap<>();
@@ -128,22 +219,11 @@ public class TestBook087Ownership extends CommonTest {
                                 ? "borrowed" : "-"));
             });
         });
-        Map<String, String> expected = new TreeMap<>(Map.ofEntries(
-                Map.entry("Lines.copy()", "fresh"),
-                Map.entry("Lines.sorted()", "fresh"),
-                Map.entry("Lines.orEmpty()", "-"),
-                Map.entry("Lines.registered()", "-"),
-                Map.entry("Lines.countEmpty(list)", "borrowed"),
-                Map.entry("Lines.addAll(c)", "borrowed"),
-                Map.entry("Lines.add(line)", "-"),
-                Map.entry("Lines.printer(list)", "-"),
-                Map.entry("Lines.lines", "owned"),
-                Map.entry("Document.lines", "owned"),
-                Map.entry("Document.buffer", "owned"),
-                Map.entry("Document.tags", "-"),
-                Map.entry("Document.index", "-"),
-                Map.entry("Parser.tokens", "owned")));
-        actual.keySet().retainAll(expected.keySet());
-        assertEquals(expected, actual);
+        x.recursiveSubTypeStream().filter(t -> t.simpleName().endsWith("Palette")).forEach(t ->
+                actual.put(t.simpleName(), t.analysis().getOrNull(PropertyImpl.IMMUTABLE_TYPE, ValueImpl.ImmutableImpl.class)
+                                           + " " + t.analysis().getOrNull(PropertyImpl.INDEPENDENT_TYPE,
+                        ValueImpl.IndependentImpl.class)
+                                           + " " + actual.get(t.simpleName() + ".colors")));
+        return actual;
     }
 }
