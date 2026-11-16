@@ -359,6 +359,25 @@ showed what `BorrowedParameters` missed, each now a `TestBorrowedParameter` case
 Census after: gson 469 borrowed (523), 18 owned (21); fernflower closed 1358 borrowed (1447), 100 owned (106).
 Left: gson's `toArray(T[])` hint (maddi#211), one untriaged fernflower keep.
 
+### Views over handed-over objects (2026-11-16)
+
+**Built** (maddi-mod `c97b389d`, gate `NOOWNEDVIEW` `57d538af`; test `TestOwnedView`; book §055 rule 1 and §060
+"Ownership and eventual immutability"). Rule 3 looks through the static `@UnmodifiableView` methods of one parameter
+(the `Collections.unmodifiable*` family) to their argument: `this.l = Collections.unmodifiableList(x)` arrives fresh
+when `x` does. Behind a view the links show only `x`'s faces (`this.l.§$s ⊆ x.§$s`, `this.l.§m ≡ x.§m`), never
+where `x` itself went (a static's elements show only as `this.l.§$s ≤ ALL.§$ss`), so:
+
+- a local behind a view must be handed over to the view call as to a transferring call (`Transfers.local`: created,
+  before only the receiver of calls that keep nothing, not used after);
+- `Transfers.keptOnlyIn` accepts a parameter kept in the field through matching faces, the shared modification face
+  saying the field holds it.
+
+Census A/B (gson, fernflower closed; `NOOWNEDVIEW=1` against the default, same commit): no verdict changes. Both
+corpora's view fields fail elsewhere first: gson's `Gson.factories` is not private, fernflower's
+`StructMethodParametersAttribute.myEntries` may hold `Collections.emptyList()`. The immutability verdicts do not
+move either way: they do not read ownership (§060's table: a public constructor storing a view of a handed-over
+list is owned in a closed world, its type stays `@FinalFields` and dependent).
+
 ### Annotations
 
 `@Fresh` (method), `@Borrowed` (parameter) and `@Owned` (field; `elements = true` for `OWNED_ELEMENTS_FIELD`) are in
