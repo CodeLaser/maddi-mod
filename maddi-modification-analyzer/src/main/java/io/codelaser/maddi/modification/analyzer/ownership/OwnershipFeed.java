@@ -17,14 +17,19 @@
 
 package io.codelaser.maddi.modification.analyzer.ownership;
 
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.info.FieldInfo;
+import io.codelaser.maddi.cst.api.info.Info;
+import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
+import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 import io.codelaser.maddi.modification.common.AnalysisHelper;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
@@ -42,6 +47,9 @@ import io.codelaser.maddi.cst.api.variable.Variable;
  * Written only by the ownership round at the terminal certification point ({@code IteratingAnalyzerImpl}), read by
  * the independence of fields and parameters. Empty unless the ownership pass is switched on; gate
  * {@code NOOWNERSHIPFEED} keeps it empty.
+ * <p>
+ * Stored with the results as {@code HANDED_OVER_PARAMETER} ({@link #write}, once the analysis is done), so that an
+ * incremental run starts from the cold run's feed ({@link #load}) and re-derives as it did (CodeLaser/maddi-mod#131).
  */
 public final class OwnershipFeed {
 
@@ -132,6 +140,47 @@ public final class OwnershipFeed {
 
     public void clear() {
         handedOver = Map.of();
+    }
+
+    /** The stored feed of the parameters in {@code analysisOrder}: an incremental run starts from it. */
+    public void load(List<Info> analysisOrder) {
+        Map<ParameterInfo, FieldInfo> map = new LinkedHashMap<>();
+        for (ParameterInfo pi : parameters(analysisOrder)) {
+            Value.AssignedToField stored = pi.analysis().getOrNull(PropertyImpl.HANDED_OVER_PARAMETER,
+                    ValueImpl.AssignedToFieldImpl.class);
+            if (stored != null && stored.fields().size() == 1) map.put(pi, stored.fields().iterator().next());
+        }
+        handedOver = Map.copyOf(map);
+    }
+
+    /**
+     * Store the feed: every parameter in it gets its field, every other parameter of {@code analysisOrder} that had
+     * one gets none. Overwrites: an earlier run's feed is replaced, not merged.
+     */
+    public void write(List<Info> analysisOrder) {
+        Map<ParameterInfo, FieldInfo> current = handedOver;
+        for (ParameterInfo pi : parameters(analysisOrder)) {
+            FieldInfo field = current.get(pi);
+            if (field != null) {
+                pi.analysis().overwrite(PropertyImpl.HANDED_OVER_PARAMETER,
+                        new ValueImpl.AssignedToFieldImpl(Set.of(field)));
+            } else {
+                Value.AssignedToField stored = pi.analysis().getOrNull(PropertyImpl.HANDED_OVER_PARAMETER,
+                        ValueImpl.AssignedToFieldImpl.class);
+                if (stored != null && !stored.isDefault()) {
+                    pi.analysis().overwrite(PropertyImpl.HANDED_OVER_PARAMETER, ValueImpl.AssignedToFieldImpl.EMPTY);
+                }
+            }
+        }
+    }
+
+    private static Set<ParameterInfo> parameters(List<Info> analysisOrder) {
+        Set<ParameterInfo> set = new LinkedHashSet<>();
+        for (Info info : analysisOrder) {
+            if (info instanceof MethodInfo mi) set.addAll(mi.parameters());
+            else if (info instanceof TypeInfo ti) ti.constructorAndMethodStream().forEach(mi -> set.addAll(mi.parameters()));
+        }
+        return set;
     }
 
 }

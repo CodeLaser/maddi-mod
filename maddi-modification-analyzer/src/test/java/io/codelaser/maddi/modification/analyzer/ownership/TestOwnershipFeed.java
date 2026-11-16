@@ -30,13 +30,16 @@ import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import io.codelaser.maddi.callgraph.ComputeCallGraph;
 import io.codelaser.maddi.cst.api.info.FieldInfo;
 import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
+import io.codelaser.maddi.graph.G;
 import io.codelaser.maddi.modification.analyzer.CommonTest;
+import io.codelaser.maddi.modification.analyzer.IteratingAnalyzer;
 import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
 
 /**
@@ -135,5 +138,49 @@ public class TestOwnershipFeed extends CommonTest {
         assertEquals(Set.of(), changed);
         assertEquals(OwnershipFeed.Delta.SHRUNK, feed.update(Map.of(), changed));
         assertEquals(Set.of(p), changed);
+    }
+
+    @DisplayName("incremental: a seeded run starts from the stored feed, and falls back to cold when it is stale (#131)")
+    @Test
+    public void incremental() throws IOException {
+        AnalyzerBundle bundle = buildAnalyzerBundle();
+        TypeInfo x = bundle.javaInspector().parse("a.b.X", INPUT);
+        List<Info> analysisOrder = bundle.prepAnalyzer().doPrimaryType(x);
+        G<Info> graph = new ComputeCallGraph(bundle.javaInspector().runtime(), x).go().graph();
+        IteratingAnalyzer.Configuration configuration = new IteratingAnalyzerImpl.ConfigurationBuilder()
+                .setMaxIterations(10).setModificationViaReachability(true).setOwnership(true)
+                .setOwnershipClosedWorld(true).build();
+        new IteratingAnalyzerImpl(bundle.javaInspector(), configuration).analyze(analysisOrder, graph);
+
+        TypeInfo handed = x.findSubType("Handed");
+        ParameterInfo handedParameter = handed.findConstructor(1).parameters().getFirst();
+        assertEquals(Set.of(handed.getFieldByName("l", true)), handedParameter.analysis()
+                .getOrDefault(PropertyImpl.HANDED_OVER_PARAMETER, ValueImpl.AssignedToFieldImpl.EMPTY).fields(),
+                "the cold run stores its feed");
+        assertEquals("@Immutable(hc=true) @Independent", typeVerdict(handed));
+
+        // a seeded run over the same values: it starts from the stored feed, which still holds
+        IteratingAnalyzerImpl seeded = new IteratingAnalyzerImpl(bundle.javaInspector(), configuration);
+        seeded.analyze(analysisOrder, graph, Set.of(handed));
+        assertEquals(false, seeded.ownershipFeedFellBack());
+        assertEquals("@Immutable(hc=true) @Independent", typeVerdict(handed));
+
+        // a stale feed: Kept's caller keeps its list, yet the stored feed says the parameter is handed over
+        TypeInfo kept = x.findSubType("Kept");
+        ParameterInfo keptParameter = kept.findConstructor(1).parameters().getFirst();
+        keptParameter.analysis().overwrite(PropertyImpl.HANDED_OVER_PARAMETER,
+                new ValueImpl.AssignedToFieldImpl(Set.of(kept.getFieldByName("l", true))));
+        IteratingAnalyzerImpl stale = new IteratingAnalyzerImpl(bundle.javaInspector(), configuration);
+        stale.analyze(analysisOrder, graph, Set.of(kept));
+        assertEquals(true, stale.ownershipFeedFellBack(), "the recomputed feed differs: cold analysis");
+        assertEquals("@FinalFields @Dependent", typeVerdict(kept));
+        assertEquals("@Immutable(hc=true) @Independent", typeVerdict(handed));
+        assertEquals(true, keptParameter.analysis().getOrDefault(PropertyImpl.HANDED_OVER_PARAMETER,
+                ValueImpl.AssignedToFieldImpl.EMPTY).isDefault(), "the stale entry is gone");
+    }
+
+    private static String typeVerdict(TypeInfo t) {
+        return t.analysis().getOrNull(PropertyImpl.IMMUTABLE_TYPE, ValueImpl.ImmutableImpl.class) + " "
+               + t.analysis().getOrNull(PropertyImpl.INDEPENDENT_TYPE, ValueImpl.IndependentImpl.class);
     }
 }
