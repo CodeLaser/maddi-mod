@@ -127,6 +127,33 @@ final class OwnedFields {
         return reasons;
     }
 
+    /**
+     * The parameters handed over into an owned field ({@link OwnershipFeed}): assigned to it, directly or through a
+     * view, every caller handing its argument over, the method keeping it only there. Rule 3's {@code handedOver}.
+     */
+    Map<ParameterInfo, FieldInfo> handedOver(Transfers transfers, BorrowedParameters borrowedParameters) {
+        Map<ParameterInfo, FieldInfo> map = new LinkedHashMap<>();
+        Set<ParameterInfo> twice = new HashSet<>();
+        verdicts.forEach((fieldInfo, verdict) -> {
+            if (verdict != OwnershipPass.Owned.OWNED) return;
+            for (MethodInfo methodInfo : bodies(fieldInfo)) {
+                if (methodInfo.methodBody() == null) continue;
+                methodInfo.methodBody().visit((Element e) -> {
+                    if (e instanceof Assignment a && isThisField(a.target().variable(), fieldInfo)
+                        && Transfers.unwrap(throughView(a.value())) instanceof VariableExpression ve
+                        && ve.variable() instanceof ParameterInfo pi && pi.methodInfo().equals(methodInfo)
+                        && transfers.isTransferred(pi) && Transfers.keptOnlyIn(pi, fieldInfo, borrowedParameters)) {
+                        FieldInfo previous = map.put(pi, fieldInfo);
+                        if (previous != null && !previous.equals(fieldInfo)) twice.add(pi);
+                    }
+                    return true;
+                });
+            }
+        });
+        twice.forEach(map::remove); // kept in two fields: keptOnlyIn says no, but be explicit
+        return map;
+    }
+
     private static Set<FieldInfo> fields(List<Info> analysisOrder) {
         Set<FieldInfo> set = new LinkedHashSet<>();
         for (Info info : analysisOrder) {

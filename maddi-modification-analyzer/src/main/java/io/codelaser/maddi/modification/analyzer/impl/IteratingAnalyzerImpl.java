@@ -56,6 +56,7 @@ import io.codelaser.maddi.modification.analyzer.CycleBreakingStrategy;
 import io.codelaser.maddi.modification.analyzer.IteratingAnalyzer;
 import io.codelaser.maddi.modification.analyzer.SingleIterationAnalyzer;
 import io.codelaser.maddi.modification.analyzer.nullability.NullabilityPass;
+import io.codelaser.maddi.modification.analyzer.ownership.OwnershipFeed;
 import io.codelaser.maddi.modification.analyzer.ownership.OwnershipPass;
 import io.codelaser.maddi.modification.analyzer.nullability.Policy;
 import io.codelaser.maddi.modification.analyzer.nullability.World;
@@ -77,6 +78,14 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
      * as the longest such chain plus one. Default 3; {@code MODREACH_ROUNDS=n} to measure further rounds.
      */
     static final int MODREACH_MAX_ROUNDS = Integer.parseInt(System.getenv().getOrDefault("MODREACH_ROUNDS", "3"));
+
+    /*
+     The ownership round (docs/roadmap/ownership.md, "Fed into the fixpoint"): with the ownership pass on, the
+     parameters it finds handed over into an owned field stop counting as dependence, and the fixpoint re-derives.
+     Bounded like MODREACH; gate NOOWNERSHIPFEED keeps the feed empty (the A/B baseline).
+     */
+    static final int OWNERSHIP_MAX_ROUNDS = Integer.parseInt(System.getenv().getOrDefault("OWNERSHIP_ROUNDS", "3"));
+    private static final boolean NO_OWNERSHIP_FEED = Gate.isSet("NOOWNERSHIPFEED");
 
     private final JavaInspector javaInspector;
     private SingleIterationAnalyzer lastRun;
@@ -627,6 +636,12 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
         modReachFailures = 0;
         int eventualDeferralRounds = 0; // terminal-phase re-derivation of the eventual family, once
         SingleIterationAnalyzer singleIterationAnalyzer = new SingleIterationAnalyzerImpl(javaInspector, configuration);
+        int ownershipRounds = 0;
+        OwnershipFeed ownershipFeed = new OwnershipFeed();
+        if (configuration.ownership() && !NO_OWNERSHIP_FEED
+            && singleIterationAnalyzer instanceof SingleIterationAnalyzerImpl siaFeed) {
+            siaFeed.setOwnershipFeed(ownershipFeed);
+        }
         lastSingleIterationAnalyzer = singleIterationAnalyzer instanceof SingleIterationAnalyzerImpl impl ? impl : null;
         this.lastRun = singleIterationAnalyzer;
         // G43: the wall-clock budget starts here, and every pass and every element in it is checked against it
@@ -1063,6 +1078,76 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                         LOGGER.error("MODREACH pass failed; modification properties keep their "
                                      + "fixpoint values (unfrozen)", e);
                     }
+                }
+                // The OWNERSHIP round: over the settled state (links final, modification frozen), the ownership pass
+                // finds the parameters handed over into an owned field; fed back, they stop counting as dependence.
+                // Grown only: a strengthening, re-derived through the worklist as MODREACH's (#76). Shrunk: what was
+                // derived from the old feed may be too strong, so the derived family is cleared. Still changing at the
+                // bound: the feed is dropped and the family re-derived without it, the sound fallback.
+                if (configuration.ownership() && !NO_OWNERSHIP_FEED && !incremental
+                    && ownershipRounds <= OWNERSHIP_MAX_ROUNDS) {
+                    ownershipRounds++;
+                    {
+                        int round = ownershipRounds;
+                        feed(f -> f.stage("ownership round " + round));
+                    }
+                    Set<ParameterInfo> changed = new HashSet<>();
+                    OwnershipFeed.Delta delta;
+                    if (ownershipRounds > OWNERSHIP_MAX_ROUNDS) {
+                        delta = ownershipFeed.isEmpty() ? OwnershipFeed.Delta.UNCHANGED : OwnershipFeed.Delta.SHRUNK;
+                        if (delta != OwnershipFeed.Delta.UNCHANGED) {
+                            LOGGER.warn("Ownership feed still changing after {} round(s): dropped", OWNERSHIP_MAX_ROUNDS);
+                            ownershipFeed.clear();
+                        }
+                    } else {
+                        OwnershipPass.Report report = new OwnershipPass(configuration.ownershipClosedWorld())
+                                .go(analysisOrder);
+                        delta = ownershipFeed.update(report.handedOver(), changed);
+                    }
+                    LOGGER.info("Ownership round {}: {} parameter(s) handed over, {}", ownershipRounds,
+                            ownershipFeed.handedOver().size(), delta);
+                    if (delta == OwnershipFeed.Delta.GROWN && dependersOf != null) {
+                        Set<Info> seeds = new HashSet<>();
+                        for (ParameterInfo pi : changed) {
+                            FieldInfo field = ownershipFeed.fieldOf(pi);
+                            for (Info owner : field == null ? List.<Info>of(pi.methodInfo())
+                                    : List.of(pi.methodInfo(), field, field.owner())) {
+                                Info mc = mapToOrderElement(owner, orderSet);
+                                if (mc != null) seeds.add(mc);
+                                Set<Info> deps = dependersOf.get(owner);
+                                if (deps != null) {
+                                    for (Info dep : deps) {
+                                        Info md = mapToOrderElement(dep, orderSet);
+                                        if (md != null) seeds.add(md);
+                                    }
+                                }
+                            }
+                        }
+                        eventualDeferralRounds = 0;
+                        nextPassKind = "re-derivation after ownership round " + ownershipRounds;
+                        dirty = seeds;
+                        verifying = false;
+                        previousPropertiesChanged = Integer.MAX_VALUE;
+                        maxIterations += configuration.maxIterations();
+                        continue;
+                    }
+                    if (delta != OwnershipFeed.Delta.UNCHANGED) {
+                        int cleared = clearDerivedFamily(analysisOrder);
+                        if (EventualCluster.ENABLED
+                            && singleIterationAnalyzer instanceof SingleIterationAnalyzerImpl sia) {
+                            sia.eventualCluster().resetForRederivation();
+                        }
+                        LOGGER.debug("Ownership round {}: cleared {} derived values", ownershipRounds, cleared);
+                        eventualDeferralRounds = 0;
+                        nextPassKind = "re-derivation after ownership round " + ownershipRounds;
+                        cycleBreakingActive = false;
+                        dirty = null;
+                        verifying = false;
+                        previousPropertiesChanged = Integer.MAX_VALUE;
+                        maxIterations += configuration.maxIterations();
+                        continue;
+                    }
+                    ownershipRounds = OWNERSHIP_MAX_ROUNDS + 1; // settled: no further round
                 }
                 // The DEFERRAL round (docs/design/eventual-info-hierarchy.md §"The deferral round"): the eventual
                 // walks' outputs are write-once, so WHICH iteration a walk first succeeds in is frozen into

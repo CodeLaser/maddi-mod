@@ -90,6 +90,11 @@ public class TypeModIndyAnalyzerImpl extends CommonAnalyzerImpl implements TypeM
     private static final boolean CB_METHOD_PESSIMISM = System.getenv("NOCBMETHODPESSIMISM") == null;
 
     private final AnalysisHelper analysisHelper = new AnalysisHelper();
+    private io.codelaser.maddi.modification.analyzer.ownership.OwnershipFeed ownershipFeed;
+
+    void setOwnershipFeed(io.codelaser.maddi.modification.analyzer.ownership.OwnershipFeed ownershipFeed) {
+        this.ownershipFeed = ownershipFeed;
+    }
 
     public TypeModIndyAnalyzerImpl(IteratingAnalyzer.Configuration configuration, AtomicInteger propertiesChanged, List<Message> analyzerMessages) {
         super(configuration, propertiesChanged, analyzerMessages);
@@ -687,6 +692,23 @@ normal methods: does a modification to the return value imply any modification i
         if (pi.methodInfo().isAbstract() || pi.methodInfo().methodBody().isEmpty()) return DEPENDENT;
         assert pi.index() < mlv.ofParameters().size();
         Links links = mlv.ofParameters().get(pi.index());
+        if (ownershipFeed != null && ownershipFeed.fieldOf(pi) != null) {
+            // handed over into an owned field (the ownership round's feed): the link to that field, or to its
+            // modification face, keeps the caller's object, which the caller no longer holds; content links count
+            List<Link> rest = new ArrayList<>();
+            for (Link link : links) {
+                if (!ownershipFeed.isItsField(pi, link.to())) rest.add(link);
+            }
+            if (rest.size() < links.size()) {
+                // what the object contains, the caller may still hold: the elements' independence in the link's place
+                Independent content = io.codelaser.maddi.modification.analyzer.ownership.OwnershipFeed
+                        .contentIndependence(ownershipFeed.fieldOf(pi), analysisHelper);
+                if (content == null) content = cycleBreakingActive && CB_METHOD_PESSIMISM ? DEPENDENT : null;
+                if (content == null) return null;
+                Independent worst = worstLinkToFields(rest, pi.methodInfo(), cycleBreakingActive);
+                return worst == null ? null : worst.min(content);
+            }
+        }
         return worstLinkToFields(links, pi.methodInfo(), cycleBreakingActive);
     }
 
@@ -749,7 +771,7 @@ normal methods: does a modification to the return value imply any modification i
      * Statement.findObject, VarVersionsProcessor.getVarType, setVarType's parameter); the early cutoff fell back.
      * NOCBMETHODPESSIMISM restores the old behaviour.
      */
-    private Independent worstLinkToFields(Links links, MethodInfo methodInfo, boolean cycleBreakingActive) {
+    private Independent worstLinkToFields(Iterable<Link> links, MethodInfo methodInfo, boolean cycleBreakingActive) {
         boolean immutableHc = false;
         boolean undecided = false;
         for (Link link : links) {

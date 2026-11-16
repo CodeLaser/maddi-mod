@@ -83,6 +83,12 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
     private final LinkComputer linkComputer;
     private final FieldAnalyzer fieldAnalyzer;
     private final TypeModIndyAnalyzer typeModIndyAnalyzer;
+
+    /** The ownership round's feed (docs/roadmap/ownership.md): read by the independence of fields and parameters. */
+    void setOwnershipFeed(io.codelaser.maddi.modification.analyzer.ownership.OwnershipFeed ownershipFeed) {
+        ((FieldAnalyzerImpl) fieldAnalyzer).setOwnershipFeed(ownershipFeed);
+        ((TypeModIndyAnalyzerImpl) typeModIndyAnalyzer).setOwnershipFeed(ownershipFeed);
+    }
     private final TypeImmutableAnalyzer typeImmutableAnalyzer;
     private final TypeIndependentAnalyzer typeIndependentAnalyzer;
     private final ShallowTypeAnalyzer shallowTypeAnalyzer;

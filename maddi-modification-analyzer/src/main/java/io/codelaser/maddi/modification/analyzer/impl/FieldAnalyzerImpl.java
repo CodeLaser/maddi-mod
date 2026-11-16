@@ -50,6 +50,11 @@ public class FieldAnalyzerImpl extends CommonAnalyzerImpl implements FieldAnalyz
 
     private final Runtime runtime;
     private final AnalysisHelper analysisHelper = new AnalysisHelper();
+    private io.codelaser.maddi.modification.analyzer.ownership.OwnershipFeed ownershipFeed;
+
+    void setOwnershipFeed(io.codelaser.maddi.modification.analyzer.ownership.OwnershipFeed ownershipFeed) {
+        this.ownershipFeed = ownershipFeed;
+    }
 
     public FieldAnalyzerImpl(Runtime runtime, IteratingAnalyzer.Configuration configuration,
                              AtomicInteger propertyChanges, List<Message> analyzerMessages) {
@@ -403,6 +408,22 @@ public class FieldAnalyzerImpl extends CommonAnalyzerImpl implements FieldAnalyz
                 // the virtual field realFieldPathRoot stops at
                 boolean sharesModification = LinkToField.sharesModification(link);
                 Variable toPrimary = sharesModification ? Util.primary(link.to()) : realFieldPathRoot(link.to());
+                // a parameter every caller hands over, kept only in this owned field (the ownership round's feed): the
+                // field holds the caller's object, or a view of it, which the caller no longer holds. Its content
+                // still counts below.
+                if (ownershipFeed != null && toPrimary instanceof ParameterInfo handed
+                    && ownershipFeed.handedOverInto(handed, fieldInfo)
+                    && (sharesModification || link.from().equals(links.primary())
+                                              && link.linkNature().isIdenticalToOrAssignedFromTo())) {
+                    Value.Independent content = io.codelaser.maddi.modification.analyzer.ownership.OwnershipFeed
+                            .contentIndependence(fieldInfo, analysisHelper);
+                    if (content == null) {
+                        if (!cycleBreakingActive || !CB_FIELD_PESSIMISM) return null; // wait
+                        content = ValueImpl.IndependentImpl.DEPENDENT;
+                    }
+                    independent = independent.min(content);
+                    continue;
+                }
                 if (toPrimary instanceof ParameterInfo pi
                     && (!pi.methodInfo().access().isPrivate() || escapesAsFunctionalInterface(pi.methodInfo()))
                     && owner.inHierarchyOf(pi.typeInfo())

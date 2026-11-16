@@ -118,7 +118,8 @@ public final class OwnershipPass {
                          Map<FieldInfo, Owned> owned, Map<FieldInfo, String> notOwnedReason,
                          Map<MethodInfo, Boolean> finalizer, Map<MethodInfo, String> notFinalizerReason,
                          List<Message> finalizerViolations, List<String[]> finalizerViolationRows,
-                         Map<FieldInfo, Boolean> ownedElements, Map<FieldInfo, String> notOwnedElementsReason) {
+                         Map<FieldInfo, Boolean> ownedElements, Map<FieldInfo, String> notOwnedElementsReason,
+                         Map<ParameterInfo, FieldInfo> handedOver) {
     }
 
     private final boolean closedWorld;
@@ -199,7 +200,8 @@ public final class OwnershipPass {
                 finalizers.violations().size());
         return new Report(verdicts, reason, borrowedParameters.verdicts(), borrowedParameters.reasons(),
                 ownedFields.verdicts(), ownedFields.reasons(), finalizers.verdicts(), finalizers.reasons(),
-                finalizers.violations(), finalizers.violationRows(), ownedElements.verdicts(), ownedElements.reasons());
+                finalizers.violations(), finalizers.violationRows(), ownedElements.verdicts(), ownedElements.reasons(),
+                ownedFields.handedOver(transfers, borrowedParameters));
     }
 
     /**

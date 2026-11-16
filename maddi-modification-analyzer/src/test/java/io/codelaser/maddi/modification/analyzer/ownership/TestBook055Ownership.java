@@ -191,13 +191,14 @@ public class TestBook055Ownership extends CommonTest {
         assertEquals(expected, actual);
     }
 
-    @DisplayName("§060's palettes in a closed world: the public constructors' lists are owned, the types still dependent")
+    @DisplayName("§060's palettes in a closed world: the public constructors' lists are owned, and the types immutable")
     @Test
     public void closedWorld() throws IOException {
         Map<String, String> actual = run(true);
         Map<String, String> expected = new TreeMap<>(PALETTES);
-        expected.put("PublicPalette", "@FinalFields @Dependent owned");
-        expected.put("PublicViewPalette", "@FinalFields @Dependent owned");
+        // fed into the fixpoint: every caller hands its list over, so the constructor's parameter is no dependence
+        expected.put("PublicPalette", "@Immutable(hc=true) @Independent owned");
+        expected.put("PublicViewPalette", "@Immutable(hc=true) @Independent owned");
         actual.keySet().retainAll(expected.keySet());
         assertEquals(expected, actual);
     }
