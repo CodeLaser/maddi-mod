@@ -444,6 +444,10 @@ final class Transfers {
      * Whether the callee keeps {@code pi} in {@code field} only: every link from the parameter goes to that field of
      * {@code this} (or its modification face to the field's), nothing reaches the parameter itself, and nothing keeps
      * it where no link shows (stage 2's hidden verdict).
+     * <p>
+     * A field holding a view of the parameter ({@code this.l = Collections.unmodifiableList(l)}) shows only face links:
+     * {@code 0:l.§m ≡ this.l.§m}, {@code 0:l.§$s ⊇ this.l.§$s}. A face of the parameter linked to the same face of the
+     * field is kept in the field too; the shared modification face is what says the field holds the object.
      */
     static boolean keptOnlyIn(ParameterInfo pi, FieldInfo field, BorrowedParameters borrowedParameters) {
         if (!borrowedParameters.isHidden(pi)) return false;
@@ -460,6 +464,13 @@ final class Transfers {
                     intoField = true;
                 } else if (pi.equals(link.to())) {
                     return false;
+                } else if (link.from() instanceof FieldReference face && face.fieldInfo().name().startsWith("§")
+                           && pi.equals(face.scopeVariable())) {
+                    if (!(link.to() instanceof FieldReference other && other.fieldInfo().equals(face.fieldInfo())
+                          && isThisField(other.scopeVariable(), field))) {
+                        return false;
+                    }
+                    if ("§m".equals(face.fieldInfo().name())) intoField = true;
                 }
             }
         }

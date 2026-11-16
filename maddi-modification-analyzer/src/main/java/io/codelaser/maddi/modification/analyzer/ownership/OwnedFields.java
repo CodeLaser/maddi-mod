@@ -30,6 +30,7 @@ import io.codelaser.maddi.cst.api.element.Element;
 import io.codelaser.maddi.cst.api.expression.Assignment;
 import io.codelaser.maddi.cst.api.expression.EmptyExpression;
 import io.codelaser.maddi.cst.api.expression.Expression;
+import io.codelaser.maddi.cst.api.expression.MethodCall;
 import io.codelaser.maddi.cst.api.expression.VariableExpression;
 import io.codelaser.maddi.cst.api.info.FieldInfo;
 import io.codelaser.maddi.cst.api.info.Info;
@@ -74,6 +75,10 @@ import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
  *   {@code f::m}, not the receiver of a method that may leak {@code this}, not passed to a method that may keep it. A
  *   lambda reading the field captures the owner, not the field's object.</li>
  * </ol>
+ * Views ({@link #throughView}): in rule 3, an unmodifiable view's argument arrives in the field's place
+ * ({@code this.l = Collections.unmodifiableList(l)}): the view holds that object and nothing else, so the field owns
+ * both when the argument is created for it or handed over.
+ * <p>
  * Lending ({@link Lending}): in rule 4, a link to the result of a method whose every caller only uses that result
  * (a getter, {@code &self.f} in Rust) keeps the field owned.
  * <p>
@@ -196,7 +201,7 @@ final class OwnedFields {
         if (initializer != null && !(initializer instanceof EmptyExpression)) {
             OwnershipPass.Body body = new OwnershipPass.Body(Set.of(), List.of(), analysedResults, deps, thisEscape,
                     new HashSet<>());
-            String r = body.created(initializer);
+            String r = body.created(throughView(initializer));
             if (r != null) return "initializer " + r;
         }
         for (MethodInfo methodInfo : bodies(fieldInfo)) {
@@ -209,15 +214,24 @@ final class OwnedFields {
             if (assignments.isEmpty()) continue;
             OwnershipPass.Body body = OwnershipPass.Body.of(methodInfo, analysedResults, deps, thisEscape);
             for (Assignment a : assignments) {
-                if (handedOver(a.value(), methodInfo, fieldInfo, transfers, borrowedParameters)) continue;
-                if (Transfers.unwrap(a.value()) instanceof VariableExpression ve
+                Expression value = throughView(a.value());
+                if (handedOver(value, methodInfo, fieldInfo, transfers, borrowedParameters)) continue;
+                if (Transfers.unwrap(value) instanceof VariableExpression ve
                     && ve.variable() instanceof ParameterInfo pi && pi.methodInfo().equals(methodInfo)) {
                     String why = transfers.isTransferred(pi) ? "kept elsewhere too" : transfers.reason(pi);
                     return "assigned in " + methodInfo.name() + " from parameter " + pi.name() + ": " + why;
                 }
-                String r = body.created(a.value());
+                String r = body.created(value);
                 if (r != null) return "assigned in " + methodInfo.name() + ": " + r;
-                if (a.value() instanceof VariableExpression ve && ve.variable() instanceof LocalVariable) {
+                if (value != a.value() && value instanceof VariableExpression ve
+                    && ve.variable() instanceof LocalVariable lv) {
+                    // behind a view, the links show only the local's content and modification face, never where the
+                    // object itself went: it must be handed over to the view as to a transferring call
+                    String handed = Transfers.local(methodInfo, viewCall(a.value()), lv, analysedResults, fresh,
+                            thisEscape, true);
+                    if (handed != null) return "assigned in " + methodInfo.name() + " a view of " + handed;
+                }
+                if (value instanceof VariableExpression ve && ve.variable() instanceof LocalVariable) {
                     String kept = OwnershipPass.localHandedToBodyThatMayKeepIt(methodInfo, thisEscape,
                             borrowedParameters);
                     if (kept != null) return "assigned in " + methodInfo.name() + " from a " + kept;
@@ -263,6 +277,34 @@ final class OwnedFields {
             if (kept != null) return "in " + methodInfo.name() + ": " + kept;
         }
         return null;
+    }
+
+    /**
+     * The object an unmodifiable view wraps, in the view's place: {@code Collections.unmodifiableList(x)} is a new
+     * object holding {@code x} and nothing else (or {@code x} itself, when it is such a view already), so it arrives
+     * fresh exactly when {@code x} does. The views are the static {@code @UnmodifiableView} methods of one parameter,
+     * the {@code Collections.unmodifiable*} family; nested views are looked through too.
+     */
+    static Expression throughView(Expression expression) {
+        Expression e = expression;
+        while (Transfers.unwrap(e) instanceof MethodCall mc && mc.methodInfo() != null && mc.methodInfo().isStatic()
+               && mc.parameterExpressions().size() == 1
+               && mc.methodInfo().analysis().getOrDefault(PropertyImpl.UNMODIFIABLE_VIEW_METHOD,
+                ValueImpl.BoolImpl.FALSE).isTrue()) {
+            e = mc.parameterExpressions().getFirst();
+        }
+        return e;
+    }
+
+    // the innermost view call of throughView's chain: the call the wrapped object is handed to
+    private static Element viewCall(Expression expression) {
+        Expression e = expression;
+        Element call = null;
+        while (Transfers.unwrap(e) instanceof MethodCall mc && throughView(mc) != mc) {
+            call = mc;
+            e = mc.parameterExpressions().getFirst();
+        }
+        return call;
     }
 
     /*

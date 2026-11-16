@@ -138,6 +138,11 @@ public class TestBook055Ownership extends CommonTest {
                 public static final class PublicViewPalette {
                     private final List<String> colors;
                     public PublicViewPalette(List<String> colors) { this.colors = Collections.unmodifiableList(colors); }
+                    public static PublicViewPalette of(String... names) {
+                        List<String> list = new ArrayList<>();
+                        for (String name : names) list.add(name);
+                        return new PublicViewPalette(list);
+                    }
                     public String color(int i) { return colors.get(i); }
                 }
 
@@ -157,9 +162,8 @@ public class TestBook055Ownership extends CommonTest {
     // §055 and §060 "Ownership and eventual immutability": the palettes, a list handed over to the constructor
     private static final Map<String, String> PALETTES = Map.of(
             "Palette", "@Immutable(hc=true) @Independent owned",
-            "ViewPalette", "@Immutable(hc=true) @Independent -",
-            "CopiedPalette", "@Immutable(hc=true) @Independent -",
-            "PublicViewPalette", "@FinalFields @Dependent -");
+            "ViewPalette", "@Immutable(hc=true) @Independent owned",
+            "CopiedPalette", "@Immutable(hc=true) @Independent -");
 
     @DisplayName("§055's examples")
     @Test
@@ -180,18 +184,20 @@ public class TestBook055Ownership extends CommonTest {
                 Map.entry("Document.tags", "-"),
                 Map.entry("Document.index", "-"),
                 Map.entry("Parser.tokens", "owned"),
-                Map.entry("PublicPalette", "@FinalFields @Dependent -")));
+                Map.entry("PublicPalette", "@FinalFields @Dependent -"),
+                Map.entry("PublicViewPalette", "@FinalFields @Dependent -")));
         PALETTES.forEach(expected::put);
         actual.keySet().retainAll(expected.keySet());
         assertEquals(expected, actual);
     }
 
-    @DisplayName("§060's palettes in a closed world: the public constructor's list is owned, the type still dependent")
+    @DisplayName("§060's palettes in a closed world: the public constructors' lists are owned, the types still dependent")
     @Test
     public void closedWorld() throws IOException {
         Map<String, String> actual = run(true);
         Map<String, String> expected = new TreeMap<>(PALETTES);
         expected.put("PublicPalette", "@FinalFields @Dependent owned");
+        expected.put("PublicViewPalette", "@FinalFields @Dependent owned");
         actual.keySet().retainAll(expected.keySet());
         assertEquals(expected, actual);
     }
