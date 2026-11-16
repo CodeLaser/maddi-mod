@@ -277,8 +277,8 @@ class AnnotationToProperty {
             } else if (Borrowed.class.getCanonicalName().equals(fqn)) {
                 borrowed = valueForTrue;
             } else if (Owned.class.getCanonicalName().equals(fqn)) {
-                // nothing reads a field contract yet (a field with a body around it is computed); the round trip of
-                // the decorated output, and a future guard on hand-written @Owned, do
+                // a field's verdict is computed; this value serves the round trip of the decorated output, and the
+                // ownership pass's guard (OwnershipPass.contractViolations) checks a hand-written @Owned
                 owned = valueForTrue;
                 if (!isAbsent) ownedElements = ValueImpl.BoolImpl.from(ae.extractBoolean("elements"));
             } else if (NotNull.class.getCanonicalName().equals(fqn)) {

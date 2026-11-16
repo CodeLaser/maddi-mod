@@ -31,6 +31,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.codelaser.maddi.cst.api.analysis.Message;
+import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.element.Element;
 import io.codelaser.maddi.cst.api.expression.Assignment;
 import io.codelaser.maddi.cst.api.expression.Cast;
@@ -56,8 +57,10 @@ import io.codelaser.maddi.cst.api.statement.Statement;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.cst.api.variable.LocalVariable;
 import io.codelaser.maddi.cst.api.variable.Variable;
+import io.codelaser.maddi.cst.impl.analysis.MessageImpl;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
+import io.codelaser.maddi.modification.common.util.Culprits;
 import io.codelaser.maddi.modification.link.impl.LinkNatureImpl;
 import io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl;
 import io.codelaser.maddi.modification.prepwork.variable.Link;
@@ -259,6 +262,80 @@ public final class OwnershipPass {
                         ValueImpl.BoolImpl.from(borrowed));
             }
         });
+    }
+
+    private static final String BORROWED_ANNOTATION = "io.codelaser.maddi.annotation.Borrowed";
+    private static final String OWNED_ANNOTATION = "io.codelaser.maddi.annotation.Owned";
+
+    /**
+     * The guard on hand-written ownership annotations: a {@code @Fresh}, {@code @Borrowed} or {@code @Owned} (with
+     * {@code elements = true}) the user wrote on an element the pass computes, whose computed verdict is negative, is
+     * a contract violation, with the pass's reason as its cause. A contract on a bodiless element decides it and is
+     * not checked; an element the pass has no verdict for (a void method, a primitive parameter) is not either.
+     */
+    public static List<Message> contractViolations(Report report) {
+        List<Message> messages = new ArrayList<>();
+        report.fresh().forEach((m, fresh) -> {
+            if (!fresh && !isContracted(m) && claims(m, FRESH_ANNOTATION, null)) {
+                messages.add(violation(m, "method " + m.fullyQualifiedName() + " is not @Fresh",
+                        report.notFreshReason().get(m)));
+            }
+        });
+        report.borrowed().forEach((p, borrowed) -> {
+            if (!borrowed && !BorrowedParameters.isContracted(p) && claims(p, BORROWED_ANNOTATION, null)) {
+                messages.add(violation(p, "parameter '" + p.name() + "' of " + p.methodInfo().fullyQualifiedName()
+                                          + " is not @Borrowed", report.notBorrowedReason().get(p)));
+            }
+        });
+        report.owned().forEach((f, owned) -> {
+            if (owned != Owned.OWNED && claims(f, OWNED_ANNOTATION, null)) {
+                messages.add(violation(f, "field " + f.fullyQualifiedName() + " is not @Owned",
+                        report.notOwnedReason().get(f)));
+            } else if (owned == Owned.OWNED && Boolean.FALSE.equals(report.ownedElements().get(f))
+                       && claims(f, OWNED_ANNOTATION, "elements")) {
+                messages.add(violation(f, "field " + f.fullyQualifiedName() + " is @Owned, but its elements are not",
+                        report.notOwnedElementsReason().get(f)));
+            }
+        });
+        return messages;
+    }
+
+    // the annotation is written on the element, not as absent; with 'parameter', that boolean parameter is true too
+    private static boolean claims(Info info, String annotation, String parameter) {
+        return info.annotations().stream()
+                .filter(ae -> annotation.equals(ae.typeInfo().fullyQualifiedName()))
+                .anyMatch(ae -> !ae.extractBoolean("absent") && (parameter == null || ae.extractBoolean(parameter)));
+    }
+
+    private static Message violation(Info info, String what, String reason) {
+        String text = what + ", violating its contract" + (reason == null || reason.isBlank() ? "" : ": " + reason);
+        return MessageImpl.error(info, CONTRACT_VIOLATION, text,
+                MessageImpl.cause(info, "the hand-written ownership annotation on " + info.simpleName()));
+    }
+
+    /** As {@code GuardAnalyzerImpl.CONTRACT_VIOLATION}, which this package does not depend on. */
+    static final String CONTRACT_VIOLATION = "contract-violation";
+
+    /**
+     * Why a verdict is negative, for the IDE's "not @Fresh: ..." (OWNERSHIP_CULPRIT): one step at the element, the
+     * report's reason. A positive verdict clears what an earlier run of the same analysis wrote. Only when a run asks
+     * for culprits ({@link Culprits#ENABLED}).
+     */
+    public static void writeCulprits(Report report) {
+        report.fresh().forEach((m, fresh) -> culprit(m, fresh ? null : report.notFreshReason().get(m)));
+        report.borrowed().forEach((p, borrowed) -> culprit(p, borrowed ? null : report.notBorrowedReason().get(p)));
+        report.owned().forEach((f, owned) -> culprit(f, owned != Owned.NOT_OWNED ? null
+                : report.notOwnedReason().get(f)));
+    }
+
+    private static void culprit(Info info, String reason) {
+        Value.Culprit value = reason == null || reason.isBlank() ? ValueImpl.CulpritImpl.EMPTY
+                : new ValueImpl.CulpritImpl(List.of(Culprits.step(info, info, reason)));
+        if (info.analysis().haveAnalyzedValueFor(PropertyImpl.OWNERSHIP_CULPRIT)) {
+            info.analysis().overwrite(PropertyImpl.OWNERSHIP_CULPRIT, value);
+        } else if (!value.isDefault()) {
+            info.analysis().set(PropertyImpl.OWNERSHIP_CULPRIT, value);
+        }
     }
 
     // the methods the property is about: a result that is an object

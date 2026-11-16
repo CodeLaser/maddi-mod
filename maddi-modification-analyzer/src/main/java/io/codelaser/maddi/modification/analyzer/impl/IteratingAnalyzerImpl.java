@@ -597,8 +597,12 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
             feed(f -> f.stage("ownership"));
             OwnershipPass.Report report = new OwnershipPass(configuration.ownershipClosedWorld()).go(analysisOrder);
             OwnershipPass.write(report);
+            // why a method is not @Fresh, a parameter not @Borrowed, a field not @Owned: the IDE's explanation
+            if (Culprits.ENABLED) OwnershipPass.writeCulprits(report);
             // stage 6: a contracted @Finalizer whose receiver is used after the call, with the guard's findings
             guardMessages.addAll(report.finalizerViolations());
+            // a hand-written @Fresh, @Borrowed or @Owned the computed verdict does not uphold
+            if (configuration.guardContracts()) guardMessages.addAll(OwnershipPass.contractViolations(report));
             // OWNERSHIP=<absolute path>: the census as a TSV (stage 4); any other value only turns the pass on
             String census = System.getenv("OWNERSHIP");
             if (census != null && census.startsWith("/")) OwnershipPass.writeTsv(report, java.nio.file.Path.of(census));
