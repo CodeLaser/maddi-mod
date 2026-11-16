@@ -464,7 +464,8 @@ final class Transfers {
                     intoField = true;
                 } else if (pi.equals(link.to())) {
                     return false;
-                } else if (link.from() instanceof FieldReference face && face.fieldInfo().name().startsWith("§")
+                } else if (!OwnedFields.NO_OWNED_VIEW
+                           && link.from() instanceof FieldReference face && face.fieldInfo().name().startsWith("§")
                            && pi.equals(face.scopeVariable())) {
                     if (!(link.to() instanceof FieldReference other && other.fieldInfo().equals(face.fieldInfo())
                           && isThisField(other.scopeVariable(), field))) {

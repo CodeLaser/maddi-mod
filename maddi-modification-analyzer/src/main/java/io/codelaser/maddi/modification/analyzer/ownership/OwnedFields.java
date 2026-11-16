@@ -47,6 +47,7 @@ import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 import io.codelaser.maddi.modification.common.AnalysisHelper;
+import io.codelaser.maddi.modification.link.impl.Gate;
 import io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl;
 import io.codelaser.maddi.modification.prepwork.variable.Link;
 import io.codelaser.maddi.modification.prepwork.variable.Links;
@@ -283,10 +284,14 @@ final class OwnedFields {
      * The object an unmodifiable view wraps, in the view's place: {@code Collections.unmodifiableList(x)} is a new
      * object holding {@code x} and nothing else (or {@code x} itself, when it is such a view already), so it arrives
      * fresh exactly when {@code x} does. The views are the static {@code @UnmodifiableView} methods of one parameter,
-     * the {@code Collections.unmodifiable*} family; nested views are looked through too.
+     * the {@code Collections.unmodifiable*} family; nested views are looked through too. Gate {@code NOOWNEDVIEW}
+     * switches this off.
      */
+    static final boolean NO_OWNED_VIEW = Gate.isSet("NOOWNEDVIEW");
+
     static Expression throughView(Expression expression) {
         Expression e = expression;
+        if (NO_OWNED_VIEW) return e;
         while (Transfers.unwrap(e) instanceof MethodCall mc && mc.methodInfo() != null && mc.methodInfo().isStatic()
                && mc.parameterExpressions().size() == 1
                && mc.methodInfo().analysis().getOrDefault(PropertyImpl.UNMODIFIABLE_VIEW_METHOD,
