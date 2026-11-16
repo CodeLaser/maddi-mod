@@ -432,8 +432,8 @@ annotation: `@Immutable` on the type says it.
   `remove`). Latte allows it; add it after the first census if the worklist shows it matters.
 - Back-pointers as borrows; uniqueness as a basis for eventual immutability.
 - Feeding freshness into the modification fixpoint.
-- A guard that checks hand-written `@Owned` / `@Borrowed` in source (contracts are read for bodiless and library
-  methods only).
+- ~~A guard that checks hand-written `@Owned` / `@Borrowed` in source~~: done 2026-11-16,
+  `OwnershipPass.contractViolations` (with the guard on; a contract on a bodiless element still decides it).
 - A run-time oracle that refutes a verdict by observing sharing during a test run. Optional after stage 3; it does
   not belong to this repository.
 
