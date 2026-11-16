@@ -17,6 +17,8 @@
 
 package io.codelaser.maddi.modification.analyzer.impl;
 
+import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
+
 import java.util.HashMap;
 import java.util.Map;
 import java.util.TreeMap;
@@ -88,12 +90,20 @@ public class ElementSummary {
 
     /*
      Not compared: the values written after the iteration loop, which a seeded run has not written yet when the cutoff
-     compares, and which are computed over the whole order afterwards anyway: nullability (NullabilityPass) and the
-     culprits, the explanations of a verdict (GuardAnalyzerImpl, TypeCulprit), which feed no other verdict.
+     compares, and which are computed over the whole order afterwards anyway: nullability (NullabilityPass), the
+     culprits, the explanations of a verdict (GuardAnalyzerImpl, TypeCulprit), which feed no other verdict, and the
+     ownership pass's verdicts (OwnershipPass.write, after iterate). Its feed into the fixpoint, HANDED_OVER_PARAMETER,
+     is checked on its own at the end of a seeded run (IteratingAnalyzerImpl, CodeLaser/maddi-mod#131).
      */
+    private static final java.util.Set<String> OWNERSHIP = java.util.Set.of(PropertyImpl.FRESH_METHOD.key(),
+            PropertyImpl.BORROWED_PARAMETER.key(), PropertyImpl.OWNED_FIELD.key(),
+            PropertyImpl.OWNED_ELEMENTS_FIELD.key(), PropertyImpl.SHARED_IMMUTABLE_FIELD.key(),
+            PropertyImpl.HANDED_OVER_PARAMETER.key());
+
     private static boolean afterTheLoop(Property property) {
         String key = property.key();
-        return key.startsWith("nullability") || key.endsWith("Culprit") || key.contains("CulpritMethod");
+        return key.startsWith("nullability") || key.endsWith("Culprit") || key.contains("CulpritMethod")
+               || OWNERSHIP.contains(key);
     }
 
     /*
