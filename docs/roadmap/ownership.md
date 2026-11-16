@@ -40,7 +40,7 @@ A one-shot pass after convergence, modelled on `NullabilityPass`:
   (around line 531), under a new `Configuration.ownership()` knob (default false), set by `AnalysisEngineImpl`
   from an environment gate `OWNERSHIP=1`, in the way the other gates are read.
 - It **only adds** properties. It never writes or overwrites an existing one, and nothing in the fixpoint reads the
-  new ones. Acceptance for every stage: `FPDUMP` of the existing verdicts is byte-identical with the gate on and off.
+  new ones (one exception since 2026-11-16: §3 "Fed into the fixpoint"). Acceptance for every stage: `FPDUMP` of the existing verdicts is byte-identical with the gate on and off.
 - Properties are declared in `maddi/maddi-cst-analysis/.../PropertyImpl.java` and registered in
   `PropertyProviderImpl` (follow `NULLABILITY_METHOD`). Polarity as elsewhere: the default is the pessimistic
   value, and absence means undecided.
@@ -377,6 +377,30 @@ corpora's view fields fail elsewhere first: gson's `Gson.factories` is not priva
 `StructMethodParametersAttribute.myEntries` may hold `Collections.emptyList()`. The immutability verdicts do not
 move either way: they do not read ownership (§060's table: a public constructor storing a view of a handed-over
 list is owned in a closed world, its type stays `@FinalFields` and dependent).
+
+### Fed into the fixpoint (2026-11-16)
+
+**Built** (maddi-mod `1729c49b`; tests `TestOwnershipFeed`, `TestBook055Ownership.closedWorld`; book §060). Decision
+(Bart, 2026-11-16): ownership feeds the fixpoint unless that slows the analysis down drastically. This reverses §2's
+"nothing in the fixpoint reads the new ones" for one fact.
+
+- **The fact:** a parameter every caller hands over (stage 5) and its method keeps only in an owned field
+  (`Report.handedOver`, collected by `OwnedFields.handedOver`, views included). `OwnershipFeed` carries it.
+- **Read by** field independence (`FieldAnalyzerImpl.computeIndependent`) and parameter independence
+  (`TypeModIndyAnalyzerImpl.doIndependentParameter`): the link from the parameter to the field, or to its
+  modification face, is skipped, and in its place counts what the caller may still hold, the elements
+  (`OwnershipFeed.contentIndependence`): a `java.util` container or an array only; any other type stays dependent,
+  as its fields may hold the caller's objects. A `List<Counter>` of the caller's counters stays dependent.
+- **The round** (`IteratingAnalyzerImpl`, terminal block, after the MODREACH joint fixpoint and before the eventual
+  deferral): the pass runs over the settled state, writing nothing; grown, the worklist re-derives (#76's path);
+  shrunk, the derived family is cleared; still changing after `OWNERSHIP_ROUNDS` (3), the feed is dropped. Skipped
+  for incremental runs, as MODREACH is, and the feed is not persisted: a warm or incremental run does not see it
+  (follow-up). Gate `NOOWNERSHIPFEED` keeps the feed empty.
+
+A/B (`FPDUMP`, `NOOWNERSHIPFEED=1` against the default, `OWNERSHIP` on; module tests 768 green): gson (a library,
+nothing handed over) byte-identical, 10 s both ways; fernflower closed world 2 field verdicts up
+(`DecompilerContext.properties` `@Dependent` → `@Independent(hc=true)`, its values being `Object`;
+`JavacSwitchCandidate.mappedCaseLabelValues` → `@Independent`), no type verdict moved, 435 s against 423 s (+3%).
 
 ### Annotations
 
