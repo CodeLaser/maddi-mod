@@ -243,8 +243,9 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
     private static final String MLV_DUMP = System.getenv("MLVDUMP");
     @Override
     public MethodLinkedVariables doMethod(MethodInfo method) {
-        // one object per link end within this method's links (LinkEndInterner)
-        try (LinkEndInterner _ = LinkEndInterner.open()) {
+        // one object per link end within this method's links: the private doMethod opens the LinkEndInterner scope
+        // (gate NOCALLEESCOPE: only here, as before)
+        try (LinkEndInterner _ = CALLEE_SCOPE_OFF ? LinkEndInterner.open() : null) {
             TypeInfo typeInfo = method.typeInfo();
             boolean shallow = options.forceShallow() || method.isAbstract() || typeInfo.compilationUnit().externalLibrary();
             MethodLinkedVariables result = doMethod(method, shallow, false, true);
@@ -315,7 +316,25 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
         return doMethod(methodInfo, true, false, false);
     }
 
+    /*
+     Every computation of a method's links has its own LinkEndInterner scope, also one made on demand while another
+     method's links are being computed (recurseMethod, doMethodShallowDoNotWrite, the shallow fallbacks below). Only
+     the public doMethod opened one, so a callee computed on demand interned its ends in its caller's scope: a marker
+     is a local, equal to any local of its name, so the callee's '$_ce4' (its 'return null') became the caller's
+     '$_ce4' (another null, in another method), and the nullability pass took the callee's own null for the caller's
+     (fernflower MergeHelper.getFirstDirectData, a non-null 'Statement' in J2K; CodeLaser/maddi-mod#127 had shifted
+     the marker numbering onto a collision). Gate NOCALLEESCOPE (presence) restores the single scope.
+     */
+    static final boolean CALLEE_SCOPE_OFF = System.getenv("NOCALLEESCOPE") != null;
+
     private MethodLinkedVariables doMethod(MethodInfo methodInfo, boolean shallow, boolean write, boolean writeShallow) {
+        if (CALLEE_SCOPE_OFF) return doMethodInScope(methodInfo, shallow, write, writeShallow);
+        try (LinkEndInterner _ = LinkEndInterner.open()) {
+            return doMethodInScope(methodInfo, shallow, write, writeShallow);
+        }
+    }
+
+    private MethodLinkedVariables doMethodInScope(MethodInfo methodInfo, boolean shallow, boolean write, boolean writeShallow) {
         if (!shallow && missingPrepData(methodInfo)) {
             // A source method without prep data would die on doStatement's 'assert vd != null' — and the
             // exception aborts not just this method but every caller whose computation recursed into it,
