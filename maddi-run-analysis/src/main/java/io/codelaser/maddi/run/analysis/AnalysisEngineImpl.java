@@ -216,6 +216,9 @@ public class AnalysisEngineImpl implements AnalysisEngine {
         if (o.environmentGates() && System.getenv("OWNERSHIP") != null) builder.setOwnership(true);
         // stage 5: an application, whose public callees are called only from the analysed sources
         if (o.environmentGates() && "closed".equals(System.getenv("OWNERSHIP_WORLD"))) builder.setOwnershipClosedWorld(true);
+        // the options' own switches, which the IDE daemon sets (it runs without the environment gates)
+        if (Boolean.TRUE.equals(o.ownership())) builder.setOwnership(true);
+        if (Boolean.TRUE.equals(o.ownershipClosedWorld())) builder.setOwnershipClosedWorld(true);
         IteratingAnalyzer analyzer = new IteratingAnalyzerImpl(javaInspector, builder.build());
         if (request.valueFeed() != null) {
             analyzer.setValueFeed(request.valueFeed());
