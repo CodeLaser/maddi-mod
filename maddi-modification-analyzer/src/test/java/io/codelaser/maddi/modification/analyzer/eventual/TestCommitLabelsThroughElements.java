@@ -110,4 +110,79 @@ public class TestCommitLabelsThroughElements extends CommonTest {
             EventualCluster.ENABLED = saved;
         }
     }
+
+    // the JavaDocImpl.TagImpl shape: a final List field written only as an immutable copy, of eventually immutable
+    // elements, read and handed on raw to a new object
+    @Language("java")
+    private static final String INPUT_COPY = """
+            import java.util.List;
+            import io.codelaser.maddi.support.EventuallyFinalOnDemand;
+
+            public class C {
+              static class T {
+                private final EventuallyFinalOnDemand<String> inspection = new EventuallyFinalOnDemand<>();
+                public void commit(String s) { inspection.setFinal(s); }
+                public int size() { return inspection.get().length(); }
+              }
+              static class Tag {
+                private final List<T> params;
+                Tag(List<T> params) { this.params = List.copyOf(params); }
+                public Tag touch() {
+                  if (params.isEmpty()) return this;
+                  int n = params.stream().mapToInt(t -> t.size()).sum();
+                  return n > 0 ? new Tag(params) : this;
+                }
+              }
+            }
+            """;
+
+    @DisplayName("a final container field written only as an immutable copy commits with its elements")
+    @Test
+    public void testImmutableCopyField() {
+        boolean saved = EventualCluster.ENABLED;
+        EventualCluster.ENABLED = true;
+        try {
+            TypeInfo C = javaInspector.parse("C", INPUT_COPY);
+            analyzer.go(prepWork(C));
+            TypeInfo tag = C.findSubType("Tag");
+            assertEquals(Set.of("params"), nonModAfter(tag, "touch", 0));
+        } finally {
+            EventualCluster.ENABLED = saved;
+        }
+    }
+
+    // the Comment.rewire shape: a default method returning this, modifying only through an override (#116's
+    // dispatch union) that is non-modifying after its own mark
+    @Language("java")
+    private static final String INPUT_DEFAULT = """
+            import io.codelaser.maddi.support.EventuallyFinalOnDemand;
+
+            public class D {
+              interface I {
+                default I copy() { return this; }
+              }
+              static class Impl implements I {
+                private final EventuallyFinalOnDemand<String> inspection = new EventuallyFinalOnDemand<>();
+                public void commit(String s) { inspection.setFinal(s); }
+                @Override public I copy() { inspection.get(); return this; }
+              }
+            }
+            """;
+
+    @DisplayName("a default method modifying through an override carries the override's after-labels")
+    @Test
+    public void testDefaultMethodUnion() {
+        boolean saved = EventualCluster.ENABLED;
+        EventualCluster.ENABLED = true;
+        try {
+            TypeInfo D = javaInspector.parse("D", INPUT_DEFAULT);
+            analyzer.go(prepWork(D));
+            TypeInfo impl = D.findSubType("Impl");
+            TypeInfo i = D.findSubType("I");
+            assertEquals(Set.of("inspection"), nonModAfter(impl, "copy", 0));
+            assertEquals(Set.of("inspection"), nonModAfter(i, "copy", 0));
+        } finally {
+            EventualCluster.ENABLED = saved;
+        }
+    }
 }

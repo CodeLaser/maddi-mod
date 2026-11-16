@@ -898,7 +898,38 @@ public class TypeEventualAnalyzerImpl extends CommonAnalyzerImpl implements Type
             return true;
         });
         if (bail[0]) return null;
+        if (EventualCluster.ENABLED && Util.dispatchUnion(methodInfo)) {
+            // #133: under the #116 dispatch union a concrete overridable method's modification is its own body's
+            // AND its overrides' (Comment.rewire's 'return this', modifying through JavaDocImpl.rewire). The walk
+            // above saw the body only; the overrides' after-labels join it, as AbstractMethodAnalyzerImpl lifts
+            // them to an abstract method. An override that modifies with no label, or is undecided, bails.
+            Set<String> overrides = overrideLabels(methodInfo);
+            if (overrides == null) {
+                if (siteDebug()) ecsite("enm dispatch-union bail");
+                return null;
+            }
+            labels.addAll(overrides);
+        }
         return labels;
+    }
+
+    /** The union of the overrides' after-labels, an unconditionally non-modifying override adding none; null when
+     *  an override modifies without a label or is still undecided. */
+    private static Set<String> overrideLabels(MethodInfo methodInfo) {
+        Set<String> union = new HashSet<>();
+        for (MethodInfo implementation : methodInfo.analysis()
+                .getOrDefault(PropertyImpl.IMPLEMENTATIONS, ValueImpl.SetOfMethodInfoImpl.EMPTY).methodInfoSet()) {
+            Set<String> enm = implementation.analysis()
+                    .getOrDefault(EVENTUALLY_NON_MODIFYING_METHOD, ValueImpl.SetOfStringsImpl.EMPTY_SET).set();
+            if (!enm.isEmpty()) {
+                union.addAll(enm);
+                continue;
+            }
+            Value.Bool nonModifying = implementation.analysis().getOrNull(NON_MODIFYING_METHOD,
+                    ValueImpl.BoolImpl.class);
+            if (nonModifying == null || nonModifying.isFalse()) return null;
+        }
+        return union;
     }
 
     /**
