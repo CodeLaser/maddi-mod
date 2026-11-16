@@ -393,9 +393,14 @@ list is owned in a closed world, its type stays `@FinalFields` and dependent).
   as its fields may hold the caller's objects. A `List<Counter>` of the caller's counters stays dependent.
 - **The round** (`IteratingAnalyzerImpl`, terminal block, after the MODREACH joint fixpoint and before the eventual
   deferral): the pass runs over the settled state, writing nothing; grown, the worklist re-derives (#76's path);
-  shrunk, the derived family is cleared; still changing after `OWNERSHIP_ROUNDS` (3), the feed is dropped. Skipped
-  for incremental runs, as MODREACH is, and the feed is not persisted: a warm or incremental run does not see it
-  (follow-up). Gate `NOOWNERSHIPFEED` keeps the feed empty.
+  shrunk, the derived family is cleared; still changing after `OWNERSHIP_ROUNDS` (3), the feed is dropped. Gate
+  `NOOWNERSHIPFEED` keeps the feed empty.
+- **Stored and checked** (CodeLaser/maddi-mod#131; maddi `4b92978b4`, maddi-mod `cd560474`): the feed the analysis
+  ends with is written as `HANDED_OVER_PARAMETER` (`OwnershipFeed.write`, replacing an earlier run's). An
+  incremental run loads it, so its seed re-derives independence as the cold run did, and at its terminal point the
+  pass recomputes the feed: an edit can change it without moving a summary (a caller that now keeps its argument),
+  so a different feed sends the run to the cold analysis, the derived family cleared first
+  (`ownershipFeedFellBack()`). Tests `TestOwnershipFeed.incremental`, `TestWriteAnalysisHandedOver`.
 
 A/B (`FPDUMP`, `NOOWNERSHIPFEED=1` against the default, `OWNERSHIP` on; module tests 768 green): gson (a library,
 nothing handed over) byte-identical, 10 s both ways; fernflower closed world 2 field verdicts up

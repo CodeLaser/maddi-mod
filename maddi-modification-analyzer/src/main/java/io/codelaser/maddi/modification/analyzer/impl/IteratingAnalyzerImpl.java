@@ -484,6 +484,16 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
     private Map<String, String> priorSummaries;
     private boolean cutoffFellBack;
 
+    // the feed of the last iterate() (the ownership round's, docs/roadmap/ownership.md): stored after the analysis
+    private OwnershipFeed lastOwnershipFeed;
+    // an incremental run found the stored feed stale, and fell back to the cold analysis (CodeLaser/maddi-mod#131)
+    private boolean ownershipFeedFellBack;
+
+    /** Whether the last {@link #analyze} was incremental and fell back to the cold analysis on a stale ownership feed. */
+    public boolean ownershipFeedFellBack() {
+        return ownershipFeedFellBack;
+    }
+
     /** Whether the last seeded {@link #analyze} with prior summaries fell back to the cold analysis. */
     public boolean cutoffFellBack() {
         return cutoffFellBack;
@@ -537,6 +547,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
     @Override
     public void analyze(List<Info> analysisOrder, G<Info> dependencyGraph,
                         Set<Info> initialDirty, Consumer<Info> beforeFirstRecompute) {
+        ownershipFeedFellBack = false;
         boolean frozenBefore = TolerantWrite.modificationPropertiesFrozen();
         TolerantWrite.insideAnalyze(true);
         CanonicalVirtuals.beginAnalysis();
@@ -580,6 +591,8 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
             NullabilityPass.write(pass.go(analysisOrder));
         }
         if (configuration.ownership()) {
+            // the feed the analysis ended with, stored for an incremental run to start from (#131)
+            if (lastOwnershipFeed != null) lastOwnershipFeed.write(analysisOrder);
             // docs/roadmap/ownership.md: one-shot, over the converged link facts; adds properties, changes none
             feed(f -> f.stage("ownership"));
             OwnershipPass.Report report = new OwnershipPass(configuration.ownershipClosedWorld()).go(analysisOrder);
@@ -638,10 +651,13 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
         SingleIterationAnalyzer singleIterationAnalyzer = new SingleIterationAnalyzerImpl(javaInspector, configuration);
         int ownershipRounds = 0;
         OwnershipFeed ownershipFeed = new OwnershipFeed();
-        if (configuration.ownership() && !NO_OWNERSHIP_FEED
-            && singleIterationAnalyzer instanceof SingleIterationAnalyzerImpl siaFeed) {
+        boolean feeding = configuration.ownership() && !NO_OWNERSHIP_FEED;
+        if (feeding && singleIterationAnalyzer instanceof SingleIterationAnalyzerImpl siaFeed) {
             siaFeed.setOwnershipFeed(ownershipFeed);
+            // incremental: the seed re-derives against the feed the cold run left (#131); checked at the end
+            if (initialDirty != null) ownershipFeed.load(analysisOrder);
         }
+        lastOwnershipFeed = feeding ? ownershipFeed : null;
         lastSingleIterationAnalyzer = singleIterationAnalyzer instanceof SingleIterationAnalyzerImpl impl ? impl : null;
         this.lastRun = singleIterationAnalyzer;
         // G43: the wall-clock budget starts here, and every pass and every element in it is checked against it
@@ -1077,6 +1093,27 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                         modReachFailures++;
                         LOGGER.error("MODREACH pass failed; modification properties keep their "
                                      + "fixpoint values (unfrozen)", e);
+                    }
+                }
+                // An incremental run started from the stored feed: the carried values were derived with it. An edit
+                // anywhere may change it without moving a summary (a caller that now keeps its argument), so the pass
+                // recomputes it; a different feed sends the run to the cold analysis, as a moved summary does (#131)
+                if (feeding && incremental) {
+                    feed(f -> f.stage("ownership feed check"));
+                    Map<ParameterInfo, FieldInfo> now = new OwnershipPass(configuration.ownershipClosedWorld())
+                            .go(analysisOrder).handedOver();
+                    if (!now.equals(ownershipFeed.handedOver())) {
+                        ownershipFeedFellBack = true;
+                        LOGGER.info("Incremental: the ownership feed moved ({} stored, {} now); falling back to the "
+                                    + "cold analysis of all {} element(s)", ownershipFeed.handedOver().size(),
+                                now.size(), analysisOrder.size());
+                        if (beforeFirstRecompute != null) analysisOrder.forEach(beforeFirstRecompute);
+                        // what the seed derived from the stale feed only ever strengthened, and a controlled
+                        // overwrite never weakens: without the caller's clear hook it would survive the cold run
+                        clearDerivedFamily(analysisOrder);
+                        TolerantWrite.unfreezeModificationProperties();
+                        iterate(analysisOrder, dependencyGraph, null, null);
+                        return;
                     }
                 }
                 // The OWNERSHIP round: over the settled state (links final, modification frozen), the ownership pass
