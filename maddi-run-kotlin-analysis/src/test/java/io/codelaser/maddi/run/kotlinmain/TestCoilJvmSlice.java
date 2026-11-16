@@ -185,4 +185,30 @@ public class TestCoilJvmSlice {
         CensusRatchet.noWorseThan("coil placeholders", summary.placeholders(), 4);
         CensusRatchet.noWorseThan("coil elements isolated by prep", summary.prepErrors(), 0);
     }
+
+    /** As in {@link TestDetektCorpus}: without them nothing built on a library type can be concluded immutable. */
+    private static final List<String> ANNOTATED_APIS = List.of(
+            "../../maddi/maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles/jdk",
+            "../../maddi/maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles/libs/kotlin",
+            "../../maddi/maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles/libs/kotlinx");
+
+    /**
+     * Prep and the modification analysis with the annotated APIs loaded, as the other Kotlin corpora run it. The
+     * prep-only run above loads none, so its library-call census (-Dmaddi.libraryCallDump) read every library member
+     * as an uncontracted default, already hinted or not, and coil's calls said nothing about the hints (maddi-mod#15).
+     */
+    @Test
+    public void runsModificationAnalysis() throws IOException {
+        RunMixedPrepAnalyzer.Summary summary =
+                new RunMixedPrepAnalyzer().go(read(config()), true, ANNOTATED_APIS);
+        LOGGER.info("coil modification: {} primary type(s), analysis order {}, {} isolated by prep,"
+                    + " {} immutable type(s), {} placeholder(s)", summary.primaryTypes(), summary.analysisOrderSize(),
+                summary.prepErrors(), summary.immutableTypes(), summary.placeholders());
+        assertTrue(summary.immutableTypes() > 0, "no immutable types at all; the annotated APIs were not loaded");
+
+        CensusRatchet.noWorseThan("coil placeholders, with the annotated APIs", summary.placeholders(), 4);
+        CensusRatchet.noWorseThan("coil elements isolated by prep, with the annotated APIs", summary.prepErrors(), 0);
+        // Measured 2026-11-16, first run: 131 primary types, analysis order 2,003, 73 immutable types, 4 placeholders.
+        CensusRatchet.noWorseThanAtLeast("coil immutable types", summary.immutableTypes(), 73);
+    }
 }
