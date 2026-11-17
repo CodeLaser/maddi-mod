@@ -176,6 +176,33 @@ public class TestModuleGatedHints {
         assertFalse(source2.analysis().haveAnalyzedValueFor(PropertyImpl.ANNOTATED_API));
     }
 
+    // One jar's stored results, restored for that jar's source set, go to that jar's copy only (nacos: slf4j-api
+    // 1.7.26 and 2.0.13, each copy decided differently in the cold run).
+    @Test
+    public void oneJarsResultsStayWithThatJar() throws Exception {
+        JavaInspector ji = inspectorWithoutDesktop();
+        Runtime real = ji.runtime();
+        TypeInfo v1 = libraryType(real, "lib-1.0.jar");
+        TypeInfo v2 = libraryType(real, "lib-2.0.jar");
+        Runtime twoCopies = (Runtime) Proxy.newProxyInstance(getClass().getClassLoader(), new Class<?>[]{Runtime.class},
+                (_, method, args) -> {
+                    if ("loadedCopies".equals(method.getName()) && "com.example.lib.Thing".equals(args[0])) {
+                        return List.of(v1, v2);
+                    }
+                    try {
+                        return method.invoke(real, args);
+                    } catch (InvocationTargetException e) {
+                        throw e.getCause();
+                    }
+                });
+        SourceSet jar2 = v2.compilationUnit().sourceSet();
+        LoadAnalysisResults lar = new LoadAnalysisResults(twoCopies, jar2);
+        assertEquals(1, lar.go(new PrepWorkCodec(twoCopies, jar2).codec(), results("com.example.lib.Thing")));
+        assertEquals(0, lar.decoratedExtraCopies());
+        assertTrue(v2.analysis().haveAnalyzedValueFor(PropertyImpl.ANNOTATED_API));
+        assertFalse(v1.analysis().haveAnalyzedValueFor(PropertyImpl.ANNOTATED_API));
+    }
+
     private static TypeInfo libraryType(Runtime runtime, String jar) {
         return type(runtime, new SourceSetImpl.Builder().setName(jar).setUri(URI.create("file:/" + jar))
                 .setLibrary(true).setExternalLibrary(true).build());

@@ -421,6 +421,12 @@ public class LoadAnalysisResults {
      com.google.protobuf.Any as source: its entry was also written onto the protobuf jar's Any, whose getBody()
      callers then read istio's nonModifyingMethod (found by the diagnose workspace, 2026-11-17). A library's entry
      never goes to a source copy either: in a preload that copy is counted as skipped, as before.
+
+     And the results stored for ONE jar are that jar's: when sourceSetOfRequest is itself a library's source set
+     and one of the copies is loaded from it, the entry goes to that copy only. nacos carries slf4j-api 1.7.26 and
+     2.0.13; a store that keeps each copy's results under its own jar would otherwise restore 2.0.13's annotated
+     Logger.warn onto the 1.7.26 copy, which the cold run decides shallowly. The fan-out is for hint files (a
+     preload, or a request from a project source set).
      */
     private boolean processPrimaryType(Codec codec, JSONObject jo) {
         String name = primaryTypeName(jo);
@@ -430,6 +436,12 @@ public class LoadAnalysisResults {
         }
         if (!librariesOnly && sourceTypeOfRequest(codec, name)) {
             return processSub(codec, new CodecImpl.ContextImpl(), jo, true, null);
+        }
+        if (!librariesOnly && sourceSetOfRequest.externalLibrary()) {
+            // one jar's own results, restored for that jar: its copy only
+            TypeInfo own = copies.stream()
+                    .filter(c -> sourceSetOfRequest.equals(c.compilationUnit().sourceSet())).findFirst().orElse(null);
+            if (own != null) return processSub(codec, new CodecImpl.ContextImpl(), jo, true, own);
         }
         boolean any = false;
         int decorated = 0;
