@@ -16,9 +16,9 @@ import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
 /**
  * CodeLaser/maddi-mod#127, the recursive call itself.
  * <ul>
- *     <li>A return variable is not cleared when its value arrives through an intermediate (a ternary, an object
- *     creation): {@code if (c) return n; return d ? null : find(n.first);} kept the second statement's value only,
- *     recursion or not ({@code fd}, {@code ff}).</li>
+ *     <li>A return variable keeps what earlier returns gave it when its value arrives through an intermediate (a
+ *     ternary, an object creation): {@code if (c) return n; return d ? null : find(n.first);} kept the second
+ *     statement's value only, recursion or not ({@code fd}, {@code ff}); see LinkGraph.carryReturn.</li>
  *     <li>A method that calls itself is computed a second time with its first summary for that call
  *     ({@code swap}, {@code fill}): one unrolling, so {@code find} links {@code n} and {@code n.first}.</li>
  * </ul>
@@ -63,17 +63,18 @@ public class TestRecursiveResult extends CommonTest {
             sb.append(name).append('=').append(mi.analysis().getOrNull(METHOD_LINKS, MethodLinkedVariablesImpl.class))
                     .append('\n');
         }
-        // without the changes (gates CLEARRETURN, NOSELFSUMMARY): find=[-] --> -, fd lacks '←0:n', ff=[-] --> -,
-        // swap lacks '←1:b', fill lacks every link to 2:y, and fa, fe, deep lack '←0:n.first'.
+        // without the changes (gates NOCARRYRETURN, NOSELFSUMMARY): find=[-] --> -, fd lacks '←0:n', ff=[-] --> -,
+        // swap lacks '←1:b', fill lacks every link to 2:y, and fe, deep lack '←0:n.first'.
+        // fa's second round spells its 'n.first' as 'fa.first≺0:n' (the carried 'fa←0:n' makes them one object)
         // 2:y in fill is unmarked: a link-only test has no verdicts, and the call back into the recursion marks
         // nothing while its own are undecided (MethodModification)
         assertEquals("""
-                find=[-] --> find.first←$_ce2,find←$_ce2,find←0:n.first,find←0:n
+                find=[-] --> find←$_ce2,find←0:n.first,find←0:n
                 find1=[-] --> find1←0:n.first,find1←0:n
-                fa=[-] --> fa←0:n.first,fa←0:n
+                fa=[-] --> fa.first≺0:n,fa←0:n
                 fb=[-] --> -
                 fc=[-] --> fc←$_ce1,fc←0:n
-                fd=[-] --> fd.first←$_ce2,fd←$_ce2,fd←0:n.first,fd←0:n
+                fd=[-] --> fd.first←0:n.first,fd←$_ce2,fd←0:n.first,fd←0:n
                 fe=[-] --> fe←0:n.first,fe←0:n
                 ff=[-] --> ff←$_v,ff←0:n
                 swap=[-, -] --> swap←0:a,swap←1:b

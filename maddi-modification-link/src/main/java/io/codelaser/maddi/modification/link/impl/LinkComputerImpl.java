@@ -1421,6 +1421,13 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                     System.out.println("RVTRACE stmt " + statement.source().index() + " dest=" + destination
                                        + " rLinks=" + r.links());
                 }
+                if (returnTargetVariable == returnVariable && previousVd != null
+                    && previousVd.isKnown(returnVariable.fullyQualifiedName())) {
+                    // #127: what earlier returns gave the return variable survives this statement (LinkGraph)
+                    previousVd.variableInfoStream(stageOfPrevious)
+                            .filter(vi -> vi.variable().equals(returnVariable)).findFirst()
+                            .ifPresent(vi -> linkGraph.carryReturn(vi.linkedVariables()));
+                }
                 if (r != null) {
                     r = r.with(rvLinks);
                     r = r.copyLinksToExtra();

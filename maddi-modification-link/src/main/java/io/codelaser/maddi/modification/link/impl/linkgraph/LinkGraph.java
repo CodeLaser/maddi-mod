@@ -95,24 +95,18 @@ public class LinkGraph {
         }
 
         Reduce r = reduceLinks(newLinks);
-        // A return variable is not reassigned: a second 'return' is a merge over paths (see Graph.mergeEdgeBi).
-        // Cleared here, 'if (c) return n; return d ? null : f(n.first);' kept only the second statement's value:
-        // a ternary, like an object creation, arrives through an intermediate, and the reduction's target was
-        // cleared as an assigned local is (CodeLaser/maddi-mod#127, fernflower's Statements.findFirstData: 'return=-').
-        // So it is cleared only while this statement is the only one that has returned: a statement is computed
-        // more than once (a ternary's branches with their condition's facts), and the clear drops the earlier
-        // evaluation ('return custom == null ? fallback() : custom' must not keep custom's null).
-        // Gate CLEARRETURN restores the unconditional clear.
-        if (r != null && r.clear instanceof ReturnVariable) {
-            String first = firstReturnAt.putIfAbsent(r.clear, statementIndex);
-            if (CLEAR_RETURN || first == null || first.equals(statementIndex)) graph.clear(r.clear, statementIndex);
-        } else if (r != null && r.clear != null) {
+        Links carried = carriedReturn;
+        carriedReturn = null;
+        if (r != null && r.clear != null) {
             graph.clear(r.clear, statementIndex);
         }
-        for (Variable v : newLinks.keySet()) {
-            if (v instanceof ReturnVariable) firstReturnAt.putIfAbsent(v, statementIndex);
-        }
         Map<Variable, Links> newLinks2 = r == null ? respellSelfReassignment(newLinks) : r.newLinks;
+        if (r != null && r.clear instanceof ReturnVariable && carried != null) {
+            // see carryReturn: the earlier returns' values, next to this statement's
+            Links now = newLinks2.get(r.clear);
+            newLinks2 = new HashMap<>(newLinks2);
+            newLinks2.put(r.clear, now == null ? carried : now.merge(carried));
+        }
         List<Link> statementLinks = new ArrayList<>();
         newLinks2.entrySet()
                 .stream()
@@ -213,9 +207,35 @@ public class LinkGraph {
         return res;
     }
 
-    private static final boolean CLEAR_RETURN = Gate.isSet("CLEARRETURN");
-    // the statement that first assigned each return variable (compute)
-    private final Map<Variable, String> firstReturnAt = new HashMap<>();
+    /*
+     A return statement whose value arrives through an intermediate (a ternary, an object creation) is reduced, and
+     the reduction clears its target: right for a local, which is reassigned, and how the alternatives of one return
+     stay apart from an earlier return's alias group (TestAdapterChainGrowth). But a return variable is a merge over
+     paths, and the clear took the earlier returns' values with it: 'if (c) return n; return new Node();' had the
+     summary '-', 'if (..) return null; return new X();' lost its null, and fernflower's Statements.findFirstData
+     ('if (..) return stat; return c ? null : findFirstData(stat.getFirst())') linked nothing
+     (CodeLaser/maddi-mod#127). The link computer hands over what the return variable held before this statement;
+     after the clear it goes back in, as further values of this statement (several values: plain edges, no group).
+     Gate NOCARRYRETURN: nothing is carried, as before.
+     */
+    private static final boolean NO_CARRY_RETURN = Gate.isSet("NOCARRYRETURN");
+    private Links carriedReturn;
+
+    public void carryReturn(Links linksBeforeThisStatement) {
+        if (NO_CARRY_RETURN || linksBeforeThisStatement == null || linksBeforeThisStatement.primary() == null) return;
+        // the values only ('rv ← n', 'rv ← null'): what holds of a value's faces comes with the value, and a face
+        // link of the return variable ('rv.§m ≡ 0:in.§m') next to this statement's own turned into 'rv.§m ≡ rv.§m'
+        Variable rv = linksBeforeThisStatement.primary();
+        Links.Builder builder = new LinksImpl.Builder(rv);
+        for (Link l : linksBeforeThisStatement.linkSet()) {
+            if (l.from().equals(rv) && l.linkNature() == LinkNatureImpl.IS_ASSIGNED_FROM
+                && !(Util.primary(l.to()) instanceof IntermediateVariable) && !rv.equals(Util.primary(l.to()))) {
+                builder.add(l.from(), l.linkNature(), l.to(), l.mediated());
+            }
+        }
+        Links kept = builder.build();
+        carriedReturn = kept.isEmpty() ? null : kept;
+    }
 
     private record Reduce(Map<Variable, Links> newLinks, Variable clear) {
     }

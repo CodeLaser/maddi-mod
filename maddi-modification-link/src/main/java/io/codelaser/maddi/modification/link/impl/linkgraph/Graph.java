@@ -800,8 +800,11 @@ public class Graph {
         for (Variable face : sharedVariables.assignmentSources(primary)) {
             for (Variable v : virtualModificationIdenticals.variablesPartOf(face)) {
                 Variable rehomed = rehome(v, face, primary);
+                // not onto itself: the source's group can hold the recipient's own face ('rv.§m ≡ 0:in.§m' when an
+                // earlier return gave 'rv ← in', #127), and rehomed, that member is 'rv.§m ≡ rv.§m'
                 virtualModificationIdenticals.groupsOfMember(v)
-                        .flatMap(g -> g.expand(rehomed)).forEach(inherited::add);
+                        .flatMap(g -> g.expand(rehomed)).filter(l -> !l.from().equals(l.to()))
+                        .forEach(inherited::add);
             }
         }
         return Stream.concat(own, inherited.stream());
