@@ -1512,7 +1512,7 @@ public class ShadowModificationPass {
     private static final boolean NO_WHOLE_CONTAINER = Gate.isSet("NOWHOLECONTAINER");
 
     // the owners of hidden contents that overlap this one, both sides element sets (#134), whichever side stores it
-    private static void overlappingContainers(VariableData vd, Variable hiddenContent, List<Variable> out) {
+    private void overlappingContainers(VariableData vd, Variable hiddenContent, List<Variable> out) {
         if (!Util.virtual(hiddenContent) || Util.isVirtualModification(hiddenContent)) return;
         String fqn = hiddenContent.fullyQualifiedName();
         Variable owner = Util.firstRealVariable(hiddenContent);
@@ -1525,6 +1525,13 @@ public class ShadowModificationPass {
                     .forEach(l -> {
                         Variable other = fqn.equals(l.from().fullyQualifiedName()) ? l.to()
                                 : fqn.equals(l.to().fullyQualifiedName()) ? l.from() : null;
+                        // elements that can be modified at all (not a String[]'s, not an enum list's)
+                        // and elements that may be the same objects ('dtos.§$s ∩ kinds.§$s', Dto and Kind, may not)
+                        if (other != null && (!Util.isSlice(other) && analysisHelper.typeImmutable(other.parameterizedType().copyWithoutArrays())
+                                                      .isAtLeastImmutableHC()
+                                              || !Util.elementsMayOverlap(other, hiddenContent))) {
+                            other = null;
+                        }
                         Variable container = other == null ? null : Util.firstRealVariable(other);
                         if (container != null && !container.equals(owner) && !out.contains(container)) {
                             out.add(container);

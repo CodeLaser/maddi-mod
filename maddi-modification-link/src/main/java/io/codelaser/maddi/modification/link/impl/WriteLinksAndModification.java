@@ -1172,6 +1172,13 @@ class WriteLinksAndModification {
      variable of the element type: that object may be one of the primary's elements, which ∈ would say, had the two
      element fields matched.
      */
+    // #134: an element set whose elements can be modified at all: not a String[]'s, not an enum list's
+    private static boolean mutableElements(Variable elementSet) {
+        if (Util.isSlice(elementSet)) return true; // its type is the slice's, see Util.elementsMayOverlap
+        ParameterizedType pt = elementSet.parameterizedType().copyWithoutArrays();
+        return !new AnalysisHelper().typeImmutable(pt).isAtLeastImmutableHC();
+    }
+
     private static boolean overlapsAsElement(Variable primary, Link link, Variable toReal) {
         Variable from = link.from();
         if (from.equals(primary) || Util.isVirtualModification(from)) return false;
@@ -1223,7 +1230,9 @@ class WriteLinksAndModification {
             if (!structural && !NO_OBJECT_GRAPH_MOD && link.linkNature() == OBJECT_GRAPH_OVERLAPS
                 && !modifiedElementOf.isEmpty()
                 && Util.virtual(link.from()) && !Util.isVirtualModification(link.from())
-                && Util.virtual(link.to()) && !Util.isVirtualModification(link.to())) {
+                && Util.virtual(link.to()) && !Util.isVirtualModification(link.to())
+                && mutableElements(link.from())
+                && Util.elementsMayOverlap(link.from(), link.to())) {
                 Set<MethodInfo> causes = modifiedElementOf.get(link.to());
                 if (causes != null) {
                     // #134: 'x.map.§$$s[-2] ∩ rv.§$s', rv filled with the elements of one of the field's values

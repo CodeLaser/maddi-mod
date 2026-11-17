@@ -31,6 +31,7 @@ import io.codelaser.maddi.cst.api.expression.Expression;
 import io.codelaser.maddi.cst.api.expression.VariableExpression;
 import io.codelaser.maddi.cst.api.info.FieldInfo;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.statement.IfElseStatement;
 import io.codelaser.maddi.cst.api.statement.LocalVariableCreation;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
@@ -66,8 +67,9 @@ import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
  * A lazily created VIEW is a memo as well (maddi-mod#136, Bart 2026-11-17): gson's
  * {@code LinkedTreeMap.entrySet() { if (entrySet == null) entrySet = new EntrySet(); return entrySet; }}, as the JDK's
  * {@code HashMap.entrySet()} which the hints declare {@code @NotModified}. Same rule, for a field of an object type
- * whose every guarded write stores a new object built from {@code this} and constants only: a function of the
- * instance. Such a field gets {@link #LAZY_CACHE_FIELD} but NOT {@code IGNORE_MODIFICATIONS_FIELD}: only the
+ * whose every guarded write stores a new object built from {@code this} and constants only, and that captures the
+ * instance (an inner class of the owner, or {@code this} as an argument): a function of the instance. A new object
+ * holding nothing of the instance ({@code if (pool == null) pool = new Object()}) is lazily created state, not a view. Such a field gets {@link #LAZY_CACHE_FIELD} but NOT {@code IGNORE_MODIFICATIONS_FIELD}: only the
  * assignment of the slot is disclaimed ({@link #isMemoSlot}), while a modification through the view
  * ({@code map.entrySet().clear()}) still modifies its owner.
  */
@@ -141,16 +143,28 @@ public final class LazyCacheField {
     private static boolean onlyViewWrites(MethodInfo methodInfo, FieldInfo fieldInfo) {
         boolean[] ok = {true};
         methodInfo.methodBody().visit(e -> {
-            if (e instanceof Assignment a && isWriteOf(a, fieldInfo) && !isViewCreation(a.value())) ok[0] = false;
+            if (e instanceof Assignment a && isWriteOf(a, fieldInfo) && !isViewCreation(a.value(), fieldInfo)) ok[0] = false;
             return ok[0];
         });
         return ok[0];
     }
 
-    private static boolean isViewCreation(Expression value) {
-        return unwrap(value) instanceof ConstructorCall cc && cc.constructor() != null && cc.anonymousClass() == null
-               && (cc.object() == null || isThis(cc.object()))
-               && cc.parameterExpressions().stream().allMatch(p -> isThis(p) || constant(unwrap(p)));
+    /*
+     A view captures the instance: an inner class of the field's owner (its implicit outer instance, 'new EntrySet()'),
+     or 'this' passed explicitly ('new KeyView(this)'). A new object that holds nothing of the instance ('new Object()',
+     'new ArrayList<>()') is lazily created STATE: its creation stays a modification (TestModificationOfElementFromGetter's
+     getPool).
+     */
+    private static boolean isViewCreation(Expression value, FieldInfo fieldInfo) {
+        if (!(unwrap(value) instanceof ConstructorCall cc) || cc.constructor() == null || cc.anonymousClass() != null
+            || cc.object() != null && !isThis(cc.object())
+            || !cc.parameterExpressions().stream().allMatch(p -> isThis(p) || constant(unwrap(p)))) {
+            return false;
+        }
+        TypeInfo created = cc.constructor().typeInfo();
+        boolean innerOfOwner = created.isInnerClass() && created != fieldInfo.owner()
+                               && created.isEqualToOrInnerClassOf(fieldInfo.owner());
+        return innerOfOwner || cc.parameterExpressions().stream().anyMatch(LazyCacheField::isThis);
     }
 
     private static boolean isThis(Expression e) {

@@ -125,7 +125,25 @@ public class Util {
      'Map<String, List<String>> tags' (TestMapValueModification). A type parameter or wildcard argument agrees with
      anything; for two different types (a subtype pair) the arguments are not compared.
      */
-    private static boolean mayBeSameObject(ParameterizedType a, ParameterizedType b) {
+    /*
+     #134: whether two element sets may hold the same objects, judged on their element types ('dtos.§$s ∩ kinds.§$s',
+     Dto and Kind, may not). A virtual container type ('map.§$$s[-2]', the elements of a map's values) names no
+     element type of its own: no evidence, so they may. Neither does a slice of one ('map.§$$s[-1]', its keys):
+     at a call site the slices of one container collapse into one link, the first kept, so the slice a link names
+     need not be the one the elements came from; the container it belongs to is the evidence.
+     */
+    public static boolean elementsMayOverlap(Variable a, Variable b) {
+        if (isSlice(a) || isSlice(b)) return true;
+        ParameterizedType pa = a.parameterizedType().copyWithoutArrays();
+        ParameterizedType pb = b.parameterizedType().copyWithoutArrays();
+        if (pa.typeInfo() != null && isContainerType(pa.typeInfo())
+            || pb.typeInfo() != null && isContainerType(pb.typeInfo())) {
+            return true;
+        }
+        return mayBeSameObject(pa, pb);
+    }
+
+    public static boolean mayBeSameObject(ParameterizedType a, ParameterizedType b) {
         TypeInfo ta = a.bestTypeInfo();
         TypeInfo tb = b.bestTypeInfo();
         if (ta == null || tb == null) return true;
