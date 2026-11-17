@@ -79,7 +79,8 @@ public class MethodAnalyzer {
 
         @Override
         public boolean isDefault() {
-            return variableData.isDefault() && variableNames.isEmpty();
+            // EMPTY_VARIABLE_INFO_MAP has no VariableData
+            return (variableData == null || variableData.isDefault()) && variableNames.isEmpty();
         }
 
         public VariableData get(String fqn) {

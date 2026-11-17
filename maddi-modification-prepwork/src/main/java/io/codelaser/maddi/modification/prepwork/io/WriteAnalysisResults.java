@@ -44,6 +44,7 @@ import io.codelaser.maddi.cst.api.element.SourceSet;
 import io.codelaser.maddi.cst.api.info.*;
 import io.codelaser.maddi.cst.api.runtime.Runtime;
 import io.codelaser.maddi.cst.io.CodecImpl;
+import io.codelaser.maddi.modification.prepwork.MethodAnalyzer;
 import io.codelaser.maddi.modification.prepwork.PrepAnalyzer;
 import io.codelaser.maddi.util.Trie;
 
@@ -56,9 +57,14 @@ public class WriteAnalysisResults {
      * ClassCastException from the positional reader. Bump the version when the shape of the elements changes
      * (their keys, their order, the encoding of a value); {@link LoadAnalysisResults} reads exactly this version,
      * and still accepts a file without a marker (written before the marker existed) as version 0.
+     * <p>
+     * Version 2 adds the anonymous, local and lambda types of a type's members as its sub-elements, tagged "A"
+     * (their simple name and their place in the codec's {@code CodecImpl.localTypes}). Version 1 is the same without
+     * them, so the reader reads both ({@link #MIN_READABLE_VERSION}).
      */
     public static final String FORMAT_NAME = "maddi-analysis-results";
-    public static final int FORMAT_VERSION = 1;
+    public static final int FORMAT_VERSION = 2;
+    public static final int MIN_READABLE_VERSION = 1;
 
     /** The marker as written: the first element of the file's array. */
     public static String formatMarker() {
@@ -76,8 +82,12 @@ public class WriteAnalysisResults {
      * {@code PrepAnalyzer.PREPPED} records that prepwork has run over a type <em>in this process</em>; restoring
      * it onto a freshly parsed universe would make prepwork skip types whose statements hold no
      * {@code VariableData}, which is the very failure the marker exists to prevent.
+     * {@code MethodAnalyzer.VARIABLES_OF_ENCLOSING_METHOD}, on an anonymous or lambda type, is prepwork's view of
+     * the enclosing method's variables for this run: it holds a {@code VariableData} and has no encoding. It reaches
+     * the writer since format version 2 writes local types.
      */
-    private static final Predicate<Property> NEVER_SERIALISED = p -> p != PrepAnalyzer.PREPPED;
+    private static final Predicate<Property> NEVER_SERIALISED = p -> p != PrepAnalyzer.PREPPED
+                                                                     && p != MethodAnalyzer.VARIABLES_OF_ENCLOSING_METHOD;
 
     public WriteAnalysisResults(Runtime runtime) {
         this(runtime, ti -> true);
@@ -299,6 +309,17 @@ public class WriteAnalysisResults {
     }
 
     private Codec.EncodedValue writeType(Codec codec, Codec.Context context, TypeInfo typeInfo, int index) {
+        return writeType(codec, context, typeInfo, index, true);
+    }
+
+    /*
+     withLocalTypes: the anonymous, local and lambda types declared in this type's members (format version 2). They
+     are not among subTypes(), and an analysis that is loaded instead of computed needs their methods' and
+     parameters' values too (a lambda's isModified() parameters, its method's links). CodecImpl.localTypes lists
+     them flat, those nested in another local type included, so a local type's own entry does not list them again.
+     */
+    private Codec.EncodedValue writeType(Codec codec, Codec.Context context, TypeInfo typeInfo, int index,
+                                         boolean withLocalTypes) {
         List<Codec.EncodedValue> subs = new ArrayList<>();
 
         int sc = 0;
@@ -310,6 +331,18 @@ public class WriteAnalysisResults {
                 subs.add(sub);
             }
             sc++;
+        }
+        if (withLocalTypes) {
+            int lc = 0;
+            for (TypeInfo localType : CodecImpl.localTypes(typeInfo)) {
+                if (typePredicate.test(localType)) {
+                    context.push(localType);
+                    Codec.EncodedValue sub = writeType(codec, context, localType, lc, false);
+                    context.pop();
+                    subs.add(sub);
+                }
+                lc++;
+            }
         }
 
         int fc = 0;

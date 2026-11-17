@@ -34,7 +34,7 @@ public class TestAnalysisResultsFormat extends CommonTest {
             }
             """;
 
-    private static final String MARKER = "{\"format\": \"maddi-analysis-results\", \"version\": 1}";
+    private static final String MARKER = "{\"format\": \"maddi-analysis-results\", \"version\": 2}";
 
     private Codec codec;
     private SourceSet sourceSet;
@@ -76,10 +76,12 @@ public class TestAnalysisResultsFormat extends CommonTest {
 
         // written before the marker existed: version 0, still read
         assertEquals(1, load(written.replace(MARKER + ",\n", "")));
+        // version 1, without the local types version 2 adds: still read (archives and checkpoints written before)
+        assertEquals(1, load(written.replace("\"version\": 2", "\"version\": 1")));
 
         // another release's version, another format: refused with the reason, not with a ClassCastException
-        String otherVersion = written.replace("\"version\": 1", "\"version\": 99");
-        assertEquals("written in analysis-results format version 99, this reader reads version 1: regenerate the "
+        String otherVersion = written.replace("\"version\": 2", "\"version\": 99");
+        assertEquals("written in analysis-results format version 99, this reader reads versions 1 to 2: regenerate the "
                      + "file with this release", refused(otherVersion));
         assertEquals("not an analysis-results file: format 'something-else', expected 'maddi-analysis-results'",
                 refused(written.replace("maddi-analysis-results", "something-else")));
@@ -97,7 +99,7 @@ public class TestAnalysisResultsFormat extends CommonTest {
         String written = write();
         Path dir = Files.createDirectories(Path.of("build/analysis-results-format/other-version"));
         Path file = dir.resolve("AB.json");
-        Files.writeString(file, written.replace("\"version\": 1", "\"version\": 99"));
+        Files.writeString(file, written.replace("\"version\": 2", "\"version\": 99"));
 
         // the file is named
         LoadAnalysisResults loader = new LoadAnalysisResults(runtime, sourceSet);

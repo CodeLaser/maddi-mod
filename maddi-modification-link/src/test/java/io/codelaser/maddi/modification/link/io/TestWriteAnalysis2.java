@@ -91,7 +91,7 @@ public class TestWriteAnalysis2 extends CommonTest {
     @Language("json")
     private static final String JSON1 = """
             [
-            {"format": "maddi-analysis-results", "version": 1},
+            {"format": "maddi-analysis-results", "version": 2},
 
             {"name": "Ta.b.X", "data":{"partOfConstructionType":["C<init>(0,int)"]}, "subs":[
              {"name": "Fi(0)", "data":{"finalField":1}},
@@ -172,7 +172,7 @@ public class TestWriteAnalysis2 extends CommonTest {
     @Language("json")
     private static final String JSON2 = """
             [
-            {"format": "maddi-analysis-results", "version": 1},
+            {"format": "maddi-analysis-results", "version": 2},
 
             {"name": "Ta.b.X", "data":{"partOfConstructionType":["C<init>(0)"]}, "subs":[
              {"name": "SR(0)", "data":{"partOfConstructionType":["C<init>(0,java.util.Set,int,java.util.List)"]}, "subs":[

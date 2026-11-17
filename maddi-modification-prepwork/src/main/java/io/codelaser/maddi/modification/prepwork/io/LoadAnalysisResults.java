@@ -304,9 +304,18 @@ public class LoadAnalysisResults {
             throw new AnalysisResultsFormatException("not an analysis-results file: format '" + format
                                                      + "', expected '" + WriteAnalysisResults.FORMAT_NAME + "'");
         }
-        if (!String.valueOf(WriteAnalysisResults.FORMAT_VERSION).equals(version)) {
+        int v;
+        try {
+            v = Integer.parseInt(version);
+        } catch (NumberFormatException e) {
+            v = -1;
+        }
+        // version 1 lacks only the local types version 2 adds: it still loads (WriteAnalysisResults.FORMAT_VERSION)
+        if (v < WriteAnalysisResults.MIN_READABLE_VERSION || v > WriteAnalysisResults.FORMAT_VERSION) {
             throw new AnalysisResultsFormatException("written in analysis-results format version " + version
-                                                     + ", this reader reads version " + WriteAnalysisResults.FORMAT_VERSION
+                                                     + ", this reader reads versions "
+                                                     + WriteAnalysisResults.MIN_READABLE_VERSION + " to "
+                                                     + WriteAnalysisResults.FORMAT_VERSION
                                                      + ": regenerate the file with this release");
         }
     }
