@@ -117,9 +117,11 @@ public class TestExposedCorpus {
         // under class delegation; a mixed set downstream of a Kotlin-only set; a non-trailing vararg in a stub; an
         // override's boxed return; kotlinc's bridges and DefaultImpls forwarders in stubs): 763 primary types, analysis order 15,817,
         // 243 placeholders, 0 isolated by prep, 248 immutable types. The placeholders are the backlog, as detekt's
-        // 6,057 were.
-        CensusRatchet.noWorseThan("exposed placeholders", summary.placeholders(), 243);
+        // 6,057 were. 2026-11-17 (maddi 056aaa276..bbddaca99): 95 placeholders, 250 immutable types. A companion's
+        // declared supertype (`companion object : DialectNameProvider("H2")`, 74), import aliases (35), reified
+        // `T::class` (19), `Number.toLong()` (17).
+        CensusRatchet.noWorseThan("exposed placeholders", summary.placeholders(), 95);
         CensusRatchet.noWorseThan("exposed elements isolated by prep", summary.prepErrors(), 0);
-        CensusRatchet.noWorseThanAtLeast("exposed immutable types", summary.immutableTypes(), 248);
+        CensusRatchet.noWorseThanAtLeast("exposed immutable types", summary.immutableTypes(), 250);
     }
 }
