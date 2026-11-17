@@ -41,6 +41,7 @@ import io.codelaser.maddi.modification.link.vf.VirtualFields;
 import io.codelaser.maddi.modification.prepwork.Util;
 import io.codelaser.maddi.modification.prepwork.variable.*;
 import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
+import io.codelaser.maddi.modification.prepwork.callgraph.LazyCacheField;
 
 public record ExpressionVisitor(Runtime runtime,
                                 JavaInspector javaInspector,
@@ -614,14 +615,15 @@ public record ExpressionVisitor(Runtime runtime,
         // assigning an @IgnoreModifications field does not modify its owner: the disclaimed stratum
         // (road §050) covers the slot as well as the content -- symmetric with the isIgnoreModifications
         // filter MethodModification.go applies to call-through modification. No-op without the annotation.
+        // A lazily cached value or view (LazyCacheField, maddi-mod#136) disclaims the slot write only.
         Set<Variable> scopeVariables = a.variableTarget() instanceof FieldReference fr
-                                       && fr.fieldInfo().isIgnoreModifications()
+                                       && LazyCacheField.isMemoSlot(fr.fieldInfo())
                 ? Set.of()
                 : Util.scopeVariables(a.variableTarget());
         // a field of an expression's result ('requireNonNull(tail).next = node'): no scope VARIABLE, but the
         // expression's result is modified, and through its links whatever it stands for (guava LinkedListMultimap)
         if (rTarget.expressionScopePrimary() != null && scopeVariables.isEmpty()
-            && !(a.variableTarget() instanceof FieldReference fr2 && fr2.fieldInfo().isIgnoreModifications())) {
+            && !(a.variableTarget() instanceof FieldReference fr2 && LazyCacheField.isMemoSlot(fr2.fieldInfo()))) {
             scopeVariables = Set.of(rTarget.expressionScopePrimary());
         }
         return result

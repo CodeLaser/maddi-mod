@@ -72,7 +72,7 @@ class LinkToField {
      */
     static Value.Immutable immutableOfLinkedField(Link link, MethodInfo methodInfo, AnalysisHelper analysisHelper) {
         Variable primaryTo = Util.firstRealVariable(link.to());
-        if (!reachesInstance(primaryTo, methodInfo)) return null;
+        if (!reaches(link, primaryTo, methodInfo)) return null;
         ParameterizedType type = linkedType(link, primaryTo);
         if (type == null) return null;
         Value.Immutable ofDeclaredType = analysisHelper.typeImmutableNullIfUndecided(type);
@@ -90,6 +90,22 @@ class LinkToField {
      instance one does (fernflower's DecompilerContext, CodeLaser/maddi-mod#107). Ownership as for modification
      (OwnStaticState); another type's static state is a static side effect, not dependence. Gate NOSTATICINDEP.
      */
+    private static final boolean NO_THIS_CONTENT_INDEP = Gate.isSet("NOTHISCONTENTINDEP");
+
+    /*
+     A field of the instance (reachesInstance), or the instance's own hidden faces: 'all.§m ≡ this.§m', 'all.§$s ∋
+     this.§$'. An abstract type's content is its subtypes' fields, which no field reference names: fernflower's
+     'List<Exprent> getAllExprents() { List<Exprent> l = new ArrayList<>(); getAllExprents(l); return l; }' hands the
+     list to the abstract filler, whose links say it shares this.§m, and the result was INDEPENDENT while every
+     override filled it with its own subexpressions (CodeLaser/maddi-mod#135). A link to 'this' as a whole object
+     ('return this') is not judged here. Gate NOTHISCONTENTINDEP.
+     */
+    private static boolean reaches(Link link, Variable primaryTo, MethodInfo methodInfo) {
+        if (reachesInstance(primaryTo, methodInfo)) return true;
+        return !NO_THIS_CONTENT_INDEP && primaryTo instanceof This thisVar && link.to() != primaryTo
+               && Util.virtual(link.to()) && methodInfo.typeInfo().isEqualToOrInnerClassOf(thisVar.typeInfo());
+    }
+
     private static boolean reachesInstance(Variable primaryTo, MethodInfo methodInfo) {
         if (primaryTo instanceof FieldReference fr && fr.scopeIsRecursivelyThis()) return true;
         if (!NO_STATIC_INDEP && OwnStaticState.staticRoot(primaryTo) instanceof FieldReference root
@@ -133,7 +149,7 @@ class LinkToField {
      */
     static boolean reachesJudgeableField(Link link, MethodInfo methodInfo) {
         Variable primaryTo = Util.firstRealVariable(link.to());
-        return reachesInstance(primaryTo, methodInfo) && linkedType(link, primaryTo) != null;
+        return reaches(link, primaryTo, methodInfo) && linkedType(link, primaryTo) != null;
     }
 
     /**
@@ -142,7 +158,7 @@ class LinkToField {
      */
     static ParameterizedType reachedFieldType(Link link, MethodInfo methodInfo) {
         Variable primaryTo = Util.firstRealVariable(link.to());
-        if (!reachesInstance(primaryTo, methodInfo)) return null;
+        if (!reaches(link, primaryTo, methodInfo)) return null;
         return linkedType(link, primaryTo);
     }
 
@@ -215,7 +231,18 @@ class LinkToField {
             // ('t ≤ this.events.§$s') is dependent too: it sits in accessible content (#119). Gate NOOBJECTGRAPHINDEP
             return link.from().parameterizedType().copyWithoutArrays();
         }
-        // deliberately NOT judged: ≥ (object graph, the other direction) and ∩ (overlap); ≤ only as above. ≤'s to() is the whole container,
+        if (!NO_OBJECT_GRAPH_INDEP && link.linkNature().equals(LinkNatureImpl.OBJECT_GRAPH_OVERLAPS)
+            && Util.virtual(link.from()) && !Util.isVirtualModification(link.from())
+            && Util.virtual(link.to()) && !Util.isVirtualModification(link.to())) {
+            // 'res.§$s ∩ this.map.§$$s[-2]': 'res.addAll(map.get(k))', or 'res.add(e)' for each e of it, fills a new
+            // list with the elements of one of the field's values, as the copy constructor's '≤' above does. Only
+            // between two hidden contents (element sets): the witness is fernflower's Statement.getEdges, whose
+            // gathering branch made getAllSuccessorEdges INDEPENDENT while its callers wrote the edges
+            // (CodeLaser/maddi-mod#134). A '∩' between variables stays unjudged, below.
+            return link.from().parameterizedType().copyWithoutArrays();
+        }
+        // deliberately NOT judged: ≥ (object graph, the other direction) and ∩ (overlap) other than the element-set
+        // case above; ≤ only as above. ≤'s to() is the whole container,
         // so judging it reads a DIFFERENT type than the ~/⊆ face variants judge for the same pair, which
         // would re-open the variance fork from the other side; ∩ is a speculative overlap, present
         // identically in both measured worlds. Extend only with a concrete variance witness in hand.

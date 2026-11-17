@@ -57,6 +57,7 @@ import io.codelaser.maddi.modification.prepwork.variable.ObjectCreationVariable;
 import io.codelaser.maddi.modification.prepwork.variable.Stage;
 import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
 import io.codelaser.maddi.modification.prepwork.variable.impl.VariableInfoImpl;
+import io.codelaser.maddi.modification.prepwork.callgraph.LazyCacheField;
 
 /**
  * PLAN-modification-reachability phase 1: the shadow pass. Computes modification as one-shot
@@ -982,7 +983,8 @@ public class ShadowModificationPass {
     private void seedAssignmentTarget(MethodInfo mi, VariableData vd, Variable target) {
         switch (target) {
             case FieldReference fr -> {
-                if (fr.isIgnoreModifications()) return;
+                // a lazily cached value or view: its slot write is a memo (LazyCacheField, maddi-mod#136)
+                if (fr.isIgnoreModifications() || LazyCacheField.isMemoSlot(fr.fieldInfo())) return;
                 if (fr.scopeIsRecursivelyThis()) {
                     seedWithOrigin(mi, mi, "assignment to " + fr.fullyQualifiedName());
                 } else if (fr.scopeVariable() != null) {
@@ -1417,6 +1419,10 @@ public class ShadowModificationPass {
                                             // owner of the container; that owner, in the element's own mode
                                             Variable aliasOwner = Util.hiddenAliasOwner(l.to(), v);
                                             if (aliasOwner != null) push(todo, aliasOwner);
+                                            // #134: 'rv.§$s ∩ 0:x.map.§$$s[-2]', rv filled with the elements of one
+                                            // of x's values (addAll, add per element): x, deep-only, as for ≤ below.
+                                            // The engine's WriteLinksAndModification rule for the same overlap
+                                            if (!NO_OBJECT_GRAPH_MOD) overlappingContainers(vd, l.to(), containers);
                                         });
                                 // #62: 'tags ∩ this.map.§$$s[-2]', the whole object overlapping a container's
                                 // element content (a for-each over map.values()): its container, deep-only, as for ∈.
@@ -1504,6 +1510,35 @@ public class ShadowModificationPass {
     private static final boolean NO_OBJECT_GRAPH_MOD = Gate.isSet("NOOBJECTGRAPHMOD");
     private static final boolean NO_VIEW_ELEMENT_MOD = Gate.isSet("NOVIEWELEMENTMOD");
     private static final boolean NO_WHOLE_CONTAINER = Gate.isSet("NOWHOLECONTAINER");
+
+    // the owners of hidden contents that overlap this one, both sides element sets (#134), whichever side stores it
+    private void overlappingContainers(VariableData vd, Variable hiddenContent, List<Variable> out) {
+        if (!Util.virtual(hiddenContent) || Util.isVirtualModification(hiddenContent)) return;
+        String fqn = hiddenContent.fullyQualifiedName();
+        Variable owner = Util.firstRealVariable(hiddenContent);
+        vd.variableInfoStream().forEach(vi -> {
+            Links links = vi.linkedVariables();
+            if (links == null) return;
+            links.stream().filter(l -> l.linkNature() == LinkNatureImpl.OBJECT_GRAPH_OVERLAPS
+                                       && Util.virtual(l.from()) && !Util.isVirtualModification(l.from())
+                                       && Util.virtual(l.to()) && !Util.isVirtualModification(l.to()))
+                    .forEach(l -> {
+                        Variable other = fqn.equals(l.from().fullyQualifiedName()) ? l.to()
+                                : fqn.equals(l.to().fullyQualifiedName()) ? l.from() : null;
+                        // elements that can be modified at all (not a String[]'s, not an enum list's)
+                        // and elements that may be the same objects ('dtos.§$s ∩ kinds.§$s', Dto and Kind, may not)
+                        if (other != null && (!Util.isSlice(other) && analysisHelper.typeImmutable(other.parameterizedType().copyWithoutArrays())
+                                                      .isAtLeastImmutableHC()
+                                              || !Util.elementsMayOverlap(other, hiddenContent))) {
+                            other = null;
+                        }
+                        Variable container = other == null ? null : Util.firstRealVariable(other);
+                        if (container != null && !container.equals(owner) && !out.contains(container)) {
+                            out.add(container);
+                        }
+                    });
+        });
+    }
 
     private static void coElements(VariableData vd, Variable hiddenContent, List<Variable> out) {
         if (!Util.virtual(hiddenContent) || Util.isVirtualModification(hiddenContent)) return;

@@ -25,16 +25,19 @@ import io.codelaser.maddi.cst.api.analysis.Property;
 import io.codelaser.maddi.cst.api.expression.And;
 import io.codelaser.maddi.cst.api.expression.Assignment;
 import io.codelaser.maddi.cst.api.expression.BinaryOperator;
+import io.codelaser.maddi.cst.api.expression.ConstructorCall;
 import io.codelaser.maddi.cst.api.expression.EnclosedExpression;
 import io.codelaser.maddi.cst.api.expression.Expression;
 import io.codelaser.maddi.cst.api.expression.VariableExpression;
 import io.codelaser.maddi.cst.api.info.FieldInfo;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.statement.IfElseStatement;
 import io.codelaser.maddi.cst.api.statement.LocalVariableCreation;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.cst.api.variable.LocalVariable;
+import io.codelaser.maddi.cst.api.variable.This;
 import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
@@ -60,6 +63,15 @@ import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
  * so that every consumer agrees. The rule is narrow on purpose: an instance field of a primitive or {@code String}
  * type (the cached value has no content of its own to modify), written only by parameterless instance methods of its
  * own type, each write guarded by an {@code ==} test of that field (or a local copy of it) against a constant.
+ * <p>
+ * A lazily created VIEW is a memo as well (maddi-mod#136, Bart 2026-11-17): gson's
+ * {@code LinkedTreeMap.entrySet() { if (entrySet == null) entrySet = new EntrySet(); return entrySet; }}, as the JDK's
+ * {@code HashMap.entrySet()} which the hints declare {@code @NotModified}. Same rule, for a field of an object type
+ * whose every guarded write stores a new object built from {@code this} and constants only, and that captures the
+ * instance (an inner class of the owner, or {@code this} as an argument): a function of the instance. A new object
+ * holding nothing of the instance ({@code if (pool == null) pool = new Object()}) is lazily created state, not a view. Such a field gets {@link #LAZY_CACHE_FIELD} but NOT {@code IGNORE_MODIFICATIONS_FIELD}: only the
+ * assignment of the slot is disclaimed ({@link #isMemoSlot}), while a modification through the view
+ * ({@code map.entrySet().clear()}) still modifies its owner.
  */
 public final class LazyCacheField {
 
@@ -89,10 +101,19 @@ public final class LazyCacheField {
     }
 
     /**
-     * After a clear of the derived tier: put the disclaimer back on a recognised field.
+     * Whether assigning this field modifies nothing: an {@code @IgnoreModifications} field (slot and content
+     * disclaimed), or a lazily cached value or view (the slot only). The link engine's slot writes ask this.
+     */
+    public static boolean isMemoSlot(FieldInfo fieldInfo) {
+        return fieldInfo.isIgnoreModifications() || isLazyCacheField(fieldInfo);
+    }
+
+    /**
+     * After a clear of the derived tier: put the disclaimer back on a recognised field. Not on a view: its content
+     * is the instance's, and stays modifiable.
      */
     public static void restoreIgnoreModifications(FieldInfo fieldInfo) {
-        if (isLazyCacheField(fieldInfo)
+        if (isLazyCacheField(fieldInfo) && valueType(fieldInfo.type())
             && !fieldInfo.analysis().haveAnalyzedValueFor(PropertyImpl.IGNORE_MODIFICATIONS_FIELD)) {
             fieldInfo.analysis().set(PropertyImpl.IGNORE_MODIFICATIONS_FIELD, ValueImpl.BoolImpl.TRUE);
         }
@@ -103,16 +124,51 @@ public final class LazyCacheField {
      */
     static boolean isLazyCache(FieldInfo fieldInfo, Collection<MethodInfo> assigningMethods) {
         if (assigningMethods.isEmpty() || fieldInfo.isStatic() || fieldInfo.access() == null
-            || !fieldInfo.access().isPrivate() || !valueType(fieldInfo.type())) {
+            || !fieldInfo.access().isPrivate()) {
             return false;
         }
+        boolean view = !valueType(fieldInfo.type());
+        if (view && (fieldInfo.type().arrays() > 0 || fieldInfo.type().isPrimitiveExcludingVoid())) return false;
         for (MethodInfo methodInfo : assigningMethods) {
             if (methodInfo.isStatic() || !methodInfo.parameters().isEmpty() || methodInfo.typeInfo() != fieldInfo.owner()
-                || methodInfo.methodBody() == null || !onlyGuardedWrites(methodInfo, fieldInfo)) {
+                || methodInfo.methodBody() == null || !onlyGuardedWrites(methodInfo, fieldInfo)
+                || view && !onlyViewWrites(methodInfo, fieldInfo)) {
                 return false;
             }
         }
         return true;
+    }
+
+    // every write of the field stores 'new T(..)', its arguments 'this' or constants: a function of the instance
+    private static boolean onlyViewWrites(MethodInfo methodInfo, FieldInfo fieldInfo) {
+        boolean[] ok = {true};
+        methodInfo.methodBody().visit(e -> {
+            if (e instanceof Assignment a && isWriteOf(a, fieldInfo) && !isViewCreation(a.value(), fieldInfo)) ok[0] = false;
+            return ok[0];
+        });
+        return ok[0];
+    }
+
+    /*
+     A view captures the instance: an inner class of the field's owner (its implicit outer instance, 'new EntrySet()'),
+     or 'this' passed explicitly ('new KeyView(this)'). A new object that holds nothing of the instance ('new Object()',
+     'new ArrayList<>()') is lazily created STATE: its creation stays a modification (TestModificationOfElementFromGetter's
+     getPool).
+     */
+    private static boolean isViewCreation(Expression value, FieldInfo fieldInfo) {
+        if (!(unwrap(value) instanceof ConstructorCall cc) || cc.constructor() == null || cc.anonymousClass() != null
+            || cc.object() != null && !isThis(cc.object())
+            || !cc.parameterExpressions().stream().allMatch(p -> isThis(p) || constant(unwrap(p)))) {
+            return false;
+        }
+        TypeInfo created = cc.constructor().typeInfo();
+        boolean innerOfOwner = created.isInnerClass() && created != fieldInfo.owner()
+                               && created.isEqualToOrInnerClassOf(fieldInfo.owner());
+        return innerOfOwner || cc.parameterExpressions().stream().anyMatch(LazyCacheField::isThis);
+    }
+
+    private static boolean isThis(Expression e) {
+        return unwrap(e) instanceof VariableExpression ve && ve.variable() instanceof This;
     }
 
     private static boolean valueType(ParameterizedType type) {
