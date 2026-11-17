@@ -126,8 +126,9 @@ public class TestExposedCorpus {
         // class file's return-type-only overloads: `LocalDate.getMonth()`). 20 at maddi c20d566d8 (a `vararg` enum
         // constructor, `v[k]` on a smart-cast intersection, a library `var`'s setter, `this@Class` in a member extension,
         // an `if` with no expression form under a cast, `Array(n) { … }` as an argument). Left: 19 in Gradle build logic,
-        // and `Array(n) { … }` initializing a property.
-        CensusRatchet.noWorseThan("exposed placeholders", summary.placeholders(), 20);
+        // and `Array(n) { … }` initializing a property. 19 at maddi 19e5fcec3 (that property: `Collections.nCopies`): all
+        // in Gradle build logic, which needs the kotlin-dsl compiler plugins (sam-with-receiver, assignment).
+        CensusRatchet.noWorseThan("exposed placeholders", summary.placeholders(), 19);
         CensusRatchet.noWorseThan("exposed elements isolated by prep", summary.prepErrors(), 0);
         CensusRatchet.noWorseThanAtLeast("exposed immutable types", summary.immutableTypes(), 250);
     }
