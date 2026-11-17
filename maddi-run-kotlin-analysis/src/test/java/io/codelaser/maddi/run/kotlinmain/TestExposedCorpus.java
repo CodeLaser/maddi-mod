@@ -119,8 +119,10 @@ public class TestExposedCorpus {
         // 243 placeholders, 0 isolated by prep, 248 immutable types. The placeholders are the backlog, as detekt's
         // 6,057 were. 2026-11-17 (maddi 056aaa276..bbddaca99): 95 placeholders, 250 immutable types. A companion's
         // declared supertype (`companion object : DialectNameProvider("H2")`, 74), import aliases (35), reified
-        // `T::class` (19), `Number.toLong()` (17).
-        CensusRatchet.noWorseThan("exposed placeholders", summary.placeholders(), 95);
+        // `T::class` (19), `Number.toLong()` (17). 51 at maddi 96ad57c39 (maddi#220: unsigned types, assignments to
+        // inherited or same-named properties, `x = try …`, expression callees, bound class literals, `Int::plus`,
+        // @JvmName-renamed index operators, a Java enum's `entries`).
+        CensusRatchet.noWorseThan("exposed placeholders", summary.placeholders(), 51);
         CensusRatchet.noWorseThan("exposed elements isolated by prep", summary.prepErrors(), 0);
         CensusRatchet.noWorseThanAtLeast("exposed immutable types", summary.immutableTypes(), 250);
     }
