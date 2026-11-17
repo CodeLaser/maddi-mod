@@ -123,8 +123,11 @@ public class TestExposedCorpus {
         // a bound class literal on a type-parameter value, `x = if (…) a else try …`, a Java getter with an acronym). 33 at
         // maddi ee97e0242 (a `try`/jump nested in an expression, hoisted; `v.size` on a smart-cast array; `in map`). 26 at
         // maddi 4667998de (an inline-class function's mangled JVM name, a local suspend function, `Uuid.toLongs`, a
-        // class file's return-type-only overloads: `LocalDate.getMonth()`).
-        CensusRatchet.noWorseThan("exposed placeholders", summary.placeholders(), 26);
+        // class file's return-type-only overloads: `LocalDate.getMonth()`). 20 at maddi c20d566d8 (a `vararg` enum
+        // constructor, `v[k]` on a smart-cast intersection, a library `var`'s setter, `this@Class` in a member extension,
+        // an `if` with no expression form under a cast, `Array(n) { … }` as an argument). Left: 19 in Gradle build logic,
+        // and `Array(n) { … }` initializing a property.
+        CensusRatchet.noWorseThan("exposed placeholders", summary.placeholders(), 20);
         CensusRatchet.noWorseThan("exposed elements isolated by prep", summary.prepErrors(), 0);
         CensusRatchet.noWorseThanAtLeast("exposed immutable types", summary.immutableTypes(), 250);
     }
