@@ -75,9 +75,12 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
      * after that re-derivation, the summary entries they caused in callers, which were the seeds keeping other
      * frozen-FALSE nodes reached, so the next round finds those as reverse divergences: one hop up the caller
      * chain per round, contracting about tenfold (timefold: 1099, 114, 3). The joint fixpoint takes as many rounds
-     * as the longest such chain plus one. Default 3; {@code MODREACH_ROUNDS=n} to measure further rounds.
+     * as the longest such chain plus one. The loop already stops at the first round that writes nothing; this is
+     * only the safety bound. Default 10 (was 3, CodeLaser/maddi-mod#133): at 3 the maddi self-analysis stopped one
+     * round short, LocalVariableImpl.typesReferenced keeping a frozen FALSE whose summary had re-derived to empty,
+     * and with it the Element family's eventual verdict. {@code MODREACH_ROUNDS=n} to measure.
      */
-    static final int MODREACH_MAX_ROUNDS = Integer.parseInt(System.getenv().getOrDefault("MODREACH_ROUNDS", "3"));
+    static final int MODREACH_MAX_ROUNDS = Integer.parseInt(System.getenv().getOrDefault("MODREACH_ROUNDS", "10"));
 
     /*
      The ownership round (docs/roadmap/ownership.md, "Fed into the fixpoint"): with the ownership pass on, the
@@ -1031,6 +1034,13 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                         // same index. UNMODIFIED_FIELD has no such case: see writeVerdicts' javadoc.
                         var counts = pass.writeVerdicts(analysisOrder, report, contracted(singleIterationAnalyzer));
                         TolerantWrite.freezeModificationProperties();
+                        if (modReachRounds == MODREACH_MAX_ROUNDS && !counts.changed().isEmpty()) {
+                            // the re-derivation below runs, but no round checks it: a frozen verdict may now
+                            // disagree with the summary it re-derives (#133)
+                            LOGGER.warn("MODREACH: round {} still wrote {} change(s); bound reached, the modification "
+                                        + "properties may not be at their joint fixpoint", modReachRounds,
+                                    counts.changed().size());
+                        }
                         LOGGER.debug("MODREACH round {}: {}", modReachRounds, counts.summary());
                         LOGGER.debug("MODREACH round {}: {}", modReachRounds, report.summary());
                         if (INCREMENTAL_REDERIVATION && !counts.weakened() && !counts.changed().isEmpty()

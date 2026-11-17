@@ -68,7 +68,7 @@ is not retried.
    stays), computes the structural twins from a second closure, and freezes the three properties. When a round
    changed anything, the derived family (immutability, independence, container, eventual) is cleared and
    re-derived with modification frozen; a round that only strengthened re-derives through the worklist instead
-   (#76, `NOINCREDERIVE` restores the clear). Rounds repeat to a joint fixpoint, at most `MODREACH_ROUNDS` (3).
+   (#76, `NOINCREDERIVE` restores the clear). Rounds repeat to a joint fixpoint, at most `MODREACH_ROUNDS` (10, a safety bound: #133).
    Diagnostics: `MODREACH_EXPLAIN=<substring>`, `MODREACH_TAINT=<substring>`, `MODREACH_DEBUG`. The design and
    its history: `PLAN-modification-reachability.md`.
 7. **Eventual deferral** (`EventualCluster.ENABLED`, `EVENTUALCLUSTER=0` turns the cluster off, `EVENTUALDEFER=0`
