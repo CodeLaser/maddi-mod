@@ -121,8 +121,9 @@ public class TestExposedCorpus {
         // declared supertype (`companion object : DialectNameProvider("H2")`, 74), import aliases (35), reified
         // `T::class` (19), `Number.toLong()` (17). 51 at maddi 96ad57c39 (maddi#220: unsigned types, assignments to
         // inherited or same-named properties, `x = try …`, expression callees, bound class literals, `Int::plus`,
-        // @JvmName-renamed index operators, a Java enum's `entries`).
-        CensusRatchet.noWorseThan("exposed placeholders", summary.placeholders(), 51);
+        // @JvmName-renamed index operators, a Java enum's `entries`). 41 at maddi cd86019aa (Duration's unit properties,
+        // a bound class literal on a type-parameter value, `x = if (…) a else try …`, a Java getter with an acronym).
+        CensusRatchet.noWorseThan("exposed placeholders", summary.placeholders(), 41);
         CensusRatchet.noWorseThan("exposed elements isolated by prep", summary.prepErrors(), 0);
         CensusRatchet.noWorseThanAtLeast("exposed immutable types", summary.immutableTypes(), 250);
     }
