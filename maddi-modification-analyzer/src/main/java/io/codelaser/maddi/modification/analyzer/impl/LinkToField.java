@@ -232,13 +232,18 @@ class LinkToField {
             return link.from().parameterizedType().copyWithoutArrays();
         }
         if (!NO_OBJECT_GRAPH_INDEP && link.linkNature().equals(LinkNatureImpl.OBJECT_GRAPH_OVERLAPS)
-            && Util.virtual(link.from()) && !Util.isVirtualModification(link.from())
-            && Util.virtual(link.to()) && !Util.isVirtualModification(link.to())) {
+            && elementSet(link.from()) && elementSet(link.to())) {
             // 'res.§$s ∩ this.map.§$$s[-2]': 'res.addAll(map.get(k))', or 'res.add(e)' for each e of it, fills a new
             // list with the elements of one of the field's values, as the copy constructor's '≤' above does. Only
-            // between two hidden contents (element sets): the witness is fernflower's Statement.getEdges, whose
-            // gathering branch made getAllSuccessorEdges INDEPENDENT while its callers wrote the edges
-            // (CodeLaser/maddi-mod#134). A '∩' between variables stays unjudged, below.
+            // between two element sets: there the shared objects are elements, of the FROM side's element type.
+            // The witness is fernflower's Statement.getEdges, whose gathering branch made getAllSuccessorEdges
+            // INDEPENDENT while its callers wrote the edges (CodeLaser/maddi-mod#134).
+            // Not a single hidden content on either side: of 'print.§$ ∩ this.concreteReturnType.§$' (a new
+            // OutputBuilder holding what the type's print added) nothing says what is shared, and judging the
+            // builder's own type made every print(Qualification) dependent: maddi's Element, Statement and
+            // ParameterizedType fell to @FinalFields (TestEventualRatchet, 2026-11-17). 'methodModifiers.§$s ∩
+            // this.inspection.§$' (MethodInfo) is the same overlap with what a holder's get() returns: unjudged,
+            // as before #134. A '∩' between variables stays unjudged, below.
             return link.from().parameterizedType().copyWithoutArrays();
         }
         // deliberately NOT judged: ≥ (object graph, the other direction) and ∩ (overlap) other than the element-set
@@ -247,6 +252,11 @@ class LinkToField {
         // would re-open the variance fork from the other side; ∩ is a speculative overlap, present
         // identically in both measured worlds. Extend only with a concrete variance witness in hand.
         return null;
+    }
+
+    // a hidden content that is a set of elements ('l.§$s', 'm.§$$s[-2]'), not a single object ('h.§$') nor '§m'
+    private static boolean elementSet(Variable v) {
+        return Util.virtual(v) && !Util.isVirtualModification(v) && v.parameterizedType().arrays() > 0;
     }
 
     /**
