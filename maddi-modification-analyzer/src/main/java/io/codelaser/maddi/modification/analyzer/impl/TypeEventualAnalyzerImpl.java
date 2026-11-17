@@ -2691,11 +2691,19 @@ public class TypeEventualAnalyzerImpl extends CommonAnalyzerImpl implements Type
      *  committable, wrapper provably never mutated by the owner. The per-read half (non-modifying,
      *  non-dependent callee) is {@link #containerReadThroughLabels}'s. */
     private boolean containerContentCommittable(FieldInfo fieldInfo) {
-        return EventualCluster.ENABLED
+        boolean result = EventualCluster.ENABLED
                && fieldInfo.type().arrays() == 0 // array content stays rebindable whatever the element type
                && fieldInfo.analysis().getOrDefault(FINAL_FIELD, ValueImpl.BoolImpl.FALSE).isTrue()
                && typeParametersHoldCommittableContent(fieldInfo.owner(), fieldInfo.type())
                && ownerNeverMutatesWrapper(fieldInfo);
+        if (!result && siteDebug() && EventualCluster.ENABLED) {
+            // log-only: which condition refused the container ride-along
+            ecsite("container refusal for " + fieldInfo.name() + ": arrays=" + fieldInfo.type().arrays()
+                   + " final=" + fieldInfo.analysis().getOrDefault(FINAL_FIELD, ValueImpl.BoolImpl.FALSE).isTrue()
+                   + " typeParams=" + typeParametersHoldCommittableContent(fieldInfo.owner(), fieldInfo.type())
+                   + " ownerNeverMutates=" + ownerNeverMutatesWrapper(fieldInfo));
+        }
+        return result;
     }
 
     /**
