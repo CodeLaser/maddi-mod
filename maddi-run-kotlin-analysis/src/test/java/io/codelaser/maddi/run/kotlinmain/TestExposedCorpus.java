@@ -128,8 +128,16 @@ public class TestExposedCorpus {
         // an `if` with no expression form under a cast, `Array(n) { … }` as an argument). Left: 19 in Gradle build logic,
         // and `Array(n) { … }` initializing a property. 19 at maddi 19e5fcec3 (that property: `Collections.nCopies`): all
         // in Gradle build logic, which needs the kotlin-dsl compiler plugins (sam-with-receiver, assignment).
+        //
+        // Immutable types 250 -> 225 at maddi 008e000d1 (maddi#98: a scope function given a function value is a direct
+        // call). `QueryBuilder.append(expr) = apply(expr::toQueryBuilder)` is now `expr.toQueryBuilder(this)`, so what the
+        // implementations of the abstract `Expression.toQueryBuilder` do reaches `append`'s argument. Some do modify:
+        // column types invoke a function-typed field (`CustomEnumerationColumnType.toDb`, the JSON serializer), and
+        // invoking a function value modifies it, as Java's `Function.apply` does. Through `IColumnType.valueToString`
+        // and `LiteralOp.toQueryBuilder` that makes `Expression` @FinalFields, and 24 subclasses with it. The 250 held
+        // only while the `apply` call hid that chain (diagnosis: maddi-mod#140).
         CensusRatchet.noWorseThan("exposed placeholders", summary.placeholders(), 19);
         CensusRatchet.noWorseThan("exposed elements isolated by prep", summary.prepErrors(), 0);
-        CensusRatchet.noWorseThanAtLeast("exposed immutable types", summary.immutableTypes(), 250);
+        CensusRatchet.noWorseThanAtLeast("exposed immutable types", summary.immutableTypes(), 225);
     }
 }
