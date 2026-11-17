@@ -59,6 +59,7 @@ import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
 import io.codelaser.maddi.modification.prepwork.variable.impl.ReturnVariableImpl;
 import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
 import io.codelaser.maddi.modification.prepwork.variable.impl.VariableInfoImpl;
+import io.codelaser.maddi.modification.prepwork.callgraph.LazyCacheField;
 
 /*
 convention:
@@ -809,7 +810,7 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                             vd == null ? Stream.of() : vd.variableInfoStream()
                                     .filter(vi -> vi.variable() instanceof FieldReference fr
                                                   && fr.scopeIsRecursivelyThis()
-                                                  && !fr.fieldInfo().isIgnoreModifications()
+                                                  && !LazyCacheField.isMemoSlot(fr.fieldInfo())
                                                   && !vi.assignments().isEmpty())
                                     .map(VariableInfo::variable),
                             assignedInCallees.stream())

@@ -30,6 +30,7 @@ import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.modification.analyzer.CommonTest;
 import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
+import io.codelaser.maddi.modification.prepwork.callgraph.LazyCacheField;
 
 /**
  * hashCode, equals, compareTo and toString are queries by contract (CodeLaser/maddi#208, maddi-mod#124).
@@ -152,6 +153,73 @@ public class TestLazyCacheField extends CommonTest {
                 ClearingKey.hashCode nonModifying=true
                 ClearingKey.equals nonModifying=true o=false
                 Lookup.get pair=true
+                """, sb.toString());
+    }
+
+    // maddi-mod#136: a lazily created view (gson's LinkedTreeMap.entrySet) is a memo of its slot only
+    @Language("java")
+    private static final String INPUT_VIEW = """
+            package a.b;
+            import java.util.*;
+            class Y {
+                static class Tree<K, V> extends AbstractMap<K, V> {
+                    private final Map<K, V> store = new HashMap<>();
+                    private EntrySet entrySet;
+                    private List<V> copy;
+                    private final List<V> items = new ArrayList<>();
+                    class EntrySet extends AbstractSet<Map.Entry<K, V>> {
+                        @Override public int size() { return store.size(); }
+                        @Override public Iterator<Map.Entry<K, V>> iterator() { return store.entrySet().iterator(); }
+                        @Override public void clear() { Tree.this.store.clear(); }
+                    }
+                    @Override public Set<Map.Entry<K, V>> entrySet() {
+                        EntrySet result = entrySet;
+                        if (result == null) {
+                            result = entrySet = new EntrySet();
+                        }
+                        return result;
+                    }
+                    List<V> copy() {
+                        if (copy == null) copy = new ArrayList<>(items);
+                        return copy;
+                    }
+                    void clearViaView() { entrySet().clear(); }
+                }
+                static int count(Tree<String, String> tree) {
+                    int n = 0;
+                    for (Map.Entry<String, String> e : tree.entrySet()) n++;
+                    return n;
+                }
+            }
+            """;
+
+    @Test
+    public void views() {
+        TypeInfo Y = javaInspector.parse("a.b.Y", INPUT_VIEW);
+        List<Info> ao = prepWork(Y);
+        new IteratingAnalyzerImpl(javaInspector, new IteratingAnalyzerImpl.ConfigurationBuilder()
+                .setMaxIterations(10)
+                .setModificationViaReachability(true)
+                .build()).analyze(ao);
+        TypeInfo tree = Y.findSubType("Tree");
+        StringBuilder sb = new StringBuilder();
+        for (String f : List.of("entrySet", "copy")) {
+            FieldInfo fi = tree.getFieldByName(f, true);
+            sb.append(f).append(" lazy=").append(LazyCacheField.isLazyCacheField(fi))
+                    .append(" ignoreMod=").append(fi.isIgnoreModifications()).append('\n');
+        }
+        for (String m : List.of("entrySet", "copy", "clearViaView")) {
+            sb.append(m).append(" nonModifying=").append(tree.findUniqueMethod(m, 0).isNonModifying()).append('\n');
+        }
+        sb.append("count tree=").append(Y.findUniqueMethod("count", 1).parameters().getFirst().isUnmodified())
+                .append('\n');
+        assertEquals("""
+                entrySet lazy=true ignoreMod=false
+                copy lazy=false ignoreMod=false
+                entrySet nonModifying=true
+                copy nonModifying=false
+                clearViaView nonModifying=false
+                count tree=true
                 """, sb.toString());
     }
 }

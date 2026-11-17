@@ -57,6 +57,7 @@ import io.codelaser.maddi.modification.prepwork.variable.ObjectCreationVariable;
 import io.codelaser.maddi.modification.prepwork.variable.Stage;
 import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
 import io.codelaser.maddi.modification.prepwork.variable.impl.VariableInfoImpl;
+import io.codelaser.maddi.modification.prepwork.callgraph.LazyCacheField;
 
 /**
  * PLAN-modification-reachability phase 1: the shadow pass. Computes modification as one-shot
@@ -982,7 +983,8 @@ public class ShadowModificationPass {
     private void seedAssignmentTarget(MethodInfo mi, VariableData vd, Variable target) {
         switch (target) {
             case FieldReference fr -> {
-                if (fr.isIgnoreModifications()) return;
+                // a lazily cached value or view: its slot write is a memo (LazyCacheField, maddi-mod#136)
+                if (fr.isIgnoreModifications() || LazyCacheField.isMemoSlot(fr.fieldInfo())) return;
                 if (fr.scopeIsRecursivelyThis()) {
                     seedWithOrigin(mi, mi, "assignment to " + fr.fullyQualifiedName());
                 } else if (fr.scopeVariable() != null) {
