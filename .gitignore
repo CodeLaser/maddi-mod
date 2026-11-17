@@ -9,7 +9,7 @@
 .idea
 **/.idea
 *.iml
-*/.kotlin
+.kotlin
 
 # IntelliJ Platform Gradle Plugin runIde sandbox
 .intellijPlatform/
