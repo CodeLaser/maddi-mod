@@ -75,10 +75,12 @@ import io.codelaser.maddi.cst.api.statement.YieldStatement;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.api.variable.DependentVariable;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
+import io.codelaser.maddi.cst.api.variable.LocalVariable;
 import io.codelaser.maddi.cst.api.variable.This;
 import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
+import io.codelaser.maddi.modification.link.impl.Gate;
 import io.codelaser.maddi.modification.analyzer.IteratingAnalyzer;
 import io.codelaser.maddi.modification.analyzer.TypeEventualAnalyzer;
 import io.codelaser.maddi.modification.analyzer.TypeImmutableAnalyzer;
@@ -89,6 +91,9 @@ import io.codelaser.maddi.modification.prepwork.variable.Link;
 import io.codelaser.maddi.modification.prepwork.variable.MethodLinkedVariables;
 
 public class TypeEventualAnalyzerImpl extends CommonAnalyzerImpl implements TypeEventualAnalyzer {
+
+    // #133: a for-each over a local list holding only fresh objects yields fresh loop variables (buildLocalContext)
+    private static final boolean NO_FRESH_ELEMENTS = Gate.isSet("NOFRESHELEMENTS");
 
     // log-only diagnostic gate (MODREACH_EXPLAIN style): substring of a type FQN to trace in computeTypeLevel
     private static final String EC_TYPE_DEBUG = System.getenv("EC_TYPE_DEBUG");
@@ -2220,6 +2225,13 @@ public class TypeEventualAnalyzerImpl extends CommonAnalyzerImpl implements Type
         // b.setX(…)' must behave exactly like 'typeInfo.builder().setX(…)'. Fresh + this-derived-tracked can
         // coexist (the constructor args carry labels).
         Map<Variable, List<Expression>> assignments = new HashMap<>();
+        // the loop variable of 'for (T v : list)' over a local list, and per local: the arguments of its add(x)
+        // calls, and how many of its uses are of the kind a container of fresh elements allows (#133)
+        Map<Variable, Variable> forEachSource = new HashMap<>();
+        Map<Variable, List<Expression>> added = new HashMap<>();
+        Map<Variable, Integer> allowedUses = new HashMap<>();
+        Map<Variable, Integer> allUses = new HashMap<>();
+        boolean collectElements = EventualCluster.ENABLED && !NO_FRESH_ELEMENTS;
         methodInfo.methodBody().visit(e -> {
             if (e instanceof LocalVariableCreation lvc) {
                 lvc.localVariableStream().forEach(lv ->
@@ -2228,6 +2240,24 @@ public class TypeEventualAnalyzerImpl extends CommonAnalyzerImpl implements Type
                        && !(a.variableTarget() instanceof FieldReference)
                        && !(a.variableTarget() instanceof This)) {
                 recordAssignment(assignments, a.variableTarget(), a.value());
+            }
+            if (collectElements) {
+                if (e instanceof VariableExpression ve && ve.variable() instanceof LocalVariable lv) {
+                    allUses.merge(lv, 1, Integer::sum);
+                } else if (e instanceof ForEachStatement fes && fes.initializer() != null
+                           && fes.expression() instanceof VariableExpression ve
+                           && ve.variable() instanceof LocalVariable list) {
+                    forEachSource.put(fes.initializer().localVariable(), list);
+                    allowedUses.merge(list, 1, Integer::sum);
+                } else if (e instanceof MethodCall mc && mc.object() instanceof VariableExpression ve
+                           && ve.variable() instanceof LocalVariable list) {
+                    if ("add".equals(mc.methodInfo().name()) && mc.parameterExpressions().size() == 1) {
+                        added.computeIfAbsent(list, l -> new ArrayList<>()).add(mc.parameterExpressions().getFirst());
+                        allowedUses.merge(list, 1, Integer::sum);
+                    } else if (isNonModifyingRead(mc.methodInfo())) {
+                        allowedUses.merge(list, 1, Integer::sum);
+                    }
+                }
             }
             return true;
         });
@@ -2240,6 +2270,23 @@ public class TypeEventualAnalyzerImpl extends CommonAnalyzerImpl implements Type
                     && entry.getValue().stream().allMatch(v -> rootedInFresh(v, freshCandidates)
                                                                || freshViaFactory(v))) {
                     freshCandidates.add(entry.getKey());
+                    grew = true;
+                }
+            }
+            // TypeInfoImpl.translate: 'newTypeParameters.add(tp.withOwnerVariableTypeBounds(typeInfo))', then
+            // 'for (TypeParameter tp : newTypeParameters) tp.builder()...commit()'. The loop variable is fresh when
+            // the list is: itself fresh, every element added to it fresh, and never used other than as the
+            // receiver of add or of a non-modifying read, or as a for-each source -- so nothing else enters it.
+            // Gate NOFRESHELEMENTS.
+            for (Map.Entry<Variable, Variable> entry : forEachSource.entrySet()) {
+                Variable loopVariable = entry.getKey();
+                Variable list = entry.getValue();
+                if (!freshCandidates.contains(loopVariable)
+                    && freshCandidates.contains(list)
+                    && allUses.getOrDefault(list, 0).equals(allowedUses.getOrDefault(list, 0))
+                    && added.getOrDefault(list, List.of()).stream()
+                            .allMatch(v -> rootedInFresh(v, freshCandidates) || freshViaFactory(v))) {
+                    freshCandidates.add(loopVariable);
                     grew = true;
                 }
             }
