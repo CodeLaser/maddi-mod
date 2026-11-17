@@ -118,8 +118,8 @@ public class TestRetrofitCorpus {
 
         // Measured 2026-10-01 at the pin, on the first run: 14 Kotlin + 168 Java types (180 primary), analysis
         // order 1,709, 3 placeholders, 0 isolated by prep, 62 immutable types. 2026-11-17 (maddi bbddaca99): 1
-        // placeholder, 63 immutable types.
-        CensusRatchet.noWorseThan("retrofit placeholders", summary.placeholders(), 1);
+        // placeholder, 63 immutable types. 0 at maddi 19e5fcec3 (`::LinkedHashSet`, a constructor reference through a typealias).
+        CensusRatchet.noWorseThan("retrofit placeholders", summary.placeholders(), 0);
         CensusRatchet.noWorseThan("retrofit elements isolated by prep", summary.prepErrors(), 0);
         CensusRatchet.noWorseThanAtLeast("retrofit immutable types", summary.immutableTypes(), 63);
     }
