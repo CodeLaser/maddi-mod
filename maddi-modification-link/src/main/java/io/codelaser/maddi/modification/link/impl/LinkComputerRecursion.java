@@ -12,6 +12,14 @@ interface LinkComputerRecursion {
         return false;
     }
 
+    /**
+     * CodeLaser/maddi-mod#127: {@code method} calls itself while its links are being computed. Null in the first
+     * round (the call links nothing), the first round's summary in the second.
+     */
+    default MethodLinkedVariables selfSummary(MethodInfo method) {
+        return null;
+    }
+
     /** see {@link io.codelaser.maddi.modification.link.LinkComputer#recordSummaryConsumption} */
     default void recordSummaryConsumption(MethodInfo consumer, MethodInfo consumed) {
         // no-op by default

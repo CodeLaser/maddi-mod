@@ -95,7 +95,12 @@ public class LinkGraph {
         }
 
         Reduce r = reduceLinks(newLinks);
-        if (r != null && r.clear != null) {
+        // A return variable is never reassigned: a second 'return' is a merge over paths (see Graph.mergeEdgeBi).
+        // Cleared here, 'if (c) return n; return d ? null : f(n.first);' kept only the second statement's value:
+        // a ternary, like an object creation, arrives through an intermediate, and the reduction's target was
+        // cleared as an assigned local is (CodeLaser/maddi-mod#127, fernflower's Statements.findFirstData: 'return=-').
+        // Gate CLEARRETURN restores the clear.
+        if (r != null && r.clear != null && (CLEAR_RETURN || !(r.clear instanceof ReturnVariable))) {
             graph.clear(r.clear, statementIndex);
         }
         Map<Variable, Links> newLinks2 = r == null ? respellSelfReassignment(newLinks) : r.newLinks;
@@ -198,6 +203,8 @@ public class LinkGraph {
         }
         return res;
     }
+
+    private static final boolean CLEAR_RETURN = Gate.isSet("CLEARRETURN");
 
     private record Reduce(Map<Variable, Links> newLinks, Variable clear) {
     }

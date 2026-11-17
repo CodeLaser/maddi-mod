@@ -311,6 +311,47 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
     private static final ThreadLocal<int[]> IN_PROGRESS_FALLBACKS = ThreadLocal.withInitial(() -> new int[1]);
     private final Map<MethodInfo, MethodLinkedVariables> provisionalDemand = new ConcurrentHashMap<>();
 
+    /*
+     CodeLaser/maddi-mod#127, the recursive call itself. While a method's links are computed, its call to itself has no
+     summary yet, and links nothing: 'f(a, b) { if (..) return a; return f(b, a); }' returned 'a' only, and what
+     the method does to the arguments of its own call was not seen. A method that calls itself is therefore
+     computed twice: the first round with the empty summary, the second with the first round's. One unrolling, not
+     a fixpoint: 'find(n) { .. return find(n.first); }' adds one field step per round and would never settle
+     (n, n.first, n.first.first, ..), and a link to 'n' already carries what a caller needs of the deeper ones.
+     The second round is skipped when the first found nothing, and given up (the first round stands) when it runs
+     over the work ceiling. Per thread: the rounds of one method are on one computation stack. Mutual recursion
+     (recursive caller, recursive callee) still gets the empty summary. Gate NOSELFSUMMARY: one round, as before.
+     */
+    private static final boolean NO_SELF_SUMMARY = System.getenv("NOSELFSUMMARY") != null;
+    private final ThreadLocal<Set<MethodInfo>> selfCalls = ThreadLocal.withInitial(HashSet::new);
+    private final ThreadLocal<Map<MethodInfo, MethodLinkedVariables>> selfSummaries =
+            ThreadLocal.withInitial(HashMap::new);
+
+    @Override
+    public MethodLinkedVariables selfSummary(MethodInfo method) {
+        if (NO_SELF_SUMMARY) return null;
+        selfCalls.get().add(method);
+        return selfSummaries.get().get(method);
+    }
+
+    /** #127: the second round of a method that called itself in the first; see {@link #selfSummary}. */
+    private MethodLinkedVariables secondRound(MethodInfo methodInfo, MethodLinkedVariables first) {
+        if (!selfCalls.get().remove(methodInfo) || first.isDefault()) return first;
+        selfSummaries.get().put(methodInfo, first);
+        try {
+            return new SourceMethodComputer(methodInfo).go();
+        } catch (DegradedAnalysisException dae) {
+            LOGGER.info("Work ceiling in the second round of {} [{}]; the first round stands", methodInfo,
+                    dae.reason().label());
+            selfSummaries.get().remove(methodInfo);
+            // the second round has overwritten statement data: the first round again
+            return new SourceMethodComputer(methodInfo).go();
+        } finally {
+            selfSummaries.get().remove(methodInfo);
+            selfCalls.get().remove(methodInfo);
+        }
+    }
+
     @Override
     public MethodLinkedVariables doMethodShallowDoNotWrite(MethodInfo methodInfo) {
         ++IN_PROGRESS_FALLBACKS.get()[0];
@@ -396,6 +437,7 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                         tlv = computer.go();
                     }
                     reportWork(methodInfo, computer, false);
+                    tlv = secondRound(methodInfo, tlv);
                     boolean changed = false;
                     if (write) {
                         if (TolerantWrite.setAllowControlledOverwrite(methodInfo.analysis(), METHOD_LINKS, tlv, methodInfo)) {
@@ -431,6 +473,7 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                     tlv = doMethod(methodInfo, true, write, writeShallow);
                 }
             } finally {
+                selfCalls.get().remove(methodInfo);
                 Graph.setAltSources(altSourcesOff, altSourcesUsed);
                 recursionPrevention.doneSource(methodInfo);
                 if (trace) {
