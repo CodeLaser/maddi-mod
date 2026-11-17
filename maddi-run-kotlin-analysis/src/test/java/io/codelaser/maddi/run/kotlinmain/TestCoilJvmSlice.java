@@ -179,10 +179,11 @@ public class TestCoilJvmSlice {
         // `String.toPath` is `get`, `FileSystem.read`/`write`), `x in 0.0..1.0` as two comparisons, arithmetic on a
         // boxed primitive, a `try` alone in a value-`if` branch, `removeAt` as `List.remove(int)`. Then 4 in 2 / 4:
         // an extension `componentN` in a destructuring, a companion's member extension through its singleton, a
-        // reference to a member of the enclosing extension's receiver. The 4 left are reified `T::class`, refused.
+        // reference to a member of the enclosing extension's receiver. The 4 left were reified `T::class`; 0 since
+        // 2026-11-17 (maddi efd63f995: the class literal of the type parameter's erasure).
         // ⚠ coil is the SECOND corpus for a reason — it and detekt have no overlap in what they call, so a change
         // that helps one and hurts the other shows up here.
-        CensusRatchet.noWorseThan("coil placeholders", summary.placeholders(), 4);
+        CensusRatchet.noWorseThan("coil placeholders", summary.placeholders(), 0);
         CensusRatchet.noWorseThan("coil elements isolated by prep", summary.prepErrors(), 0);
     }
 
@@ -206,7 +207,7 @@ public class TestCoilJvmSlice {
                 summary.prepErrors(), summary.immutableTypes(), summary.placeholders());
         assertTrue(summary.immutableTypes() > 0, "no immutable types at all; the annotated APIs were not loaded");
 
-        CensusRatchet.noWorseThan("coil placeholders, with the annotated APIs", summary.placeholders(), 4);
+        CensusRatchet.noWorseThan("coil placeholders, with the annotated APIs", summary.placeholders(), 0);
         CensusRatchet.noWorseThan("coil elements isolated by prep, with the annotated APIs", summary.prepErrors(), 0);
         // Measured 2026-11-16, first run: 131 primary types, analysis order 2,003, 73 immutable types, 4 placeholders.
         CensusRatchet.noWorseThanAtLeast("coil immutable types", summary.immutableTypes(), 73);
