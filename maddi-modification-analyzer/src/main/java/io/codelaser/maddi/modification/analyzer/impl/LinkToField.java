@@ -215,7 +215,18 @@ class LinkToField {
             // ('t ≤ this.events.§$s') is dependent too: it sits in accessible content (#119). Gate NOOBJECTGRAPHINDEP
             return link.from().parameterizedType().copyWithoutArrays();
         }
-        // deliberately NOT judged: ≥ (object graph, the other direction) and ∩ (overlap); ≤ only as above. ≤'s to() is the whole container,
+        if (!NO_OBJECT_GRAPH_INDEP && link.linkNature().equals(LinkNatureImpl.OBJECT_GRAPH_OVERLAPS)
+            && Util.virtual(link.from()) && !Util.isVirtualModification(link.from())
+            && Util.virtual(link.to()) && !Util.isVirtualModification(link.to())) {
+            // 'res.§$s ∩ this.map.§$$s[-2]': 'res.addAll(map.get(k))', or 'res.add(e)' for each e of it, fills a new
+            // list with the elements of one of the field's values, as the copy constructor's '≤' above does. Only
+            // between two hidden contents (element sets): the witness is fernflower's Statement.getEdges, whose
+            // gathering branch made getAllSuccessorEdges INDEPENDENT while its callers wrote the edges
+            // (CodeLaser/maddi-mod#134). A '∩' between variables stays unjudged, below.
+            return link.from().parameterizedType().copyWithoutArrays();
+        }
+        // deliberately NOT judged: ≥ (object graph, the other direction) and ∩ (overlap) other than the element-set
+        // case above; ≤ only as above. ≤'s to() is the whole container,
         // so judging it reads a DIFFERENT type than the ~/⊆ face variants judge for the same pair, which
         // would re-open the variance fork from the other side; ∩ is a speculative overlap, present
         // identically in both measured worlds. Extend only with a concrete variance witness in hand.

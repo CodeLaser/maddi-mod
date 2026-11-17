@@ -1220,6 +1220,19 @@ class WriteLinksAndModification {
                     return false;
                 }
             }
+            if (!structural && !NO_OBJECT_GRAPH_MOD && link.linkNature() == OBJECT_GRAPH_OVERLAPS
+                && !modifiedElementOf.isEmpty()
+                && Util.virtual(link.from()) && !Util.isVirtualModification(link.from())
+                && Util.virtual(link.to()) && !Util.isVirtualModification(link.to())) {
+                Set<MethodInfo> causes = modifiedElementOf.get(link.to());
+                if (causes != null) {
+                    // #134: 'x.map.§$$s[-2] ∩ rv.§$s', rv filled with the elements of one of the field's values
+                    // (addAll, add per element), and an element of rv modified: it may be one of x's, so x is
+                    // modified, deeply, as for the copy's '≥' below. A modification of rv itself does not count.
+                    modifiedVariablesAndTheirCause.putIfAbsent(builder.primary(), causes);
+                    return false;
+                }
+            }
             Variable toReal = Util.firstRealVariable(link.to());
             Set<MethodInfo> causesOfModification = modifiedVariablesAndTheirCause.get(toReal);
             if (causesOfModification != null) {

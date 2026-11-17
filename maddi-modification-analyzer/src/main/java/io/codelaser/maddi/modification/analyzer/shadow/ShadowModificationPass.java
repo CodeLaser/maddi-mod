@@ -1419,6 +1419,10 @@ public class ShadowModificationPass {
                                             // owner of the container; that owner, in the element's own mode
                                             Variable aliasOwner = Util.hiddenAliasOwner(l.to(), v);
                                             if (aliasOwner != null) push(todo, aliasOwner);
+                                            // #134: 'rv.§$s ∩ 0:x.map.§$$s[-2]', rv filled with the elements of one
+                                            // of x's values (addAll, add per element): x, deep-only, as for ≤ below.
+                                            // The engine's WriteLinksAndModification rule for the same overlap
+                                            if (!NO_OBJECT_GRAPH_MOD) overlappingContainers(vd, l.to(), containers);
                                         });
                                 // #62: 'tags ∩ this.map.§$$s[-2]', the whole object overlapping a container's
                                 // element content (a for-each over map.values()): its container, deep-only, as for ∈.
@@ -1506,6 +1510,28 @@ public class ShadowModificationPass {
     private static final boolean NO_OBJECT_GRAPH_MOD = Gate.isSet("NOOBJECTGRAPHMOD");
     private static final boolean NO_VIEW_ELEMENT_MOD = Gate.isSet("NOVIEWELEMENTMOD");
     private static final boolean NO_WHOLE_CONTAINER = Gate.isSet("NOWHOLECONTAINER");
+
+    // the owners of hidden contents that overlap this one, both sides element sets (#134), whichever side stores it
+    private static void overlappingContainers(VariableData vd, Variable hiddenContent, List<Variable> out) {
+        if (!Util.virtual(hiddenContent) || Util.isVirtualModification(hiddenContent)) return;
+        String fqn = hiddenContent.fullyQualifiedName();
+        Variable owner = Util.firstRealVariable(hiddenContent);
+        vd.variableInfoStream().forEach(vi -> {
+            Links links = vi.linkedVariables();
+            if (links == null) return;
+            links.stream().filter(l -> l.linkNature() == LinkNatureImpl.OBJECT_GRAPH_OVERLAPS
+                                       && Util.virtual(l.from()) && !Util.isVirtualModification(l.from())
+                                       && Util.virtual(l.to()) && !Util.isVirtualModification(l.to()))
+                    .forEach(l -> {
+                        Variable other = fqn.equals(l.from().fullyQualifiedName()) ? l.to()
+                                : fqn.equals(l.to().fullyQualifiedName()) ? l.from() : null;
+                        Variable container = other == null ? null : Util.firstRealVariable(other);
+                        if (container != null && !container.equals(owner) && !out.contains(container)) {
+                            out.add(container);
+                        }
+                    });
+        });
+    }
 
     private static void coElements(VariableData vd, Variable hiddenContent, List<Variable> out) {
         if (!Util.virtual(hiddenContent) || Util.isVirtualModification(hiddenContent)) return;
