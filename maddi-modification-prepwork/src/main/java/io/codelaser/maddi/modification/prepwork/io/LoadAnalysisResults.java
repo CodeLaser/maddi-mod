@@ -414,23 +414,47 @@ public class LoadAnalysisResults {
      Mockito calls reached a hinted member (CodeLaser/maddi-mod#37). So the entry is applied to every loaded copy.
      A member a version lacks is skipped with a warning, as for any other version mismatch. A copy loaded only after
      this load (lazily, during prep) is still missed: that needs results attached at load time.
+
+     That holds for a LIBRARY's results. A source type's results are that type's own: when the name resolves, for
+     sourceSetOfRequest, to a type parsed from source, the entry goes to that type only. Dedup restores a project's
+     stored analysis one source-set directory at a time, and nacos's istio module vendors protobuf's generated
+     com.google.protobuf.Any as source: its entry was also written onto the protobuf jar's Any, whose getBody()
+     callers then read istio's nonModifyingMethod (found by the diagnose workspace, 2026-11-17). A library's entry
+     never goes to a source copy either: in a preload that copy is counted as skipped, as before.
      */
     private boolean processPrimaryType(Codec codec, JSONObject jo) {
-        List<TypeInfo> copies = runtime.loadedCopies(primaryTypeName(jo));
+        String name = primaryTypeName(jo);
+        List<TypeInfo> copies = runtime.loadedCopies(name);
         if (copies.size() < 2) {
             return processSub(codec, new CodecImpl.ContextImpl(), jo, true, null);
         }
+        if (!librariesOnly && sourceTypeOfRequest(codec, name)) {
+            return processSub(codec, new CodecImpl.ContextImpl(), jo, true, null);
+        }
         boolean any = false;
+        int decorated = 0;
         for (TypeInfo copy : copies) {
-            if (analysedFromSource(copy)) {
-                ++skippedSourceTypes;
+            if (!copy.compilationUnit().externalLibrary()) {
+                if (librariesOnly) ++skippedSourceTypes;
                 any = true; // on the classpath: not counted as skipped for a missing module
                 continue;
             }
             any |= processSub(codec, new CodecImpl.ContextImpl(), jo, true, copy);
+            ++decorated;
         }
-        decoratedExtraCopies += copies.size() - 1;
+        decoratedExtraCopies += Math.max(0, decorated - 1);
         return any;
+    }
+
+    // does the name resolve, for the source set of request, to a type parsed from source?
+    private static boolean sourceTypeOfRequest(Codec codec, String name) {
+        if (name.isEmpty()) return false;
+        try {
+            return codec.decodeInfoInContext(new CodecImpl.ContextImpl(), 'T', name) instanceof TypeInfo typeInfo
+                   && !typeInfo.compilationUnit().externalLibrary();
+        } catch (Codec.DecoderException de) {
+            return false; // processSub reports it
+        }
     }
 
     // the fully qualified name of a primary type's entry, without its 'T'; "" when the entry is not shaped as expected
