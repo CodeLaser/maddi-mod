@@ -75,9 +75,12 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
      * after that re-derivation, the summary entries they caused in callers, which were the seeds keeping other
      * frozen-FALSE nodes reached, so the next round finds those as reverse divergences: one hop up the caller
      * chain per round, contracting about tenfold (timefold: 1099, 114, 3). The joint fixpoint takes as many rounds
-     * as the longest such chain plus one. Default 3; {@code MODREACH_ROUNDS=n} to measure further rounds.
+     * as the longest such chain plus one. The loop already stops at the first round that writes nothing; this is
+     * only the safety bound. Default 10 (was 3, CodeLaser/maddi-mod#133): at 3 the maddi self-analysis stopped one
+     * round short, LocalVariableImpl.typesReferenced keeping a frozen FALSE whose summary had re-derived to empty,
+     * and with it the Element family's eventual verdict. {@code MODREACH_ROUNDS=n} to measure.
      */
-    static final int MODREACH_MAX_ROUNDS = Integer.parseInt(System.getenv().getOrDefault("MODREACH_ROUNDS", "3"));
+    static final int MODREACH_MAX_ROUNDS = Integer.parseInt(System.getenv().getOrDefault("MODREACH_ROUNDS", "10"));
 
     /*
      The ownership round (docs/roadmap/ownership.md, "Fed into the fixpoint"): with the ownership pass on, the
@@ -530,6 +533,8 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
 
     // CodeLaser/maddi-mod#76: a MODREACH round that only strengthened re-derives through the worklist instead of
     // clearing the derived family. Gate NOINCREDERIVE restores the full clear (the A/B baseline).
+    // #137: settle oscillating MODREACH elements at FALSE; NOMODREACHSETTLE restores the plain bounded rounds
+    private static final boolean NO_MODREACH_SETTLE = Gate.isSet("NOMODREACHSETTLE");
     private static final boolean INCREMENTAL_REDERIVATION =
             !Gate.isSet("NOINCREDERIVE");
 
@@ -649,6 +654,10 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
         int iterations = 0;
         int maxIterations = configuration.maxIterations(); // extended per MODREACH re-derivation round
         int modReachRounds = 0; // P2.5: pass <-> re-derivation to joint fixpoint, bounded
+        // #137: per element, the main modification value after each round that changed it; an element that went
+        // FALSE, TRUE, FALSE is oscillating (its links depend on its own verdict) and is settled at FALSE
+        Map<Info, List<Boolean>> modReachHistory = new HashMap<>();
+        Set<Info> modReachSettled = new HashSet<>();
         int cutoffModReachRounds = 0; // the early cutoff's own rounds, over the seed: see cutoffModReach
         modReachFailures = 0;
         int eventualDeferralRounds = 0; // terminal-phase re-derivation of the eventual family, once
@@ -1033,8 +1042,41 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                         // implementations, which is exactly the path by which this pass reaches it. The same
                         // holds for that method's PARAMETERS, folded over the implementations' parameter at the
                         // same index. UNMODIFIED_FIELD has no such case: see writeVerdicts' javadoc.
+                        if (!NO_MODREACH_SETTLE) pass.settleFalse(modReachSettled);
                         var counts = pass.writeVerdicts(analysisOrder, report, contracted(singleIterationAnalyzer));
                         TolerantWrite.freezeModificationProperties();
+                        int newlySettled = 0;
+                        for (Info c : counts.changed()) {
+                            Boolean v = modificationValue(c);
+                            if (v == null) continue;
+                            List<Boolean> history = modReachHistory.computeIfAbsent(c, _ -> new ArrayList<>());
+                            history.add(v);
+                            int n = history.size();
+                            if (!NO_MODREACH_SETTLE && n >= 3 && !history.get(n - 1) && history.get(n - 2)
+                                && !history.get(n - 3) && modReachSettled.add(c)) {
+                                newlySettled++;
+                            }
+                        }
+                        if (newlySettled > 0) {
+                            LOGGER.info("MODREACH round {}: {} oscillating element(s) settled at FALSE (#137)",
+                                    modReachRounds, newlySettled);
+                        }
+                        // MODREACH_ROUNDLOG (presence-only): each round's write counts and changed elements, with the
+                        // value now written; tells a long propagation chain from an oscillation (#133)
+                        if (System.getenv("MODREACH_ROUNDLOG") != null) {
+                            int logRound = modReachRounds;
+                            System.out.println("MODREACH_ROUND " + logRound + " " + counts.summary());
+                            counts.changed().stream().map(c -> "MODREACH_ROUND " + logRound + " changed "
+                                                               + roundLogValue(c) + " " + c.fullyQualifiedName())
+                                    .sorted().forEach(System.out::println);
+                        }
+                        if (modReachRounds == MODREACH_MAX_ROUNDS && !counts.changed().isEmpty()) {
+                            // the re-derivation below runs, but no round checks it: a frozen verdict may now
+                            // disagree with the summary it re-derives (#133)
+                            LOGGER.warn("MODREACH: round {} still wrote {} change(s); bound reached, the modification "
+                                        + "properties may not be at their joint fixpoint", modReachRounds,
+                                    counts.changed().size());
+                        }
                         LOGGER.debug("MODREACH round {}: {}", modReachRounds, counts.summary());
                         LOGGER.debug("MODREACH round {}: {}", modReachRounds, report.summary());
                         if (INCREMENTAL_REDERIVATION && !counts.weakened() && !counts.changed().isEmpty()
@@ -1353,6 +1395,31 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
      The MODREACH cutover's one exception (see ShadowModificationPass.writeVerdicts): a bodiless method, or its
      parameter, whose computed value an authored contract decides.
      */
+    /** The main modification property's value of a MODREACH element, null when undecided or not one. */
+    private static Boolean modificationValue(Info info) {
+        io.codelaser.maddi.cst.api.analysis.Property property = switch (info) {
+            case MethodInfo _ -> PropertyImpl.NON_MODIFYING_METHOD;
+            case ParameterInfo _ -> PropertyImpl.UNMODIFIED_PARAMETER;
+            case FieldInfo _ -> PropertyImpl.UNMODIFIED_FIELD;
+            default -> null;
+        };
+        if (property == null) return null;
+        ValueImpl.BoolImpl v = info.analysis().getOrNull(property, ValueImpl.BoolImpl.class);
+        return v == null ? null : v.isTrue();
+    }
+
+    private static String roundLogValue(Info info) {
+        io.codelaser.maddi.cst.api.analysis.Property property = switch (info) {
+            case MethodInfo _ -> PropertyImpl.NON_MODIFYING_METHOD;
+            case ParameterInfo _ -> PropertyImpl.UNMODIFIED_PARAMETER;
+            case FieldInfo _ -> PropertyImpl.UNMODIFIED_FIELD;
+            default -> null;
+        };
+        if (property == null) return "?";
+        Object v = info.analysis().getOrNull(property, ValueImpl.BoolImpl.class);
+        return property.key() + "=" + v;
+    }
+
     private static Predicate<Info> contracted(SingleIterationAnalyzer singleIterationAnalyzer) {
         return singleIterationAnalyzer instanceof SingleIterationAnalyzerImpl s
                 ? info -> switch (info) {

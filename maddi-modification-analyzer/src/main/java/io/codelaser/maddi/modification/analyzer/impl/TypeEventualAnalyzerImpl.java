@@ -62,6 +62,7 @@ import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.runtime.Runtime;
 import io.codelaser.maddi.cst.api.statement.AssertStatement;
 import io.codelaser.maddi.cst.api.statement.Block;
+import io.codelaser.maddi.cst.api.statement.ForEachStatement;
 import io.codelaser.maddi.cst.api.statement.IfElseStatement;
 import io.codelaser.maddi.cst.api.statement.LocalTypeDeclaration;
 import io.codelaser.maddi.cst.api.statement.LocalVariableCreation;
@@ -897,7 +898,38 @@ public class TypeEventualAnalyzerImpl extends CommonAnalyzerImpl implements Type
             return true;
         });
         if (bail[0]) return null;
+        if (EventualCluster.ENABLED && Util.dispatchUnion(methodInfo)) {
+            // #133: under the #116 dispatch union a concrete overridable method's modification is its own body's
+            // AND its overrides' (Comment.rewire's 'return this', modifying through JavaDocImpl.rewire). The walk
+            // above saw the body only; the overrides' after-labels join it, as AbstractMethodAnalyzerImpl lifts
+            // them to an abstract method. An override that modifies with no label, or is undecided, bails.
+            Set<String> overrides = overrideLabels(methodInfo);
+            if (overrides == null) {
+                if (siteDebug()) ecsite("enm dispatch-union bail");
+                return null;
+            }
+            labels.addAll(overrides);
+        }
         return labels;
+    }
+
+    /** The union of the overrides' after-labels, an unconditionally non-modifying override adding none; null when
+     *  an override modifies without a label or is still undecided. */
+    private static Set<String> overrideLabels(MethodInfo methodInfo) {
+        Set<String> union = new HashSet<>();
+        for (MethodInfo implementation : methodInfo.analysis()
+                .getOrDefault(PropertyImpl.IMPLEMENTATIONS, ValueImpl.SetOfMethodInfoImpl.EMPTY).methodInfoSet()) {
+            Set<String> enm = implementation.analysis()
+                    .getOrDefault(EVENTUALLY_NON_MODIFYING_METHOD, ValueImpl.SetOfStringsImpl.EMPTY_SET).set();
+            if (!enm.isEmpty()) {
+                union.addAll(enm);
+                continue;
+            }
+            Value.Bool nonModifying = implementation.analysis().getOrNull(NON_MODIFYING_METHOD,
+                    ValueImpl.BoolImpl.class);
+            if (nonModifying == null || nonModifying.isFalse()) return null;
+        }
+        return union;
     }
 
     /**
@@ -2240,6 +2272,20 @@ public class TypeEventualAnalyzerImpl extends CommonAnalyzerImpl implements Type
                                && !(a.variableTarget() instanceof FieldReference)
                                && !(a.variableTarget() instanceof This)) {
                         change[0] |= trackAssignment(walk, ctx, a.variableTarget(), a.value());
+                    } else if (e instanceof ForEachStatement fes && fes.initializer() != null) {
+                        // for (T p : parts): p is an element of the iterable (#133)
+                        change[0] |= trackElement(walk, ctx, fes.initializer().localVariable(), fes.expression());
+                    } else if (e instanceof MethodCall mc && mc.object() != null
+                               && ELEMENT_LAMBDA_METHODS.contains(mc.methodInfo().name())) {
+                        // parts.forEach(p -> ...), parts.stream().map(p -> ...): the lambda's parameters are
+                        // elements of the receiver (#133)
+                        for (Expression argument : mc.parameterExpressions()) {
+                            if (argument instanceof Lambda lambda) {
+                                for (ParameterInfo pi : lambda.methodInfo().parameters()) {
+                                    change[0] |= trackElement(walk, ctx, pi, mc.object());
+                                }
+                            }
+                        }
                     }
                     return true;
                 });
@@ -2316,6 +2362,69 @@ public class TypeEventualAnalyzerImpl extends CommonAnalyzerImpl implements Type
         }
         map.put(target, labels == null ? null : new HashSet<>(labels));
         return true;
+    }
+
+    /** Calls whose lambda arguments receive elements of the receiver: Iterable/Collection/Map/Stream/Optional. */
+    private static final Set<String> ELEMENT_LAMBDA_METHODS = Set.of("forEach", "forEachOrdered", "removeIf",
+            "filter", "map", "mapToInt", "mapToLong", "mapToDouble", "mapToObj", "flatMap", "anyMatch", "allMatch",
+            "noneMatch", "peek", "takeWhile", "dropWhile", "ifPresent", "ifPresentOrElse");
+
+    /** Calls whose result holds (a subset of) the receiver's elements, unchanged. */
+    private static final Set<String> ELEMENT_PRESERVING_METHODS = Set.of("stream", "parallelStream", "sequential",
+            "parallel", "unordered", "filter", "sorted", "distinct", "limit", "skip", "peek", "takeWhile",
+            "dropWhile", "iterator", "listIterator", "subList", "reversed", "values", "keySet");
+
+    /**
+     * #133: track {@code target}, an element of {@code container} (a for-each loop variable, an element lambda's
+     * parameter), with the labels committing the container's elements. Additive: when no labels can be derived the
+     * variable stays untracked, as it was before.
+     */
+    private boolean trackElement(WalkRoot walk, LocalContext ctx, Variable target, Expression container) {
+        if (container == null || walk.isRoot(target)) return false;
+        if (!referencesRootOrTracked(walk, container, ctx.commit())) return false;
+        Set<String> labels = elementLabels(walk, container, ctx, 0);
+        if (siteDebug()) ecsite("track element " + target.simpleName() + " = " + labels);
+        if (labels == null || labels.isEmpty()) return false;
+        Map<Variable, Set<String>> map = ctx.commit();
+        if (map.containsKey(target)) {
+            Set<String> existing = map.get(target);
+            return existing != null && existing.addAll(labels);
+        }
+        map.put(target, new HashSet<>(labels));
+        return true;
+    }
+
+    /**
+     * The labels after which the elements of {@code container} are committed: the root container field it reads
+     * (directly, through an alias local, an element-preserving stream/collection call, or a single-return accessor
+     * on the root), else the labels committing the container value itself (its elements are reachable from it).
+     */
+    private Set<String> elementLabels(WalkRoot walk, Expression container, LocalContext ctx, int depth) {
+        if (depth > 8) return null;
+        if (container instanceof Cast cast) return elementLabels(walk, cast.expression(), ctx, depth + 1);
+        if (container instanceof EnclosedExpression enclosed) {
+            return elementLabels(walk, enclosed.inner(), ctx, depth + 1);
+        }
+        FieldInfo alias = aliasedContainerField(walk, container, ctx);
+        if (alias != null) return Set.of(alias.name());
+        if (container instanceof VariableExpression ve && ctx.containerAlias().get(ve.variable()) != null) {
+            return Set.of(ctx.containerAlias().get(ve.variable()).name());
+        }
+        if (container instanceof MethodCall mc && mc.object() != null) {
+            if (ELEMENT_PRESERVING_METHODS.contains(mc.methodInfo().name())) {
+                return elementLabels(walk, mc.object(), ctx, depth + 1);
+            }
+            if (mc.object() instanceof VariableExpression ve && walk.isRoot(ve.variable())
+                && mc.parameterExpressions().isEmpty()
+                && (mc.methodInfo().access().isPrivate() || mc.methodInfo().isFinal()
+                    || mc.methodInfo().typeInfo().isFinal())) {
+                Expression returned = singleReturnExpression(mc.methodInfo());
+                if (returned != null) {
+                    return elementLabels(walk.inlineInto(mc.methodInfo().typeInfo()), returned, ctx, depth + 1);
+                }
+            }
+        }
+        return commitLabels(walk, container, ctx);
     }
 
     /** {@link #referencesThis} generalized to the walk's root, extended with the locals tracked as holding
