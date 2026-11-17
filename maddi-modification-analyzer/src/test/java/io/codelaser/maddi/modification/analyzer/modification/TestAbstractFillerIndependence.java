@@ -49,6 +49,12 @@ public class TestAbstractFillerIndependence extends CommonTest {
                     public final List<E> all() { List<E> l = new ArrayList<>(); fill(l); return l; }
                     public abstract List<E> fill(List<E> l);
                     public final E self() { return this; }
+                    public final List<E> deep(boolean r) { List<E> l = new ArrayList<>(); deep(r, l); return l; }
+                    private List<E> deep(boolean r, List<E> l) {
+                        int s = l.size(); fill(l); int e = l.size();
+                        if (r) { for (int i = e - 1; i >= s; i--) l.get(i).deep(true, l); }
+                        return l;
+                    }
                 }
                 public static class Leaf extends E { public List<E> fill(List<E> l) { return l; } }
                 public static class Pair extends E {
@@ -69,6 +75,9 @@ public class TestAbstractFillerIndependence extends CommonTest {
         TypeInfo e = x.findSubType("E");
         assertEquals("@Dependent", independent(e, "all"));
         assertEquals("@Dependent", independent(x.findSubType("Pair"), "all2"));
+        // CodeLaser/maddi-mod#127: the recursive collector calls the abstract filler, a callee without a body, which
+        // keeps its summary inside a recursive method (fernflower's Exprent.getAllExprents(boolean, List))
+        assertEquals("@Dependent", independent(e, "deep"));
         assertEquals("@Independent", independent(x.findSubType("Leaf"), "fill"));
     }
 
