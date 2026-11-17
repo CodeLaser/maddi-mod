@@ -225,7 +225,9 @@ public class LinkCodec {
                 // because they may contain an extensive definition, we cache these marker variables
                 // the name has an "M" appended, so that it does not clash with marker variables generated from
                 // sources
-                String name = mv.simpleName() + "M";
+                // once: a marker read from a stored analysis already carries it, and appending again grew the name
+                // by one 'M' per round trip ('$_ce0M', '$_ce0MM'). Generated names end in a digit ('$_ce0').
+                String name = mv.simpleName().endsWith("M") ? mv.simpleName() : mv.simpleName() + "M";
                 Info owner = ownerOfMarkerVariables(context);
                 List<MarkerDef> defs = encodedMarkerVariables.computeIfAbsent(name, _ -> new ArrayList<>());
                 if (defs.stream().anyMatch(d -> Objects.equals(owner, d.owner()))) {
@@ -306,11 +308,15 @@ public class LinkCodec {
             EncodedValue extra = encodeList(context, result.extra().stream()
                     .map(e -> encodeList(context, List.of(encodeVariable(context, e.getKey()),
                             e.getValue().encode(this, context)))).toList());
+            // sorted, as deepOnly below: written in the map's order, a restored result wrote its entries in another
+            // order than the cold one, and a second write differed from the first for nothing
             EncodedValue modified = encodeList(context, result.modified().entrySet().stream()
+                    .sorted(Map.Entry.comparingByKey())
                     .map(e -> encodeList(context, e.getValue() == null
                             ? List.of(encodeVariable(context, e.getKey()))
                             : List.of(encodeVariable(context, e.getKey()),
                             encodeList(context, e.getValue().stream()
+                                    .sorted(Comparator.comparing(MethodInfo::fullyQualifiedName))
                                     .map(mi -> encodeInfoOutOfContext(context, mi)).toList())))).toList());
             if (result.deepOnlyModified().isEmpty()) return encodeList(context, List.of(links, extra, modified));
             EncodedValue deepOnly = encodeList(context, result.deepOnlyModified().stream().sorted()
