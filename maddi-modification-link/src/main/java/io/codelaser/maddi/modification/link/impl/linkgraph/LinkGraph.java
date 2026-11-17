@@ -95,13 +95,22 @@ public class LinkGraph {
         }
 
         Reduce r = reduceLinks(newLinks);
-        // A return variable is never reassigned: a second 'return' is a merge over paths (see Graph.mergeEdgeBi).
+        // A return variable is not reassigned: a second 'return' is a merge over paths (see Graph.mergeEdgeBi).
         // Cleared here, 'if (c) return n; return d ? null : f(n.first);' kept only the second statement's value:
         // a ternary, like an object creation, arrives through an intermediate, and the reduction's target was
         // cleared as an assigned local is (CodeLaser/maddi-mod#127, fernflower's Statements.findFirstData: 'return=-').
-        // Gate CLEARRETURN restores the clear.
-        if (r != null && r.clear != null && (CLEAR_RETURN || !(r.clear instanceof ReturnVariable))) {
+        // So it is cleared only while this statement is the only one that has returned: a statement is computed
+        // more than once (a ternary's branches with their condition's facts), and the clear drops the earlier
+        // evaluation ('return custom == null ? fallback() : custom' must not keep custom's null).
+        // Gate CLEARRETURN restores the unconditional clear.
+        if (r != null && r.clear instanceof ReturnVariable) {
+            String first = firstReturnAt.putIfAbsent(r.clear, statementIndex);
+            if (CLEAR_RETURN || first == null || first.equals(statementIndex)) graph.clear(r.clear, statementIndex);
+        } else if (r != null && r.clear != null) {
             graph.clear(r.clear, statementIndex);
+        }
+        for (Variable v : newLinks.keySet()) {
+            if (v instanceof ReturnVariable) firstReturnAt.putIfAbsent(v, statementIndex);
         }
         Map<Variable, Links> newLinks2 = r == null ? respellSelfReassignment(newLinks) : r.newLinks;
         List<Link> statementLinks = new ArrayList<>();
@@ -205,6 +214,8 @@ public class LinkGraph {
     }
 
     private static final boolean CLEAR_RETURN = Gate.isSet("CLEARRETURN");
+    // the statement that first assigned each return variable (compute)
+    private final Map<Variable, String> firstReturnAt = new HashMap<>();
 
     private record Reduce(Map<Variable, Links> newLinks, Variable clear) {
     }

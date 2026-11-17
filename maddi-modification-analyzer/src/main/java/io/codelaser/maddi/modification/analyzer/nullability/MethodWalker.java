@@ -73,6 +73,7 @@ import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 import io.codelaser.maddi.modification.link.LinkComputer;
 import io.codelaser.maddi.modification.link.impl.LinkComputerImpl;
 import io.codelaser.maddi.modification.link.impl.LinkNatureImpl;
+import io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl;
 import io.codelaser.maddi.modification.prepwork.variable.Link;
 import io.codelaser.maddi.modification.prepwork.variable.LinkNature;
 import io.codelaser.maddi.modification.prepwork.variable.Links;
@@ -159,9 +160,29 @@ final class MethodWalker {
      callee, 'return relay <- return find <- null in find'), not a null written here.
      */
     private void nullMarker(MethodInfo mi, Variable marker, Object target, String origin) {
+        nullMarker(mi, marker, target, origin, null);
+    }
+
+    /*
+     'value' is the expression that carries the marker here, when known. A null of a method further down ('custom',
+     in 'new Reader(conf(p))' with conf returning 'custom == null ? fallback() : custom') that the called method's
+     own summary holds has come out of that method's return, so the edge is the called method's: its own walk has
+     decided whether that null leaves it (calleeNullKeptOut). The links' closure would connect 'custom' to the target
+     directly, around conf's guard. Not for a type-variable return (the node is per instantiation).
+     */
+    private void nullMarker(MethodInfo mi, Variable marker, Object target, String origin, Expression value) {
         // Policy.withoutTestNulls: a test's null literal written into a production node ('new Decider(null)')
         if (!policy.testNulls() && testCode(mi.typeInfo()) && !testCode(target)) return;
-        MethodInfo owner = seeds.nullOwner(((LocalVariable) marker).assignmentExpression());
+        Expression nullConstant = ((LocalVariable) marker).assignmentExpression();
+        MethodInfo owner = seeds.nullOwner(nullConstant);
+        if (!CALLEE_NULL_KEPT_OUT_OFF.get() && owner != null && !owner.equals(mi)
+            && value != null && NonNullFacts.unwrap(value) instanceof MethodCall mc && mc.methodInfo() != null
+            && !mc.methodInfo().equals(owner) && index.analysed.contains(mc.methodInfo())
+            && !mc.methodInfo().returnType().isVoid() && !isTypeVariable(mc.methodInfo().returnType())
+            && summaryHolds(mc.methodInfo(), nullConstant)) {
+            graph.addEdge(mc.methodInfo(), target);
+            return;
+        }
         if (owner != null && !owner.equals(mi) && index.analysed.contains(owner) && !owner.returnType().isVoid()) {
             graph.addEdge(owner, target);
         } else {
@@ -396,7 +417,9 @@ final class MethodWalker {
                             boolean literal = !RETURN_NULL_LITERALS_OFF.get() && returned != null
                                               && NonNullFacts.unwrap(returned) instanceof NullConstant;
                             if (!returnMarkersSeen.add(key) && !literal) continue;
-                            if (!literal && returned != null && facts.nonNull(returned, facts.before(statement))) {
+                            if (!literal && returned != null
+                                && (facts.nonNull(returned, facts.before(statement))
+                                    || calleeNullKeptOut(mi, returned, link.to(), facts.before(statement)))) {
                                 guardedReturnMarkers.add(key);
                                 continue;
                             }
@@ -437,7 +460,8 @@ final class MethodWalker {
                     }
                     if (slot || statement == null || fromVar instanceof ReturnVariable
                         || assignsHere(statement, fromVar)) {
-                        nullMarker(mi, link.to(), from, "null in " + mi.fullyQualifiedName());
+                        nullMarker(mi, link.to(), from, "null in " + mi.fullyQualifiedName(),
+                                statement == null ? null : assignedValue(statement, fromVar));
                     }
                 } else {
                     linkEdge(keyedSource(keyed, nodes.node(mi, scope, link.to())), from, link.to(), fromVar, statement);
@@ -1289,14 +1313,63 @@ final class MethodWalker {
         Variable primary = links.primary();
         if (primary == null) return;
         if (isNullMarker(primary)) {
-            nullMarker(mi, primary, site, "null argument in " + mi.fullyQualifiedName());
+            nullMarker(mi, primary, site, "null argument in " + mi.fullyQualifiedName(), unwrapped);
             return;
         }
         Object node = nodes.node(mi, scope, primary);
         if (node != null) graph.addEdge(node, site);
-        sourcesOf(mi, scope, primary, links, site);
+        sourcesOf(mi, scope, primary, links, site, unwrapped);
     }
     private static final Switches.Gate RETURN_NULL_LITERALS_OFF = Switches.gate("NORETURNNULLLITERALS");
+
+    /*
+     A callee's null (its marker, see nullMarker) on a return that no value of the returned expression can carry.
+     In 'Res custom = custom(p); return custom == null ? fallback() : custom;' the return is linked to custom(p)'s
+     'return null' through the local, which is returned only where it is known non-null; the other value is a call
+     whose own summary does not hold that null. The local's own edge is guarded already (linkEdge); the marker's
+     direct link is the closure repeating it. The whole expression is not known non-null (nothing says so of
+     fallback()), so facts.nonNull does not see this. It showed once a method's 'return null' before a 'return new
+     X()' stayed in its summary (CodeLaser/maddi-mod#127). A value position is kept out when it is known non-null,
+     or is a static call (no dispatch) given no variables, whose summary lacks the marker. Gate NOCALLEENULLKEPTOUT.
+     */
+    private static final Switches.Gate CALLEE_NULL_KEPT_OUT_OFF = Switches.gate("NOCALLEENULLKEPTOUT");
+
+    private boolean calleeNullKeptOut(MethodInfo mi, Expression returned, Variable marker, Set<Variable> known) {
+        if (CALLEE_NULL_KEPT_OUT_OFF.get()) return false;
+        Expression nullConstant = ((LocalVariable) marker).assignmentExpression();
+        MethodInfo owner = seeds.nullOwner(nullConstant);
+        if (owner == null || owner.equals(mi)) return false;
+        return keptOut(returned, nullConstant, known);
+    }
+
+    private boolean keptOut(Expression value, Expression nullConstant, Set<Variable> known) {
+        if (facts.nonNull(value, known)) return true;
+        Expression e = NonNullFacts.unwrap(value);
+        if (e instanceof InlineConditional ic) {
+            Set<Variable> whenTrue = new HashSet<>(known);
+            whenTrue.addAll(facts.whenTrue(ic.condition()));
+            Set<Variable> whenFalse = new HashSet<>(known);
+            whenFalse.addAll(facts.whenFalse(ic.condition()));
+            return keptOut(ic.ifTrue(), nullConstant, whenTrue) && keptOut(ic.ifFalse(), nullConstant, whenFalse);
+        }
+        if (!(e instanceof MethodCall mc) || mc.methodInfo() == null || !mc.methodInfo().isStatic()) return false;
+        boolean[] variable = {false};
+        mc.visit(x -> {
+            variable[0] |= x instanceof VariableExpression;
+            return !variable[0];
+        });
+        if (variable[0]) return false;
+        return mc.methodInfo().analysis().getOrNull(MethodLinkedVariablesImpl.METHOD_LINKS,
+                MethodLinkedVariablesImpl.class) != null && !summaryHolds(mc.methodInfo(), nullConstant);
+    }
+
+    // does the method's summary return this null (the marker of this very literal)?
+    private static boolean summaryHolds(MethodInfo method, Expression nullConstant) {
+        MethodLinkedVariablesImpl summary = method.analysis().getOrNull(MethodLinkedVariablesImpl.METHOD_LINKS,
+                MethodLinkedVariablesImpl.class);
+        return summary != null && summary.ofReturnValue().stream().anyMatch(l -> isNullMarker(l.to())
+                && ((LocalVariable) l.to()).assignmentExpression() == nullConstant);
+    }
     private static final Switches.Gate ASSIGNED_NON_NULL_OFF = Switches.gate("NOASSIGNEDNONNULL");
 
     // pi: the parameter, or the Content of a varargs parameter
@@ -1385,13 +1458,13 @@ final class MethodWalker {
             return;
         }
         if (isNullMarker(primary)) {
-            nullMarker(mi, primary, pi, "null argument in " + mi.fullyQualifiedName());
+            nullMarker(mi, primary, pi, "null argument in " + mi.fullyQualifiedName(), unwrappedArgument);
             return;
         }
         Object node = this.nodes.node(mi, scope, primary);
         if (node != null) graph.addEdge(node, pi);
         // an intermediate (or a local assigned in this very statement): its sources, in the argument's own links
-        sourcesOf(mi, scope, primary, links, pi);
+        sourcesOf(mi, scope, primary, links, pi, unwrappedArgument);
     }
 
     /*
@@ -1436,13 +1509,13 @@ final class MethodWalker {
         if (!isTypeVariable(rt) || ownNull) graph.addEdge(callee, pi);
     }
 
-    private void sourcesOf(MethodInfo mi, Scope scope, Variable primary, Links links, Object pi) {
+    private void sourcesOf(MethodInfo mi, Scope scope, Variable primary, Links links, Object pi, Expression value) {
         for (Link link : links) {
             if (!link.from().equals(primary)) continue;
             if (!(link.linkNature().isIdenticalTo() || link.linkNature().isAssignedFrom())) continue;
             if (isNullMarker(link.to())) {
                 nullMarker(mi, link.to(), pi,
-                        "null argument (via " + primary.simpleName() + ") in " + mi.fullyQualifiedName());
+                        "null argument (via " + primary.simpleName() + ") in " + mi.fullyQualifiedName(), value);
             } else {
                 graph.addEdge(nodes.node(mi, scope, link.to()), pi);
             }
