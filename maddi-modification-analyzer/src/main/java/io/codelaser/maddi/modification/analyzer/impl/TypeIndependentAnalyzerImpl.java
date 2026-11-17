@@ -78,6 +78,8 @@ public class TypeIndependentAnalyzerImpl extends CommonAnalyzerImpl implements T
     private static final String EC_TYPE_DEBUG = System.getenv("EC_TYPE_DEBUG");
     // #82: NOSUPERWAIT restores the concrete-methods shortcut for an undecided abstract SOURCE supertype
     private static final boolean NO_SUPER_WAIT = Gate.isSet("NOSUPERWAIT");
+    // #133: a return value that is disclaimed content (an @IgnoreModifications store) shares nothing that counts
+    private static final boolean NO_DISCLAIMED_RETURN = Gate.isSet("NODISCLAIMEDRETURN");
     // INDEPENDENCEWALK=0 restores the min over supertype verdicts (A/B switch, as INTERFACEWALK on the immutability side)
     private static final boolean INDEPENDENCE_WALK = !"0".equals(System.getenv("INDEPENDENCEWALK"));
 
@@ -560,6 +562,39 @@ public class TypeIndependentAnalyzerImpl extends CommonAnalyzerImpl implements T
      * reaches a field whose type commits (eventual, unconditionally immutable-hc, or the witnessed cluster seed).
      * An undecided implementation or link waits (false).
      */
+    private static final int MAX_DISCLAIMED_DEPTH = 3;
+
+    /**
+     * Does {@code methodInfo} return an {@code @IgnoreModifications} store, or nothing at all? A getter of such a
+     * field; a body that only throws (a builder's placeholder); a body {@code return callee(...)} forwarding to such
+     * a method; or an abstract method all of whose implementations are such methods.
+     */
+    private static boolean handsOutDisclaimedContent(MethodInfo methodInfo, int depth) {
+        if (depth > MAX_DISCLAIMED_DEPTH) return false;
+        Value.FieldValue fieldValue = methodInfo.getSetField();
+        if (fieldValue != null && fieldValue.field() != null && !fieldValue.setter()) {
+            return fieldValue.field().analysis()
+                    .getOrDefault(io.codelaser.maddi.cst.impl.analysis.PropertyImpl.IGNORE_MODIFICATIONS_FIELD, ValueImpl.BoolImpl.FALSE).isTrue();
+        }
+        if (methodInfo.isAbstract()) {
+            Value.SetOfMethodInfo implementations = methodInfo.analysis()
+                    .getOrDefault(IMPLEMENTATIONS, ValueImpl.SetOfMethodInfoImpl.EMPTY);
+            if (implementations.isEmpty()) return false;
+            for (MethodInfo implementation : implementations.methodInfoSet()) {
+                if (!handsOutDisclaimedContent(implementation, depth + 1)) return false;
+            }
+            return true;
+        }
+        if (Util.isThrowOnlyPlaceholder(methodInfo)) return true;
+        var statements = methodInfo.methodBody().statements();
+        if (statements.size() == 1
+            && statements.getFirst() instanceof io.codelaser.maddi.cst.api.statement.ReturnStatement rs
+            && rs.expression() instanceof MethodCall mc) {
+            return handsOutDisclaimedContent(mc.methodInfo(), depth + 1);
+        }
+        return false;
+    }
+
     private boolean sharedContentCommits(TypeInfo member, ParameterInfo abstractParameter) {
         return sharedContentCommits(member, abstractParameter.methodInfo(), abstractParameter.index(),
                 abstractParameter.fullyQualifiedName());
@@ -590,6 +625,10 @@ public class TypeIndependentAnalyzerImpl extends CommonAnalyzerImpl implements T
             }
             if (independent == null) return false;
             if (!independent.isDependent()) continue;
+            // FieldInfoImpl.analysisOfInitializer(): 'return inspection.get().analysisOfInitializer()', the
+            // inspection's @IgnoreModifications analysis map. Disclaimed content (road §050), as for analysis()
+            // itself: whatever a caller does through it does not count against the type (#133). Gate NODISCLAIMEDRETURN.
+            if (parameterIndex < 0 && !NO_DISCLAIMED_RETURN && handsOutDisclaimedContent(implementation, 0)) continue;
             MethodLinkedVariables mlv = implementation.analysis().getOrNull(METHOD_LINKS,
                     MethodLinkedVariablesImpl.class);
             if (mlv == null || parameterIndex >= mlv.ofParameters().size()) return false;
