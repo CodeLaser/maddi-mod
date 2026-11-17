@@ -1090,6 +1090,11 @@ public record ExpressionVisitor(Runtime runtime,
     }
 
     private MethodLinkedVariables recurseIntoLinkComputer(MethodInfo methodInfo) {
+        if (methodInfo.equals(currentMethod)) {
+            // #127: the call to itself links, in the second round, as the first round's summary says
+            MethodLinkedVariables self = linkComputer.selfSummary(methodInfo);
+            if (self != null) return self;
+        }
         if (methodInfo.equals(currentMethod)
             || recursive(currentMethod) && (NO_NARROW_RECURSION || recursive(methodInfo)
                                             || !RECURSION_SOURCE_SUMMARIES

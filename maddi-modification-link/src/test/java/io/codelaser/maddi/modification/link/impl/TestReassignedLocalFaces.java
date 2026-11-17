@@ -191,9 +191,9 @@ public class TestReassignedLocalFaces extends CommonTest {
             assertEquals("[-] --> switchEmpty←C.EMPTY,switchEmpty.element∈0:elements,"
                          + "switchEmpty.element←0:elements[0]  MOD[]", mlv("switchEmpty"));
         } else {
-            // without 'switchEmpty ← C.EMPTY': the second return erased the first
-            assertEquals("[-] --> switchEmpty.element∈0:elements,switchEmpty.element←0:elements[0]  MOD[]",
-                    mlv("switchEmpty"));
+            // 'switchEmpty ← C.EMPTY' is there since #127 (LinkGraph.carryReturn): the second return erased the first
+            assertEquals("[-] --> switchEmpty.element∈0:elements,switchEmpty.element←0:elements[0],"
+                         + "switchEmpty←C.EMPTY  MOD[]", mlv("switchEmpty"));
         }
     }
 

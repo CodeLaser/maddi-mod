@@ -118,9 +118,70 @@ public class TestModuleGatedHints {
         assertTrue(v2.analysis().haveAnalyzedValueFor(PropertyImpl.ANNOTATED_API));
     }
 
+    // A source type's results are its own. nacos: the istio module vendors protobuf's generated Any as source, and
+    // the protobuf jar has the compiled one. Restoring istio's stored analysis (not a preload) wrote Any's entry onto
+    // the jar's copy too, whose callers in other modules then read istio's verdicts (diagnose workspace, 2026-11-17).
+    @Test
+    public void sourceTypeResultsStayWithTheSourceType() throws Exception {
+        JavaInspector ji = inspectorWithoutDesktop();
+        Runtime real = ji.runtime();
+        TypeInfo jar = libraryType(real, "lib-1.0.jar");
+        TypeInfo source = type(real, new SourceSetImpl.Builder().setName("vendored/main")
+                .setUri(URI.create("file:/vendored/src/main/java")).build());
+        SourceSet[] request = new SourceSet[1];
+        Runtime twoCopies = (Runtime) Proxy.newProxyInstance(getClass().getClassLoader(), new Class<?>[]{Runtime.class},
+                (_, method, args) -> {
+                    if ("loadedCopies".equals(method.getName()) && "com.example.lib.Thing".equals(args[0])) {
+                        return List.of(jar, source);
+                    }
+                    if ("getFullyQualified".equals(method.getName()) && "com.example.lib.Thing".equals(args[0])) {
+                        // what the registry answers: the source copy for its own source set, the jar's otherwise
+                        return args.length == 3 && args[2] == request[0] ? source : jar;
+                    }
+                    try {
+                        return method.invoke(real, args);
+                    } catch (InvocationTargetException e) {
+                        throw e.getCause();
+                    }
+                });
+        // restoring the vendoring module's own analysis: the source type only
+        request[0] = source.compilationUnit().sourceSet();
+        LoadAnalysisResults lar = new LoadAnalysisResults(twoCopies, request[0]);
+        assertEquals(1, lar.go(new PrepWorkCodec(twoCopies, request[0]).codec(), results("com.example.lib.Thing")));
+        assertEquals(0, lar.decoratedExtraCopies());
+        assertTrue(source.analysis().haveAnalyzedValueFor(PropertyImpl.ANNOTATED_API));
+        assertFalse(jar.analysis().haveAnalyzedValueFor(PropertyImpl.ANNOTATED_API));
+
+        // a library's results, requested by a module that sees the jar: the jar's copy, never the source type
+        TypeInfo jar2 = libraryType(real, "lib-1.0.jar");
+        TypeInfo source2 = type(real, source.compilationUnit().sourceSet());
+        Runtime again = (Runtime) Proxy.newProxyInstance(getClass().getClassLoader(), new Class<?>[]{Runtime.class},
+                (_, method, args) -> {
+                    if ("loadedCopies".equals(method.getName()) && "com.example.lib.Thing".equals(args[0])) {
+                        return List.of(jar2, source2);
+                    }
+                    if ("getFullyQualified".equals(method.getName()) && "com.example.lib.Thing".equals(args[0])) {
+                        return jar2;
+                    }
+                    try {
+                        return method.invoke(real, args);
+                    } catch (InvocationTargetException e) {
+                        throw e.getCause();
+                    }
+                });
+        LoadAnalysisResults lar2 = new LoadAnalysisResults(again, SourceSetImpl.testProtocolSourceSet());
+        assertEquals(1, lar2.go(new PrepWorkCodec(again, SourceSetImpl.testProtocolSourceSet()).codec(),
+                results("com.example.lib.Thing")));
+        assertTrue(jar2.analysis().haveAnalyzedValueFor(PropertyImpl.ANNOTATED_API));
+        assertFalse(source2.analysis().haveAnalyzedValueFor(PropertyImpl.ANNOTATED_API));
+    }
+
     private static TypeInfo libraryType(Runtime runtime, String jar) {
-        SourceSet sourceSet = new SourceSetImpl.Builder().setName(jar).setUri(URI.create("file:/" + jar))
-                .setLibrary(true).setExternalLibrary(true).build();
+        return type(runtime, new SourceSetImpl.Builder().setName(jar).setUri(URI.create("file:/" + jar))
+                .setLibrary(true).setExternalLibrary(true).build());
+    }
+
+    private static TypeInfo type(Runtime runtime, SourceSet sourceSet) {
         CompilationUnit cu = runtime.newCompilationUnitBuilder().setPackageName("com.example.lib")
                 .setSourceSet(sourceSet).build();
         TypeInfo typeInfo = runtime.newTypeInfo(cu, "Thing");

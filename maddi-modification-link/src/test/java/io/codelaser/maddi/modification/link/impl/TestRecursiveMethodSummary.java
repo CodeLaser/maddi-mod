@@ -58,15 +58,18 @@ public class TestRecursiveMethodSummary extends CommonTest {
         // before #127 (gate NONARROWRECURSION): visit=[-] --> - and label=[-] --> -, nothing linked to t.
         // The recursive methods now link t as the flat ones do, and the descendants as their non-recursive loop twins
         // do ('loop', 'labelLoop'). The '*' in 'loop' is flat(c)'s parameter, undecided in a link-only test (no
-        // verdicts) and so modified; the recursive call's own undecided verdict marks nothing (#127)
+        // verdicts) and so modified; the recursive call's own undecided verdict marks nothing (#127).
+        // With the second round (the call to itself has the first round's summary), 'visit' and 'label' link the
+        // descendants exactly as 'loop' and 'labelLoop' do; before it: no '≤this.component*', and '≥' for '~' 
         assertEquals("""
                 visit=[0:t∈this.component*.§$s,0:t∈this.indices*.§$$s[-1],0:t.children.§$s≤this.component*.§$s,\
-                0:t.children.§$s≤this.indices*.§$$s,0:t.children.§$s≤this.indices*.§$$s[-1]] --> -
+                0:t.children.§$s≤this.indices*.§$$s,0:t.children.§$s≤this.indices*.§$$s[-1],\
+                0:t.children.§$s≤this.component*] --> -
                 flat=[0:t∈this.component*.§$s,0:t∈this.indices*.§$$s[-1]] --> -
                 loop=[0:t*∈this.component*.§$s,0:t*∈this.indices*.§$$s[-1],0:t.children*.§$s≤this.component*.§$s,\
                 0:t.children*.§$s≤this.indices*.§$$s,0:t.children*.§$s≤this.indices*.§$$s[-1],\
                 0:t.children*.§$s≤this.component*] --> -
-                label=[-] --> label.§$s∋0:t,label.§$s≥0:t.children.§$s
+                label=[-] --> label.§$s∋0:t,label.§$s~0:t.children.§$s
                 labelFlat=[-] --> labelFlat.§$s∋0:t
                 labelLoop=[-] --> labelLoop.§$s∋0:t,labelLoop.§$s~0:t.children.§$s""", summary);
     }

@@ -46,14 +46,16 @@ import io.codelaser.maddi.modification.analyzer.CommonTest;
  * annotation the source omits is not automatically wrong — the analyzer may still compute it, and the source may
  * simply have stopped asserting it. This test settles which, position by position.
  * <p>
- * <b>The answer, as recorded in the expected blocks below: the book is right at thirteen of the sixteen, understates
- * one, and is wrong at two.</b>
+ * <b>The answer, as recorded in the expected blocks below: the book is right at fourteen of the sixteen, and is
+ * wrong at two.</b>
  * <ul>
- *     <li>{@code EventuallyFinal} (3/3), {@code FirstThen} (4/4), {@code SetOnceMap} (3/3) and two of
- *     {@code SetOnce}'s three: computed {@code INDEPENDENT_HC}, exactly as printed. The sources dropped an
- *     annotation the analyzer still derives.</li>
- *     <li>{@code SetOnce.getOrDefault} returns fully {@code INDEPENDENT}, which is <em>stronger</em> than the book's
- *     {@code @Independent(hc=true)}. Note the shipped body differs from the book's here (finding 8).</li>
+ *     <li>{@code EventuallyFinal} (3/3), {@code FirstThen} (4/4), {@code SetOnceMap} (3/3) and {@code SetOnce}
+ *     (3/3): computed {@code INDEPENDENT_HC}, exactly as printed. The sources dropped an annotation the analyzer
+ *     still derives.</li>
+ *     <li>{@code SetOnce.getOrDefault} came out fully {@code INDEPENDENT} until CodeLaser/maddi-mod#127, stronger
+ *     than the book's {@code @Independent(hc=true)}, and wrongly: {@code if (isSet()) return get();} returns the
+ *     hidden content, and the second return ({@code Objects.requireNonNull(alternative)}, a call's result) erased
+ *     the first in the links. The book was right.</li>
  *     <li>{@code Lazy}'s {@code supplier} field is {@code DEPENDENT}, and that is what the book's own section is
  *     arguing it should not be.</li>
  * </ul>
@@ -171,14 +173,12 @@ public class TestBookIndependenceOfSupportTypes extends CommonTest {
     @Test
     public void testSetOnce() {
         TypeInfo setOnce = analyze("SetOnce", SET_ONCE);
-        // getOrDefault comes out fully INDEPENDENT, one step above what the book prints. The shipped body is not
-        // the book's: it returns Objects.requireNonNull(alternative) where the book returns the parameter
-        // unguarded, and it is @NotNull for that reason (finding 8). The book understating this is harmless in a
-        // way the two DIFFERS rows are not -- @Independent(hc=true) is a weaker, still-true statement.
+        // getOrDefault returns the hidden content on its first path ('return get()'): INDEPENDENT_HC, as the book
+        // prints. It read INDEPENDENT while the second return erased the first (CodeLaser/maddi-mod#127).
         assertEquals("""
                 set(T t), parameter 0                      INDEPENDENT_HC book: INDEPENDENT_HC agrees
                 get(), return                              INDEPENDENT_HC book: INDEPENDENT_HC agrees
-                getOrDefault(T), return                    INDEPENDENT    book: INDEPENDENT_HC STRONGER
+                getOrDefault(T), return                    INDEPENDENT_HC book: INDEPENDENT_HC agrees
                 """, new Positions()
                 .parameter(setOnce, "set", 1, 0, "set(T t), parameter 0", HC)
                 .method(setOnce, "get", 0, "get(), return", HC)

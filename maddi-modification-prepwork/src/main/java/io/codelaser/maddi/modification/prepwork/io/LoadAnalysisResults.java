@@ -63,6 +63,14 @@ import io.codelaser.maddi.inspection.api.integration.JavaInspector;
  *       backing field lives on the implementation, not the interface) that the reader cannot reconstruct. Resolving
  *       that disagreement is upstream immutability work; until then, dropping the individual hint keeps prep loading
  *       instead of failing every project that references such a type.</li>
+ *   <li><b>type analysed from source</b> &mdash; a preload ({@link #go(List)}: the shipped results, a
+ *       {@code --preload-analysis-results-dirs} entry) describes libraries. A primary type this run parses from
+ *       source takes no hints from it, whichever version the archive describes: the run computes its own verdicts.
+ *       Guava's corpus run loads {@code libs/guava} beside Guava's sources; with the hints written onto the
+ *       source types, certification refused hundreds of downgrades and the run ended in an AssertionError
+ *       (CodeLaser/maddi-mod#137). Counted in {@link #skippedSourceTypes()}. Restoring a run's own results
+ *       (with the caller's codec: {@link #go(Codec, List)}, {@link #goDir}, {@link #goDirTolerant},
+ *       {@code go(codec, content)}) does write onto source types.</li>
  * </ul>
  */
 public class LoadAnalysisResults {
@@ -94,11 +102,25 @@ public class LoadAnalysisResults {
         return this;
     }
 
+    /**
+     * The preload: the shipped results, a {@code --preload-analysis-results-dirs} entry ({@code ResultsLoader.load}).
+     * It describes libraries, so a primary type this run parses from source takes nothing from it (class note).
+     */
     public int go(List<String> directories) throws IOException {
         Codec codec = new PrepWorkCodec(runtime, sourceSetOfRequest).codec();
-        return go(codec, directories);
+        boolean savedLibrariesOnly = librariesOnly;
+        librariesOnly = true;
+        try {
+            return go(codec, directories);
+        } finally {
+            librariesOnly = savedLibrariesOnly;
+        }
     }
 
+    /**
+     * Every entry of {@code directories} with the caller's codec. Not the preload: a caller restoring its own run's
+     * output (TestKotlinAnalysisRoundTrip's restore codec) writes onto the types it parsed from source.
+     */
     public int go(Codec codec, List<String> directories) throws IOException {
         int countPrimaryTypes = 0;
         for (String dir : directories) {
@@ -124,6 +146,10 @@ public class LoadAnalysisResults {
                     LOGGER.warn("Path '{}' is not a directory containing analyzed annotated API files", directory);
                 }
             }
+        }
+        if (skippedSourceTypes > 0) {
+            LOGGER.info("Skipped preloaded analysis hints for {} primary types this run analyses from source",
+                    skippedSourceTypes);
         }
         if (skippedPrimaryTypes > 0) {
             LOGGER.info("Skipped analysis hints for {} primary types whose module is not on the classpath",
@@ -344,6 +370,18 @@ public class LoadAnalysisResults {
     // number of primary types whose module is not on the classpath, so their hints were skipped
     private int skippedPrimaryTypes;
 
+    // set while go(List) loads a preload: hints for a type parsed from source are skipped (class note)
+    private boolean librariesOnly;
+    private int skippedSourceTypes;
+
+    public int skippedSourceTypes() {
+        return skippedSourceTypes;
+    }
+
+    private boolean analysedFromSource(Info info) {
+        return librariesOnly && info instanceof TypeInfo typeInfo && !typeInfo.compilationUnit().externalLibrary();
+    }
+
     public int skippedPrimaryTypes() {
         return skippedPrimaryTypes;
     }
@@ -376,18 +414,47 @@ public class LoadAnalysisResults {
      Mockito calls reached a hinted member (CodeLaser/maddi-mod#37). So the entry is applied to every loaded copy.
      A member a version lacks is skipped with a warning, as for any other version mismatch. A copy loaded only after
      this load (lazily, during prep) is still missed: that needs results attached at load time.
+
+     That holds for a LIBRARY's results. A source type's results are that type's own: when the name resolves, for
+     sourceSetOfRequest, to a type parsed from source, the entry goes to that type only. Dedup restores a project's
+     stored analysis one source-set directory at a time, and nacos's istio module vendors protobuf's generated
+     com.google.protobuf.Any as source: its entry was also written onto the protobuf jar's Any, whose getBody()
+     callers then read istio's nonModifyingMethod (found by the diagnose workspace, 2026-11-17). A library's entry
+     never goes to a source copy either: in a preload that copy is counted as skipped, as before.
      */
     private boolean processPrimaryType(Codec codec, JSONObject jo) {
-        List<TypeInfo> copies = runtime.loadedCopies(primaryTypeName(jo));
+        String name = primaryTypeName(jo);
+        List<TypeInfo> copies = runtime.loadedCopies(name);
         if (copies.size() < 2) {
             return processSub(codec, new CodecImpl.ContextImpl(), jo, true, null);
         }
-        boolean any = false;
-        for (TypeInfo copy : copies) {
-            any |= processSub(codec, new CodecImpl.ContextImpl(), jo, true, copy);
+        if (!librariesOnly && sourceTypeOfRequest(codec, name)) {
+            return processSub(codec, new CodecImpl.ContextImpl(), jo, true, null);
         }
-        decoratedExtraCopies += copies.size() - 1;
+        boolean any = false;
+        int decorated = 0;
+        for (TypeInfo copy : copies) {
+            if (!copy.compilationUnit().externalLibrary()) {
+                if (librariesOnly) ++skippedSourceTypes;
+                any = true; // on the classpath: not counted as skipped for a missing module
+                continue;
+            }
+            any |= processSub(codec, new CodecImpl.ContextImpl(), jo, true, copy);
+            ++decorated;
+        }
+        decoratedExtraCopies += Math.max(0, decorated - 1);
         return any;
+    }
+
+    // does the name resolve, for the source set of request, to a type parsed from source?
+    private static boolean sourceTypeOfRequest(Codec codec, String name) {
+        if (name.isEmpty()) return false;
+        try {
+            return codec.decodeInfoInContext(new CodecImpl.ContextImpl(), 'T', name) instanceof TypeInfo typeInfo
+                   && !typeInfo.compilationUnit().externalLibrary();
+        } catch (Codec.DecoderException de) {
+            return false; // processSub reports it
+        }
     }
 
     // the fully qualified name of a primary type's entry, without its 'T'; "" when the entry is not shaped as expected
@@ -440,6 +507,10 @@ public class LoadAnalysisResults {
                 return false;
             }
             throw new UnsupportedOperationException("Cannot find " + name);
+        }
+        if (topLevel && copy == null && analysedFromSource(info)) {
+            ++skippedSourceTypes;
+            return true;
         }
         context.push(info);
         try {
