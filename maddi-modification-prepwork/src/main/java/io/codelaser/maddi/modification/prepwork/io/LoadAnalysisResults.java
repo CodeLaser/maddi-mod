@@ -63,6 +63,14 @@ import io.codelaser.maddi.inspection.api.integration.JavaInspector;
  *       backing field lives on the implementation, not the interface) that the reader cannot reconstruct. Resolving
  *       that disagreement is upstream immutability work; until then, dropping the individual hint keeps prep loading
  *       instead of failing every project that references such a type.</li>
+ *   <li><b>type analysed from source</b> &mdash; a preload ({@link #go(List)}: the shipped results, a
+ *       {@code --preload-analysis-results-dirs} entry) describes libraries. A primary type this run parses from
+ *       source takes no hints from it, whichever version the archive describes: the run computes its own verdicts.
+ *       Guava's corpus run loads {@code libs/guava} beside Guava's sources; with the hints written onto the
+ *       source types, certification refused hundreds of downgrades and the run ended in an AssertionError
+ *       (CodeLaser/maddi-mod#137). Counted in {@link #skippedSourceTypes()}. Restoring a run's own results
+ *       (with the caller's codec: {@link #go(Codec, List)}, {@link #goDir}, {@link #goDirTolerant},
+ *       {@code go(codec, content)}) does write onto source types.</li>
  * </ul>
  */
 public class LoadAnalysisResults {
@@ -94,11 +102,25 @@ public class LoadAnalysisResults {
         return this;
     }
 
+    /**
+     * The preload: the shipped results, a {@code --preload-analysis-results-dirs} entry ({@code ResultsLoader.load}).
+     * It describes libraries, so a primary type this run parses from source takes nothing from it (class note).
+     */
     public int go(List<String> directories) throws IOException {
         Codec codec = new PrepWorkCodec(runtime, sourceSetOfRequest).codec();
-        return go(codec, directories);
+        boolean savedLibrariesOnly = librariesOnly;
+        librariesOnly = true;
+        try {
+            return go(codec, directories);
+        } finally {
+            librariesOnly = savedLibrariesOnly;
+        }
     }
 
+    /**
+     * Every entry of {@code directories} with the caller's codec. Not the preload: a caller restoring its own run's
+     * output (TestKotlinAnalysisRoundTrip's restore codec) writes onto the types it parsed from source.
+     */
     public int go(Codec codec, List<String> directories) throws IOException {
         int countPrimaryTypes = 0;
         for (String dir : directories) {
@@ -124,6 +146,10 @@ public class LoadAnalysisResults {
                     LOGGER.warn("Path '{}' is not a directory containing analyzed annotated API files", directory);
                 }
             }
+        }
+        if (skippedSourceTypes > 0) {
+            LOGGER.info("Skipped preloaded analysis hints for {} primary types this run analyses from source",
+                    skippedSourceTypes);
         }
         if (skippedPrimaryTypes > 0) {
             LOGGER.info("Skipped analysis hints for {} primary types whose module is not on the classpath",
@@ -344,6 +370,18 @@ public class LoadAnalysisResults {
     // number of primary types whose module is not on the classpath, so their hints were skipped
     private int skippedPrimaryTypes;
 
+    // set while go(List) loads a preload: hints for a type parsed from source are skipped (class note)
+    private boolean librariesOnly;
+    private int skippedSourceTypes;
+
+    public int skippedSourceTypes() {
+        return skippedSourceTypes;
+    }
+
+    private boolean analysedFromSource(Info info) {
+        return librariesOnly && info instanceof TypeInfo typeInfo && !typeInfo.compilationUnit().externalLibrary();
+    }
+
     public int skippedPrimaryTypes() {
         return skippedPrimaryTypes;
     }
@@ -384,6 +422,11 @@ public class LoadAnalysisResults {
         }
         boolean any = false;
         for (TypeInfo copy : copies) {
+            if (analysedFromSource(copy)) {
+                ++skippedSourceTypes;
+                any = true; // on the classpath: not counted as skipped for a missing module
+                continue;
+            }
             any |= processSub(codec, new CodecImpl.ContextImpl(), jo, true, copy);
         }
         decoratedExtraCopies += copies.size() - 1;
@@ -440,6 +483,10 @@ public class LoadAnalysisResults {
                 return false;
             }
             throw new UnsupportedOperationException("Cannot find " + name);
+        }
+        if (topLevel && copy == null && analysedFromSource(info)) {
+            ++skippedSourceTypes;
+            return true;
         }
         context.push(info);
         try {

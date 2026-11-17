@@ -120,8 +120,15 @@ public class TestExposedCorpus {
         // `T::class` (19), `Number.toLong()` (17). 51 at maddi 96ad57c39 (maddi#220: unsigned types, assignments to
         // inherited or same-named properties, `x = try …`, expression callees, bound class literals, `Int::plus`,
         // @JvmName-renamed index operators, a Java enum's `entries`). 41 at maddi cd86019aa (Duration's unit properties,
-        // a bound class literal on a type-parameter value, `x = if (…) a else try …`, a Java getter with an acronym).
-        CensusRatchet.noWorseThan("exposed placeholders", summary.placeholders(), 41);
+        // a bound class literal on a type-parameter value, `x = if (…) a else try …`, a Java getter with an acronym). 33 at
+        // maddi ee97e0242 (a `try`/jump nested in an expression, hoisted; `v.size` on a smart-cast array; `in map`). 26 at
+        // maddi 4667998de (an inline-class function's mangled JVM name, a local suspend function, `Uuid.toLongs`, a
+        // class file's return-type-only overloads: `LocalDate.getMonth()`). 20 at maddi c20d566d8 (a `vararg` enum
+        // constructor, `v[k]` on a smart-cast intersection, a library `var`'s setter, `this@Class` in a member extension,
+        // an `if` with no expression form under a cast, `Array(n) { … }` as an argument). Left: 19 in Gradle build logic,
+        // and `Array(n) { … }` initializing a property. 19 at maddi 19e5fcec3 (that property: `Collections.nCopies`): all
+        // in Gradle build logic, which needs the kotlin-dsl compiler plugins (sam-with-receiver, assignment).
+        CensusRatchet.noWorseThan("exposed placeholders", summary.placeholders(), 19);
         CensusRatchet.noWorseThan("exposed elements isolated by prep", summary.prepErrors(), 0);
         CensusRatchet.noWorseThanAtLeast("exposed immutable types", summary.immutableTypes(), 250);
     }

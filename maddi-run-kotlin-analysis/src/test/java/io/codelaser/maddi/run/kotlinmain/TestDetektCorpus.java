@@ -198,8 +198,9 @@ public class TestDetektCorpus {
         // default constructors, implicit extension properties); 1,045 / 359 / 566 (context parameters); 1,083 / 360 / 586 (nested and
         // smart-cast receivers); 1,351 / 371 / 621 (member extensions); 2,256 / 434 / 864 and 667 (implicit-receiver members); 3,434 / 579 / 1,609 and 668 (class-file shells, extension
         // references); 4,701 (property references); 4,704 at 29e951ea1; 4,744 at fbe6b138a. 5 on 2026-11-17 (maddi
-        // efd63f995/bbddaca99: reified `T::class`, import aliases, `Number.toLong()`, companion supertypes).
-        CensusRatchet.noWorseThan("detekt placeholders", summary.placeholders(), 5);
+        // efd63f995/bbddaca99: reified `T::class`, import aliases, `Number.toLong()`, companion supertypes). 3 at maddi
+        // 19e5fcec3 (a library `var`'s facade setter: kotlinx.html's `id = …`; `Result.getOrNull()`): all in Gradle build logic.
+        CensusRatchet.noWorseThan("detekt placeholders", summary.placeholders(), 3);
         CensusRatchet.noWorseThan("detekt elements isolated by prep", summary.prepErrors(), 0);
         // Re-baselined deliberately, twice, each time because more code was READ, never because a lowering was
         // found wrong (gap doc §7.26, §7.27): 668 -> 667 (three transitive moves), 667 -> 665 (OutputReport and
