@@ -17,6 +17,7 @@
 
 package io.codelaser.maddi.run.kotlinmain;
 
+import io.codelaser.maddi.run.config.ShippedAnalysisResults;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -187,10 +188,7 @@ public class TestCoilJvmSlice {
     }
 
     /** As in {@link TestDetektCorpus}: without them nothing built on a library type can be concluded immutable. */
-    private static final List<String> ANNOTATED_APIS = List.of(
-            "../../maddi/maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles/jdk",
-            "../../maddi/maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles/libs/kotlin",
-            "../../maddi/maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles/libs/kotlinx");
+    private static final List<String> ANNOTATED_APIS = ShippedAnalysisResults.available(TestCoilJvmSlice.class);
 
     /**
      * Prep and the modification analysis with the annotated APIs loaded, as the other Kotlin corpora run it. The

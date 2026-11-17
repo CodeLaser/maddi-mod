@@ -51,7 +51,7 @@ public class TestGuava {
         List<String> args = new ArrayList<>(List.of(
                 "--input-configuration=" + CONFIG
                 , "--analysis-steps=modification"
-                , "--preload-analysis-results-dirs=../../maddi/maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles/jdk"
+                , "--preload-analysis-results-dirs=" + Main.PRELOAD_DEFAULT
                 // ⚠ REQUIRED SINCE THE CONFIG COVERS guava-tests (corpus commit b1a95656f). That module holds
                 // MacHashFunctionTest, which imports sun.security.jca.ProviderList/Providers -- a non-exported
                 // java.base package. Without this flag the unit is dropped and the run ends at

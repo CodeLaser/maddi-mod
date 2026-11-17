@@ -17,6 +17,7 @@
 
 package io.codelaser.maddi.run.kotlinmain;
 
+import io.codelaser.maddi.run.config.ShippedAnalysisResults;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.io.File;
@@ -68,8 +69,7 @@ public class TestSealedErrorHierarchy {
             class Named(val name: String) : Counter()
             """;
 
-    private static final List<String> JDK_ANNOTATED_APIS = List.of(
-            "../../maddi/maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles/jdk");
+    private static final List<String> JDK_ANNOTATED_APIS = ShippedAnalysisResults.available(TestSealedErrorHierarchy.class);
 
     @Test
     public void aFinalFieldsParentCapsItsSubclassesAndAMutableOneSinksThem(@TempDir Path tmp) throws Exception {

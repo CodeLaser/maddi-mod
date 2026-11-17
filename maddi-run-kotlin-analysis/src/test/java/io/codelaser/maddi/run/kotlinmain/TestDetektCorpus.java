@@ -17,6 +17,7 @@
 
 package io.codelaser.maddi.run.kotlinmain;
 
+import io.codelaser.maddi.run.config.ShippedAnalysisResults;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -112,14 +113,11 @@ public class TestDetektCorpus {
     /**
      * The <b>annotated APIs for the JDK</b>. Without them every library type is an unknown, and the analysis
      * cannot conclude anything positive about a type built on one — which is exactly what happened the first
-     * time this ran: {@code @FinalFields=1320, @Mutable=428} and not one immutable type. The Java corpus tests
-     * pass the same directory ({@code TestFernflower} et al.).
+     * time this ran: {@code @FinalFields=1320, @Mutable=428} and not one immutable type. Since #137 these are the
+     * shipped results a default run loads (the JDK's, and libs.jar's, Kotlin and kotlinx among them), as in the Java
+     * corpus tests ({@code TestFernflower} et al.).
      */
-    private static final List<String> JDK_ANNOTATED_APIS = List.of(
-            "../../maddi/maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles/jdk",
-            // and the Kotlin ones, which a Kotlin corpus needs for the same reason
-            "../../maddi/maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles/libs/kotlin",
-            "../../maddi/maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles/libs/kotlinx");
+    private static final List<String> JDK_ANNOTATED_APIS = ShippedAnalysisResults.available(TestDetektCorpus.class);
 
     /**
      * Prep <b>and</b> the iterating modification/immutability analysis, over the whole project — the first time

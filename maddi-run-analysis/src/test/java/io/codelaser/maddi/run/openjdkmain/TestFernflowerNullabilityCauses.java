@@ -1,5 +1,6 @@
 package io.codelaser.maddi.run.openjdkmain;
 
+import io.codelaser.maddi.run.config.ShippedAnalysisResults;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -48,8 +49,6 @@ import io.codelaser.maddi.run.j2k.JavaToKotlinRatchet;
  */
 @Tag("slow")
 public class TestFernflowerNullabilityCauses {
-    private static final String JDK_HINTS =
-            "../../maddi/maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles/jdk";
 
     @BeforeAll
     public static void beforeAll() {
@@ -76,7 +75,9 @@ public class TestFernflowerNullabilityCauses {
         AnalysisEngineImpl engine = new AnalysisEngineImpl();
         long parseMs = (System.nanoTime() - parseStart) / 1_000_000;
         long prepStart = System.nanoTime();
-        engine.resultsLoader(javaInspector.runtime(), javaInspector.mainSources()).load(List.of(JDK_HINTS));
+        // what a default run loads: the shipped results, the JDK's and libs.jar's (CodeLaser/maddi-mod#137)
+        engine.resultsLoader(javaInspector.runtime(), javaInspector.mainSources())
+                .load(ShippedAnalysisResults.available(Main.class));
         var parseResult = corpus.summary().parseResult();
         PrepOutcome prep = engine.prep(new PrepRequest(javaInspector.runtime(), Set.copyOf(parseResult.primaryTypes()),
                 parseResult.sourceSetToModuleInfoMap().values(), _ -> false, true, true));

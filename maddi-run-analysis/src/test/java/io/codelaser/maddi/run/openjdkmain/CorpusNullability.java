@@ -1,5 +1,6 @@
 package io.codelaser.maddi.run.openjdkmain;
 
+import io.codelaser.maddi.run.config.ShippedAnalysisResults;
 import java.io.IOException;
 import java.util.Collection;
 import java.util.List;
@@ -37,8 +38,6 @@ import io.codelaser.maddi.run.j2k.JavaToKotlinRatchet;
  */
 final class CorpusNullability {
 
-    private static final String JDK_HINTS =
-            "../../maddi/maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles/jdk";
 
     private CorpusNullability() {
     }
@@ -63,7 +62,9 @@ final class CorpusNullability {
                                 List<Policy> policies) throws IOException {
         JavaInspector javaInspector = corpus.javaInspector();
         AnalysisEngineImpl engine = new AnalysisEngineImpl();
-        engine.resultsLoader(javaInspector.runtime(), javaInspector.mainSources()).load(List.of(JDK_HINTS));
+        // what a default run loads: the shipped results, the JDK's and libs.jar's (CodeLaser/maddi-mod#137)
+        engine.resultsLoader(javaInspector.runtime(), javaInspector.mainSources())
+                .load(ShippedAnalysisResults.available(Main.class));
         var parseResult = corpus.summary().parseResult();
         PrepOutcome prep = engine.prep(new PrepRequest(javaInspector.runtime(), Set.copyOf(types),
                 parseResult.sourceSetToModuleInfoMap().values(), _ -> false, true, true));

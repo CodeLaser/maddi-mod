@@ -46,7 +46,7 @@ public class TestTimefoldSolver {
         int exitValue = Main.execute(new String[]{
                 "--input-configuration=" + Corpora.oss("timefold-solver").config()
                 , "--analysis-steps=modification"
-                , "--preload-analysis-results-dirs=../../maddi/maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles/jdk"
+                , "--preload-analysis-results-dirs=" + Main.PRELOAD_DEFAULT
         });
         assertEquals(Main.EXIT_OK, exitValue);
     }
@@ -58,7 +58,7 @@ public class TestTimefoldSolver {
         int exitValue = Main.execute(new String[]{
                 "--input-configuration=" + Corpora.ossRoot().resolve("timefold-solver/inputConfiguration2.json")
                 , "--analysis-steps=modification"
-                , "--preload-analysis-results-dirs=../../maddi/maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles/jdk"
+                , "--preload-analysis-results-dirs=" + Main.PRELOAD_DEFAULT
         });
         assertEquals(Main.EXIT_OK, exitValue);
     }

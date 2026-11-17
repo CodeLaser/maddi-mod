@@ -1,5 +1,6 @@
 package io.codelaser.maddi.run.openjdkmain;
 
+import io.codelaser.maddi.run.config.ShippedAnalysisResults;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -173,8 +174,6 @@ public class TestNullabilityOracleGuava {
         assertEquals(allNullable.count(Outcome.NOISE), allNonNull.count(Outcome.AGREE));
     }
 
-    private static final String JDK_HINTS =
-            "../../maddi/maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles/jdk";
 
     /**
      * The inference (M3) against the reference: the modification analysis runs as the CLI runs it (JDK hints, prep,
@@ -187,7 +186,9 @@ public class TestNullabilityOracleGuava {
         Parsed parsed = parse();
         JavaInspector javaInspector = parsed.javaInspector();
         AnalysisEngineImpl engine = new AnalysisEngineImpl();
-        engine.resultsLoader(javaInspector.runtime(), javaInspector.mainSources()).load(List.of(JDK_HINTS));
+        // what a default run loads: the shipped results, the JDK's and libs.jar's (CodeLaser/maddi-mod#137)
+        engine.resultsLoader(javaInspector.runtime(), javaInspector.mainSources())
+                .load(ShippedAnalysisResults.available(Main.class));
         var parseResult = parsed.summary().parseResult();
         PrepOutcome prep = engine.prep(new PrepRequest(javaInspector.runtime(), Set.copyOf(parseResult.primaryTypes()),
                 parseResult.sourceSetToModuleInfoMap().values(), _ -> false, true, true));
