@@ -45,7 +45,7 @@ public class TestFernflower {
         int exitValue = Main.execute(new String[]{
                 "--input-configuration=" + Corpora.oss("fernflower").config()
                 , "--analysis-steps=modification"
-                , "--preload-analysis-results-dirs=../../maddi/maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles/jdk"
+                , "--preload-analysis-results-dirs=" + Main.PRELOAD_DEFAULT
         });
         assertEquals(Main.EXIT_OK, exitValue);
     }

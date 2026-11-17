@@ -53,6 +53,8 @@ dependencies {
     testImplementation(project(":maddi-modification-link"))
     testImplementation("io.codelaser:maddi-run-openjdk:$maddiVersion")
     testImplementation("io.codelaser:maddi-run-config:$maddiVersion")
+    // the shipped analysis results (openjdk.jar, libs.jar): the corpus tests preload what a default run loads (#137)
+    testRuntimeOnly("io.codelaser:maddi-aapi-archive:$maddiVersion")
     testImplementation("io.codelaser:maddi-inspection-api:$maddiVersion")
     testImplementation("io.codelaser:maddi-inspection-resource:$maddiVersion")
     testImplementation("io.codelaser:maddi-inspection-mixed:$maddiVersion")

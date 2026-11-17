@@ -44,7 +44,7 @@ public class TestActiveMQBroker {
         int exitValue = Main.execute(new String[]{
                 "--input-configuration=" + CONFIG
                 , "--analysis-steps=modification"
-                , "--preload-analysis-results-dirs=../../maddi/maddi-aapi-archive/src/main/resources/io/codelaser/maddi/aapi/archive/analyzedPackageFiles/jdk"
+                , "--preload-analysis-results-dirs=" + Main.PRELOAD_DEFAULT
         });
         assertEquals(Main.EXIT_OK, exitValue);
     }
