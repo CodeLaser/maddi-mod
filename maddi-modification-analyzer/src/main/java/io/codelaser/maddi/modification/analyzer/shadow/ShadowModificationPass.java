@@ -178,6 +178,13 @@ public class ShadowModificationPass {
     private final Map<Object, Object> cause = new HashMap<>();
     private final Map<String, Integer> missingArgLinkAnalyzedCallees = new TreeMap<>();
     private final AnalysisHelper analysisHelper = new AnalysisHelper();
+    // CodeLaser/maddi-mod#137: elements whose verdict oscillated across rounds, settled at FALSE by the caller; an
+    // unreached settled element keeps its FALSE instead of being upgraded again
+    private Set<Info> settledFalse = Set.of();
+
+    public void settleFalse(Set<Info> settled) {
+        this.settledFalse = settled;
+    }
     private int immutableGuardedDivergences;
     // §10.1 invariant support for the cutover writer (PLAN §14 P2.3): nodes whose in-edge frontier
     // could NOT be fully constructed. "Unreached" is only evidence of "unmodified" when every
@@ -1932,6 +1939,10 @@ public class ShadowModificationPass {
                 analysis.overwrite(property, ValueImpl.BoolImpl.TRUE);
                 return REVERSE_UPGRADED;
             }
+            return NO_CHANGE;
+        }
+        if (!reached && current != null && current.isFalse() && settledFalse.contains(element)) {
+            // #137: settled after a period-2 oscillation; the conservative value stands
             return NO_CHANGE;
         }
         if (reached) {
