@@ -1034,6 +1034,15 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                         // same index. UNMODIFIED_FIELD has no such case: see writeVerdicts' javadoc.
                         var counts = pass.writeVerdicts(analysisOrder, report, contracted(singleIterationAnalyzer));
                         TolerantWrite.freezeModificationProperties();
+                        // MODREACH_ROUNDLOG (presence-only): each round's write counts and changed elements, with the
+                        // value now written; tells a long propagation chain from an oscillation (#133)
+                        if (System.getenv("MODREACH_ROUNDLOG") != null) {
+                            int logRound = modReachRounds;
+                            System.out.println("MODREACH_ROUND " + logRound + " " + counts.summary());
+                            counts.changed().stream().map(c -> "MODREACH_ROUND " + logRound + " changed "
+                                                               + roundLogValue(c) + " " + c.fullyQualifiedName())
+                                    .sorted().forEach(System.out::println);
+                        }
                         if (modReachRounds == MODREACH_MAX_ROUNDS && !counts.changed().isEmpty()) {
                             // the re-derivation below runs, but no round checks it: a frozen verdict may now
                             // disagree with the summary it re-derives (#133)
@@ -1359,6 +1368,18 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
      The MODREACH cutover's one exception (see ShadowModificationPass.writeVerdicts): a bodiless method, or its
      parameter, whose computed value an authored contract decides.
      */
+    private static String roundLogValue(Info info) {
+        io.codelaser.maddi.cst.api.analysis.Property property = switch (info) {
+            case MethodInfo _ -> PropertyImpl.NON_MODIFYING_METHOD;
+            case ParameterInfo _ -> PropertyImpl.UNMODIFIED_PARAMETER;
+            case FieldInfo _ -> PropertyImpl.UNMODIFIED_FIELD;
+            default -> null;
+        };
+        if (property == null) return "?";
+        Object v = info.analysis().getOrNull(property, ValueImpl.BoolImpl.class);
+        return property.key() + "=" + v;
+    }
+
     private static Predicate<Info> contracted(SingleIterationAnalyzer singleIterationAnalyzer) {
         return singleIterationAnalyzer instanceof SingleIterationAnalyzerImpl s
                 ? info -> switch (info) {
