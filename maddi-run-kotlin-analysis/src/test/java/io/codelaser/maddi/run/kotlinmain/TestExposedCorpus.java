@@ -120,8 +120,9 @@ public class TestExposedCorpus {
         // `T::class` (19), `Number.toLong()` (17). 51 at maddi 96ad57c39 (maddi#220: unsigned types, assignments to
         // inherited or same-named properties, `x = try …`, expression callees, bound class literals, `Int::plus`,
         // @JvmName-renamed index operators, a Java enum's `entries`). 41 at maddi cd86019aa (Duration's unit properties,
-        // a bound class literal on a type-parameter value, `x = if (…) a else try …`, a Java getter with an acronym).
-        CensusRatchet.noWorseThan("exposed placeholders", summary.placeholders(), 41);
+        // a bound class literal on a type-parameter value, `x = if (…) a else try …`, a Java getter with an acronym). 33 at
+        // maddi ee97e0242 (a `try`/jump nested in an expression, hoisted; `v.size` on a smart-cast array; `in map`).
+        CensusRatchet.noWorseThan("exposed placeholders", summary.placeholders(), 33);
         CensusRatchet.noWorseThan("exposed elements isolated by prep", summary.prepErrors(), 0);
         CensusRatchet.noWorseThanAtLeast("exposed immutable types", summary.immutableTypes(), 250);
     }
