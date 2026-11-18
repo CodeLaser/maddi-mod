@@ -128,11 +128,13 @@ public class TestConsumers extends CommonTest {
         VariableInfo rv = vd3.variableInfo("a.b.C.VariableData.variableInfoStream2()");
         // CodeLaser/maddi-mod#115: this link-only harness has no analysis of the interface method variableInfo(), read
         // as modifying, so map's lambda modifies its 'e' and with it the elements of this.map; the analyzer decides it
-        // non-modifying (TestLazyStageElementModification.viaInterface). The modification reshapes the links
-        assertEquals("variableInfoStream2∩0:e,variableInfoStream2∩0:e,variableInfoStream2∩this.map.§$$s,variableInfoStream2.§$s≤this.map",
+        // non-modifying (TestLazyStageElementModification.viaInterface). A modification of the elements only leaves
+        // the containment intact (#133: ⊆/⊇ become ~ on a structural modification only), the same shape as the
+        // one-expression variableInfoStream below
+        assertEquals("variableInfoStream2∩0:e,variableInfoStream2∩0:e,variableInfoStream2.§$s≤this.map.§$$s",
                 rv.linkedVariables().toString());
 
-        assertEquals("[] --> variableInfoStream2∩this.map*.§$$s,variableInfoStream2.§$s≤this.map*",
+        assertEquals("[] --> variableInfoStream2.§$s≤this.map*.§$$s",
                 variableInfoStream2.analysis().getOrNull(METHOD_LINKS, MethodLinkedVariablesImpl.class).toString());
 
         MethodInfo variableInfoStream = vd.findUniqueMethod("variableInfoStream", 0);

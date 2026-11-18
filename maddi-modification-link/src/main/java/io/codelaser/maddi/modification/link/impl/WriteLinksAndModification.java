@@ -73,6 +73,7 @@ class WriteLinksAndModification {
     suppression, but the summary reads them complete there — see the NORL guard).
      */
     private static final boolean NO_REUSE = Gate.isSet("NOREUSE");
+    private static final boolean NO_STRUCTURAL_FLIP = Gate.isSet("NOSTRUCTURALFLIP");
     private final Map<Variable, Links> lastExtracted = new HashMap<>();
 
     static class ReuseContext {
@@ -639,13 +640,14 @@ class WriteLinksAndModification {
         // #25: the structural twin, the same decision over the structural view of the evaluation and without the
         // element link (∋): a variable linked to a modified one only as the container of that element is modified in
         // its hidden content, not itself. Never false where unmodified is true.
+        boolean structurallyModifiedInEval = !unmodified
+                && !structurallyModifiedInThisEvaluation.isEmpty()
+                && !assignedInThisStatement(statement, vi)
+                && (structurallyModifiedInThisEvaluation.containsKey(variable)
+                    || !notLinkedToModifiedVirtualModification(variable, structurallyModifiedInThisEvaluation)
+                    || !notLinkedToModified(builder, structurallyModifiedInThisEvaluation, true));
         boolean structurallyUnmodified = unmodified
-                || !previouslyStructurallyModified.contains(variable)
-                   && !(!structurallyModifiedInThisEvaluation.isEmpty()
-                        && !assignedInThisStatement(statement, vi)
-                        && (structurallyModifiedInThisEvaluation.containsKey(variable)
-                            || !notLinkedToModifiedVirtualModification(variable, structurallyModifiedInThisEvaluation)
-                            || !notLinkedToModified(builder, structurallyModifiedInThisEvaluation, true)));
+                || !previouslyStructurallyModified.contains(variable) && !structurallyModifiedInEval;
         builder.removeIf(WriteLinksAndModification::notInLinkedVariables);
 
         if (variable instanceof This) {
@@ -662,7 +664,13 @@ class WriteLinksAndModification {
         // engine's behavior, needed there because its per-statement graph rebuild resurrected ⊆/⊇) would
         // permanently destroy containment knowledge that this evaluation did not invalidate.
         // Gate NOFLIPSAME=1 restores the old re-flip.
-        if (!unmodified && (modifiedInEval || Gate.isSet("NOFLIPSAME"))) {
+        // #133: only a STRUCTURAL modification can change which elements a container holds; one of its hidden content
+        // only (its elements modified, the deep-only verdict) leaves ⊆/⊇ true. Flipping on it made a varargs summary
+        // 'rv.l.§$ss ⊆ 0:xs.§$ss' read '~' once a later round marked xs deep-modified, which lost the per-element
+        // links at the call site and with them the modification that had marked xs (a period-2 MODREACH cycle,
+        // timefold's AbstractConstraintStreamTest.assertMatch). Gate NOSTRUCTURALFLIP restores the deep trigger.
+        boolean flipTrigger = NO_STRUCTURAL_FLIP ? modifiedInEval : structurallyModifiedInEval;
+        if (!unmodified && (flipTrigger || Gate.isSet("NOFLIPSAME"))) {
             // ⊆, ⊇ become ~ after a modification
             builder.linkSet().forEach(link -> {
                 if (link.linkNature() == IS_SUBSET_OF || link.linkNature() == IS_SUPERSET_OF) {
