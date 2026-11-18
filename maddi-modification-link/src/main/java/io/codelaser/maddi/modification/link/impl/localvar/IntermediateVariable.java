@@ -39,6 +39,13 @@ public class IntermediateVariable extends LocalVariableImpl implements LocalVari
         return new IntermediateVariable(LABEL_RETURN_VALUE + index, parameterizedType, assignmentExpression);
     }
 
+    // read back from an analysis-results file (LinkCodec): the full name, prefix included
+    public static IntermediateVariable named(Runtime runtime, String simpleName, ParameterizedType parameterizedType) {
+        assert simpleName.startsWith(PREFIX) : simpleName;
+        return new IntermediateVariable(simpleName.substring(PREFIX.length()), parameterizedType,
+                runtime.newEmptyExpression());
+    }
+
     public static IntermediateVariable newObject(Runtime runtime, int index, ParameterizedType parameterizedType) {
         return new IntermediateVariable(LABEL_NEW_OBJECT + index, parameterizedType, runtime.newEmptyExpression());
     }

@@ -257,11 +257,21 @@ public class LinkCodec {
                         d.definition() == null && Objects.equals(owner, d.owner()) ? new MarkerDef(owner, written) : d);
                 return definition;
             }
-            // SharedVariable/IntermediateVariable have no codec branch by design: they are kept out of
-            // summaries by acceptForLinkedVariables filtering. If one leaks here, the fallback would
-            // silently encode it as an ordinary local — fail at the cause instead.
+            /*
+             An intermediate kept INSIDE a marker's definition is part of that definition: a constructor reference's
+             functional interface ('ArrayList::new') returns its synthetic '$__rv' (ExpressionVisitor.methodReference),
+             and its links are written from it. Kept out, every summary that carries such a marker was refused by the
+             writer (hibernate-core: 399 methodLinks, Hibernate.bag() and friends), and a restored run lacked what the
+             cold one had. Written by name and type: an intermediate is equal by name.
+             */
+            if (variable instanceof IntermediateVariable iv) {
+                return encodeList(context, List.of(encodeString(context, "I"), encodeString(context, iv.simpleName()),
+                        encodeType(context, iv.parameterizedType())));
+            }
+            // a SharedVariable is a link graph's group representative; it has no codec branch by design, it never
+            // belongs in a summary. If one leaks here, the fallback would silently encode it as an ordinary local —
+            // fail at the cause instead.
             assert !(variable instanceof SharedVariable)
-                   && !(variable instanceof IntermediateVariable)
                     : "engine-internal variable leaked into persistence: " + variable;
             return super.encodeVariable(context, variable);
         }
@@ -370,6 +380,10 @@ public class LinkCodec {
                         : decodeMethodInfo(context, list.get(1));
                 return new ObjectCreationVariableImpl(methodInfo, decodeString(context, list.get(2)),
                         decodeType(context, list.get(3)));
+            }
+            if ("I".equals(s)) {
+                return IntermediateVariable.named(runtime, decodeString(context, list.get(1)),
+                        decodeType(context, list.get(2)));
             }
             if ("m".equals(s)) {
                 String name = decodeString(context, list.get(1));
