@@ -1099,6 +1099,8 @@ public record ExpressionVisitor(Runtime runtime,
      Gate RECURSIONRETURNSUMMARIES while it is measured.
      */
     static final boolean RECURSION_RETURN_SUMMARIES = System.getenv("RECURSIONRETURNSUMMARIES") != null;
+    // diagnostics: one line per bounded summary handed out (size, caller, callee, return type, links)
+    static final boolean RECURSION_RETURN_DUMP = System.getenv("RECURSIONRETURNDUMP") != null;
 
     private static MethodLinkedVariables returnLinksOnly(MethodInfo methodInfo, MethodLinkedVariables full) {
         Links ofReturn = full == null ? LinksImpl.EMPTY : full.ofReturnValue();
@@ -1137,7 +1139,17 @@ public record ExpressionVisitor(Runtime runtime,
         }
         // worklist edge discovery: currentMethod's links are being computed FROM methodInfo's summary
         linkComputer.recordSummaryConsumption(currentMethod, methodInfo);
-        if (returnLinksOnly) return returnLinksOnly(methodInfo, summaryOf(methodInfo));
+        if (returnLinksOnly) {
+            MethodLinkedVariables bounded = returnLinksOnly(methodInfo, summaryOf(methodInfo));
+            if (RECURSION_RETURN_DUMP) {
+                int n = 0;
+                for (Link ignored : bounded.ofReturnValue()) n++;
+                System.out.println("RRS " + n + '\t' + currentMethod.fullyQualifiedName() + '\t'
+                                   + methodInfo.fullyQualifiedName() + '\t' + methodInfo.returnType().detailedString()
+                                   + '\t' + bounded.ofReturnValue());
+            }
+            return bounded;
+        }
         return summaryOf(methodInfo);
     }
 
