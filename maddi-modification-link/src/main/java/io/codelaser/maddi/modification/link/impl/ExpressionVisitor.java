@@ -1096,9 +1096,11 @@ public record ExpressionVisitor(Runtime runtime,
      The bounded summary keeps the callee's return-value links only: no parameter links, no modified set. Those two
      are what made RECURSIONSOURCESUMMARIES costly and turned a read-only fernflower cycle modifying. The callee is
      not recursive itself (that case keeps the empty summary), so computing it cannot re-enter the cycle.
-     Gate RECURSIONRETURNSUMMARIES while it is measured.
+     On since 2026-11-18. Fernflower: contradicted 2a claims 26 -> 23 (cleanUpUnreachableBlocks,
+     simplifyStackVarsStatement, lowClosures cleared; four more lose their deep contradiction), verdict run +11%.
+     Guava: run +26%, TypeToken.isSubtypeOf over the work ceiling. Gate NORECURSIONRETURNSUMMARIES: the empty summary.
      */
-    static final boolean RECURSION_RETURN_SUMMARIES = System.getenv("RECURSIONRETURNSUMMARIES") != null;
+    static final boolean RECURSION_RETURN_SUMMARIES = System.getenv("NORECURSIONRETURNSUMMARIES") == null;
     // diagnostics: one line per bounded summary handed out (size, caller, callee, return type, links)
     static final boolean RECURSION_RETURN_DUMP = System.getenv("RECURSIONRETURNDUMP") != null;
 
