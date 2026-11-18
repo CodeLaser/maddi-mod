@@ -1089,6 +1089,23 @@ public record ExpressionVisitor(Runtime runtime,
      */
     static final boolean NO_RECURSION_ABSTRACT = System.getenv("NORECURSIONABSTRACT") != null;
 
+    /*
+     #127, case 1: a recursive walker reads its argument through a source callee with a body
+     ('for (obj : stat.getExprentsOrSequentialObjects())' in fernflower's setVersionsToNull). With the empty summary
+     what the callee returns is linked to nothing, so the walk's modifications of it do not reach the parameter.
+     The bounded summary keeps the callee's return-value links only: no parameter links, no modified set. Those two
+     are what made RECURSIONSOURCESUMMARIES costly and turned a read-only fernflower cycle modifying. The callee is
+     not recursive itself (that case keeps the empty summary), so computing it cannot re-enter the cycle.
+     Gate RECURSIONRETURNSUMMARIES while it is measured.
+     */
+    static final boolean RECURSION_RETURN_SUMMARIES = System.getenv("RECURSIONRETURNSUMMARIES") != null;
+
+    private static MethodLinkedVariables returnLinksOnly(MethodInfo methodInfo, MethodLinkedVariables full) {
+        Links ofReturn = full == null ? LinksImpl.EMPTY : full.ofReturnValue();
+        return new MethodLinkedVariablesImpl(ofReturn,
+                methodInfo.parameters().stream().map(_ -> LinksImpl.EMPTY).toList(), Set.of());
+    }
+
     private static boolean withoutBody(MethodInfo methodInfo) {
         return methodInfo.typeInfo().compilationUnit().externalLibrary()
                || !NO_RECURSION_ABSTRACT && methodInfo.isAbstract();
@@ -1109,15 +1126,22 @@ public record ExpressionVisitor(Runtime runtime,
             MethodLinkedVariables self = linkComputer.selfSummary(methodInfo);
             if (self != null) return self;
         }
+        boolean returnLinksOnly = false;
         if (methodInfo.equals(currentMethod)
             || recursive(currentMethod) && (NO_NARROW_RECURSION || recursive(methodInfo)
-                                            || !RECURSION_SOURCE_SUMMARIES && !withoutBody(methodInfo))) {
+                                            || !RECURSION_SOURCE_SUMMARIES && !withoutBody(methodInfo)
+                                               && !(returnLinksOnly = RECURSION_RETURN_SUMMARIES))) {
             // direct recursion, lambda to enclosing method
             return new MethodLinkedVariablesImpl(LinksImpl.EMPTY,
                     methodInfo.parameters().stream().map(_ -> LinksImpl.EMPTY).toList(), Set.of());
         }
         // worklist edge discovery: currentMethod's links are being computed FROM methodInfo's summary
         linkComputer.recordSummaryConsumption(currentMethod, methodInfo);
+        if (returnLinksOnly) return returnLinksOnly(methodInfo, summaryOf(methodInfo));
+        return summaryOf(methodInfo);
+    }
+
+    private MethodLinkedVariables summaryOf(MethodInfo methodInfo) {
         RecursionPrevention.How how = recursionPrevention.contains(methodInfo);
         return switch (how) {
             case GET -> methodInfo.analysis().getOrNull(METHOD_LINKS, MethodLinkedVariablesImpl.class);
