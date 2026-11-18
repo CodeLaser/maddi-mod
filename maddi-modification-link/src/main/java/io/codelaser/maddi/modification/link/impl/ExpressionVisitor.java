@@ -1102,8 +1102,20 @@ public record ExpressionVisitor(Runtime runtime,
     // diagnostics: one line per bounded summary handed out (size, caller, callee, return type, links)
     static final boolean RECURSION_RETURN_DUMP = System.getenv("RECURSIONRETURNDUMP") != null;
 
+    /*
+     The bound: a callee handing back more return links than this gets the empty summary, as before. Measured with
+     RECURSIONRETURNDUMP (2026-11-18): fernflower's case-1 callees hand back 1 to 6 (getStats 1,
+     getExprentsOrSequentialObjects 5, getMinContinueClosure 6); Guava's TreeMultiset.AvlNode helpers 33 to 86
+     (rebalance, addLeftChild, addRightChild), and those took four recursive AvlNode methods over the work ceiling.
+     */
+    static final int RECURSION_RETURN_CAP = Integer.parseInt(Objects.requireNonNullElse(
+            System.getenv("RECURSIONRETURNCAP"), "8"));
+
     private static MethodLinkedVariables returnLinksOnly(MethodInfo methodInfo, MethodLinkedVariables full) {
         Links ofReturn = full == null ? LinksImpl.EMPTY : full.ofReturnValue();
+        int n = 0;
+        for (Link ignored : ofReturn) n++;
+        if (n > RECURSION_RETURN_CAP) ofReturn = LinksImpl.EMPTY;
         return new MethodLinkedVariablesImpl(ofReturn,
                 methodInfo.parameters().stream().map(_ -> LinksImpl.EMPTY).toList(), Set.of());
     }
