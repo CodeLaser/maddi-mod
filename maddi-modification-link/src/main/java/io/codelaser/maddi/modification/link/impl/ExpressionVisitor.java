@@ -1080,6 +1080,20 @@ public record ExpressionVisitor(Runtime runtime,
      */
     static final boolean RECURSION_SOURCE_SUMMARIES = System.getenv("RECURSIONSOURCESUMMARIES") != null;
 
+    /*
+     #127: an abstract method of the sources has no body either. Its summary is the shallow one, as cheap as a
+     library method's, and it carries what its implementations do (their verdicts' union). fernflower's recursive
+     collector 'Exprent.getAllExprents(boolean, List)' calls the abstract 'getAllExprents(List)', which every
+     subclass implements by adding its subexpressions: with the empty summary the list was independent of the
+     expression, and so was what 'getAllExprents(true)' returns. Gate NORECURSIONABSTRACT: library callees only.
+     */
+    static final boolean NO_RECURSION_ABSTRACT = System.getenv("NORECURSIONABSTRACT") != null;
+
+    private static boolean withoutBody(MethodInfo methodInfo) {
+        return methodInfo.typeInfo().compilationUnit().externalLibrary()
+               || !NO_RECURSION_ABSTRACT && methodInfo.isAbstract();
+    }
+
     private static boolean recursive(MethodInfo methodInfo) {
         return methodInfo.analysis().getOrDefault(PropertyImpl.RECURSIVE_METHOD, ValueImpl.BoolImpl.FALSE).isTrue();
     }
@@ -1097,8 +1111,7 @@ public record ExpressionVisitor(Runtime runtime,
         }
         if (methodInfo.equals(currentMethod)
             || recursive(currentMethod) && (NO_NARROW_RECURSION || recursive(methodInfo)
-                                            || !RECURSION_SOURCE_SUMMARIES
-                                               && !methodInfo.typeInfo().compilationUnit().externalLibrary())) {
+                                            || !RECURSION_SOURCE_SUMMARIES && !withoutBody(methodInfo))) {
             // direct recursion, lambda to enclosing method
             return new MethodLinkedVariablesImpl(LinksImpl.EMPTY,
                     methodInfo.parameters().stream().map(_ -> LinksImpl.EMPTY).toList(), Set.of());
