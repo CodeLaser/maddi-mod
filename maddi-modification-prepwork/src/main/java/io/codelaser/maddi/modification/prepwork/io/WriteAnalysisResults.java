@@ -266,8 +266,13 @@ public class WriteAnalysisResults {
             codec.restoreEncodingState(state);
             ++skippedValues;
             if (encodeFailureListener != null) encodeFailureListener.accept(pv.property().key(), e);
-            LOGGER.warn("Skipping unencodable value for property {} ({}): {}", pv.property().key(),
-                    pv.value().getClass().getSimpleName(), e.toString());
+            // the element and the value too: the primary type alone left a refused value (maddi-mod's "$__sv"
+            // leaks on hibernate-core) without a reproducer
+            Object element = context.isEmpty() ? null : context.peek(0);
+            String value = String.valueOf(pv.value());
+            LOGGER.warn("Skipping unencodable value for property {} ({}) of {}: {}; value {}", pv.property().key(),
+                    pv.value().getClass().getSimpleName(), element, e.toString(),
+                    value.length() > 2000 ? value.substring(0, 2000) + "..." : value);
             return null;
         }
     }
