@@ -33,7 +33,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 /**
  * CodeLaser/maddi-mod#113 (shape 2, fernflower's ClearStructHelper.clearStatements), the local half of #26: an object
  * put into a local collection and modified after it comes out again is modified. The engine knows only that both are
- * elements of the same hidden content ('0:root ∈ l.§$s', 's ∈ l.§$s'), so the verdict is deep, not structural.
+ * elements of the same hidden content ('0:root ∈ l.§$s', 's ∈ l.§$s'). Since #130 the verdict follows the element's:
+ * clearTemp() writes the element's own field, so root, which may be that element, is structurally modified too.
  */
 public class TestCoElementModification extends CommonTest {
 
@@ -48,6 +49,7 @@ public class TestCoElementModification extends CommonTest {
                     public List<St> getStats() { return stats; }
                     public void clearTemp() { mark = 0; }
                     public int read() { return mark; }
+                    public List<St> all() { return new ArrayList<>(stats); }
                 }
                 static void viaList(St root) {
                     List<St> l = new ArrayList<>();
@@ -77,6 +79,12 @@ public class TestCoElementModification extends CommonTest {
                     St s = l.get(0);
                     return s.read();
                 }
+                // fernflower's setExprentVersionsToNull: the parts collected, the parameter added, every one written
+                static void collected(St root) {
+                    List<St> lst = root.all();
+                    lst.add(root);
+                    for (St s : lst) s.clearTemp();
+                }
                 static void otherList(St root) {
                     List<St> l = new ArrayList<>();
                     List<St> k = new ArrayList<>();
@@ -105,11 +113,13 @@ public class TestCoElementModification extends CommonTest {
         List<Info> ao = prepWork(x);
         new IteratingAnalyzerImpl(javaInspector, new IteratingAnalyzerImpl.ConfigurationBuilder()
                 .setMaxIterations(10).setModificationViaReachability(reach).build()).analyze(ao);
-        assertEquals("false/true", p(x, "viaList"));
-        assertEquals("false/true", p(x, "viaStack"));
+        // #130: clearTemp() writes the element's own field, and the element may be root: structural too
+        assertEquals("false/false", p(x, "viaList"));
+        assertEquals("false/false", p(x, "viaStack"));
         assertEquals("true/true", p(x, "addedAfter"));
         assertEquals("true/true", p(x, "readOnly"));
         assertEquals("true/true", p(x, "otherList"));
+        assertEquals("false/false", p(x, "collected"));
     }
 
     private static String p(TypeInfo typeInfo, String name) {

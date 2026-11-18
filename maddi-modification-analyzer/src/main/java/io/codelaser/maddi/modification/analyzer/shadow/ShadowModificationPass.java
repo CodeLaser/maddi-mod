@@ -1414,7 +1414,16 @@ public class ShadowModificationPass {
                                         .forEach(l -> {
                                             Variable container = Util.firstRealVariable(l.to());
                                             if (container != null) containers.add(container);
-                                            if (!NO_CO_ELEMENT) coElements(vd, l.to(), containers);
+                                            if (!NO_CO_ELEMENT) {
+                                                if (NO_STRUCTURAL_CO_ELEMENT) coElements(vd, l.to(), containers);
+                                                else {
+                                                    // #130: the element may be the co-element itself; in the
+                                                    // element's own mode, structural when it is
+                                                    List<Variable> co = new ArrayList<>();
+                                                    coElements(vd, l.to(), co);
+                                                    co.forEach(c -> push(todo, c));
+                                                }
+                                            }
                                             // #117: the element may be the object of an accessible field of an
                                             // owner of the container; that owner, in the element's own mode
                                             Variable aliasOwner = Util.hiddenAliasOwner(l.to(), v);
@@ -1507,6 +1516,8 @@ public class ShadowModificationPass {
      The container's own links name them: 'l.§$s ∋ 0:root' beside 'l.§$s ∋ s'. Gate NOCOELEMENT.
      */
     private static final boolean NO_CO_ELEMENT = Gate.isSet("NOCOELEMENT");
+    // #130: the co-element in the modified element's own mode (WriteLinksAndModification.structurallyModifiedElementOf)
+    private static final boolean NO_STRUCTURAL_CO_ELEMENT = Gate.isSet("NOSTRUCTURALCOELEMENT");
     private static final boolean NO_OBJECT_GRAPH_MOD = Gate.isSet("NOOBJECTGRAPHMOD");
     private static final boolean NO_VIEW_ELEMENT_MOD = Gate.isSet("NOVIEWELEMENTMOD");
     private static final boolean NO_WHOLE_CONTAINER = Gate.isSet("NOWHOLECONTAINER");
