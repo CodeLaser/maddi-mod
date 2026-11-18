@@ -36,12 +36,29 @@ public class TestExpandRepInIndex extends CommonTest {
         rep.variables().add(k);
         DependentVariable dv = runtime.newDependentVariable(runtime.newVariableExpression(namesRef),
                 runtime.newVariableExpression(rep), runtime.stringParameterizedType());
-        List<String> expanded = Graph.expandDependent(runtime, dv, Stream::of).map(Variable::toString).toList();
+        List<String> expanded = expand(dv).map(Variable::toString).toList();
         assertEquals(List.of("this.names[i]", "this.names[k]"), expanded);
+
+        // deeper in the index: 'names[$__sv_i[0]]'-like, the rep as the base of the index's own access
+        DependentVariable inner = runtime.newDependentVariable(runtime.newVariableExpression(rep),
+                runtime.newVariableExpression(k), runtime.intParameterizedType());
+        DependentVariable outer = runtime.newDependentVariable(runtime.newVariableExpression(namesRef),
+                runtime.newVariableExpression(inner), runtime.stringParameterizedType());
+        List<String> deep = expand(outer).map(Variable::toString).toList();
+        assertEquals(List.of("this.names[i[k]]", "this.names[k[k]]"), deep);
 
         // no rep anywhere: itself
         DependentVariable plain = runtime.newDependentVariable(runtime.newVariableExpression(namesRef),
                 runtime.newVariableExpression(i), runtime.stringParameterizedType());
-        assertEquals(List.of(plain), Graph.expandDependent(runtime, plain, Stream::of).toList());
+        assertEquals(List.of(plain), expand(plain).toList());
+    }
+
+    // as Graph.expandRepToMembers, without a graph: a rep to its members, a dependent variable through expandDependent
+    private Stream<Variable> expand(Variable v) {
+        if (v instanceof SharedVariable s) return s.variables().stream();
+        if (v instanceof DependentVariable d && d.arrayVariable() != null) {
+            return Graph.expandDependent(runtime, d, this::expand);
+        }
+        return Stream.of(v);
     }
 }

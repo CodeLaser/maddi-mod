@@ -1210,16 +1210,24 @@ public class Graph {
      */
     public static Stream<Variable> expandDependent(Runtime runtime, DependentVariable dv,
                                                    Function<Variable, Stream<Variable>> expandBase) {
+        // the index expanded as the base is: a rep as the whole index ('[$__sv_i]'), or deeper in it, at the root of a
+        // field chain ('[$__sv_target.mapping.spaces]') or as the base of another access ('[$__sv_indexes[i]]')
         Variable index = dv.indexVariable();
-        List<Variable> indices = index instanceof SharedVariable sv && !sv.variables().isEmpty()
-                ? List.copyOf(sv.variables()) : null;
+        List<Variable> indices = null;
+        if (index != null) {
+            List<Variable> expandedIndex = expandBase.apply(index).toList();
+            if (!expandedIndex.isEmpty() && !(expandedIndex.size() == 1 && expandedIndex.getFirst().equals(index))) {
+                indices = expandedIndex;
+            }
+        }
+        List<Variable> finalIndices = indices;
         return expandBase.apply(dv.arrayVariable()).flatMap(arr -> {
-            if (indices == null) {
+            if (finalIndices == null) {
                 return Stream.of(arr.equals(dv.arrayVariable()) ? dv
                         : runtime.newDependentVariable(runtime.newVariableExpression(arr), dv.indexExpression(),
                         dv.parameterizedType()));
             }
-            return indices.stream().map(ix -> runtime.newDependentVariable(runtime.newVariableExpression(arr),
+            return finalIndices.stream().map(ix -> runtime.newDependentVariable(runtime.newVariableExpression(arr),
                     runtime.newVariableExpression(ix), dv.parameterizedType()));
         });
     }
