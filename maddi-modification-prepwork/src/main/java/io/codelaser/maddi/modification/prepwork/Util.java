@@ -273,12 +273,13 @@ public class Util {
         return argumentMayBe(holder, element, 0);
     }
 
-    // the real element type behind a virtual element face: its scope's ('map.elements.§ts', Bits[] -> Bits)
+    // the real element type behind a virtual element face: its scope's innermost ('map.elements.§ts', Bits[] -> Bits;
+    // 'map.elements.§$ss', Bits[][] -> Bits, #148's lifted face)
     public static ParameterizedType elementTypeOfFace(Variable face) {
         if (!(face instanceof FieldReference fr) || fr.scopeVariable() == null) return null;
         ParameterizedType scope = fr.scopeVariable().parameterizedType();
         if (scope == null) return null;
-        if (scope.arrays() > 0) return scope.copyWithArrays(scope.arrays() - 1);
+        if (scope.arrays() > 0) return scope.copyWithoutArrays();
         if (scope.parameters().size() == 1 && !scope.parameters().getFirst().isTypeParameter()) {
             return scope.parameters().getFirst();
         }
