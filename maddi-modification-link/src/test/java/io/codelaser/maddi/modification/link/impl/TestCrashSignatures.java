@@ -164,4 +164,37 @@ public class TestCrashSignatures extends CommonTest {
     public void arrayOfCopy() {
         link(ARRAY_OF_COPY, "associate");
     }
+
+    @Language("java")
+    private static final String MUTUAL_RECURSIVE_APPLY = """
+            package a.b;
+            import java.util.*;
+            import java.util.function.Function;
+            class X {
+                static class Ref { }
+                static class Join { Group joined; Group getJoinedGroup() { return joined; } }
+                static class Group { Ref primary; final List<Join> joins = new ArrayList<>(); final List<Join> nested = new ArrayList<>();
+                    Ref getPrimary() { return primary; } List<Join> getJoins() { return joins; } List<Join> getNested() { return nested; } }
+                private <T> T query(Group group, Function<Ref, T> action) {
+                    final T result = action.apply(group.getPrimary());
+                    if (result != null) return result;
+                    final T nested = query(group.getJoins(), action);
+                    if (nested != null) return nested;
+                    return query(group.getNested(), action);
+                }
+                private <T> T query(List<Join> joins, Function<Ref, T> action) {
+                    for (int i = 0; i < joins.size(); i++) {
+                        T result = query(joins.get(i).getJoinedGroup(), action);
+                        if (result != null) return result;
+                    }
+                    return null;
+                }
+            }
+            """;
+
+    @DisplayName("two overloads recursing into each other with the Function parameter (translateHandleFunctional)")
+    @Test
+    public void mutualRecursiveApply() {
+        link(MUTUAL_RECURSIVE_APPLY, "query");
+    }
 }

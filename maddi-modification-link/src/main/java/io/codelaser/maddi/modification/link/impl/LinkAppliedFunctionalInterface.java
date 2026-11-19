@@ -84,15 +84,7 @@ public record LinkAppliedFunctionalInterface(JavaInspector javaInspector,
         List<LinkFunctionalInterface.Triplet> toAdd = new LinkFunctionalInterface(runtime, virtualFieldComputer,
                 currentMethod).go(functionalType, fromTranslated, linkNature, builder.primary(), translated,
                 objectPrimary);
-        /*
-         Only links of the result: a recursive method applying its function parameter ('T query(Group g, Function<Group,
-         T> action)', calling itself with 'action') lifted 'this.§$ ↗ query' too, the recursion's own return value,
-         which is no part of this call's result and broke the builder's assertion (hibernate-orm's
-         FromClause.queryTableGroups).
-         */
-        toAdd.stream()
-                .filter(t -> builder.primary() instanceof io.codelaser.maddi.cst.api.variable.This || io.codelaser.maddi.modification.prepwork.Util.isPartOf(builder.primary(), t.from()))
-                .forEach(t -> builder.add(t.from(), t.linkNature(), t.to()));
+        LinkFunctionalInterface.addResultLinks(builder, toAdd);
     }
 
     private boolean isLinkedToParameter(List<Links> list) {

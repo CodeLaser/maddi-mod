@@ -526,7 +526,7 @@ public record LinkMethodCall(JavaInspector javaInspector,
                     new LinkFunctionalInterface(runtime, virtualFieldComputer, currentMethod)
                             .go(parameterizedType, fromTranslated, linkNature, builder.primary(),
                                     paramProvider.apply(link.to()), objectPrimary);
-            toAdd.forEach(t -> builder.add(t.from(), t.linkNature(), t.to()));
+            LinkFunctionalInterface.addResultLinks(builder, toAdd);
             extraTest = true;
         } else if (link.to() instanceof AppliedFunctionalInterfaceVariable applied) {
             // LEAF B — the return relates to an already-applied functional interface: an indirection method that

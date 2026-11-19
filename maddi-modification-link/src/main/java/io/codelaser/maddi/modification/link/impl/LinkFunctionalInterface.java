@@ -301,6 +301,22 @@ public record LinkFunctionalInterface(Runtime runtime, VirtualFieldComputer virt
         return result.typeInfo() != null && "kotlin.Unit".equals(result.typeInfo().fullyQualifiedName());
     }
 
+    /*
+     Only links of the result: a recursive method applying its function parameter ('T query(Group g, Function<Group,
+     T> action)', calling itself, or an overload, with 'action') lifts 'this.§$ ↗ query' too, the recursion's own return
+     value, which is no part of this call's result and broke the builder's assertion (hibernate-orm's
+     FromClause.queryTableGroups through LinkAppliedFunctionalInterface, queryTableReferences through
+     LinkMethodCall.translateHandleFunctional).
+     */
+    static void addResultLinks(Links.Builder builder, List<Triplet> toAdd) {
+        for (Triplet t : toAdd) {
+            if (builder.primary() instanceof io.codelaser.maddi.cst.api.variable.This
+                || Util.isPartOf(builder.primary(), t.from())) {
+                builder.add(t.from(), t.linkNature(), t.to());
+            }
+        }
+    }
+
     private Variable createSlice(int i, Variable base, Variable sub) {
         // essentially for a BiConsumer: (x,y)-> ...
         // No slice of nothing, nor of the function itself: a BiConsumer handed on ('collect(ref, map::put)', then
