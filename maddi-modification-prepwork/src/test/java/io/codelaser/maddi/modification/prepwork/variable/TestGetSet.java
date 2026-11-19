@@ -352,8 +352,8 @@ public class TestGetSet extends CommonTest {
         {
             VariableData vd2 = VariableDataImpl.of(method2.methodBody().lastStatement());
             assertEquals("""
-                    a.b.X.Builder.function#scope26-21:26-33, a.b.X.Builder.variables#scope26-21:26-33, \
-                    a.b.X.Builder.variables#scope26-21:26-33[0], a.b.X.R.variables#r, a.b.X.R.variables#r[0], \
+                    a.b.X.Builder.function#scope26-21:26-33<a.b.X.Builder.<init>()>, a.b.X.Builder.variables#scope26-21:26-33<a.b.X.Builder.<init>()>, \
+                    a.b.X.Builder.variables#scope26-21:26-33<a.b.X.Builder.<init>()>[0], a.b.X.R.variables#r, a.b.X.R.variables#r[0], \
                     a.b.X.method2(String), a.b.X.method2(String):0:s, b, r\
                     """, vd2.knownVariableNamesToString());
         }
@@ -462,8 +462,8 @@ public class TestGetSet extends CommonTest {
         assertEquals("""
                 a.b.X.get(java.util.List,int), a.b.X.get(java.util.List,int):0:list, \
                 a.b.X.get(java.util.List,int):1:i, \
-                java.util.List._synthetic_list#scope10-16:10-34, \
-                java.util.List._synthetic_list#scope10-16:10-34[a.b.X.get(java.util.List,int):1:i]\
+                java.util.List._synthetic_list#scope10-16:10-34<java.util.List.subList(int,int)>, \
+                java.util.List._synthetic_list#scope10-16:10-34<java.util.List.subList(int,int)>[a.b.X.get(java.util.List,int):1:i]\
                 """, vdLast.knownVariableNamesToString());
     }
 
