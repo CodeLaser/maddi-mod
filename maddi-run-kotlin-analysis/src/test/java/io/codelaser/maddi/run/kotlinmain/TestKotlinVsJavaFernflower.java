@@ -215,7 +215,9 @@ public class TestKotlinVsJavaFernflower {
         System.setProperty("maddi.memberVerdictDump", out.resolve(side + "-members.txt").toString());
         System.setProperty("maddi.memberCulpritDump", out.resolve(side + "-culprits.txt").toString());
         try {
-            return new RunMixedPrepAnalyzer().go(config, true, JDK_ANNOTATED_APIS);
+            // with the reachability pass, as the analysis engine and the IDE daemon run (production verdicts)
+            return new RunMixedPrepAnalyzer().go(config, new RunMixedPrepAnalyzer.Options(true, JDK_ANNOTATED_APIS,
+                    false, false, null, false, false, true));
         } finally {
             System.clearProperty("maddi.verdictDump");
             System.clearProperty("maddi.memberVerdictDump");
