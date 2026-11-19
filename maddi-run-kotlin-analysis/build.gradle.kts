@@ -93,6 +93,7 @@ tasks.withType<Test> {
     System.getProperty("maddi.memberVerdictDump")?.let { systemProperty("maddi.memberVerdictDump", it) }
     // TestKotlinVsJavaFernflower: the J2K translation of fernflower's main sources
     System.getProperty("maddi.j2kSources")?.let { systemProperty("maddi.j2kSources", it) }
+    System.getProperty("maddi.kotlinVsJava.dumps")?.let { systemProperty("maddi.kotlinVsJava.dumps", it) }
     // ⭐ against the REALM, as the shipped CLI does: the compiler is never on the test JVM's own class path
     inputs.files(k2Runtime).withPropertyName("k2Runtime").withNormalizer(ClasspathNormalizer::class)
     jvmArgumentProviders.add(CommandLineArgumentProvider { listOf("-Dmaddi.k2.classpath=" + k2Runtime.asPath) })
