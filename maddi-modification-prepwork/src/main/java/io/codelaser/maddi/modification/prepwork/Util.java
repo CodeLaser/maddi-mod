@@ -120,6 +120,11 @@ public class Util {
      be accessible content of p as well: fernflower's 'edge.getDestination().addLabeledEdge(edge)' writes a
      Statement, and a Statement is accessible content of the Statement p ('parent', 'first'; p itself). The run-time
      check (rust codelaser-dynamic-modification, Walk) follows the same definition. Gate NOACCESSIBLEREACH.
+     Three approximations, accepted by Bart on 2026-11-19 and described in the book (§080, 'structural-definition'):
+     (a) a call compares the written object and the application objects it holds, not its JDK containers
+     (mayBeAccessibleContent, exact = false); (b) the owner's own type counts only through a field back to it
+     (accessibleTypes); (c) the fixpoint engine cannot tell a direct write from a call, so it is coarser than the
+     reachability pass (WriteLinksAndModification.mayAliasAccessibleField, TestAccessibleReach 'reset').
      */
     public static final boolean NO_ACCESSIBLE_REACH = System.getenv("NOACCESSIBLEREACH") != null;
     private static final int ACCESSIBLE_TYPES_LIMIT = 400;
