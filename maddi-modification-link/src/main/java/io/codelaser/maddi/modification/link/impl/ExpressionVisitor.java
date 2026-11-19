@@ -13,6 +13,7 @@ import org.slf4j.LoggerFactory;
 
 import io.codelaser.maddi.cst.api.analysis.PropertyValueMap;
 import io.codelaser.maddi.cst.api.analysis.Value;
+import io.codelaser.maddi.cst.api.element.Element;
 import io.codelaser.maddi.cst.api.element.RecordPattern;
 import io.codelaser.maddi.cst.api.expression.*;
 import io.codelaser.maddi.cst.api.info.FieldInfo;
@@ -21,6 +22,7 @@ import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.runtime.Runtime;
 import io.codelaser.maddi.cst.api.statement.ExpressionAsStatement;
+import io.codelaser.maddi.cst.api.statement.LocalVariableCreation;
 import io.codelaser.maddi.cst.api.statement.SwitchEntry;
 import io.codelaser.maddi.cst.api.translate.TranslationMap;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
@@ -703,6 +705,66 @@ public record ExpressionVisitor(Runtime runtime,
     }
 
     /*
+    CodeLaser/maddi-mod#43, the creation site: an anonymous object (not a lambda-like one) was no object at all, its
+    links EMPTY. It is a fresh object, and it holds every variable it captured, in a synthetic final
+    field (javac's val$x). Link it so: newObject ≻ captured, as a field assignment in a constructor would. Without it
+    the new object read independent of what it captured: guava's 'new ForwardingDeque<T>() { delegate() { return
+    delegate; } }' left wrap's parameter @Independent, and fernflower's SFormsFastMapDirect.entryList(), anonymous
+    entries over the map's own sets, was independent of the map, so StackVarsProcessor.replaceSingleVar modified its
+    'ssau' unseen (the run-time check). The captured variables: the enclosing method's parameters and the locals known
+    at this point, read in the anonymous class's code and not declared there. Primitives hold nothing.
+     */
+    private Result linkAnonymousClassToCaptured(ConstructorCall cc, VariableData variableData) {
+        TypeInfo anonymous = cc.anonymousClass();
+        LocalVariable newObject = IntermediateVariable.newObject(runtime, variableCounter.getAndIncrement(),
+                cc.parameterizedType());
+        if (NO_ANONYMOUS_CAPTURE) return new Result(LinksImpl.EMPTY, LinkedVariablesImpl.EMPTY);
+        Set<Variable> declaredInside = new HashSet<>();
+        Set<Variable> captured = new LinkedHashSet<>();
+        java.util.function.Predicate<Element> collect = e -> {
+            if (e instanceof LocalVariableCreation lvc) lvc.localVariableStream().forEach(declaredInside::add);
+            if (e instanceof VariableExpression ve) {
+                Variable v = ve.variable();
+                if (v instanceof ParameterInfo pi && pi.methodInfo() == currentMethod
+                    || v instanceof LocalVariable && variableData != null
+                       && variableData.isKnown(v.fullyQualifiedName())) {
+                    captured.add(v);
+                }
+            }
+            return true;
+        };
+        // method bodies, and field initializers: fernflower's entry captures in 'private final ... val = ent;'
+        anonymous.recursiveSubTypeStream().forEach(t -> {
+            t.constructorAndMethodStream().filter(mi -> mi.methodBody() != null)
+                    .forEach(mi -> mi.methodBody().visit(collect));
+            t.fields().stream().filter(f -> f.initializer() != null && !f.initializer().isEmpty())
+                    .forEach(f -> f.initializer().visit(collect));
+        });
+        captured.removeAll(declaredInside);
+        captured.removeIf(v -> v.parameterizedType() == null || v.parameterizedType().isPrimitiveExcludingVoid());
+        LinksImpl.Builder builder = new LinksImpl.Builder(newObject);
+        // and its modification component is that of what it captured, as 'hold.d.§m ≡ 0:d.§m' after a field
+        // assignment: a method of the anonymous object that modifies the captured object modifies it
+        VirtualFields vfAnonymous = virtualFieldComputer.compute(anonymous.asParameterizedType(), false).virtualFields();
+        FieldReference objectM = vfAnonymous == null || vfAnonymous.mutable() == null ? null
+                : runtime.newFieldReference(vfAnonymous.mutable(), runtime.newVariableExpression(newObject),
+                vfAnonymous.mutable().type());
+        for (Variable v : captured) {
+            builder.add(newObject, LinkNatureImpl.CONTAINS_AS_FIELD, v);
+            if (objectM == null) continue;
+            VirtualFields vf = virtualFieldComputer.compute(v.parameterizedType(), false).virtualFields();
+            if (vf == null || vf.mutable() == null) continue;
+            FieldReference capturedM = runtime.newFieldReference(vf.mutable(), runtime.newVariableExpression(v),
+                    vf.mutable().type());
+            builder.add(objectM, LinkNatureImpl.makeIdenticalTo(null), capturedM);
+        }
+        return new Result(builder.build(), LinkedVariablesImpl.EMPTY);
+    }
+
+    // CodeLaser/maddi-mod#43: the anonymous object as an object (a fresh one, holding what it captured); gate for A/B
+    private static final boolean NO_ANONYMOUS_CAPTURE = System.getenv("NOANONYMOUSCAPTURE") != null;
+
+    /*
     new Inner(...) of a non-static inner class, with the implicit outer instance E.this: the new object holds E.this,
     and those of its methods that modify E.this modify the creating object. Link the two modification components,
     passing exactly those methods: newObject.§m ☷{P} this.§m, P = the methods of Inner whose summaries modify E.this,
@@ -830,12 +892,12 @@ public record ExpressionVisitor(Runtime runtime,
         if (sami != null) {
             return anonymousClassAsLambda(cc, sami);
         }
-        return anonymousClassAsClass(anonymousTypeInfo);
+        return anonymousClassAsClass(anonymousTypeInfo, cc, variableData);
     }
 
-    // we collect modifications, but not more
-    private Result anonymousClassAsClass(TypeInfo anonymousTypeInfo) {
-        Result result = new Result(LinksImpl.EMPTY, LinkedVariablesImpl.EMPTY);
+    // the modifications its methods make, and a fresh object holding what it captured (linkAnonymousClassToCaptured)
+    private Result anonymousClassAsClass(TypeInfo anonymousTypeInfo, ConstructorCall cc, VariableData variableData) {
+        Result result = linkAnonymousClassToCaptured(cc, variableData);
         for (MethodInfo methodInfo : anonymousTypeInfo.constructorsAndMethods()) {
             MethodLinkedVariables mlv = linkComputer.recurseMethod(methodInfo);
             Set<Variable> modifiedInMethod = mlv.modified().stream()
