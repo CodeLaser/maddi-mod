@@ -138,6 +138,8 @@ class WriteLinksAndModification {
         if (expandedStructurallyModifiedDuringEvaluation != expandedModifiedDuringEvaluation) {
             closeOverModificationGroups(expandedStructurallyModifiedDuringEvaluation);
         }
+        structurallyModifiedElementOf = NO_STRUCTURAL_CO_ELEMENT ? Map.of()
+                : modifiedElementOf(expandedStructurallyModifiedDuringEvaluation);
 
         RedundantLinks redundantLinks = new RedundantLinks();
         Map<Link, Variable> flipOwner = new HashMap<>();
@@ -226,6 +228,17 @@ class WriteLinksAndModification {
         return container != null && !container.equals(primary) && Util.hiddenAliasOwner(containerFace, element) != null;
     }
     private Map<Variable, Set<MethodInfo>> modifiedElementOf = Map.of();
+
+    /*
+     CodeLaser/maddi-mod#130: the co-element rule for the structural question. An element modified in its own state
+     ('c.clear()' writing c.mark, structurally) may be the co-element itself ('list.add(input)'), and then that
+     modification is input's own state, not its hidden content: input is structurally modified. Only an element's
+     STRUCTURAL modification carries over; one in its hidden content stays deep for the co-element too. Fernflower's
+     'lst = exprent.getAllExprents(true); lst.add(exprent); for (Exprent e : lst) ...setVersion(0)' (nine targets
+     whose structural claim the run-time check contradicted). Gate NOSTRUCTURALCOELEMENT: deep only, as before.
+     */
+    private static final boolean NO_STRUCTURAL_CO_ELEMENT = Gate.isSet("NOSTRUCTURALCOELEMENT");
+    private Map<Variable, Set<MethodInfo>> structurallyModifiedElementOf = Map.of();
 
     private Map<Variable, Set<MethodInfo>> modifiedElementOf(Map<Variable, Set<MethodInfo>> modified) {
         if (NO_CO_ELEMENT || modified.isEmpty()) return Map.of();
@@ -1226,9 +1239,10 @@ class WriteLinksAndModification {
     private boolean notLinkedToModified(Links.Builder builder,
                                         Map<Variable, Set<MethodInfo>> modifiedVariablesAndTheirCause,
                                         boolean structural) {
+        Map<Variable, Set<MethodInfo>> elementOf = structural ? structurallyModifiedElementOf : modifiedElementOf;
         for (Link link : builder) {
-            if (!structural && link.linkNature() == IS_ELEMENT_OF && !modifiedElementOf.isEmpty()) {
-                Set<MethodInfo> causes = modifiedElementOf.get(link.to());
+            if (link.linkNature() == IS_ELEMENT_OF && !elementOf.isEmpty()) {
+                Set<MethodInfo> causes = elementOf.get(link.to());
                 if (causes != null) {
                     // #113: a co-element of a modified element (see modifiedElementOf)
                     modifiedVariablesAndTheirCause.putIfAbsent(builder.primary(), causes);

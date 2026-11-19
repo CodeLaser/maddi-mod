@@ -3,6 +3,8 @@ package io.codelaser.maddi.modification.link.io;
 import static io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl.METHOD_LINKS;
 import static io.codelaser.maddi.modification.prepwork.callgraph.ComputePartOfConstructionFinalField.PART_OF_CONSTRUCTION;
 
+import io.codelaser.maddi.modification.prepwork.callgraph.LazyCacheField;
+
 import java.util.*;
 import java.util.function.BiFunction;
 import java.util.stream.Collectors;
@@ -332,6 +334,20 @@ public class LinkCodec {
          */
         private final Map<String, Map<String, MarkerVariable>> decodedMarkerVariables = new HashMap<>();
 
+        /*
+         ⛔ A DEFINITION CAN MEET ITS OWN NAME BEFORE IT IS DECODED. The encoder registers a marker as written before it
+         builds the definition, so a marker of the same name met inside it, under the same element, is the bare
+         back-reference ["m", name]: a self-reference, or another marker that happens to carry the same generated
+         name (a field's links gather markers from several methods, each numbering its own: hibernate's
+         AbstractOneToManyDecomposer.persister has a Function and a Consumer both called $_fi32). The decoder put the
+         definition in place only after decoding its body, and died on "Cannot find $_fi32M under ...persister" (13
+         of 6451 hibernate-core files). Markers are equal by name, so a placeholder of that name and type stands in
+         for the inner reference; the full definition replaces it when it is done.
+         */
+        private void putPlaceholder(Context context, String name, ParameterizedType type) {
+            putDecodedMarkerVariable(context, name, new MarkerVariable(name, type, runtime.newEmptyExpression()));
+        }
+
         private void putDecodedMarkerVariable(Context context, String name, MarkerVariable mv) {
             decodedMarkerVariables.computeIfAbsent(markerScope(ownerOfMarkerVariables(context)), _ -> new HashMap<>())
                     .put(name, mv);
@@ -367,6 +383,7 @@ public class LinkCodec {
             if ("a".equals(s)) {
                 String name = decodeString(context, list.get(1));
                 ParameterizedType type = decodeType(context, list.get(2));
+                putPlaceholder(context, name, type);
                 List<Result> params = decodeList(context, list.get(3)).stream()
                         .map(ev -> decodeResult(context, ev)).toList();
                 ParameterInfo source = list.size() > 4
@@ -379,6 +396,7 @@ public class LinkCodec {
             if ("f".equals(s)) {
                 String name = decodeString(context, list.get(1));
                 ParameterizedType type = decodeType(context, list.get(2));
+                putPlaceholder(context, name, type);
                 Result result = decodeResult(context, list.get(3));
                 FunctionalInterfaceVariable fiv = new FunctionalInterfaceVariable(name, type, runtime, result);
                 putDecodedMarkerVariable(context, name, fiv);
@@ -395,6 +413,7 @@ public class LinkCodec {
                     putDecodedMarkerVariable(context, name, emptyMv);
                     return emptyMv;
                 }
+                putPlaceholder(context, name, pt);
                 Expression ae = decodeExpression(context, list.get(3));
                 MarkerVariable mv = new MarkerVariable(name, pt, ae);
                 putDecodedMarkerVariable(context, name, mv);
@@ -622,8 +641,11 @@ public class LinkCodec {
         }
     }
 
+    // every property maddi-mod declares and the encoder writes; TestEveryLinkPropertyDecodes keeps this complete.
+    // lazyCacheField (#136) was missing: "Have no property object for key lazyCacheField", and the whole file was lost
     private static final Map<String, Property> PROPERTY_MAP = Map.of(
             PART_OF_CONSTRUCTION.key(), PART_OF_CONSTRUCTION,
+            LazyCacheField.LAZY_CACHE_FIELD.key(), LazyCacheField.LAZY_CACHE_FIELD,
             METHOD_LINKS.key(), METHOD_LINKS,
             LinksImpl.LINKS.key(), LinksImpl.LINKS);
     // recursiveMethod (the call graph's, present on checkpointed methods, task #34) is decoded by the

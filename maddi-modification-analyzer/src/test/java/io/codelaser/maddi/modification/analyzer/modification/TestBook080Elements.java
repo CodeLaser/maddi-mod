@@ -105,7 +105,8 @@ public class TestBook080Elements extends CommonTest {
         // the step back to the elements: done when the element is modified locally (CodeLaser/maddi-mod#113),
         // not yet through a callee
         assertEquals("true/true", p(x, "useClearList"));
-        assertEquals("false", p(x, "useLocal").substring(0, 5));
+        // #130: c.clear() writes c's own field, and c may be input: structural too
+        assertEquals("false/false", p(x, "useLocal"));
     }
 
     private static String p(TypeInfo typeInfo, String name) {
