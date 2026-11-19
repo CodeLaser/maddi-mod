@@ -29,6 +29,7 @@ import io.codelaser.maddi.modification.common.AnalysisHelper;
 import io.codelaser.maddi.modification.common.util.TolerantWrite;
 import io.codelaser.maddi.modification.link.impl.graph.Fact;
 import io.codelaser.maddi.modification.link.impl.linkgraph.FollowGraph;
+import io.codelaser.maddi.modification.link.impl.linkgraph.Graph;
 import io.codelaser.maddi.modification.link.impl.linkgraph.RedundantLinks;
 import io.codelaser.maddi.modification.link.impl.localvar.IntermediateVariable;
 import io.codelaser.maddi.modification.link.impl.localvar.MarkerVariable;
@@ -1116,11 +1117,7 @@ class WriteLinksAndModification {
             // a rep in the array base ('$__sv_map.§vks[-1]' — the [-1]-slice face of a collapsed group) leaked
             // as-is into printed links; rebuild the access on the expanded base, keeping the original element
             // type (mirrors Graph.expandRepToMembers' DV branch)
-            return iterateOverShared(dv.arrayVariable())
-                    .map(arr -> arr == dv.arrayVariable()
-                            ? dv
-                            : runtime.newDependentVariable(runtime.newVariableExpression(arr),
-                            dv.indexExpression(), dv.parameterizedType()));
+            return Graph.expandDependent(runtime, dv, this::iterateOverShared);
         }
         return Stream.of(variable);
     }

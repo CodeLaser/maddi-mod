@@ -1196,13 +1196,40 @@ public class Graph {
             // an array-indexed rep, e.g. '$__sv_g[0]' -> 'g[0]'; rebuild the access on the expanded array member.
             // keep the original element type: a member may be statically Object-typed (a downcast slot such as
             // 'ld.variables[1]' grouped with 'float[][] matrix'), where recomputing via copyWithOneFewerArrays fails.
-            return expandRepToMembers(dv.arrayVariable())
-                    .map(arr -> arr.equals(dv.arrayVariable())
-                            ? dv
-                            : runtime.newDependentVariable(runtime.newVariableExpression(arr), dv.indexExpression(),
-                            dv.parameterizedType()));
+            return expandDependent(runtime, dv, this::expandRepToMembers);
         }
         return Stream.of(variable);
+    }
+
+    /*
+     A dependent variable with a rep in its array base ('$__sv_g[0]') or in its INDEX ('this.names[$__sv_i]'): rebuilt
+     on every member of each. The index case was missing: an index grouped with another variable (a loop counter
+     read from 'ld.variables[2]' in a jfocus loop body) kept the rep, which reached a field's stored links and was
+     refused by the writer (hibernate-core: 19 fields, 'ComponentType.propertyNullability[$__sv_i]'). Shared with
+     WriteLinksAndModification.iterateOverShared.
+     */
+    public static Stream<Variable> expandDependent(Runtime runtime, DependentVariable dv,
+                                                   Function<Variable, Stream<Variable>> expandBase) {
+        // the index expanded as the base is: a rep as the whole index ('[$__sv_i]'), or deeper in it, at the root of a
+        // field chain ('[$__sv_target.mapping.spaces]') or as the base of another access ('[$__sv_indexes[i]]')
+        Variable index = dv.indexVariable();
+        List<Variable> indices = null;
+        if (index != null) {
+            List<Variable> expandedIndex = expandBase.apply(index).toList();
+            if (!expandedIndex.isEmpty() && !(expandedIndex.size() == 1 && expandedIndex.getFirst().equals(index))) {
+                indices = expandedIndex;
+            }
+        }
+        List<Variable> finalIndices = indices;
+        return expandBase.apply(dv.arrayVariable()).flatMap(arr -> {
+            if (finalIndices == null) {
+                return Stream.of(arr.equals(dv.arrayVariable()) ? dv
+                        : runtime.newDependentVariable(runtime.newVariableExpression(arr), dv.indexExpression(),
+                        dv.parameterizedType()));
+            }
+            return finalIndices.stream().map(ix -> runtime.newDependentVariable(runtime.newVariableExpression(arr),
+                    runtime.newVariableExpression(ix), dv.parameterizedType()));
+        });
     }
 
     // rebuild 'variable' with every occurrence of 'from' in its scope chain replaced by 'to'

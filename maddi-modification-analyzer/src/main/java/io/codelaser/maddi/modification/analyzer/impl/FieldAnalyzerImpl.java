@@ -203,6 +203,15 @@ public class FieldAnalyzerImpl extends CommonAnalyzerImpl implements FieldAnalyz
             return degraded != null && degraded.isTrue();
         }
 
+        // SharedVariable itself is out of reach here (it extends maddi-cst-impl's LocalVariableImpl): a LinkVariable
+        // with the rep's prefix
+        private static boolean containsRep(Variable variable) {
+            return variable.variableStreamDescend().anyMatch(v -> v instanceof LinkVariable
+                                                                  && v.fullyQualifiedName().startsWith(SHARED_PREFIX));
+        }
+
+        private static final String SHARED_PREFIX = "$__sv_";
+
         private Links computeLinkedVariables(FieldInfo fieldInfo, List<MethodInfo> methodsReferringToField) {
             FieldReference primary = runtime.newFieldReference(fieldInfo);
             Links.Builder builder = new LinksImpl.Builder(primary);
@@ -223,6 +232,12 @@ public class FieldAnalyzerImpl extends CommonAnalyzerImpl implements FieldAnalyz
                             } else if (!lv.isEmpty()) {
                                 // we're only interested in parameters, other fields, return values
                                 for (Link l : lv) {
+                                    // a link graph's group representative left in the field side ('this.f[$__sv_i]'),
+                                    // by a path the extraction's expansion does not cover: dropped, as a rep is
+                                    // everywhere else (SharedVariable.acceptForLinkedVariables). It cannot be stored,
+                                    // and the expanded members' links are there beside it (hibernate-core: three
+                                    // fields' '~' links)
+                                    if (containsRep(l.from())) continue;
                                     if (LinkVariable.acceptForLinkedVariables(l.to())
                                         && primary.equals(Util.primary(l.from()))
                                         // avoid duplicate links
