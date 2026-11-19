@@ -128,7 +128,15 @@ public class Util {
      */
     public static final boolean NO_ACCESSIBLE_REACH = System.getenv("NOACCESSIBLEREACH") != null;
     private static final int ACCESSIBLE_TYPES_LIMIT = 400;
-    private static final java.util.Map<String, List<ParameterizedType>> ACCESSIBLE_TYPES =
+    /*
+     Keyed by name, but a hit only for the very same TypeInfo. A name is not a type: the gate runs many tests in one
+     JVM, and three of them declare their own a.b.X.St; the first one's accessible types answered for the others
+     (TestAccessibleReach 'lift' not structural, gate 44510614747). Likewise a type re-parsed after an edit.
+     */
+    private record AccessibleTypes(TypeInfo root, List<ParameterizedType> types) {
+    }
+
+    private static final java.util.Map<String, AccessibleTypes> ACCESSIBLE_TYPES =
             new java.util.concurrent.ConcurrentHashMap<>();
 
     /**
@@ -144,7 +152,11 @@ public class Util {
         TypeInfo root = type.bestTypeInfo();
         if (root == null) return List.of(type);
         String key = type.arrays() + ":" + root.fullyQualifiedName();
-        return ACCESSIBLE_TYPES.computeIfAbsent(key, k -> computeAccessibleTypes(type));
+        AccessibleTypes cached = ACCESSIBLE_TYPES.get(key);
+        if (cached != null && cached.root() == root) return cached.types();
+        List<ParameterizedType> types = computeAccessibleTypes(type);
+        ACCESSIBLE_TYPES.put(key, new AccessibleTypes(root, types));
+        return types;
     }
 
     private static List<ParameterizedType> computeAccessibleTypes(ParameterizedType type) {

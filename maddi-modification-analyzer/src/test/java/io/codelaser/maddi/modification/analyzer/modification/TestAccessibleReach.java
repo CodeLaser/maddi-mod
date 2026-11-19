@@ -22,6 +22,7 @@ import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.modification.analyzer.CommonTest;
 import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
+import io.codelaser.maddi.modification.prepwork.Util;
 import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -29,6 +30,8 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * CodeLaser/maddi-mod#130, the definition of a structural modification: a write to an object that is the parameter's
@@ -110,6 +113,30 @@ public class TestAccessibleReach extends CommonTest {
         assertEquals(reach ? "false/true" : "false/false", p(x, "reset"));
         assertEquals("false/false", p(x, "resetIf"));
         assertEquals("false/true", p(x, "touchAll"));
+    }
+
+    /**
+     * A name is not a type. The gate runs many tests in one JVM, and three of them declare their own {@code a.b.X.St}:
+     * the accessible types cached for the first answered for the others, and 'lift' lost its structural verdict
+     * (gate 44510614747). Two parses of one name with different fields must each get their own.
+     */
+    @DisplayName("the accessible types of a type are its own, not those of an earlier type of the same name")
+    @Test
+    public void sameNameAnotherType() throws Exception {
+        TypeInfo x1 = javaInspector.parse("a.b.X", """
+                package a.b;
+                public class X {
+                    public static class St { int n; }
+                }
+                """);
+        TypeInfo st1 = x1.findSubType("St");
+        assertEquals(List.of(), Util.accessibleTypes(st1.asParameterizedType()));
+        beforeEach(); // a fresh inspector, as the next test class gets
+        TypeInfo x2 = javaInspector.parse("a.b.X", INPUT);
+        TypeInfo st2 = x2.findSubType("St");
+        assertNotSame(st1, st2);
+        assertTrue(Util.accessibleTypes(st2.asParameterizedType()).stream()
+                .anyMatch(pt -> pt.typeInfo() == st2), "St is accessible content of St, through 'parent'");
     }
 
     private static String p(TypeInfo typeInfo, String name) {
