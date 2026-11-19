@@ -1195,8 +1195,76 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                     }
                 }
             }
+            /*
+             CodeLaser/maddi-mod#148, the same for a field of 'this' iterated at a local index: 'for (ent :
+             this.elements[i]) list.add(ent); return list' leaves the link on the field's side only
+             ('this.elements[i].§ts ∩ ret.§$s'): the return value's own cannot name 'i', out of scope at the return.
+             Lifted past the index, reversed into the return value: 'ret.§$s ∩ this.elements…'. Before, the method read
+             independent of the field whose content it returns (fernflower's SFormsFastMapDirect.entryList()).
+             */
+            if (!NO_LIFT_FIELD_INDEX) {
+                for (VariableInfo vi : (Iterable<VariableInfo>) vd.variableInfoStream()::iterator) {
+                    if (!(vi.variable() instanceof FieldReference fr) || !rootedAtThis(fr)) continue;
+                    Links links = vi.linkedVariables();
+                    if (links == null || links.primary() == null
+                        || links.stream().noneMatch(l -> locallyIndexed(l.from()) && rootedAtReturn(l.to()))) {
+                        continue;
+                    }
+                    for (Link original : links) {
+                        if (!locallyIndexed(original.from()) || !rootedAtReturn(original.to())) continue;
+                        Link link = liftOne(original, null, Set.of());
+                        if (link == null) link = liftHiddenContentFace(original);
+                        if (link == null || !LinkVariable.acceptForLinkedVariables(link.to())
+                            || !LinkVariable.acceptForLinkedVariables(link.from())) {
+                            continue;
+                        }
+                        if (builder == null) {
+                            builder = ofReturnValue.primary() == null ? new LinksImpl.Builder(returnVariable)
+                                    : new LinksImpl.Builder(ofReturnValue);
+                        }
+                        LinkNature reverse = link.linkNature().reverse();
+                        if (!builder.contains(link.to(), reverse, link.from())) {
+                            builder.add(link.to(), reverse, link.from(), link.mediated(), true);
+                        }
+                    }
+                }
+            }
             return builder == null ? ofReturnValue : builder.build();
         }
+
+        /*
+         'this.elements[i].§ts ∩ x': the face of one row lifts field by field to no valid nature. The row's elements are
+         among the array's: 'this.elements.§tss ∩ x' (the top array's own hidden-content face, ∩ the weakest valid
+         nature). A §m face is not lifted (a modification face past its field is no §m link, as in liftOne).
+         */
+        private Link liftHiddenContentFace(Link original) {
+            if (!(original.from() instanceof FieldReference face) || Util.isVirtualModification(face)
+                || !face.fieldInfo().name().startsWith("§")) {
+                return null;
+            }
+            Variable top = face.scopeVariable();
+            while (top instanceof DependentVariable dv && !LinkVariable.acceptForLinkedVariables(dv)) {
+                top = dv.arrayVariable();
+            }
+            if (top == face.scopeVariable() || top == null || !LinkVariable.acceptForLinkedVariables(top)) return null;
+            io.codelaser.maddi.modification.link.vf.VirtualFields vf =
+                    virtualFieldComputer.compute(top.parameterizedType(), false).virtualFields();
+            if (vf == null || vf.hiddenContent() == null) return null;
+            io.codelaser.maddi.cst.api.runtime.Runtime runtime = javaInspector.runtime();
+            FieldReference topFace = runtime.newFieldReference(vf.hiddenContent(), runtime.newVariableExpression(top),
+                    vf.hiddenContent().type());
+            return new LinksImpl.LinkImpl(topFace, LinkNatureImpl.OBJECT_GRAPH_OVERLAPS, original.to(),
+                    original.mediated(), true);
+        }
+
+        private static boolean rootedAtThis(FieldReference fr) {
+            Variable v = fr;
+            while (v instanceof FieldReference f) v = f.scopeVariable();
+            return v instanceof This;
+        }
+
+        // CodeLaser/maddi-mod#148, gate for A/B
+        private static final boolean NO_LIFT_FIELD_INDEX = System.getenv("NOLIFTFIELDINDEX") != null;
 
         private boolean rootedAtReturn(Variable v) {
             return returnVariable.equals(Util.primary(v));
