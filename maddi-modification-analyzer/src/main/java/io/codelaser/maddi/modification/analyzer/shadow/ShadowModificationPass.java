@@ -1279,6 +1279,20 @@ public class ShadowModificationPass {
                         // entry's map reached through the entry's ∩)
                         projectReceiverChain(mi, vd, container, null).forEach(node ->
                                 out.add(accessibleReach(written, unwrap(node)) ? unwrap(node) : deepOnly(node)));
+                        /*
+                         #139: the container's hidden content may overlap another's ('e.§$s ∩ 0:c.succ.§$$s[-2]', e
+                         gathered from c's lists, #134): modifying an element of e modifies that owner too, deep-only.
+                         The ∈ path of project does this for an element held in a local; a call result ('e.get(0)')
+                         takes this one. Gate NONESTEDGATHERED.
+                         */
+                        if (!NO_NESTED_GATHERED && container instanceof VariableExpression cve) {
+                            List<Variable> owners = new ArrayList<>();
+                            overlappingOwners(vd, cve.variable(), faceSlice(link.to()), mc.parameterizedType(), owners);
+                            for (Variable owner : owners) {
+                                project(mi, vd, owner).forEach(node ->
+                                        out.add(accessibleReach(written, unwrap(node)) ? unwrap(node) : deepOnly(node)));
+                            }
+                        }
                     }
                 }
                 return out;
@@ -1610,8 +1624,69 @@ public class ShadowModificationPass {
     private static final boolean NO_VIEW_ELEMENT_MOD = Gate.isSet("NOVIEWELEMENTMOD");
     private static final boolean NO_WHOLE_CONTAINER = Gate.isSet("NOWHOLECONTAINER");
 
+    private static final boolean NO_NESTED_GATHERED = Gate.isSet("NONESTEDGATHERED");
+
+    /*
+     #139: the owners of the hidden contents that overlap the face of 'owner' the modified element belongs to
+     (overlappingContainers on it). Only that face: a map's value modified ('m.computeIfAbsent(k, ..).addAll(..)') is no
+     modification of whatever its keys overlap (fernflower's ExceptionDeobfuscator.hasObfuscatedExceptions, its graph
+     marked modified through the keys). The callee names its faces in its own terms ('this.§es', 'this.§kvs[-2]'), the
+     caller in its own ('e.§$s', 'ranges.§$$s[-2]'): matched on the slice they select ('[-2]' the values, '[-1]' the
+     keys, none the whole). No face, no owner.
+     */
+    private static boolean mayBeElementOf(ParameterizedType element, Variable face) {
+        ParameterizedType pt = face.parameterizedType();
+        if (pt == null || element == null || element.isTypeParameter() || element.bestTypeInfo() == null) return true;
+        ParameterizedType e = pt.copyWithoutArrays();
+        if (e.isTypeParameter() || e.bestTypeInfo() == null) return true;
+        // a map's whole face has the synthetic entry type 'Map.§$$': no real object is one; its slices carry the types
+        return Util.mayBeSameObject(element, e) || Util.typeMayHold(e, element);
+    }
+
+    private static String faceSlice(Variable face) {
+        Variable root = Util.firstRealVariable(face);
+        String f = face.toString();
+        String r = root == null ? null : root.toString();
+        if (r == null || !f.startsWith(r) || f.length() <= r.length()) return null;
+        String rest = f.substring(r.length());
+        int b = rest.lastIndexOf('[');
+        return b >= 0 && rest.endsWith("]") && rest.startsWith("[-", b) ? rest.substring(b) : "";
+    }
+
+    private void overlappingOwners(VariableData vd, Variable owner, String suffix, ParameterizedType element,
+                                   List<Variable> out) {
+        if (suffix == null) return;
+        Set<String> faces = new LinkedHashSet<>();
+        List<Variable> faceVars = new ArrayList<>();
+        vd.variableInfoStream().forEach(vi -> {
+            Links links = vi.linkedVariables();
+            if (links == null) return;
+            links.stream().filter(l -> l.linkNature() == LinkNatureImpl.OBJECT_GRAPH_OVERLAPS).forEach(l -> {
+                for (Variable f : List.of(l.from(), l.to())) {
+                    if (Util.virtual(f) && !Util.isVirtualModification(f) && owner.equals(Util.firstRealVariable(f))
+                        && suffix.equals(faceSlice(f)) && faces.add(f.fullyQualifiedName())) {
+                        faceVars.add(f);
+                    }
+                }
+            });
+        });
+        for (Variable f : faceVars) overlappingContainers(vd, f, element, out);
+        out.remove(owner);
+    }
+
     // the owners of hidden contents that overlap this one, both sides element sets (#134), whichever side stores it
     private void overlappingContainers(VariableData vd, Variable hiddenContent, List<Variable> out) {
+        overlappingContainers(vd, hiddenContent, null, out);
+    }
+
+    /*
+     'element' (#139), when not null: the modified object, an element of 'hiddenContent'. The overlap is judged on the
+     faces' elements, which a slice face takes deep (a map's values slice overlaps what the value sets hold); the
+     modified object reaches the other owner only when it may be one of the other face's elements, or be held by one
+     (an Edge and List<Edge>: yes; a HashSet<BasicBlock> and BasicBlock: no).
+     */
+    private void overlappingContainers(VariableData vd, Variable hiddenContent, ParameterizedType element,
+                                       List<Variable> out) {
         if (!Util.virtual(hiddenContent) || Util.isVirtualModification(hiddenContent)) return;
         String fqn = hiddenContent.fullyQualifiedName();
         Variable owner = Util.firstRealVariable(hiddenContent);
@@ -1631,6 +1706,7 @@ public class ShadowModificationPass {
                                               || !Util.elementsMayOverlap(other, hiddenContent))) {
                             other = null;
                         }
+                        if (other != null && element != null && !mayBeElementOf(element, other)) other = null;
                         Variable container = other == null ? null : Util.firstRealVariable(other);
                         if (container != null && !container.equals(owner) && !out.contains(container)) {
                             out.add(container);
