@@ -265,6 +265,21 @@ public class Util {
         return mayBeSameObject(pa, pb);
     }
 
+    /*
+     #138: whether the elements of 'part' may be objects inside the elements of 'whole', by declared types: the element
+     type of 'part' among the accessible content of 'whole''s element type. 'items.stream().map(a -> a.statement())'
+     links 'sts.§$s ∩ 0:items.§$s': the St objects collected are fields of the Items, not Items.
+     */
+    public static boolean elementsMayHold(Variable whole, Variable part) {
+        ParameterizedType pw = whole.parameterizedType().copyWithoutArrays();
+        ParameterizedType pp = part.parameterizedType().copyWithoutArrays();
+        if (pw.bestTypeInfo() == null || pp.bestTypeInfo() == null || pp.isTypeParameter()) return false;
+        for (ParameterizedType t : accessibleTypes(pw)) {
+            if (t.arrays() == pp.arrays() && mayBeSameObject(t, pp)) return true;
+        }
+        return false;
+    }
+
     public static boolean mayBeSameObject(ParameterizedType a, ParameterizedType b) {
         TypeInfo ta = a.bestTypeInfo();
         TypeInfo tb = b.bestTypeInfo();
