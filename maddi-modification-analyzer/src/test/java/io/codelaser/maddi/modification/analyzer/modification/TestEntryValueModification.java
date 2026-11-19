@@ -115,6 +115,49 @@ public class TestEntryValueModification extends CommonTest {
         assertEquals("s1=MU s2=UU s3=UU s4=UU", run(false));
     }
 
+    /*
+     The control: a holder whose own field is rebound ('r.element = x') is modified itself; it holds nothing modified,
+     so nothing passes on to the list it may hold an element of. The fixpoint rule took any modified holder and marked
+     xs (the gate, TestKotlinLinkFunctions.varAssignedInLambda's capturedRefInit).
+     */
+    @Language("java")
+    private static final String REF = """
+            package a.b;
+            import java.util.*;
+            class R {
+                static class Ref<T> { T element; }
+                static StringBuilder capturedRefInit(List<StringBuilder> xs, StringBuilder a) {
+                    Ref<StringBuilder> r = new Ref<>();
+                    r.element = a;
+                    xs.forEach(x -> { r.element = x; });
+                    return r.element;
+                }
+                static StringBuilder loopRef(List<StringBuilder> xs, StringBuilder a) {
+                    Ref<StringBuilder> r = new Ref<>();
+                    r.element = a;
+                    for (StringBuilder x : xs) r.element = x;
+                    return r.element;
+                }
+            }
+            """;
+
+    @DisplayName("control: a holder whose field is rebound holds nothing modified")
+    @Test
+    public void rebindingIsNoModificationOfTheHeld() throws Exception {
+        for (boolean reach : new boolean[]{false, true}) {
+            beforeEach();
+            TypeInfo r = javaInspector.parse("a.b.R", REF);
+            List<Info> ao = prepWork(r);
+            new IteratingAnalyzerImpl(javaInspector, new IteratingAnalyzerImpl.ConfigurationBuilder()
+                    .setMaxIterations(10).setModificationViaReachability(reach).build()).analyze(ao);
+            for (String n : List.of("capturedRefInit", "loopRef")) {
+                MethodInfo m = r.methods().stream().filter(x -> x.name().equals(n)).findFirst().orElseThrow();
+                assertEquals("xs=true a=true", "xs=" + m.parameters().get(0).isUnmodified()
+                                                + " a=" + m.parameters().get(1).isUnmodified(), n + " reach=" + reach);
+            }
+        }
+    }
+
     private String run(boolean reach) {
         TypeInfo z = javaInspector.parse("a.b.Z", INPUT);
         List<Info> ao = prepWork(z);

@@ -137,6 +137,7 @@ class WriteLinksAndModification {
                 : expand(modifiedDuringEvaluation, deepOnlyDuringEvaluation);
         closeOverModificationGroups(expandedModifiedDuringEvaluation);
         modifiedElementOf = modifiedElementOf(expandedModifiedDuringEvaluation);
+        hiddenContentHolders = new HashMap<>();
         if (expandedStructurallyModifiedDuringEvaluation != expandedModifiedDuringEvaluation) {
             closeOverModificationGroups(expandedStructurallyModifiedDuringEvaluation);
         }
@@ -237,6 +238,14 @@ class WriteLinksAndModification {
                 pt -> new AnalysisHelper().typeImmutable(pt).isAtLeastImmutableHC());
     }
     private Map<Variable, Set<MethodInfo>> modifiedElementOf = Map.of();
+
+    /*
+     #147: the variables modified in their hidden content because an object assigned into it was modified ('e.§$$.§$ ←
+     set'), this evaluation. Only these may pass the modification on to what they may hold an element of (holdsElement):
+     a variable modified itself ('r.element = x' rebinds r's field) holds nothing modified
+     (TestKotlinLinkFunctions.varAssignedInLambda, '0:xs.§$s ∩ r').
+     */
+    private Map<Variable, Set<MethodInfo>> hiddenContentHolders = new HashMap<>();
 
     /*
      CodeLaser/maddi-mod#130: the co-element rule for the structural question. An element modified in its own state
@@ -1222,19 +1231,23 @@ class WriteLinksAndModification {
     private static boolean overlapsAsElement(Variable primary, Link link, Variable toReal) {
         Variable from = link.from();
         if (from.equals(primary) || Util.isVirtualModification(from)) return false;
+        if (!primary.equals(Util.firstRealVariable(from))) return false;
         if (!link.to().equals(toReal)) return false;
+        return Util.isElementTypeOf(toReal.parameterizedType(), from.parameterizedType());
+    }
+
+    /*
+     #147: the whole variable may HOLD one of the face's elements, as its hidden content: '0:map.elements.§ts ∩ e', e an
+     entry (Map.Entry<Integer, Bits>) whose value is one of the field's sets, modified through getValue(). The face may
+     belong to a field of the primary. Judged on the face's real element type (its scope's), not the virtual field's
+     formal one. Only for a variable modified in its hidden content (hiddenContentHolders).
+     */
+    private static boolean holdsElement(Variable primary, Link link, Variable toReal) {
+        if (Util.NO_ELEMENTS_MAY_HOLD) return false;
+        Variable from = link.from();
+        if (from.equals(primary) || Util.isVirtualModification(from) || !link.to().equals(toReal)) return false;
         Variable real = Util.firstRealVariable(from);
-        if (primary.equals(real)) {
-            if (Util.isElementTypeOf(toReal.parameterizedType(), from.parameterizedType())) return true;
-        } else if (Util.NO_ELEMENTS_MAY_HOLD || !Util.isFieldOf(real, primary)) {
-            return false;
-        }
-        /*
-         #147: or the whole variable may HOLD one of the elements, as its hidden content: '0:map.elements.§ts ∩ e', e an
-         entry (Map.Entry<Integer, Bits>) whose value is one of the field's sets, modified through getValue(). The face
-         may belong to a field of the primary. Judged on the face's real element type (its scope's, Bits[] -> Bits), not
-         on the virtual field's formal one.
-         */
+        if (!primary.equals(real) && !Util.isFieldOf(real, primary)) return false;
         ParameterizedType element = Util.elementTypeOfFace(from);
         return element != null && Util.typeMayHold(toReal.parameterizedType(), element);
     }
@@ -1314,9 +1327,13 @@ class WriteLinksAndModification {
                  #147: 'e.§$$.§$ ← $__rv3', the primary's hidden content assigned from a modified object (an entry's
                  value, out of getValue()): the primary is modified in its hidden content, deeply.
                  */
+                // (the modified variable itself, not a field of one: 'r.element = x' modifies r, not the object
+                // r.element held -- TestKotlinLinkFunctions.varAssignedInLambda, 'xs.§$s ← r.element')
                 if (!structural && !Util.NO_ELEMENTS_MAY_HOLD && ln == IS_ASSIGNED_FROM
+                    && link.to().equals(toReal)
                     && Util.virtual(link.from()) && !Util.isVirtualModification(link.from())
                     && builder.primary().equals(Util.firstRealVariable(link.from()))) {
+                    hiddenContentHolders.putIfAbsent(builder.primary(), causesOfModification);
                     modifiedVariablesAndTheirCause.putIfAbsent(builder.primary(), causesOfModification);
                     return false;
                 }
@@ -1341,7 +1358,8 @@ class WriteLinksAndModification {
                     // for-each over map.values() ends up there, the view's element field (§$s, from V) and the
                     // iterated one (§$ss, from Set<String>) differing. Modifying tags modifies the map deeply.
                     || ln == OBJECT_GRAPH_OVERLAPS && !structural && !NO_VIEW_ELEMENT_MOD
-                       && overlapsAsElement(builder.primary(), link, toReal)
+                       && (overlapsAsElement(builder.primary(), link, toReal)
+                           || hiddenContentHolders.containsKey(toReal) && holdsElement(builder.primary(), link, toReal))
                        && !sharesModificationGroup(toReal, builder.primary())) {
                     // the completion, as for ≡ above: a later variable holding this one as an element (∋) is
                     // modified in turn. vlist.get(i).put(..) modifies vlist through its element, and versions,
