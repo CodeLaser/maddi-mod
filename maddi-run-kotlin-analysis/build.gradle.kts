@@ -91,6 +91,8 @@ tasks.withType<Test> {
     System.getenv("MADDI_PLACEHOLDER_DUMP")?.let { systemProperty("maddi.placeholderDump", it) }
     System.getProperty("maddi.libraryCallDump")?.let { systemProperty("maddi.libraryCallDump", it) }
     System.getProperty("maddi.memberVerdictDump")?.let { systemProperty("maddi.memberVerdictDump", it) }
+    // TestKotlinVsJavaFernflower: the J2K translation of fernflower's main sources
+    System.getProperty("maddi.j2kSources")?.let { systemProperty("maddi.j2kSources", it) }
     // ⭐ against the REALM, as the shipped CLI does: the compiler is never on the test JVM's own class path
     inputs.files(k2Runtime).withPropertyName("k2Runtime").withNormalizer(ClasspathNormalizer::class)
     jvmArgumentProviders.add(CommandLineArgumentProvider { listOf("-Dmaddi.k2.classpath=" + k2Runtime.asPath) })
