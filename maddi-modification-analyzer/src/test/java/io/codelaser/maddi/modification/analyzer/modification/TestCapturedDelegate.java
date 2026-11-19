@@ -18,6 +18,8 @@
 package io.codelaser.maddi.modification.analyzer.modification;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
@@ -136,12 +138,99 @@ public class TestCapturedDelegate extends CommonTest {
                 + " peek=" + method(fd, "peek").isNonModifying());
     }
 
+    /*
+     CodeLaser/maddi-mod#43, the creation site, with a captured loop variable: fernflower's
+     SFormsFastMapDirect.entryList() returns anonymous entries whose getValue() returns the map's own set, and
+     StackVarsProcessor.replaceSingleVar modifies those sets (FastSparseSet.complement). The returned list holds the
+     map's content, so it is not independent of the map, and the caller modifies the map.
+     */
+    @Language("java")
+    private static final String ENTRIES = """
+            package a.b;
+            import java.util.ArrayList;
+            import java.util.List;
+            import java.util.Map;
+            class Y {
+                static class Bits {
+                    final int[] data = new int[4];
+                    void complement(Bits other) { data[0] &= ~other.data[0]; }
+                }
+                static class BitsMap {
+                    private final Bits[] elements = new Bits[4];
+                    List<Map.Entry<Integer, Bits>> entryList() {
+                        List<Map.Entry<Integer, Bits>> list = new ArrayList<>();
+                        int key = 0;
+                        for (final Bits ent : elements) {
+                            if (ent != null) {
+                                final int k = key;
+                                list.add(new Map.Entry<>() {
+                                    // captured in a field initializer, as fernflower writes it
+                                    private final Bits val = ent;
+                                    public Integer getKey() { return k; }
+                                    public Bits getValue() { return val; }
+                                    public Bits setValue(Bits value) { throw new UnsupportedOperationException(); }
+                                });
+                            }
+                            key++;
+                        }
+                        return list;
+                    }
+                }
+                static class NamedEntry implements Map.Entry<Integer, Bits> {
+                    final int k; final Bits v;
+                    NamedEntry(int k, Bits v) { this.k = k; this.v = v; }
+                    public Integer getKey() { return k; }
+                    public Bits getValue() { return v; }
+                    public Bits setValue(Bits value) { throw new UnsupportedOperationException(); }
+                }
+                static class BitsMap2 {
+                    private final Bits[] elements = new Bits[4];
+                    List<Map.Entry<Integer, Bits>> entryList() {
+                        List<Map.Entry<Integer, Bits>> list = new ArrayList<>();
+                        int key = 0;
+                        for (final Bits ent : elements) {
+                            if (ent != null) list.add(new NamedEntry(key, ent));
+                            key++;
+                        }
+                        return list;
+                    }
+                }
+                static void complementAll2(BitsMap2 map, Bits other) {
+                    for (Map.Entry<Integer, Bits> e : map.entryList()) e.getValue().complement(other);
+                }
+                static class Holder { final java.util.Deque<String> d; Holder(java.util.Deque<String> d) { this.d = d; } }
+                static Holder hold(java.util.Deque<String> d) { return new Holder(d); }
+                static void complementAll(BitsMap map, Bits other) {
+                    for (Map.Entry<Integer, Bits> e : map.entryList()) e.getValue().complement(other);
+                }
+            }
+            """;
+
+    @DisplayName("an anonymous object holds what it captured: entries over the map's own sets are the map's content")
+    @Test
+    public void capturedLoopVariable() {
+        TypeInfo Y = javaInspector.parse("a.b.Y", ENTRIES);
+        List<Info> ao = prepWork(Y);
+        new IteratingAnalyzerImpl(javaInspector, new IteratingAnalyzerImpl.ConfigurationBuilder()
+                .setMaxIterations(10).build()).analyze(ao);
+        MethodInfo entryList = method(Y.findSubType("BitsMap"), "entryList");
+        assertEquals("[] --> entryList.§$$s∩this.elements.§ts", links(entryList));
+        assertEquals("@Dependent", independent(entryList), "the entries hold the map's sets");
+        // the same as with a named entry class holding the set in a field (the control)
+        assertEquals("@Dependent", independent(method(Y.findSubType("BitsMap2"), "entryList")));
+        // KNOWN GAP, not the creation site: a modification of an entry's value, through Map.Entry.getValue() on an
+        // element of the returned list, does not reach the map across the overlap link (∩), named class or not.
+        // fernflower's replaceSingleVar has this shape.
+        assertTrue(method(Y, "complementAll").parameters().getFirst().isUnmodified(), "known gap");
+        assertTrue(method(Y, "complementAll2").parameters().getFirst().isUnmodified(), "known gap, the control");
+    }
+
     // The two sides of the same shape the engine does not cover yet, pinned as they are (CodeLaser/maddi-mod#43):
     // a captured LOCAL does not reach the summary's links (the statement-level link 'delegate ← copy' is not built),
     // so that delegate() still reads independent, while a modification of the local is the method's
     // (copyModificationsIntoMethod's closure set); and the creation site 'new ForwardingDeque<T>() {...}' does not
     // link the new object to what it captured, so wrap's result is independent of its parameter.
-    @DisplayName("known gaps: a captured local, and the creation site")
+    @DisplayName("known gap: a captured local; the creation site is fixed")
     @Test
     public void knownGaps() {
         TypeInfo X = analyze();
@@ -153,9 +242,12 @@ public class TestCapturedDelegate extends CommonTest {
                 "clearIt=" + method(anon, "clearIt").isNonModifying()
                 + " sizeIt=" + method(anon, "sizeIt").isNonModifying(), "the modification side is right");
 
+        // the creation site is fixed: the anonymous object's modification component is that of what it captured
         MethodInfo wrap = method(X, "wrap");
-        assertEquals("[-] --> -", links(wrap), "no link from the new object to the captured parameter");
+        assertEquals("[-] --> wrap.§m≡0:delegate.§m", links(wrap), "the new object holds the captured parameter");
+        // as for a named class holding it in a field: a static method's parameter is judged against a receiver, and
+        // there is none (TestCapturedDelegate's Y.hold, 'hold.d←0:d,hold.d.§m≡0:d.§m', reads @Independent too)
         assertEquals("@Independent", String.valueOf(wrap.parameters().getFirst().analysis()
-                .getOrNull(PropertyImpl.INDEPENDENT_PARAMETER, ValueImpl.IndependentImpl.class)), "unsound, see the comment");
+                .getOrNull(PropertyImpl.INDEPENDENT_PARAMETER, ValueImpl.IndependentImpl.class)));
     }
 }
