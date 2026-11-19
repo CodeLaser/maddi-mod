@@ -127,7 +127,10 @@ public class TestExposedCorpus {
         // constructor, `v[k]` on a smart-cast intersection, a library `var`'s setter, `this@Class` in a member extension,
         // an `if` with no expression form under a cast, `Array(n) { … }` as an argument). Left: 19 in Gradle build logic,
         // and `Array(n) { … }` initializing a property. 19 at maddi 19e5fcec3 (that property: `Collections.nCopies`): all
-        // in Gradle build logic, which needs the kotlin-dsl compiler plugins (sam-with-receiver, assignment).
+        // in Gradle build logic, which needs the kotlin-dsl compiler plugins (sam-with-receiver, assignment). 3 at maddi
+        // 74b3f8f11, with the configuration recording buildSrc's kotlinc plugin options, the plugins applied to that
+        // module only: `driverConfiguration(it)` through kotlin-dsl's `invoke`, `classpath += …` through a Java setter,
+        // and `layout.projectDirectory.dir(…)` in the Gradle plugin module (maddi#221).
         //
         // Immutable types 250 -> 225 at maddi 008e000d1 (maddi#98: a scope function given a function value is a direct
         // call). `QueryBuilder.append(expr) = apply(expr::toQueryBuilder)` is now `expr.toQueryBuilder(this)`, so what the
@@ -136,7 +139,7 @@ public class TestExposedCorpus {
         // invoking a function value modifies it, as Java's `Function.apply` does. Through `IColumnType.valueToString`
         // and `LiteralOp.toQueryBuilder` that makes `Expression` @FinalFields, and 24 subclasses with it. The 250 held
         // only while the `apply` call hid that chain (diagnosis: maddi-mod#140).
-        CensusRatchet.noWorseThan("exposed placeholders", summary.placeholders(), 19);
+        CensusRatchet.noWorseThan("exposed placeholders", summary.placeholders(), 3);
         CensusRatchet.noWorseThan("exposed elements isolated by prep", summary.prepErrors(), 0);
         CensusRatchet.noWorseThanAtLeast("exposed immutable types", summary.immutableTypes(), 225);
     }

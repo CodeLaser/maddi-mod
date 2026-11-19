@@ -200,7 +200,10 @@ public class TestDetektCorpus {
         // references); 4,701 (property references); 4,704 at 29e951ea1; 4,744 at fbe6b138a. 5 on 2026-11-17 (maddi
         // efd63f995/bbddaca99: reified `T::class`, import aliases, `Number.toLong()`, companion supertypes). 3 at maddi
         // 19e5fcec3 (a library `var`'s facade setter: kotlinx.html's `id = …`; `Result.getOrNull()`): all in Gradle build logic.
-        CensusRatchet.noWorseThan("detekt placeholders", summary.placeholders(), 3);
+        // 1 at maddi 74b3f8f11, with the configuration recording build-logic's kotlinc plugin options (kotlin-dsl's
+        // sam-with-receiver and assignment, applied to that module only): a configuration invoked as a function
+        // (maddi#221).
+        CensusRatchet.noWorseThan("detekt placeholders", summary.placeholders(), 1);
         CensusRatchet.noWorseThan("detekt elements isolated by prep", summary.prepErrors(), 0);
         // Re-baselined deliberately, twice, each time because more code was READ, never because a lowering was
         // found wrong (gap doc §7.26, §7.27): 668 -> 667 (three transitive moves), 667 -> 665 (OutputReport and
