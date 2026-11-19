@@ -22,6 +22,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.codelaser.maddi.inspection.resource.InputConfigurationImpl;
+import io.codelaser.maddi.modification.common.util.Culprits;
 import io.codelaser.maddi.run.config.ShippedAnalysisResults;
 import io.codelaser.maddi.run.config.util.JsonStreaming;
 import io.codelaser.maddi.util.corpus.Corpora;
@@ -102,6 +103,8 @@ public class TestKotlinVsJavaFernflower {
         addKotlinStdlib(mapper, tree);
         InputConfigurationImpl kotlin = mapper.treeToValue(tree, InputConfigurationImpl.class);
 
+        // explain.txt: culprits on both sides; set here because the forked test JVM need not see the environment
+        if (Boolean.getBoolean("maddi.kotlinVsJava.culprits")) Culprits.ENABLED = true;
         RunMixedPrepAnalyzer.Summary javaSummary = run(java, out, "java");
         RunMixedPrepAnalyzer.Summary kotlinSummary = run(kotlin, out, "kotlin");
         List<String> actual = writeReport(out, List.of("java:   " + javaSummary, "kotlin: " + kotlinSummary),
