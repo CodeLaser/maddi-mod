@@ -17,13 +17,17 @@
 # maddi-mod fb286554), as the analysis engine and the IDE daemon run: the first record had the fixpoint verdicts only.
 # Types differ 4 -> 1, kotlin-stronger F 10 -> 4, M 8 -> 7, P 18 -> 15; kotlin-weaker M 11 -> 15, P 6 -> 8. With
 # -Dmaddi.kotlinVsJava.culprits=true the run writes explain.txt, both sides' culprits per differing verdict.
+#
+# 2026-11-19, maddi b4ceaf52c (`e.also { v = it }` is Java's `(v = e)`) and f5a904b10 (an object expression's members
+# capture the enclosing parameters): kotlin-stronger M 7 -> 6, P 15 -> 8. Gone: both getMaxBreakLift, the
+# DirectGraph.ExprentIterator chain (iterateExprents, StatementIterator.iterate, updateVersions).
 
 java primaryTypes=227 placeholders=0 prepErrors=0
 kotlin primaryTypes=227 placeholders=41 prepErrors=0
 T: agree=226 kotlin-weaker=0 kotlin-stronger=0 differ=1 kotlin-none=0 java-none=0 java-only=0 kotlin-only-accessor=0 kotlin-only-companion=0 kotlin-only-static-init=0 kotlin-only-data-class=0 kotlin-only-enum-name=0 kotlin-only-nested-type=87 kotlin-only-other=0 java-only-initializer=0
 F: agree=1520 kotlin-weaker=2 kotlin-stronger=4 differ=0 kotlin-none=0 java-none=0 java-only=0 kotlin-only-accessor=0 kotlin-only-companion=136 kotlin-only-static-init=0 kotlin-only-data-class=0 kotlin-only-enum-name=0 kotlin-only-nested-type=0 kotlin-only-other=0 java-only-initializer=0
-M: agree=2271 kotlin-weaker=15 kotlin-stronger=7 differ=0 kotlin-none=0 java-none=0 java-only=0 kotlin-only-accessor=214 kotlin-only-companion=0 kotlin-only-static-init=62 kotlin-only-data-class=62 kotlin-only-enum-name=12 kotlin-only-nested-type=0 kotlin-only-other=20 java-only-initializer=2
-P: agree=2325 kotlin-weaker=8 kotlin-stronger=15 differ=0 kotlin-none=0 java-none=0 java-only=0 kotlin-only-accessor=121 kotlin-only-companion=0 kotlin-only-static-init=0 kotlin-only-data-class=85 kotlin-only-enum-name=0 kotlin-only-nested-type=0 kotlin-only-other=4 java-only-initializer=0
+M: agree=2272 kotlin-weaker=15 kotlin-stronger=6 differ=0 kotlin-none=0 java-none=0 java-only=0 kotlin-only-accessor=214 kotlin-only-companion=0 kotlin-only-static-init=62 kotlin-only-data-class=62 kotlin-only-enum-name=12 kotlin-only-nested-type=0 kotlin-only-other=20 java-only-initializer=2
+P: agree=2332 kotlin-weaker=8 kotlin-stronger=8 differ=0 kotlin-none=0 java-none=0 java-only=0 kotlin-only-accessor=121 kotlin-only-companion=0 kotlin-only-static-init=0 kotlin-only-data-class=85 kotlin-only-enum-name=0 kotlin-only-nested-type=0 kotlin-only-other=4 java-only-initializer=0
 T differ  @FinalFields -> @Mutable  org.jetbrains.java.decompiler.modules.decompiler.StrongConnectivityHelper
 F kotlin-weaker  true -> false  org.jetbrains.java.decompiler.main.rels.NestedClassProcessor.VarFieldPair.varPair
 F kotlin-weaker  true -> false  org.jetbrains.java.decompiler.modules.decompiler.SwitchPatternHelper.SwitchOnReferenceCandidate.myPreviousSelector
@@ -51,7 +55,6 @@ M kotlin-stronger  false -> true  org.jetbrains.java.decompiler.modules.decompil
 M kotlin-stronger  false -> true  org.jetbrains.java.decompiler.modules.decompiler.ExprProcessor.processStatement(org.jetbrains.java.decompiler.modules.decompiler.stats.RootStatement,org.jetbrains.java.decompiler.struct.StructClass)
 M kotlin-stronger  false -> true  org.jetbrains.java.decompiler.modules.decompiler.exps.ConstExprent.toJava(int,org.jetbrains.java.decompiler.main.collectors.BytecodeMappingTracer)
 M kotlin-stronger  false -> true  org.jetbrains.java.decompiler.modules.decompiler.exps.ConstExprent.toString()
-M kotlin-stronger  false -> true  org.jetbrains.java.decompiler.modules.decompiler.sforms.DirectGraph.ExprentIterator.processExprent(org.jetbrains.java.decompiler.modules.decompiler.exps.Exprent)
 M kotlin-stronger  false -> true  org.jetbrains.java.decompiler.struct.StructContext.saveContext()
 M kotlin-only-other  true  org.jetbrains.java.decompiler.main.ClassWriter.MType.getEntries()
 M kotlin-only-other  true  org.jetbrains.java.decompiler.main.extern.IFernflowerLogger.Severity.getEntries()
@@ -83,19 +86,12 @@ P kotlin-weaker  true -> false  org.jetbrains.java.decompiler.modules.decompiler
 P kotlin-weaker  true -> false  org.jetbrains.java.decompiler.modules.decompiler.SwitchPatternHelper.JavacReferenceFinder.collectPatterns(org.jetbrains.java.decompiler.modules.decompiler.exps.VarExprent,org.jetbrains.java.decompiler.modules.decompiler.stats.DoStatement,java.util.Set)#0
 P kotlin-stronger  false -> true  org.jetbrains.java.decompiler.main.rels.NestedClassProcessor.ExprentIteratorWithReplace.processExprent(org.jetbrains.java.decompiler.modules.decompiler.exps.Exprent)#0
 P kotlin-stronger  false -> true  org.jetbrains.java.decompiler.main.rels.NestedClassProcessor.iterateExprents(org.jetbrains.java.decompiler.modules.decompiler.sforms.DirectGraph,org.jetbrains.java.decompiler.main.rels.NestedClassProcessor.ExprentIteratorWithReplace)#1
-P kotlin-stronger  false -> true  org.jetbrains.java.decompiler.modules.decompiler.EliminateLoopsHelper.getMaxBreakLift(org.jetbrains.java.decompiler.modules.decompiler.stats.Statement,org.jetbrains.java.decompiler.modules.decompiler.StatEdge,java.util.HashMap,org.jetbrains.java.decompiler.modules.decompiler.stats.Statement)#0
 P kotlin-stronger  false -> true  org.jetbrains.java.decompiler.modules.decompiler.ExprProcessor.getTypeName(org.jetbrains.java.decompiler.struct.gen.VarType,boolean,java.util.List)#2
 P kotlin-stronger  false -> true  org.jetbrains.java.decompiler.modules.decompiler.ExprProcessor.getTypeName(org.jetbrains.java.decompiler.struct.gen.VarType,java.util.List)#1
 P kotlin-stronger  false -> true  org.jetbrains.java.decompiler.modules.decompiler.ExprProcessor.listToJava(java.util.List,int,org.jetbrains.java.decompiler.main.collectors.BytecodeMappingTracer)#0
 P kotlin-stronger  false -> true  org.jetbrains.java.decompiler.modules.decompiler.ExprProcessor.processBlock(org.jetbrains.java.decompiler.modules.decompiler.stats.BasicBlockStatement,org.jetbrains.java.decompiler.modules.decompiler.PrimitiveExpressionList,org.jetbrains.java.decompiler.struct.StructClass)#0
 P kotlin-stronger  false -> true  org.jetbrains.java.decompiler.modules.decompiler.ExprProcessor.processBlock(org.jetbrains.java.decompiler.modules.decompiler.stats.BasicBlockStatement,org.jetbrains.java.decompiler.modules.decompiler.PrimitiveExpressionList,org.jetbrains.java.decompiler.struct.StructClass)#1
 P kotlin-stronger  false -> true  org.jetbrains.java.decompiler.modules.decompiler.ExprProcessor.writeNestedClass(StringBuilder,org.jetbrains.java.decompiler.struct.gen.Type,java.util.List,java.util.List)#3
-P kotlin-stronger  false -> true  org.jetbrains.java.decompiler.modules.decompiler.LowBreakHelper.getMaxBreakLift(org.jetbrains.java.decompiler.modules.decompiler.stats.Statement,org.jetbrains.java.decompiler.modules.decompiler.StatEdge)#0
-P kotlin-stronger  false -> true  org.jetbrains.java.decompiler.modules.decompiler.PPandMMHelper.updateVersions(org.jetbrains.java.decompiler.modules.decompiler.sforms.DirectGraph,org.jetbrains.java.decompiler.modules.decompiler.vars.VarVersion,org.jetbrains.java.decompiler.modules.decompiler.vars.VarVersion)#2
-P kotlin-stronger  false -> true  org.jetbrains.java.decompiler.modules.decompiler.sforms.DirectGraph.iterateExprents(org.jetbrains.java.decompiler.modules.decompiler.sforms.DirectGraph.ExprentIterator)#0
-P kotlin-stronger  false -> true  org.jetbrains.java.decompiler.modules.decompiler.sforms.DirectGraph.iterateExprentsDeep(org.jetbrains.java.decompiler.modules.decompiler.sforms.DirectGraph.ExprentIterator)#0
-P kotlin-stronger  false -> true  org.jetbrains.java.decompiler.util.StatementIterator.iterate(org.jetbrains.java.decompiler.modules.decompiler.exps.Exprent,org.jetbrains.java.decompiler.modules.decompiler.sforms.DirectGraph.ExprentIterator)#1
-P kotlin-stronger  false -> true  org.jetbrains.java.decompiler.util.StatementIterator.iterate(org.jetbrains.java.decompiler.modules.decompiler.stats.Statement,org.jetbrains.java.decompiler.modules.decompiler.sforms.DirectGraph.ExprentIterator)#1
 P kotlin-only-other  true  org.jetbrains.java.decompiler.struct.attr.StructLocalVariableTableAttribute.LocalVariable.version$set(org.jetbrains.java.decompiler.modules.decompiler.vars.VarVersion)#0
 P kotlin-only-other  false  org.jetbrains.java.decompiler.util.FastFixedSetFactory.FastFixedSet.data$set(int[])#0
 P kotlin-only-other  false  org.jetbrains.java.decompiler.util.FastSparseSetFactory.FastSparseSet.data$set(int[])#0
