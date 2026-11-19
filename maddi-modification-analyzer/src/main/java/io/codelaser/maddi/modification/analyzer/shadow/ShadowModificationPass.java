@@ -988,7 +988,7 @@ public class ShadowModificationPass {
                 if (fr.scopeIsRecursivelyThis()) {
                     seedWithOrigin(mi, mi, "assignment to " + fr.fullyQualifiedName());
                 } else if (fr.scopeVariable() != null) {
-                    for (Object node : project(mi, vd, fr.scopeVariable())) {
+                    for (Object node : project(mi, vd, fr.scopeVariable(), true)) {
                         seedWithOrigin(node, mi, "assignment to " + fr.fullyQualifiedName());
                     }
                 } else if (fr.scope() != null) {
@@ -1002,7 +1002,7 @@ public class ShadowModificationPass {
                 }
             }
             case DependentVariable dv -> {
-                for (Object node : project(mi, vd, dv.arrayVariable())) {
+                for (Object node : project(mi, vd, dv.arrayVariable(), true)) {
                     if (unwrap(node) instanceof FieldInfo fi && constructionPhaseWrite(mi, fi)) continue;
                     seedWithOrigin(node, mi, "array-element assignment " + dv.fullyQualifiedName());
                 }
@@ -1266,7 +1266,10 @@ public class ShadowModificationPass {
                                     mc.parameterExpressions().get(pi.index());
                             case null, default -> null;
                         };
-                        projectReceiverChain(mi, vd, container, null).forEach(node -> out.add(deepOnly(node)));
+                        // #130: unless the result may be the container's accessible content too
+                        Written written = new Written(mc.parameterizedType(), false);
+                        projectReceiverChain(mi, vd, container, null).forEach(node ->
+                                out.add(accessibleReach(written, node) ? node : deepOnly(node)));
                     }
                 }
                 return out;
@@ -1325,19 +1328,50 @@ public class ShadowModificationPass {
      * projected after everything the start reaches structurally, so a node reached both ways stays structural.
      */
     private Set<Object> project(MethodInfo mi, VariableData vd, Variable start) {
+        return project(mi, vd, start, false);
+    }
+
+    /**
+     * @param exact the write is to {@code start}'s own fields (an assignment, an array store), not somewhere in its
+     *              accessible content: see {@link Util#mayBeAccessibleContent}
+     */
+    private Set<Object> project(MethodInfo mi, VariableData vd, Variable start, boolean exact) {
         Set<Object> out = new LinkedHashSet<>();
         Set<String> done = new HashSet<>();
         List<Variable> containers = new ArrayList<>();
-        project(mi, vd, start, false, done, out, containers);
+        Written written = start == null ? null : new Written(start.parameterizedType(), exact);
+        project(mi, vd, start, false, done, out, containers, written);
         // an element's container can be an element in turn: the list grows while we walk it
         for (int i = 0; i < containers.size(); i++) {
-            project(mi, vd, containers.get(i), true, done, out, containers);
+            project(mi, vd, containers.get(i), true, done, out, containers, written);
         }
         return out;
     }
 
+    /** The object a projection starts from, the one written: its declared type, and whether its own fields are. */
+    private record Written(ParameterizedType type, boolean exact) {
+    }
+
+    /*
+     #130: a node reached through hidden content only is still modified structurally when the object written may be
+     its accessible content as well (Util.mayBeAccessibleContent): 'edge.getDestination().addLabeledEdge(edge)', the
+     edge an element of the parameter's edge list, writes a Statement, and the Statement parameter's accessible content
+     holds Statements. The engine's WriteLinksAndModification.mayAliasAccessibleField, the same rule.
+     */
+    private boolean accessibleReach(Written written, Object node) {
+        if (written == null) return false;
+        ParameterizedType owner = switch (node) {
+            case ParameterInfo pi -> pi.parameterizedType();
+            case MethodInfo m -> m.typeInfo().asParameterizedType();
+            case FieldInfo fi -> fi.type();
+            default -> null;
+        };
+        return Util.mayBeAccessibleContent(written.type(), owner, written.exact(),
+                pt -> analysisHelper.typeImmutable(pt).isAtLeastImmutableHC());
+    }
+
     private void project(MethodInfo mi, VariableData vd, Variable start, boolean deepOnly, Set<String> done,
-                         Set<Object> nodes, List<Variable> containers) {
+                         Set<Object> nodes, List<Variable> containers, Written written) {
         Set<Object> out = deepOnly ? new LinkedHashSet<>() : nodes;
         Deque<Variable> todo = new ArrayDeque<>();
         push(todo, start);
@@ -1482,7 +1516,7 @@ public class ShadowModificationPass {
                 }
             }
         }
-        if (deepOnly) out.forEach(node -> nodes.add(deepOnly(node)));
+        if (deepOnly) out.forEach(node -> nodes.add(accessibleReach(written, node) ? node : deepOnly(node)));
     }
 
     /*

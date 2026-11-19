@@ -110,6 +110,116 @@ public class Util {
 
     public static final boolean NO_HIDDEN_ALIAS = System.getenv("NOHIDDENALIAS") != null;
 
+    /*
+     CodeLaser/maddi-mod#130, the definition of a structural modification (Bart, 2026-11-19): a write is a structural
+     modification of p when the object written is p's accessible content, reached by SOME path of accessible fields in
+     the heap the call leaves, whichever path the method took to it. Accessible content is judged by declared types:
+     the fields of the declared type and its supertypes, not a subclass's (IfStatement.ifedge, seen through 'Statement
+     parent', is hidden content of Statement); a field typed by a type parameter or Object, and the elements of a
+     container, are hidden. An object a method reaches through hidden content (an element of p's edge list) may so
+     be accessible content of p as well: fernflower's 'edge.getDestination().addLabeledEdge(edge)' writes a
+     Statement, and a Statement is accessible content of the Statement p ('parent', 'first'; p itself). The run-time
+     check (rust codelaser-dynamic-modification, Walk) follows the same definition. Gate NOACCESSIBLEREACH.
+     Three approximations, accepted by Bart on 2026-11-19 and described in the book (§080, 'structural-definition'):
+     (a) a call compares the written object and the application objects it holds, not its JDK containers
+     (mayBeAccessibleContent, exact = false); (b) the owner's own type counts only through a field back to it
+     (accessibleTypes); (c) the fixpoint engine cannot tell a direct write from a call, so it is coarser than the
+     reachability pass (WriteLinksAndModification.mayAliasAccessibleField, TestAccessibleReach 'reset').
+     */
+    public static final boolean NO_ACCESSIBLE_REACH = System.getenv("NOACCESSIBLEREACH") != null;
+    private static final int ACCESSIBLE_TYPES_LIMIT = 400;
+    private static final java.util.Map<String, List<ParameterizedType>> ACCESSIBLE_TYPES =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * The declared types of the accessible content of an object of declared type {@code type}, reached through at
+     * least one field: the type itself only when a field leads back to it ('Statement parent'). An element of hidden
+     * content that is the owner itself, with no field to it (a Leaf in its own 'List<Leaf> children'), is left out,
+     * as #117 left it out (the book's §080, TestBook080Elements clearLeaves). Closed over the non-static fields of each type and its supertypes, a field typed by a type parameter
+     * or {@code Object} left out (hidden content), an array field with its element type (unless that is hidden). The
+     * JDK's types are members but are not walked into: their own fields are their implementation (the run-time check
+     * does not walk them either), and a container's elements are hidden content.
+     */
+    public static List<ParameterizedType> accessibleTypes(ParameterizedType type) {
+        TypeInfo root = type.bestTypeInfo();
+        if (root == null) return List.of(type);
+        String key = type.arrays() + ":" + root.fullyQualifiedName();
+        return ACCESSIBLE_TYPES.computeIfAbsent(key, k -> computeAccessibleTypes(type));
+    }
+
+    private static List<ParameterizedType> computeAccessibleTypes(ParameterizedType type) {
+        List<ParameterizedType> result = new java.util.ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        java.util.ArrayDeque<ParameterizedType> todo = new java.util.ArrayDeque<>();
+        todo.add(type);
+        boolean root = true;
+        while (!todo.isEmpty() && result.size() < ACCESSIBLE_TYPES_LIMIT) {
+            ParameterizedType pt = todo.poll();
+            TypeInfo ti = pt.bestTypeInfo();
+            if (root) {
+                root = false; // walked, not a member: it becomes one when a field leads back to it
+            } else {
+                if (ti == null || !seen.add(pt.arrays() + ":" + ti.fullyQualifiedName())) continue;
+                result.add(pt);
+            }
+            if (ti == null) continue;
+            if (pt.arrays() > 0) {
+                ParameterizedType element = pt.copyWithoutArrays();
+                if (!hiddenFieldType(element)) todo.add(element);
+                continue;
+            }
+            if (isJdk(ti)) continue;
+            Stream.concat(Stream.of(ti), ti.superTypesExcludingJavaLangObject().stream())
+                    .flatMap(t -> t.fields().stream())
+                    .filter(f -> !f.isStatic())
+                    .map(FieldInfo::type)
+                    .filter(ft -> !ft.isPrimitiveExcludingVoid() && !hiddenFieldType(ft))
+                    .forEach(todo::add);
+        }
+        return List.copyOf(result);
+    }
+
+    private static boolean hiddenFieldType(ParameterizedType ft) {
+        return ft.isTypeParameter() || ft.arrays() == 0 && ft.isJavaLangObject() || ft.bestTypeInfo() == null;
+    }
+
+    // on the fully qualified name: packageName() is null for a nested type
+    private static boolean isJdk(TypeInfo ti) {
+        String p = ti.fullyQualifiedName();
+        return p.startsWith("java.") || p.startsWith("javax.") || p.startsWith("jdk.") || p.startsWith("sun.");
+    }
+
+    /**
+     * Whether a modification of an object of declared type {@code written}, reached by the method through hidden
+     * content of an object of declared type {@code owner}, may be a structural modification of that owner (see
+     * {@link #NO_ACCESSIBLE_REACH}).
+     *
+     * @param exact     the write is to {@code written}'s own fields (an assignment 'w.f = x', an array store);
+     *                  false: somewhere in its accessible content (a call that modifies it structurally). Then the
+     *                  object itself and the application objects it holds are compared, not the JDK containers it
+     *                  holds: a 'List<Node> children' in every Node would make any modification of a list's elements
+     *                  a modification of the list (the book's §080 (3), and the read-only List the Kotlin printer
+     *                  derives from it). Known gap: a call that writes a JDK container the element and the owner
+     *                  share; the run-time check guards it.
+     * @param immutable whether a type's objects cannot be modified: they are left out of the comparison
+     */
+    public static boolean mayBeAccessibleContent(ParameterizedType written, ParameterizedType owner, boolean exact,
+                                                 java.util.function.Predicate<ParameterizedType> immutable) {
+        if (NO_ACCESSIBLE_REACH || written == null || owner == null) return false;
+        if (written.isTypeParameter() || written.bestTypeInfo() == null || owner.bestTypeInfo() == null) return false;
+        List<ParameterizedType> ownerTypes = accessibleTypes(owner);
+        List<ParameterizedType> writtenTypes = exact ? List.of(written)
+                : Stream.concat(Stream.of(written), accessibleTypes(written).stream()).toList();
+        for (ParameterizedType w : writtenTypes) {
+            if (w != written && w.arrays() == 0 && isJdk(w.bestTypeInfo())) continue;
+            if (immutable.test(w)) continue;
+            for (ParameterizedType o : ownerTypes) {
+                if (w.arrays() == o.arrays() && mayBeSameObject(w, o)) return true;
+            }
+        }
+        return false;
+    }
+
     private static boolean hasCompatibleField(TypeInfo ownerType, FieldInfo except, ParameterizedType elementType) {
         return Stream.concat(Stream.of(ownerType), ownerType.superTypesExcludingJavaLangObject().stream())
                 .flatMap(t -> t.fields().stream())

@@ -223,10 +223,17 @@ class WriteLinksAndModification {
     private static final boolean NO_ITERATOR_STATE = Gate.isSet("NOITERATORSTATE");
 
     /* #117: see Util.hiddenAliasOwner. The container's own variable ('sequence.stats') is left alone: its element
-       is modified, not it. */
+       is modified, not it.
+       #130: or the element, modified structurally, may be the primary's accessible content as well, by declared
+       types at any depth (Util.mayBeAccessibleContent): 'edge.getDestination().addLabeledEdge(edge)' modifies a
+       Statement, and Statements are accessible content of the Statement whose edge list held the edge. The element's
+       own fields or something it holds: not exact. The shadow pass's accessibleReach, the same rule. */
     private static boolean mayAliasAccessibleField(Variable primary, Variable containerFace, Variable element) {
         Variable container = Util.firstRealVariable(containerFace);
-        return container != null && !container.equals(primary) && Util.hiddenAliasOwner(containerFace, element) != null;
+        if (container == null) return false;
+        if (!container.equals(primary) && Util.hiddenAliasOwner(containerFace, element) != null) return true;
+        return Util.mayBeAccessibleContent(element.parameterizedType(), primary.parameterizedType(), false,
+                pt -> new AnalysisHelper().typeImmutable(pt).isAtLeastImmutableHC());
     }
     private Map<Variable, Set<MethodInfo>> modifiedElementOf = Map.of();
 
