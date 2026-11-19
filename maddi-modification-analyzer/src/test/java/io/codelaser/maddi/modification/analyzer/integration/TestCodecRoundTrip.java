@@ -47,7 +47,9 @@ import io.codelaser.maddi.util.Trie;
  * fernflower and guava (2026-11-12): a link through an object creation, a method call, a char, long or double
  * constant, a binary operator, an inline conditional, an assignment, a class literal or an array's length; an anonymous, local or lambda type named in a link or an implementation;
  * a modified array element beside the deep-only list; a type parameter of a nested type; a virtual container type
- * (Map's §KV), whose fields it owns and whose definition must not depend on the order of the file.
+ * (Map's §KV), whose fields it owns and whose definition must not depend on the order of the file. Guava added
+ * (CodeLaser/maddi-mod#110, 2026-11-19): a string constant holding a control character, which made the file invalid
+ * JSON, and an array creation, whose synthetic constructor is no member of a type.
  */
 public class TestCodecRoundTrip extends CommonTest {
 
@@ -105,6 +107,8 @@ public class TestCodecRoundTrip extends CommonTest {
                 static <K, V> Map<K, V> copyMap(Map<K, V> m) { return new HashMap<>(m); }
                 static <K, V> V first(Map<K, V> m, K k) { return m.get(k); }
                 static <T, R> R apply(Function<T, R> f, T t) { return f.apply(t); }
+                static List<String> nul() { List<String> l = new ArrayList<>(); l.add("\\0\\r"); return l; }
+                Object atArray() { return arr[java.util.Arrays.asList(new Integer[] { 1 }).get(0)]; }
             }
             """;
 
@@ -136,7 +140,9 @@ public class TestCodecRoundTrip extends CommonTest {
         }
         // not vacuous: the shapes the codec could not write before are in the file
         for (String shape : List.of("[\"O\"", "\"A", "binaryOperator", "methodCall", "charConstant", "longConstant",
-                "doubleConstant", "inlineConditional", "arrayLength", "assignment", "classLiteral", "\"U")) {
+                "doubleConstant", "inlineConditional", "arrayLength", "assignment", "classLiteral", "\"U",
+                // CodeLaser/maddi-mod#110: a control character in a string, an array creation with its initializer
+                "\\u0000", "[\"[]\"", "arrayInitializer", "emptyExpression")) {
             assertTrue(written.contains(shape), () -> "expected " + shape + " in the written results");
         }
 

@@ -52,6 +52,7 @@ public class LinkCodec {
     private final Codec.PropertyProvider propertyProvider;
     private final Runtime runtime;
     private final SourceSet sourceSetOfRequest;
+    private final JavaInspector javaInspector;
 
     public LinkCodec(JavaInspector javaInspector) {
         this(javaInspector, javaInspector.mainSources());
@@ -67,6 +68,7 @@ public class LinkCodec {
         this.propertyProvider = new P();
         this.sourceSetOfRequest = sourceSetOfRequest;
         this.runtime = javaInspector.runtime();
+        this.javaInspector = javaInspector;
     }
 
     public Codec codec() {
@@ -86,6 +88,17 @@ public class LinkCodec {
     class C extends CodecImpl {
         public C() {
             super(runtime, propertyProvider, decoderProvider, typeProvider, sourceSetOfRequest);
+        }
+
+        // the source set of the type being decoded resolves what the source set of the request cannot
+        @Override
+        protected TypeInfo typeOutsideSourceSetOfRequest(Codec.Context context, String fullyQualifiedName) {
+            Codec.TypeAndSorted current = context == null ? null : context.currentType();
+            if (current == null) return null;
+            TypeInfo primary = current.typeInfo().primaryType();
+            SourceSet own = primary.compilationUnit() == null ? null : primary.compilationUnit().sourceSet();
+            if (own == null || own.equals(sourceSetOfRequest)) return null;
+            return javaInspector.compiledTypesManager().type(fullyQualifiedName, own);
         }
 
         /**
