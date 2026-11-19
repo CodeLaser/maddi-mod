@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 /*
@@ -26,6 +27,11 @@ public class TestKotlinAnalyzerElementModification extends CommonKotlinAnalyzerT
             }
             class ReadOnly(private val parts: List<Part>) {
                 fun viaGet(): Int = parts.get(0).bump()
+            }
+            // fernflower's ExprProcessor.popNestedTypeAnnotation: each element modified in Kotlin's inline forEach
+            object Pop {
+                fun viaForEach(parts: List<Part>) { parts.forEach { p -> p.bump() } }
+                fun viaFor(parts: List<Part>) { for (p in parts) p.bump() }
             }
             // Annotation is an Exp itself: its render() calls into the family it belongs to, a cycle (fernflower's
             // AnnotationExprent.toJava calling Exprent.toJava)
@@ -60,6 +66,10 @@ public class TestKotlinAnalyzerElementModification extends CommonKotlinAnalyzerT
                 private final List<Part> parts;
                 ReadOnly(List<Part> parts) { this.parts = parts; }
                 int viaGet() { return parts.get(0).bump(); }
+            }
+            final class Pop {
+                static void viaForEach(List<Part> parts) { parts.forEach(p -> p.bump()); }
+                static void viaFor(List<Part> parts) { for (Part p : parts) p.bump(); }
             }
             abstract class Exp { abstract String render(); }
             final class Counting extends Exp { private int n; String render() { n += 1; return "c"; } }
@@ -100,6 +110,17 @@ public class TestKotlinAnalyzerElementModification extends CommonKotlinAnalyzerT
         assertEquals("method viaGet: nonModifying=false", firstWord(a.kotlin("ReadOnly", "viaGet"), "viaGet"));
         assertEquals("method render: nonModifying=false", firstWord(a.kotlin("Annotation", "render"), "render"),
                 () -> a.kotlin("Annotation", "render") + "\n--- java\n" + a.java("Annotation", "render"));
+    }
+
+    // ⛔ UNSOUND TODAY (CodeLaser/maddi-mod#145): Kotlin's inline forEach drops the lambda's modification of the
+    // elements; `for` and Java's forEach see it
+    @Disabled("maddi-mod#145: a modification inside Kotlin's inline forEach does not reach the collection")
+    @Test
+    public void aLambdaElementModificationReachesTheParameter() {
+        for (String m : new String[]{"viaFor", "viaForEach"}) {
+            assertEquals(false, a.javaType("Pop").findUniqueMethod(m, 1).parameters().getFirst().isUnmodified(), "java " + m);
+            assertEquals(false, a.kotlinType("Pop").findUniqueMethod(m, 1).parameters().getFirst().isUnmodified(), "kotlin " + m);
+        }
     }
 
     /** The method's line, up to and including its nonModifying verdict. */
