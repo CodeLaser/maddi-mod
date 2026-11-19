@@ -1352,7 +1352,11 @@ public class Graph {
                 if (!engine.isValid(up)) continue;
                 closureStream(vertex).forEach(e -> {
                     Variable to = e.getKey();
+                    // nor to a modification face ('mapping[index] = toStringArray(classNames)', 'classNames.§m'): the
+                    // array is no §m, the link would mix the two (hibernate-orm's JoinedSubclassEntityPersister
+                    // .associateSubclassNamesToSubclassTableIndex)
                     if (same.contains(to) || to.equals(array) || Util.isPartOf(array, to)
+                        || Util.isVirtualModification(to)
                         || expandRepToMembers(to).allMatch(m -> leavesScope(m, toRemove))) {
                         return;
                     }

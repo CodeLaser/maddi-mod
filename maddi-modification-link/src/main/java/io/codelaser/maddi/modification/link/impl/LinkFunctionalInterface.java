@@ -303,6 +303,11 @@ public record LinkFunctionalInterface(Runtime runtime, VirtualFieldComputer virt
 
     private Variable createSlice(int i, Variable base, Variable sub) {
         // essentially for a BiConsumer: (x,y)-> ...
+        // No slice of nothing, nor of the function itself: a BiConsumer handed on ('collect(ref, map::put)', then
+        // 'collect(join.ref(), consumer)') arrives with its own decoration link as the source, '1:consumer ↗ $_afi0'
+        // (hibernate-orm's CteInsertHandler.addDmlCtes; a null base in a loop body copy of
+        // SqmMutationStrategyHelper.forEachSelectableMapping)
+        if (base == null || io.codelaser.maddi.modification.common.FunctionTypes.isStandardFunctionalInterface(base.parameterizedType())) return null;
         ParameterizedType sourcePt = sub.parameterizedType();
         String name = sourcePt.typeParameter() != null ? sourcePt.typeParameter().simpleName().toLowerCase() : "$";
         String names = name + "s".repeat(sourcePt.arrays());

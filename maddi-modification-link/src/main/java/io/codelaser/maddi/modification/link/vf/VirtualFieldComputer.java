@@ -111,8 +111,11 @@ public class VirtualFieldComputer {
             return typeParameter(pt, arrays);
         }
         TypeInfo typeInfo = pt.typeInfo();
-        if (arrays == 0 && (typeInfo == null
-                            || typeInfo.isPrimitiveExcludingVoid()
+        // an array of an element type that is neither a type parameter nor a type (typeInfo null) has no methods to
+        // count multiplicity from: none, as for the element itself (hibernate-orm's
+        // MappingModelCreationHelper.buildPluralAttributeMapping crashed on it)
+        if (typeInfo == null) return NONE_NONE;
+        if (arrays == 0 && (typeInfo.isPrimitiveExcludingVoid()
                             || typeInfo.isVoid()
                             || Util.isContainerType(typeInfo)
                             || FunctionTypes.isStandardFunctionalInterface(typeInfo))) {
