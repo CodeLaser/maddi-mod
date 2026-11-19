@@ -31,6 +31,7 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -38,6 +39,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Stream;
 
 /**
  * <b>The Kotlin front end's precision, measured against Java's on the same program.</b> Fernflower's main sources
@@ -92,11 +94,37 @@ public class TestKotlinVsJavaFernflower {
             }
         }
         if (replaced != 1) throw new IllegalStateException("expected one source set " + MAIN_SET + ", found " + replaced);
+        addKotlinStdlib(mapper, tree);
         InputConfigurationImpl kotlin = mapper.treeToValue(tree, InputConfigurationImpl.class);
 
         RunMixedPrepAnalyzer.Summary javaSummary = run(java, out, "java");
         RunMixedPrepAnalyzer.Summary kotlinSummary = run(kotlin, out, "kotlin");
         writeReport(out, List.of("java:   " + javaSummary, "kotlin: " + kotlinSummary), out.resolve("report.txt"));
+    }
+
+    /**
+     * kotlin-stdlib on the Kotlin side's class path, as kotlinc had it when it compiled the translation. ⛔ The Java
+     * configuration has none, and without it K2 resolves none of the stdlib: no `@JvmStatic` (so no static forwarders,
+     * and the Java tests calling `ConstExprent.trimFloat` or `InterpreterUtil.getBytes` were dropped, taking their
+     * modifications with them), no `use`/`apply`/`toInt` (placeholders, members without a verdict). The test set,
+     * Java in both runs, gets it too, as a Gradle build would.
+     */
+    private static void addKotlinStdlib(ObjectMapper mapper, JsonNode tree) {
+        String jar = Stream.of(System.getProperty("java.class.path").split(File.pathSeparator))
+                .filter(p -> p.matches(".*kotlin-stdlib-[0-9][^/]*\\.jar$")).findFirst()
+                .orElseThrow(() -> new IllegalStateException("kotlin-stdlib jar not on the test classpath"));
+        String name = Path.of(jar).getFileName().toString();
+        ObjectNode part = mapper.createObjectNode();
+        part.put("name", name);
+        part.put("uri", Path.of(jar).toUri().toString());
+        part.put("library", true);
+        part.put("externalLibrary", true);
+        part.set("restrictToPackages", mapper.createArrayNode());
+        ((ArrayNode) tree.get("classPathParts")).add(part);
+        for (JsonNode set : tree.get("sourceSets")) {
+            if (set.path("name").asText().startsWith(CORPUS + "/")) ((ArrayNode) set.get("dependencies")).add(name);
+        }
+        LOGGER.info("Kotlin side: {} on the class path", name);
     }
 
     private static void writeReport(Path dir, List<String> header, Path target) throws IOException {
