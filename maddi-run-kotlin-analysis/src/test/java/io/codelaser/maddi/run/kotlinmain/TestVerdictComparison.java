@@ -104,4 +104,29 @@ public class TestVerdictComparison {
         assertEquals(2, t.count(NESTED_ONLY));
         assertEquals(1, t.count(KOTLIN_ONLY), "a.Z is not a Java type");
     }
+
+    @Test
+    public void theRatchetPinsDifferencesAndNamingCounts() {
+        Map<String, String> java = Map.of("a.A.f", "true", "a.A.g", "false", "a.A.h", "true");
+        Map<String, String> kotlin = Map.of("a.A.f", "false", "a.A.g", "true", "a.A.h", "true", "a.A.getH()", "true");
+        Outcome o = compare("M", java, kotlin, Set.of("a.A.h"), Set.of("a.A"));
+        List<String> lines = ratchetLines(List.of("java primaryTypes=1 placeholders=0 prepErrors=0"), List.of(o));
+        assertEquals(List.of(
+                "java primaryTypes=1 placeholders=0 prepErrors=0",
+                o.summary(),
+                "M kotlin-weaker  true -> false  a.A.f",
+                "M kotlin-stronger  false -> true  a.A.g"), lines, "the accessor is counted in the summary only");
+
+        List<String> recorded = List.of("# a comment", "", lines.get(1), lines.get(3), lines.get(2), lines.get(0));
+        assertEquals("", ratchetDiff(recorded, lines), "order, comments and blank lines are free");
+        assertEquals("", ratchetDiff(recorded, lines.subList(1, 4)), "dumps only: no per-side lines to compare");
+
+        String diff = ratchetDiff(recorded, List.of(lines.get(0), lines.get(1), lines.get(2), "M kotlin-stronger  false -> true  a.A.x"));
+        assertEquals("""
+                new, not recorded (a regression, or a change to record deliberately):
+                + M kotlin-stronger  false -> true  a.A.x
+                recorded, now gone (an improvement: remove them from the ratchet in this commit):
+                - M kotlin-stronger  false -> true  a.A.g
+                """, diff);
+    }
 }

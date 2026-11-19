@@ -236,6 +236,59 @@ final class VerdictComparison {
         return lines;
     }
 
+    /**
+     * The categories the ratchet pins element by element: every verdict that differs, and every member with no
+     * counterpart that no naming rule explains. The naming categories (accessors, companions, ...) are pinned by their
+     * counts only, in the summary lines.
+     */
+    static final List<String> PINNED = List.of(WEAKER, STRONGER, KOTLIN_NONE, JAVA_NONE, DIFFER, JAVA_ONLY, KOTLIN_ONLY);
+
+    /** What the ratchet records: the per-side lines, every kind's summary, then each element of a pinned category. */
+    static List<String> ratchetLines(List<String> sides, List<Outcome> outcomes) {
+        List<String> lines = new ArrayList<>(sides);
+        outcomes.forEach(o -> lines.add(o.summary()));
+        for (Outcome o : outcomes) {
+            for (String c : PINNED) {
+                o.categories().getOrDefault(c, List.of()).forEach(e -> lines.add(o.kind() + " " + c + "  " + e));
+            }
+        }
+        return lines;
+    }
+
+    /**
+     * Empty when the actual lines are the recorded ones (comments and blank lines skipped; order is free). Otherwise
+     * the lines that are new and the lines that are gone. A per-side line (`java ...`, `kotlin ...`) is compared only
+     * when the actual lines have them: a re-comparison of saved dumps has no run summaries.
+     */
+    static String ratchetDiff(List<String> recorded, List<String> actual) {
+        boolean sides = actual.stream().anyMatch(VerdictComparison::isSideLine);
+        Set<String> want = new TreeSet<>();
+        for (String l : recorded) {
+            if (l.isBlank() || l.startsWith("#") || !sides && isSideLine(l)) continue;
+            want.add(l);
+        }
+        Set<String> have = new TreeSet<>(actual);
+        Set<String> added = new TreeSet<>(have);
+        added.removeAll(want);
+        Set<String> gone = new TreeSet<>(want);
+        gone.removeAll(have);
+        if (added.isEmpty() && gone.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder();
+        if (!added.isEmpty()) {
+            sb.append("new, not recorded (a regression, or a change to record deliberately):\n");
+            added.forEach(l -> sb.append("+ ").append(l).append('\n'));
+        }
+        if (!gone.isEmpty()) {
+            sb.append("recorded, now gone (an improvement: remove them from the ratchet in this commit):\n");
+            gone.forEach(l -> sb.append("- ").append(l).append('\n'));
+        }
+        return sb.toString();
+    }
+
+    private static boolean isSideLine(String l) {
+        return l.startsWith("java ") || l.startsWith("kotlin ");
+    }
+
     static Set<String> keysOf(Map<String, String> map) {
         return new TreeSet<>(map.keySet());
     }

@@ -31,7 +31,11 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import static org.junit.jupiter.api.Assertions.fail;
+
 import java.io.File;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -65,6 +69,7 @@ public class TestKotlinVsJavaFernflower {
 
     private static final String CORPUS = "fernflower";
     private static final String MAIN_SET = "fernflower/main";
+    private static final String RATCHET = "/kotlin-vs-java/" + CORPUS + ".ratchet";
     private static final List<String> JDK_ANNOTATED_APIS = ShippedAnalysisResults.available(TestKotlinVsJavaFernflower.class);
 
     @Test
@@ -72,7 +77,7 @@ public class TestKotlinVsJavaFernflower {
         String dumps = System.getProperty("maddi.kotlinVsJava.dumps");
         if (dumps != null && !dumps.isBlank()) {
             Path dir = Path.of(dumps);
-            writeReport(dir, List.of(), dir.resolve("report.txt"));
+            assertRatchet(dir, writeReport(dir, List.of(), List.of(), dir.resolve("report.txt")));
             return;
         }
         String sources = System.getProperty("maddi.j2kSources");
@@ -99,7 +104,33 @@ public class TestKotlinVsJavaFernflower {
 
         RunMixedPrepAnalyzer.Summary javaSummary = run(java, out, "java");
         RunMixedPrepAnalyzer.Summary kotlinSummary = run(kotlin, out, "kotlin");
-        writeReport(out, List.of("java:   " + javaSummary, "kotlin: " + kotlinSummary), out.resolve("report.txt"));
+        List<String> actual = writeReport(out, List.of("java:   " + javaSummary, "kotlin: " + kotlinSummary),
+                List.of(side("java", javaSummary), side("kotlin", kotlinSummary)), out.resolve("report.txt"));
+        assertRatchet(out, actual);
+    }
+
+    /** The per-side numbers the ratchet holds: the rest of a summary moves with unrelated work. */
+    private static String side(String name, RunMixedPrepAnalyzer.Summary s) {
+        return name + " primaryTypes=" + s.primaryTypes() + " placeholders=" + s.placeholders() + " prepErrors=" + s.prepErrors();
+    }
+
+    /**
+     * Two-sided, as {@link CensusRatchet}: a new difference fails, and so does a recorded one that is gone, so that the
+     * file is tightened in the commit that earns it. The actual lines are written next to the report, ready to copy.
+     */
+    private static void assertRatchet(Path dir, List<String> actual) throws IOException {
+        Path written = dir.resolve(CORPUS + ".ratchet.actual");
+        Files.write(written, actual);
+        List<String> recorded;
+        try (InputStream in = TestKotlinVsJavaFernflower.class.getResourceAsStream(RATCHET)) {
+            if (in == null) throw new IllegalStateException("no " + RATCHET + " on the test class path");
+            recorded = new String(in.readAllBytes(), StandardCharsets.UTF_8).lines().toList();
+        }
+        String diff = VerdictComparison.ratchetDiff(recorded, actual);
+        if (!diff.isEmpty()) {
+            fail("Kotlin vs Java on " + CORPUS + " moved from " + RATCHET + " (actual lines in " + written.toAbsolutePath()
+                 + "):\n" + diff);
+        }
     }
 
     /**
@@ -127,7 +158,8 @@ public class TestKotlinVsJavaFernflower {
         LOGGER.info("Kotlin side: {} on the class path", name);
     }
 
-    private static void writeReport(Path dir, List<String> header, Path target) throws IOException {
+    /** Writes the report; returns the lines the ratchet compares. */
+    private static List<String> writeReport(Path dir, List<String> header, List<String> sides, Path target) throws IOException {
         Map<String, String> javaTypes = VerdictComparison.read(dir.resolve("java-types.txt"), true, false);
         Map<String, String> kotlinTypes = VerdictComparison.read(dir.resolve("kotlin-types.txt"), true, true);
         Map<String, String> javaMembers = VerdictComparison.read(dir.resolve("java-members.txt"), false, false);
@@ -144,6 +176,7 @@ public class TestKotlinVsJavaFernflower {
         report.addAll(VerdictComparison.report(outcomes));
         Files.write(target, report);
         report.stream().filter(l -> !l.startsWith("  ")).forEach(l -> LOGGER.info("{}", l));
+        return VerdictComparison.ratchetLines(sides, outcomes);
     }
 
     private static RunMixedPrepAnalyzer.Summary run(InputConfigurationImpl config, Path out, String side) throws IOException {
