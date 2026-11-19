@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 /*
@@ -112,9 +111,8 @@ public class TestKotlinAnalyzerElementModification extends CommonKotlinAnalyzerT
                 () -> a.kotlin("Annotation", "render") + "\n--- java\n" + a.java("Annotation", "render"));
     }
 
-    // ⛔ UNSOUND TODAY (CodeLaser/maddi-mod#145): Kotlin's inline forEach drops the lambda's modification of the
-    // elements; `for` and Java's forEach see it
-    @Disabled("maddi-mod#145: a modification inside Kotlin's inline forEach does not reach the collection")
+    // maddi-mod#145: Kotlin's inline forEach dropped the lambda's modification of the elements, while `for` and Java's
+    // forEach saw it; the converter now lowers it into the loop kotlinc inlines (maddi ForEachLoweringTest)
     @Test
     public void aLambdaElementModificationReachesTheParameter() {
         for (String m : new String[]{"viaFor", "viaForEach"}) {
