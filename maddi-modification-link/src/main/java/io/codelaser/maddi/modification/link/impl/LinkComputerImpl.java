@@ -251,7 +251,8 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
             boolean shallow = options.forceShallow() || method.isAbstract() || typeInfo.compilationUnit().externalLibrary();
             MethodLinkedVariables result = doMethod(method, shallow, false, true);
             if (MLV_DUMP != null && method.fullyQualifiedName().contains(MLV_DUMP)) {
-                System.out.println("MLVDUMP " + method.fullyQualifiedName() + " " + result);
+                System.out.println("MLVDUMP " + method.fullyQualifiedName() + " " + result + " modified="
+                                   + result.modified());
             }
             return result;
         } catch (RuntimeException | AssertionError | StackOverflowError e) {
@@ -282,6 +283,10 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
             int[] fallbacks = IN_PROGRESS_FALLBACKS.get();
             int before = fallbacks[0];
             MethodLinkedVariables mlv = doMethod(method, false, false, true);
+            if (MLV_DUMP != null && method.fullyQualifiedName().contains(MLV_DUMP)) {
+                System.out.println("MLVDUMP-demand " + method.fullyQualifiedName() + " " + mlv + " modified="
+                                   + mlv.modified() + " provisional=" + (fallbacks[0] != before));
+            }
             if (fallbacks[0] == before) {
                 if (TolerantWrite.setAllowControlledOverwrite(method.analysis(), METHOD_LINKS, mlv, method)) {
                     propertiesChanged.incrementAndGet();
