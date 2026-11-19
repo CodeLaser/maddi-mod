@@ -48,6 +48,7 @@ public record LinkFunctionalInterface(Runtime runtime, VirtualFieldComputer virt
                                       MethodInfo currentMethod) {
     private static final Logger LOGGER = LoggerFactory.getLogger(LinkFunctionalInterface.class);
     private static final boolean NO_FRESH_FUNCTION_RESULT = Gate.isSet("NOFRESHFUNCTIONRESULT");
+    private static final boolean NO_MAP_FIELD = Gate.isSet("NOMAPFIELD");
 
     record Triplet(Variable from, LinkNature linkNature, Variable to) {
     }
@@ -253,8 +254,27 @@ public record LinkFunctionalInterface(Runtime runtime, VirtualFieldComputer virt
                                 false);
                         Variable to = translateAndRecreateVirtualFields(tmMapSource, l.to(), vfMapSource, vfMapTarget,
                                 true);
+                        LinkNature nature = l.linkNature();
+                        /*
+                         CodeLaser/maddi-mod#138: 'a -> a.statement()', the function's result a real field of its
+                         parameter: the result's elements are in the object graph of the source's ('map.§$s ≤
+                         source.§$s', as 'items.get(0).statement()' is '≤ items.§$s'). Translated as is, the field
+                         hung off the map source ('$__rv0.statement'), which became a mere '∩'. Gate NOMAPFIELD
+                         */
+                        if (!NO_MAP_FIELD && to instanceof FieldReference toFr && !virtual(toFr)
+                            && from != null && from.equals(returnPrimary)
+                            && objectPrimary.equals(Util.primary(toFr))
+                            && vfMapSource.hiddenContent() != null && vfMapTarget.hiddenContent() != null
+                            && (nature == LinkNatureImpl.IS_ASSIGNED_FROM || nature == LinkNatureImpl.IS_IN_OBJECT_GRAPH
+                                || nature == LinkNatureImpl.IS_FIELD_OF)) {
+                            FieldInfo hcT = vfMapTarget.hiddenContent();
+                            FieldInfo hcS = vfMapSource.hiddenContent();
+                            from = runtime.newFieldReference(hcT, runtime.newVariableExpression(returnPrimary), hcT.type());
+                            to = runtime.newFieldReference(hcS, runtime.newVariableExpression(objectPrimary), hcS.type());
+                            nature = LinkNatureImpl.IS_IN_OBJECT_GRAPH;
+                        }
                         if (from != null && to != null && Util.acceptModificationLink(from, to)) {
-                            result.add(new Triplet(from, l.linkNature(), to));
+                            result.add(new Triplet(from, nature, to));
                         }
                     }
                 }

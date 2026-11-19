@@ -878,6 +878,14 @@ public class ShadowModificationPass {
                             seedWithOrigin(deepOnly(node), mi, "elements handed to a modifying function by "
                                                                + mc.methodInfo().fullyQualifiedName());
                         }
+                        // ... and the variables those elements come from (#138: 'extract(parts).forEach(p -> p.bump())',
+                        // a fresh list of parts' elements)
+                        if (!NO_ELEMENT_SOURCES) {
+                            for (Object node : elementSources(mi, vd, mc.object(), 0)) {
+                                seedWithOrigin(deepOnly(node), mi, "elements handed to a modifying function by "
+                                                                   + mc.methodInfo().fullyQualifiedName());
+                            }
+                        }
                     }
                     // ... and a lazy stream stage's ('helpers.stream().filter(h -> ..)', CodeLaser/maddi-mod#115)
                     if (!disclaimed && mc.object() != null
@@ -1596,20 +1604,84 @@ public class ShadowModificationPass {
     private Set<Object> elementSources(MethodInfo mi, VariableData vd, Expression receiver, int depth) {
         Expression e = receiver;
         while (e instanceof EnclosedExpression ee) e = ee.inner();
-        if (e instanceof VariableExpression ve) return project(mi, vd, ve.variable());
-        if (!(e instanceof MethodCall call) || call.object() == null || depth > 16 || call.methodInfo() == null) {
+        if (e instanceof VariableExpression ve) {
+            if (NO_ELEMENT_SOURCES) return project(mi, vd, ve.variable());
+            // the variable, and those its elements come from, transitively (the links run both ways)
+            Set<Object> out = new LinkedHashSet<>();
+            List<Variable> todo = new ArrayList<>(List.of(ve.variable()));
+            Set<Variable> seen = new HashSet<>(todo);
+            while (!todo.isEmpty() && seen.size() <= 16) {
+                Variable v = todo.removeFirst();
+                out.addAll(project(mi, vd, v));
+                for (Variable owner : elementOwners(vd, v)) if (seen.add(owner)) todo.add(owner);
+            }
+            return out;
+        }
+        if (!(e instanceof MethodCall call) || depth > 16 || call.methodInfo() == null) {
             return Set.of();
         }
         MethodLinkedVariables mlv = call.methodInfo().analysis().getOrNull(MethodLinkedVariablesImpl.METHOD_LINKS,
                 MethodLinkedVariablesImpl.class);
         if (mlv == null) return Set.of();
-        boolean fromReceiver = mlv.ofReturnValue().stream().anyMatch(l ->
-                Util.virtual(l.from()) && !Util.isVirtualModification(l.from())
-                && Util.virtual(l.to()) && !Util.isVirtualModification(l.to())
-                && Util.firstRealVariable(l.to()) instanceof This
-                && (l.linkNature() == LinkNatureImpl.IS_SUBSET_OF || l.linkNature() == LinkNatureImpl.SHARES_ELEMENTS
-                    || l.linkNature().isIdenticalToOrAssignedFromTo()));
-        return fromReceiver ? elementSources(mi, vd, call.object(), depth + 1) : Set.of();
+        Set<Object> out = new LinkedHashSet<>();
+        boolean fromReceiver = false;
+        Set<ParameterInfo> fromParameters = new LinkedHashSet<>();
+        for (Link l : mlv.ofReturnValue()) {
+            if (!Util.virtual(l.from()) || Util.isVirtualModification(l.from())
+                || !Util.virtual(l.to()) || Util.isVirtualModification(l.to())
+                || !(l.linkNature() == LinkNatureImpl.IS_SUBSET_OF || l.linkNature() == LinkNatureImpl.SHARES_ELEMENTS
+                     || l.linkNature().isIdenticalToOrAssignedFromTo()
+                     || !NO_ELEMENT_SOURCES && l.linkNature() == LinkNatureImpl.IS_IN_OBJECT_GRAPH)) {
+                continue;
+            }
+            Variable to = Util.firstRealVariable(l.to());
+            if (to instanceof This) fromReceiver = true;
+            else if (!NO_ELEMENT_SOURCES && to instanceof ParameterInfo pi && pi.methodInfo() == call.methodInfo()) {
+                fromParameters.add(pi);
+            }
+        }
+        if (fromReceiver && call.object() != null) out.addAll(elementSources(mi, vd, call.object(), depth + 1));
+        // CodeLaser/maddi-mod#138: or a parameter's ('extract(parts)': 'extract.§$s ⊆ 0:parts.§$s')
+        for (ParameterInfo pi : fromParameters) {
+            if (pi.index() < call.parameterExpressions().size()) {
+                out.addAll(elementSources(mi, vd, call.parameterExpressions().get(pi.index()), depth + 1));
+            }
+        }
+        return out;
+    }
+
+    /*
+     CodeLaser/maddi-mod#138: the variables v's elements come from, by the links of v's hidden content to theirs
+     ('l.§$s ⊆ 0:parts.§$s', 'sts.§$s ≤ 0:items.§$s'), either side storing it. Not '∩': #134's overlap rules, with
+     their type checks. Gate NOELEMENTSOURCES.
+     */
+    private static final boolean NO_ELEMENT_SOURCES = Gate.isSet("NOELEMENTSOURCES");
+
+    private static List<Variable> elementOwners(VariableData vd, Variable v) {
+        List<Variable> out = new ArrayList<>();
+        vd.variableInfoStream().forEach(vi -> {
+            Links links = vi.linkedVariables();
+            if (links == null) return;
+            links.stream().forEach(l -> {
+                if (!Util.virtual(l.from()) || Util.isVirtualModification(l.from())
+                    || !Util.virtual(l.to()) || Util.isVirtualModification(l.to())) {
+                    return;
+                }
+                LinkNature n = l.linkNature();
+                Variable other = null;
+                if (v.equals(Util.firstRealVariable(l.from()))
+                    && (n == LinkNatureImpl.IS_SUBSET_OF || n == LinkNatureImpl.IS_IN_OBJECT_GRAPH
+                        || n == LinkNatureImpl.SHARES_ELEMENTS || n.isIdenticalToOrAssignedFromTo())) {
+                    other = Util.firstRealVariable(l.to());
+                } else if (v.equals(Util.firstRealVariable(l.to()))
+                           && (n == LinkNatureImpl.IS_SUPERSET_OF || n == LinkNatureImpl.OBJECT_GRAPH_CONTAINS
+                               || n == LinkNatureImpl.SHARES_ELEMENTS || n.isIdenticalToOrAssignedFromTo())) {
+                    other = Util.firstRealVariable(l.from());
+                }
+                if (other != null && !other.equals(v) && !out.contains(other)) out.add(other);
+            });
+        });
+        return out;
     }
 
     /*

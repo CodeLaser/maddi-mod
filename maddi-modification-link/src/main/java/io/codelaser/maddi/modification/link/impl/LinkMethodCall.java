@@ -50,6 +50,8 @@ public record LinkMethodCall(JavaInspector javaInspector,
                              VariableData variableData,
                              Stage stage) {
 
+    private static final boolean NO_CONCRETE_COLLECT = Gate.isSet("NOCONCRETECOLLECT");
+
     public Result constructorCall(ConstructorCall cc,
                                   Result object,
                                   List<Result> params,
@@ -393,8 +395,14 @@ public record LinkMethodCall(JavaInspector javaInspector,
         // retTps must be non-empty (the result actually carries type-parameter-derived content) and a subset of the
         // object's: an empty retTps (e.g. R=Long from counting()) would satisfy containsAll vacuously and link a
         // scalar result to the stream. See TestCollectorSpec.scalarCollectors.
-        if (retTps.isEmpty()
-            || !collectTypeParametersFromVirtualField(hcObj.type()).containsAll(retTps)) {
+        // CodeLaser/maddi-mod#138: at concrete types the hidden content is the element type itself ('List<Part>',
+        // 'Part[] §$s'), and when Part's fields carry no type parameter, retTps is empty: 'parts.stream().filter(..)
+        // .collect(Collectors.toList())' lost its link to 'parts'. The same hidden content on both sides (the same
+        // concrete element type) is the accumulating collector's shape. Gate NOCONCRETECOLLECT
+        boolean sameConcrete = !NO_CONCRETE_COLLECT && retTps.isEmpty() && !hcRet.type().isTypeParameter()
+                               && hcRet.type().typeInfo() != null && hcRet.type().equals(hcObj.type());
+        if (!sameConcrete && (retTps.isEmpty()
+                              || !collectTypeParametersFromVirtualField(hcObj.type()).containsAll(retTps))) {
             return null;
         }
         Variable newPrimary = IntermediateVariable.returnValue(runtime, variableCounter.getAndIncrement(),
