@@ -21,20 +21,24 @@
 # 2026-11-19, maddi b4ceaf52c (`e.also { v = it }` is Java's `(v = e)`) and f5a904b10 (an object expression's members
 # capture the enclosing parameters): kotlin-stronger M 7 -> 6, P 15 -> 8. Gone: both getMaxBreakLift, the
 # DirectGraph.ExprentIterator chain (iterateExprents, StatementIterator.iterate, updateVersions).
+#
+# 2026-11-20, maddi 79ee97c86 (J2K's `run sw@ { … return@sw … }` is the labelled block `sw: { … break sw; … }`) and
+# 7a609ac06 (`m.values` typed at the use site, Collection<U>): kotlin-stronger F 4 -> 2, M 6 -> 3, P 8 -> 6. Gone:
+# ExprProcessor.processBlock/processStatement, FlattenStatementsHelper.StackEntry.finally*RangeSource,
+# StructContext.saveContext. getTypeName, writeNestedClass and listToJava stay: Java is right only because it
+# reassigns its own parameter; both sides lose a copied list's elements (#138 stream form, #152 loop form).
 
 java primaryTypes=227 placeholders=0 prepErrors=0
 kotlin primaryTypes=227 placeholders=41 prepErrors=0
 T: agree=226 kotlin-weaker=0 kotlin-stronger=0 differ=1 kotlin-none=0 java-none=0 java-only=0 kotlin-only-accessor=0 kotlin-only-companion=0 kotlin-only-static-init=0 kotlin-only-data-class=0 kotlin-only-enum-name=0 kotlin-only-nested-type=87 kotlin-only-other=0 java-only-initializer=0
-F: agree=1520 kotlin-weaker=2 kotlin-stronger=4 differ=0 kotlin-none=0 java-none=0 java-only=0 kotlin-only-accessor=0 kotlin-only-companion=136 kotlin-only-static-init=0 kotlin-only-data-class=0 kotlin-only-enum-name=0 kotlin-only-nested-type=0 kotlin-only-other=0 java-only-initializer=0
-M: agree=2272 kotlin-weaker=15 kotlin-stronger=6 differ=0 kotlin-none=0 java-none=0 java-only=0 kotlin-only-accessor=214 kotlin-only-companion=0 kotlin-only-static-init=62 kotlin-only-data-class=62 kotlin-only-enum-name=12 kotlin-only-nested-type=0 kotlin-only-other=20 java-only-initializer=2
-P: agree=2332 kotlin-weaker=8 kotlin-stronger=8 differ=0 kotlin-none=0 java-none=0 java-only=0 kotlin-only-accessor=121 kotlin-only-companion=0 kotlin-only-static-init=0 kotlin-only-data-class=85 kotlin-only-enum-name=0 kotlin-only-nested-type=0 kotlin-only-other=4 java-only-initializer=0
+F: agree=1522 kotlin-weaker=2 kotlin-stronger=2 differ=0 kotlin-none=0 java-none=0 java-only=0 kotlin-only-accessor=0 kotlin-only-companion=136 kotlin-only-static-init=0 kotlin-only-data-class=0 kotlin-only-enum-name=0 kotlin-only-nested-type=0 kotlin-only-other=0 java-only-initializer=0
+M: agree=2275 kotlin-weaker=15 kotlin-stronger=3 differ=0 kotlin-none=0 java-none=0 java-only=0 kotlin-only-accessor=214 kotlin-only-companion=0 kotlin-only-static-init=62 kotlin-only-data-class=62 kotlin-only-enum-name=12 kotlin-only-nested-type=0 kotlin-only-other=20 java-only-initializer=2
+P: agree=2334 kotlin-weaker=8 kotlin-stronger=6 differ=0 kotlin-none=0 java-none=0 java-only=0 kotlin-only-accessor=121 kotlin-only-companion=0 kotlin-only-static-init=0 kotlin-only-data-class=85 kotlin-only-enum-name=0 kotlin-only-nested-type=0 kotlin-only-other=4 java-only-initializer=0
 T differ  @FinalFields -> @Mutable  org.jetbrains.java.decompiler.modules.decompiler.StrongConnectivityHelper
 F kotlin-weaker  true -> false  org.jetbrains.java.decompiler.main.rels.NestedClassProcessor.VarFieldPair.varPair
 F kotlin-weaker  true -> false  org.jetbrains.java.decompiler.modules.decompiler.SwitchPatternHelper.SwitchOnReferenceCandidate.myPreviousSelector
 F kotlin-stronger  false -> true  org.jetbrains.java.decompiler.main.ClassesProcessor.ClassNode.superInvocation
 F kotlin-stronger  false -> true  org.jetbrains.java.decompiler.main.rels.MethodProcessorRunnable.root
-F kotlin-stronger  false -> true  org.jetbrains.java.decompiler.modules.decompiler.sforms.FlattenStatementsHelper.StackEntry.finallyLongRangeSource
-F kotlin-stronger  false -> true  org.jetbrains.java.decompiler.modules.decompiler.sforms.FlattenStatementsHelper.StackEntry.finallyShortRangeSource
 M kotlin-weaker  true -> false  org.jetbrains.java.decompiler.main.rels.NestedClassProcessor.VarFieldPair.hashCode()
 M kotlin-weaker  true -> false  org.jetbrains.java.decompiler.modules.decompiler.IfHelper.mergeAllIfs(org.jetbrains.java.decompiler.modules.decompiler.stats.RootStatement)
 M kotlin-weaker  true -> false  org.jetbrains.java.decompiler.modules.decompiler.IfHelper.mergeAllIfsRec(org.jetbrains.java.decompiler.modules.decompiler.stats.Statement,java.util.Set)
@@ -51,11 +55,8 @@ M kotlin-weaker  true -> false  org.jetbrains.java.decompiler.modules.decompiler
 M kotlin-weaker  true -> false  org.jetbrains.java.decompiler.modules.decompiler.stats.SynchronizedStatement.getSequentialObjects()
 M kotlin-weaker  true -> false  org.jetbrains.java.decompiler.modules.decompiler.vars.VarVersion.hashCode()
 M kotlin-stronger  false -> true  org.jetbrains.java.decompiler.main.rels.NestedClassProcessor.ExprentIteratorWithReplace.processExprent(org.jetbrains.java.decompiler.modules.decompiler.exps.Exprent)
-M kotlin-stronger  false -> true  org.jetbrains.java.decompiler.modules.decompiler.ExprProcessor.processBlock(org.jetbrains.java.decompiler.modules.decompiler.stats.BasicBlockStatement,org.jetbrains.java.decompiler.modules.decompiler.PrimitiveExpressionList,org.jetbrains.java.decompiler.struct.StructClass)
-M kotlin-stronger  false -> true  org.jetbrains.java.decompiler.modules.decompiler.ExprProcessor.processStatement(org.jetbrains.java.decompiler.modules.decompiler.stats.RootStatement,org.jetbrains.java.decompiler.struct.StructClass)
 M kotlin-stronger  false -> true  org.jetbrains.java.decompiler.modules.decompiler.exps.ConstExprent.toJava(int,org.jetbrains.java.decompiler.main.collectors.BytecodeMappingTracer)
 M kotlin-stronger  false -> true  org.jetbrains.java.decompiler.modules.decompiler.exps.ConstExprent.toString()
-M kotlin-stronger  false -> true  org.jetbrains.java.decompiler.struct.StructContext.saveContext()
 M kotlin-only-other  true  org.jetbrains.java.decompiler.main.ClassWriter.MType.getEntries()
 M kotlin-only-other  true  org.jetbrains.java.decompiler.main.extern.IFernflowerLogger.Severity.getEntries()
 M kotlin-only-other  true  org.jetbrains.java.decompiler.main.extern.IMemberIdentifierRenamer.Type.getEntries()
@@ -89,8 +90,6 @@ P kotlin-stronger  false -> true  org.jetbrains.java.decompiler.main.rels.Nested
 P kotlin-stronger  false -> true  org.jetbrains.java.decompiler.modules.decompiler.ExprProcessor.getTypeName(org.jetbrains.java.decompiler.struct.gen.VarType,boolean,java.util.List)#2
 P kotlin-stronger  false -> true  org.jetbrains.java.decompiler.modules.decompiler.ExprProcessor.getTypeName(org.jetbrains.java.decompiler.struct.gen.VarType,java.util.List)#1
 P kotlin-stronger  false -> true  org.jetbrains.java.decompiler.modules.decompiler.ExprProcessor.listToJava(java.util.List,int,org.jetbrains.java.decompiler.main.collectors.BytecodeMappingTracer)#0
-P kotlin-stronger  false -> true  org.jetbrains.java.decompiler.modules.decompiler.ExprProcessor.processBlock(org.jetbrains.java.decompiler.modules.decompiler.stats.BasicBlockStatement,org.jetbrains.java.decompiler.modules.decompiler.PrimitiveExpressionList,org.jetbrains.java.decompiler.struct.StructClass)#0
-P kotlin-stronger  false -> true  org.jetbrains.java.decompiler.modules.decompiler.ExprProcessor.processBlock(org.jetbrains.java.decompiler.modules.decompiler.stats.BasicBlockStatement,org.jetbrains.java.decompiler.modules.decompiler.PrimitiveExpressionList,org.jetbrains.java.decompiler.struct.StructClass)#1
 P kotlin-stronger  false -> true  org.jetbrains.java.decompiler.modules.decompiler.ExprProcessor.writeNestedClass(StringBuilder,org.jetbrains.java.decompiler.struct.gen.Type,java.util.List,java.util.List)#3
 P kotlin-only-other  true  org.jetbrains.java.decompiler.struct.attr.StructLocalVariableTableAttribute.LocalVariable.version$set(org.jetbrains.java.decompiler.modules.decompiler.vars.VarVersion)#0
 P kotlin-only-other  false  org.jetbrains.java.decompiler.util.FastFixedSetFactory.FastFixedSet.data$set(int[])#0
