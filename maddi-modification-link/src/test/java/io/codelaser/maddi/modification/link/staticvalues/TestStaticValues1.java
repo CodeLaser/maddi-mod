@@ -130,7 +130,7 @@ public class TestStaticValues1 extends CommonTest {
         MethodLinkedVariables mlv = method.analysis().getOrCreate(METHOD_LINKS, () -> tlc.doMethod(method));
         {
             VariableData vd0 = VariableDataImpl.of(method.methodBody().statements().getFirst());
-            assertEquals("a.b.X.j#scope16-15:16-21, a.b.X.method(int):0:i, x", vd0.knownVariableNamesToString());
+            assertEquals("a.b.X.j#scope16-15:16-21<a.b.X.<init>()>, a.b.X.method(int):0:i, x", vd0.knownVariableNamesToString());
             VariableInfo viX = vd0.variableInfo("x");
             assertEquals("x.j←0:i", viX.linkedVariables().toString());
 
@@ -140,7 +140,7 @@ public class TestStaticValues1 extends CommonTest {
         MethodLinkedVariables mlvC = methodC.analysis().getOrCreate(METHOD_LINKS, () -> tlc.doMethod(methodC));
         {
             VariableData vd0 = VariableDataImpl.of(methodC.methodBody().statements().getFirst());
-            assertEquals("a.b.X.j#scope20-15:20-21, x", vd0.knownVariableNamesToString());
+            assertEquals("a.b.X.j#scope20-15:20-21<a.b.X.<init>()>, x", vd0.knownVariableNamesToString());
             VariableInfo viX = vd0.variableInfo("x");
             assertEquals("x.j←$_ce1", viX.linkedVariables().toString());
 
