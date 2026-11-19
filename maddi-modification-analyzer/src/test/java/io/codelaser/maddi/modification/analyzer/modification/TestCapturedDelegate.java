@@ -218,11 +218,11 @@ public class TestCapturedDelegate extends CommonTest {
         assertEquals("@Dependent", independent(entryList), "the entries hold the map's sets");
         // the same as with a named entry class holding the set in a field (the control)
         assertEquals("@Dependent", independent(method(Y.findSubType("BitsMap2"), "entryList")));
-        // KNOWN GAP, not the creation site: a modification of an entry's value, through Map.Entry.getValue() on an
-        // element of the returned list, does not reach the map across the overlap link (∩), named class or not.
+        // CodeLaser/maddi-mod#147: a modification of an entry's value, through Map.Entry.getValue() on an element of
+        // the returned list, reaches the map across the overlap link (∩): an entry may hold one of the map's sets.
         // fernflower's replaceSingleVar has this shape.
-        assertTrue(method(Y, "complementAll").parameters().getFirst().isUnmodified(), "known gap");
-        assertTrue(method(Y, "complementAll2").parameters().getFirst().isUnmodified(), "known gap, the control");
+        assertFalse(method(Y, "complementAll").parameters().getFirst().isUnmodified(), "complement writes the map's sets");
+        assertFalse(method(Y, "complementAll2").parameters().getFirst().isUnmodified(), "the control, a named entry class");
     }
 
     // The two sides of the same shape the engine does not cover yet, pinned as they are (CodeLaser/maddi-mod#43):

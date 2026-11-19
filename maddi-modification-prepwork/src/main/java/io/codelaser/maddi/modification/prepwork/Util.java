@@ -265,6 +265,49 @@ public class Util {
         return mayBeSameObject(pa, pb);
     }
 
+    /*
+     #147: whether an object of type 'holder' may hold an object of type 'element' as its hidden content: one of its type
+     arguments, at any depth, may be the same object (Map.Entry<Integer, Bits> and Bits). Gate NOELEMENTSMAYHOLD.
+     */
+    public static boolean typeMayHold(ParameterizedType holder, ParameterizedType element) {
+        return argumentMayBe(holder, element, 0);
+    }
+
+    // the real element type behind a virtual element face: its scope's ('map.elements.§ts', Bits[] -> Bits)
+    public static ParameterizedType elementTypeOfFace(Variable face) {
+        if (!(face instanceof FieldReference fr) || fr.scopeVariable() == null) return null;
+        ParameterizedType scope = fr.scopeVariable().parameterizedType();
+        if (scope == null) return null;
+        if (scope.arrays() > 0) return scope.copyWithArrays(scope.arrays() - 1);
+        if (scope.parameters().size() == 1 && !scope.parameters().getFirst().isTypeParameter()) {
+            return scope.parameters().getFirst();
+        }
+        return null;
+    }
+
+    // whether v is a field (at any depth) of owner: 'map.elements' of 'map'
+    public static boolean isFieldOf(Variable v, Variable owner) {
+        Variable x = v;
+        while (x instanceof FieldReference fr) {
+            x = fr.scopeVariable();
+            if (owner.equals(x)) return true;
+        }
+        return false;
+    }
+
+    public static final boolean NO_ELEMENTS_MAY_HOLD = System.getenv("NOELEMENTSMAYHOLD") != null;
+
+    private static boolean argumentMayBe(ParameterizedType holder, ParameterizedType element, int depth) {
+        if (NO_ELEMENTS_MAY_HOLD || depth > 3) return false;
+        for (ParameterizedType arg : holder.parameters()) {
+            if (arg.isTypeParameter() || arg.wildcard() != null || arg.bestTypeInfo() == null) continue;
+            if (arg.bestTypeInfo().isJavaLangObject()) continue;
+            if (arg.arrays() == element.arrays() && mayBeSameObject(arg, element)) return true;
+            if (argumentMayBe(arg, element, depth + 1)) return true;
+        }
+        return false;
+    }
+
     public static boolean mayBeSameObject(ParameterizedType a, ParameterizedType b) {
         TypeInfo ta = a.bestTypeInfo();
         TypeInfo tb = b.bestTypeInfo();

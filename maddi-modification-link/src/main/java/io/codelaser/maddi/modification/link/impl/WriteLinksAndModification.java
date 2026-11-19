@@ -1222,9 +1222,21 @@ class WriteLinksAndModification {
     private static boolean overlapsAsElement(Variable primary, Link link, Variable toReal) {
         Variable from = link.from();
         if (from.equals(primary) || Util.isVirtualModification(from)) return false;
-        if (!primary.equals(Util.firstRealVariable(from))) return false;
         if (!link.to().equals(toReal)) return false;
-        return Util.isElementTypeOf(toReal.parameterizedType(), from.parameterizedType());
+        Variable real = Util.firstRealVariable(from);
+        if (primary.equals(real)) {
+            if (Util.isElementTypeOf(toReal.parameterizedType(), from.parameterizedType())) return true;
+        } else if (Util.NO_ELEMENTS_MAY_HOLD || !Util.isFieldOf(real, primary)) {
+            return false;
+        }
+        /*
+         #147: or the whole variable may HOLD one of the elements, as its hidden content: '0:map.elements.§ts ∩ e', e an
+         entry (Map.Entry<Integer, Bits>) whose value is one of the field's sets, modified through getValue(). The face
+         may belong to a field of the primary. Judged on the face's real element type (its scope's, Bits[] -> Bits), not
+         on the virtual field's formal one.
+         */
+        ParameterizedType element = Util.elementTypeOfFace(from);
+        return element != null && Util.typeMayHold(toReal.parameterizedType(), element);
     }
 
 
@@ -1296,6 +1308,16 @@ class WriteLinksAndModification {
 
                     // because we're processing the variables in order, adding to the map here provides the completion
                     modifiedVariablesAndTheirCause.put(builder.primary(), causesOfModification);
+                    return false;
+                }
+                /*
+                 #147: 'e.§$$.§$ ← $__rv3', the primary's hidden content assigned from a modified object (an entry's
+                 value, out of getValue()): the primary is modified in its hidden content, deeply.
+                 */
+                if (!structural && !Util.NO_ELEMENTS_MAY_HOLD && ln == IS_ASSIGNED_FROM
+                    && Util.virtual(link.from()) && !Util.isVirtualModification(link.from())
+                    && builder.primary().equals(Util.firstRealVariable(link.from()))) {
+                    modifiedVariablesAndTheirCause.putIfAbsent(builder.primary(), causesOfModification);
                     return false;
                 }
                 if (ln == SHARES_FIELDS && sharesOnlyImmutable(builder, link.to())) {
