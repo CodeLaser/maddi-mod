@@ -37,7 +37,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.TreeMap;
+import java.util.Set;
 
 /**
  * <b>The Kotlin front end's precision, measured against Java's on the same program.</b> Fernflower's main sources
@@ -53,7 +53,9 @@ import java.util.TreeMap;
  *
  * <p>Needs {@code -Dmaddi.j2kSources=<dir>}: the translation's {@code src/} directory (build/j2k/fernflower-nullability
  * of that test). Without it, skipped. Writes {@code build/kotlin-vs-java/fernflower/}: both sides' dumps and
- * {@code report.txt}. A measurement, not yet a ratchet.
+ * {@code report.txt}; {@link VerdictComparison} pairs the two front ends' names and sorts the differences.
+ * {@code -Dmaddi.kotlinVsJava.dumps=<dir>} instead compares the four dumps of an earlier run in that directory,
+ * without analysing anything (seconds, not half an hour). A measurement, not yet a ratchet.
  */
 @Tag("slow")
 public class TestKotlinVsJavaFernflower {
@@ -65,6 +67,12 @@ public class TestKotlinVsJavaFernflower {
 
     @Test
     public void verdictsAgree() throws IOException {
+        String dumps = System.getProperty("maddi.kotlinVsJava.dumps");
+        if (dumps != null && !dumps.isBlank()) {
+            Path dir = Path.of(dumps);
+            writeReport(dir, List.of(), dir.resolve("report.txt"));
+            return;
+        }
         String sources = System.getProperty("maddi.j2kSources");
         Assumptions.assumeTrue(sources != null && !sources.isBlank(), "no -Dmaddi.j2kSources");
         Path out = Path.of("build/kotlin-vs-java", CORPUS);
@@ -88,15 +96,25 @@ public class TestKotlinVsJavaFernflower {
 
         RunMixedPrepAnalyzer.Summary javaSummary = run(java, out, "java");
         RunMixedPrepAnalyzer.Summary kotlinSummary = run(kotlin, out, "kotlin");
+        writeReport(out, List.of("java:   " + javaSummary, "kotlin: " + kotlinSummary), out.resolve("report.txt"));
+    }
 
-        List<String> report = new ArrayList<>();
-        report.add("java:   " + javaSummary);
-        report.add("kotlin: " + kotlinSummary);
-        compare(read(out.resolve("java-types.txt"), true), read(out.resolve("kotlin-types.txt"), true), "T", report);
-        Map<String, String> javaMembers = read(out.resolve("java-members.txt"), false);
-        Map<String, String> kotlinMembers = read(out.resolve("kotlin-members.txt"), false);
-        for (String kind : List.of("F", "M", "P")) compare(only(javaMembers, kind), only(kotlinMembers, kind), kind, report);
-        Files.write(out.resolve("report.txt"), report);
+    private static void writeReport(Path dir, List<String> header, Path target) throws IOException {
+        Map<String, String> javaTypes = VerdictComparison.read(dir.resolve("java-types.txt"), true, false);
+        Map<String, String> kotlinTypes = VerdictComparison.read(dir.resolve("kotlin-types.txt"), true, true);
+        Map<String, String> javaMembers = VerdictComparison.read(dir.resolve("java-members.txt"), false, false);
+        Map<String, String> kotlinMembers = VerdictComparison.read(dir.resolve("kotlin-members.txt"), false, true);
+        Set<String> kotlinFields = VerdictComparison.only(kotlinMembers, "F").keySet();
+        Set<String> javaTypeNames = javaTypes.keySet();
+        List<VerdictComparison.Outcome> outcomes = new ArrayList<>();
+        outcomes.add(VerdictComparison.compare("T", javaTypes, kotlinTypes, kotlinFields, javaTypeNames));
+        for (String kind : List.of("F", "M", "P")) {
+            outcomes.add(VerdictComparison.compare(kind, VerdictComparison.only(javaMembers, kind),
+                    VerdictComparison.only(kotlinMembers, kind), kotlinFields, javaTypeNames));
+        }
+        List<String> report = new ArrayList<>(header);
+        report.addAll(VerdictComparison.report(outcomes));
+        Files.write(target, report);
         report.stream().filter(l -> !l.startsWith("  ")).forEach(l -> LOGGER.info("{}", l));
     }
 
@@ -109,40 +127,5 @@ public class TestKotlinVsJavaFernflower {
             System.clearProperty("maddi.verdictDump");
             System.clearProperty("maddi.memberVerdictDump");
         }
-    }
-
-    /** `<verdict> <fqn>` (types) or `<kind> <verdict> <key>` (members), by key; a member's kind stays in its key. */
-    private static Map<String, String> read(Path dump, boolean types) throws IOException {
-        Map<String, String> byKey = new TreeMap<>();
-        for (String line : Files.readAllLines(dump)) {
-            String[] parts = line.split(" ", types ? 2 : 3);
-            if (types) byKey.put(parts[1], parts[0]);
-            else byKey.put(parts[0] + " " + parts[2], parts[1]);
-        }
-        return byKey;
-    }
-
-    private static Map<String, String> only(Map<String, String> members, String kind) {
-        Map<String, String> result = new TreeMap<>();
-        members.forEach((k, v) -> { if (k.startsWith(kind + " ")) result.put(k.substring(2), v); });
-        return result;
-    }
-
-    private static void compare(Map<String, String> java, Map<String, String> kotlin, String kind, List<String> report) {
-        int same = 0;
-        List<String> differ = new ArrayList<>();
-        List<String> javaOnly = new ArrayList<>();
-        for (Map.Entry<String, String> e : java.entrySet()) {
-            String k = kotlin.get(e.getKey());
-            if (k == null) javaOnly.add(e.getKey());
-            else if (k.equals(e.getValue())) same++;
-            else differ.add(e.getValue() + " -> " + k + "  " + e.getKey());
-        }
-        List<String> kotlinOnly = kotlin.keySet().stream().filter(key -> !java.containsKey(key)).toList();
-        report.add(kind + ": " + same + " agree, " + differ.size() + " differ, " + javaOnly.size() + " Java only, "
-                   + kotlinOnly.size() + " Kotlin only");
-        differ.forEach(d -> report.add("  differ " + d));
-        javaOnly.forEach(d -> report.add("  java-only " + d));
-        kotlinOnly.forEach(d -> report.add("  kotlin-only " + d));
     }
 }
