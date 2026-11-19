@@ -1256,7 +1256,14 @@ public class ShadowModificationPass {
                 // modifying it modifies that object's hidden content, deep-only (see project)
                 if (resultFqn != null) {
                     for (Link link : mlv.ofReturnValue()) {
-                        if (link.linkNature() != LinkNatureImpl.IS_ELEMENT_OF
+                        // #147: or the result IS the receiver's hidden content ('getValue→this.§kv.§v', Map.Entry's
+                        // value): the same, deep-only. Gate NOELEMENTSMAYHOLD
+                        boolean hiddenContentItself = !Util.NO_ELEMENTS_MAY_HOLD
+                                                      && (link.linkNature() == LinkNatureImpl.IS_ASSIGNED_TO
+                                                          || link.linkNature() == LinkNatureImpl.IS_ASSIGNED_FROM)
+                                                      && Util.virtual(link.to())
+                                                      && !Util.isVirtualModification(link.to());
+                        if (link.linkNature() != LinkNatureImpl.IS_ELEMENT_OF && !hiddenContentItself
                             || !resultFqn.equals(link.from().fullyQualifiedName())) continue;
                         Expression container = switch (Util.firstRealVariable(link.to())) {
                             case This thisVar when callee.typeInfo().isEqualToOrInnerClassOf(thisVar.typeInfo()) ->
@@ -1268,8 +1275,10 @@ public class ShadowModificationPass {
                         };
                         // #130: unless the result may be the container's accessible content too
                         Written written = new Written(mc.parameterizedType(), false);
+                        // (a node the container's projection reached deep-only is judged on what it wraps: #147, the
+                        // entry's map reached through the entry's ∩)
                         projectReceiverChain(mi, vd, container, null).forEach(node ->
-                                out.add(accessibleReach(written, node) ? node : deepOnly(node)));
+                                out.add(accessibleReach(written, unwrap(node)) ? unwrap(node) : deepOnly(node)));
                     }
                 }
                 return out;
@@ -1413,6 +1422,7 @@ public class ShadowModificationPass {
                 case DependentVariable dv -> push(todo, dv.arrayVariable());
                 default -> {
                     if (!NO_VIEW_LOCAL && v instanceof LocalVariable lv) out.addAll(projectViewLocal(mi, vd, lv));
+                    hiddenContentHolders(vd, v, containers);
                     VariableInfoContainer vic = vd.variableInfoContainerOrNull(v.fullyQualifiedName());
                     if (vic != null) {
                         Links links = vic.best().linkedVariables();
@@ -1482,6 +1492,24 @@ public class ShadowModificationPass {
                                             .filter(c -> c != null && !c.equals(v))
                                             .forEach(containers::add);
                                 }
+                                // #147: 'e ∩ 0:map.elements.§ts', e (an entry) may HOLD one of the face's elements
+                                // as its hidden content: the face's owner, deep-only. The engine's
+                                // WriteLinksAndModification.overlapsAsElement, the same rule
+                                if (!Util.NO_ELEMENTS_MAY_HOLD) {
+                                    links.stream().filter(l -> l.linkNature() == LinkNatureImpl.OBJECT_GRAPH_OVERLAPS
+                                                               && Util.virtual(l.to())
+                                                               && !Util.isVirtualModification(l.to())
+                                                               && l.from().fullyQualifiedName()
+                                                                       .equals(v.fullyQualifiedName()))
+                                            .filter(l -> {
+                                                ParameterizedType element = Util.elementTypeOfFace(l.to());
+                                                return element != null
+                                                       && Util.typeMayHold(v.parameterizedType(), element);
+                                            })
+                                            .map(l -> Util.firstRealVariable(l.to()))
+                                            .filter(c -> c != null && !c.equals(v))
+                                            .forEach(containers::add);
+                                }
                                 // #112: 'e ≤ 0:x.map.§$$s[-2]', an object from inside a container's hidden content
                                 // (an element of a copy of one of its values): its container, deep-only, as for ∈
                                 if (!NO_OBJECT_GRAPH_MOD) {
@@ -1517,6 +1545,32 @@ public class ShadowModificationPass {
             }
         }
         if (deepOnly) out.forEach(node -> nodes.add(accessibleReach(written, node) ? node : deepOnly(node)));
+    }
+
+    /*
+     CodeLaser/maddi-mod#147: 'e.§$$.§$ ← $__rv3', the modified object assigned into another variable's hidden content
+     (an entry's value, out of getValue()): that variable, deep-only, whichever side stores the link. The engine's
+     WriteLinksAndModification rule for the same assignment. Gate NOELEMENTSMAYHOLD.
+     */
+    private static void hiddenContentHolders(VariableData vd, Variable v, List<Variable> containers) {
+        if (Util.NO_ELEMENTS_MAY_HOLD) return;
+        String vFqn = v.fullyQualifiedName();
+        vd.variableInfoStream().forEach(vi -> {
+            Links links = vi.linkedVariables();
+            if (links == null) return;
+            links.stream().forEach(l -> {
+                Variable face = null;
+                if (l.linkNature() == LinkNatureImpl.IS_ASSIGNED_FROM && l.to().fullyQualifiedName().equals(vFqn)) {
+                    face = l.from();
+                } else if (l.linkNature() == LinkNatureImpl.IS_ASSIGNED_TO
+                           && l.from().fullyQualifiedName().equals(vFqn)) {
+                    face = l.to();
+                }
+                if (face == null || !Util.virtual(face) || Util.isVirtualModification(face)) return;
+                Variable holder = Util.firstRealVariable(face);
+                if (holder != null && !holder.equals(v) && !containers.contains(holder)) containers.add(holder);
+            });
+        });
     }
 
     /*
