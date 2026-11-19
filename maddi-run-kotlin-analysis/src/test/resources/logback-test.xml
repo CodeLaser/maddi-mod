@@ -1,0 +1,9 @@
+<!-- The tests' logging: INFO. Without this file logback's default is DEBUG for everything, and the JUnit report of
+     one corpus run holds every javac class load and link step: 38 GB for TestKotlinVsJavaFernflower, 333 MB for
+     TestDetektCorpus. -->
+<configuration>
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder><pattern>%d{HH:mm:ss.SSS} %-5level %logger{36} - %msg%n</pattern></encoder>
+    </appender>
+    <root level="INFO"><appender-ref ref="STDOUT"/></root>
+</configuration>
