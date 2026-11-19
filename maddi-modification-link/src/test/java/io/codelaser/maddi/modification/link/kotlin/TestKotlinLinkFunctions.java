@@ -31,6 +31,8 @@ public class TestKotlinLinkFunctions extends CommonKotlinLinkTest {
                 fun findMap(xs: List<StringBuilder>): StringBuilder? { xs.map { if (it.isEmpty()) return it; it.length }; return null }
                 fun findNested(xss: List<List<StringBuilder>>): StringBuilder? { xss.forEach { xs -> xs.forEach { if (it.isEmpty()) return it } }; return null }
                 fun captured(xs: List<StringBuilder>): StringBuilder? { var r: StringBuilder? = null; xs.forEach { r = it }; return r }
+                // a function value: forEach stays the stdlib call (a literal in place is lowered into a loop, maddi-mod#145)
+                fun capturedFn(xs: List<StringBuilder>): StringBuilder? { var r: StringBuilder? = null; val f: (StringBuilder) -> Unit = { r = it }; xs.forEach(f); return r }
             }
             """;
 
@@ -93,11 +95,13 @@ public class TestKotlinLinkFunctions extends CommonKotlinLinkTest {
      'find ∈ xs.§$s', as the Java loop's `return x` does. Before, the value went to the lambda's own (Unit) return
      variable and `find` read as linked to nothing: an independence claim on it would have been wrong. The two
      sides differ only in the number of the `null` constant's marker.
+     Since maddi-mod#145 a `forEach` with a literal in place is lowered into the loop kotlinc inlines, so `find` links
+     exactly as the Java loop does, the `∩` on the `null` constant included.
      */
     @Test
     public void nonLocalReturn() {
         assertEquals("[0:xs.§$s∋$_ce2] --> find∩$_ce2,find←$_ce2,find∈0:xs.§$s", p.javaLinks("find"));
-        assertEquals("[0:xs.§$s∋$_ce1] --> find←$_ce1,find∈0:xs.§$s", p.kotlinLinks("find"));
+        assertEquals("[0:xs.§$s∋$_ce3] --> find∩$_ce3,find←$_ce3,find∈0:xs.§$s", p.kotlinLinks("find"));
     }
 
     /*
@@ -111,7 +115,8 @@ public class TestKotlinLinkFunctions extends CommonKotlinLinkTest {
      */
     @Test
     public void nonLocalReturnShapes() {
-        assertEquals("[0:xss.§$s.§$s∋$_ce1] --> findNested←$_ce1,findNested∈0:xss.§$s.§$s",
+        // two nested loops since maddi-mod#145: the return lands in the flattened elements of xss
+        assertEquals("[-] --> findNested∩$_ce5,findNested←$_ce5,findNested≤0:xss.§$ss",
                 p.kotlinLinks("findNested"));
         assertEquals("[-] --> -", p.kotlinLinks("findMap"));
     }
@@ -142,17 +147,18 @@ public class TestKotlinLinkFunctions extends CommonKotlinLinkTest {
      Kotlin's `forEach` is the stdlib's static extension CollectionsKt.forEach(Iterable, Function1<T, Unit>). Its
      derived contract roots the consumer at the receiver parameter as Java's Iterable.forEach roots it at 'this'
      (`0:$receiver.§ts⊇Λ1:action`), the call applies it with the first argument as the object, and a Unit-returning
-     Function1 lifts as a Consumer (CodeLaser/maddi#94). `captured` links as the Java `capturedRef`, in another order.
+     Function1 lifts as a Consumer (CodeLaser/maddi#94). A literal in place is lowered into a loop (maddi-mod#145), so the
+     call is kept here with a function value: `capturedFn`.
      */
     @Test
     public void kotlinForEachIsContracted() {
         List<String> lambdaLinks = new ArrayList<>();
-        p.kotlin("captured").methodBody().visit(e -> {
+        p.kotlin("capturedFn").methodBody().visit(e -> {
             if (e instanceof Lambda l) lambdaLinks.add(p.links(l.methodInfo()));
             return true;
         });
         assertEquals("[[0:it.§m≡r*.element.§m,0:it→r*.element] --> -]", lambdaLinks.toString());
-        assertEquals("[0:xs.§$s∋$_ce1] --> captured.§m~0:xs.§m,captured←$_ce1,captured∈0:xs.§$s",
-                p.kotlinLinks("captured"));
+        assertEquals("[0:xs.§$s∋$_ce1] --> capturedFn.§m~0:xs.§m,capturedFn←$_ce1,capturedFn∈0:xs.§$s",
+                p.kotlinLinks("capturedFn"));
     }
 }

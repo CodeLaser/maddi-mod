@@ -32,11 +32,12 @@ public class TestKotlinLambdas extends CommonKotlinTest {
                 }
                 fun capturedVar(xs: List<String>, p: String): Int {
                     var n = 0
-                    xs.forEach { if (it == p) n++ }
+                    // a Sequence's forEach stays a call with a lambda: a List's is lowered into a loop (maddi-mod#145)
+                    xs.asSequence().forEach { if (it == p) n++ }
                     return n
                 }
                 fun nonLocal(xs: List<Int>): Int {
-                    xs.forEach { if (it > 2) return it }
+                    xs.asSequence().forEach { if (it > 2) return it }
                     return 0
                 }
                 fun localFun(a: Int): Int {
@@ -112,7 +113,7 @@ public class TestKotlinLambdas extends CommonKotlinTest {
     @Test
     public void capturedVar() {
         MethodInfo m = p.kotlin("capturedVar");
-        assertEquals("{IntRef n=new IntRef();n.element=0;CollectionsKt.forEach(xs,it->{if(it.equals(p)){n.element++;}});"
+        assertEquals("{IntRef n=new IntRef();n.element=0;SequencesKt.forEach(CollectionsKt.asSequence(xs),it->{if(it.equals(p)){n.element++;}});"
                      + "return n.element;}", m.methodBody().print(p.runtime().qualificationSimpleNames()).toString());
         VariableData last = VariableDataImpl.of(m.methodBody().statements().getLast());
         String element = last.variableInfoStream()
