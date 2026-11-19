@@ -289,6 +289,22 @@ final class VerdictComparison {
         return l.startsWith("java ") || l.startsWith("kotlin ");
     }
 
+    /** A culprit dump ({@code <kind> <member>}, then indented steps), by key; Kotlin keys under Java's names. */
+    static Map<String, List<String>> readCulprits(List<String> lines, boolean kotlin) {
+        Map<String, List<String>> result = new TreeMap<>();
+        List<String> current = null;
+        for (String line : lines) {
+            if (line.isBlank()) continue;
+            if (line.startsWith(" ")) {
+                if (current != null) current.add(line);
+            } else {
+                current = new ArrayList<>();
+                result.put(kotlin ? kotlinKey(line) : line, current);
+            }
+        }
+        return result;
+    }
+
     static Set<String> keysOf(Map<String, String> map) {
         return new TreeSet<>(map.keySet());
     }

@@ -176,17 +176,47 @@ public class TestKotlinVsJavaFernflower {
         report.addAll(VerdictComparison.report(outcomes));
         Files.write(target, report);
         report.stream().filter(l -> !l.startsWith("  ")).forEach(l -> LOGGER.info("{}", l));
+        writeExplanations(dir, outcomes);
         return VerdictComparison.ratchetLines(sides, outcomes);
+    }
+
+    /**
+     * For every member whose verdict differs, the culprits of the side that judged it modified, both sides shown:
+     * {@code explain.txt}. Present only when the run recorded culprits (environment {@code CULPRITS} set).
+     */
+    private static void writeExplanations(Path dir, List<VerdictComparison.Outcome> outcomes) throws IOException {
+        Path javaFile = dir.resolve("java-culprits.txt");
+        Path kotlinFile = dir.resolve("kotlin-culprits.txt");
+        if (!Files.exists(javaFile) || !Files.exists(kotlinFile)) return;
+        Map<String, List<String>> java = VerdictComparison.readCulprits(Files.readAllLines(javaFile), false);
+        Map<String, List<String>> kotlin = VerdictComparison.readCulprits(Files.readAllLines(kotlinFile), true);
+        List<String> lines = new ArrayList<>();
+        for (VerdictComparison.Outcome o : outcomes) {
+            if ("T".equals(o.kind())) continue;
+            for (String c : List.of(VerdictComparison.STRONGER, VerdictComparison.WEAKER)) {
+                for (String e : o.categories().get(c)) {
+                    String key = o.kind() + " " + e.substring(e.lastIndexOf("  ") + 2);
+                    lines.add(c + "  " + e);
+                    lines.add("  java:");
+                    java.getOrDefault(key, List.of("  (no culprit)")).forEach(st -> lines.add("  " + st));
+                    lines.add("  kotlin:");
+                    kotlin.getOrDefault(key, List.of("  (no culprit)")).forEach(st -> lines.add("  " + st));
+                }
+            }
+        }
+        Files.write(dir.resolve("explain.txt"), lines);
     }
 
     private static RunMixedPrepAnalyzer.Summary run(InputConfigurationImpl config, Path out, String side) throws IOException {
         System.setProperty("maddi.verdictDump", out.resolve(side + "-types.txt").toString());
         System.setProperty("maddi.memberVerdictDump", out.resolve(side + "-members.txt").toString());
+        System.setProperty("maddi.memberCulpritDump", out.resolve(side + "-culprits.txt").toString());
         try {
             return new RunMixedPrepAnalyzer().go(config, true, JDK_ANNOTATED_APIS);
         } finally {
             System.clearProperty("maddi.verdictDump");
             System.clearProperty("maddi.memberVerdictDump");
+            System.clearProperty("maddi.memberCulpritDump");
         }
     }
 }
