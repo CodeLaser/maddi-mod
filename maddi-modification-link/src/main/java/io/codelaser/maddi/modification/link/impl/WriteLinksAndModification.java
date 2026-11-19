@@ -75,6 +75,7 @@ class WriteLinksAndModification {
      */
     private static final boolean NO_REUSE = Gate.isSet("NOREUSE");
     private static final boolean NO_STRUCTURAL_FLIP = Gate.isSet("NOSTRUCTURALFLIP");
+    private static final boolean NO_VMIDIR_EXPAND = Gate.isSet("NOVMIDIREXPAND");
     private final Map<Variable, Links> lastExtracted = new HashMap<>();
 
     static class ReuseContext {
@@ -575,10 +576,24 @@ class WriteLinksAndModification {
         // same-statement containment in the persistent graph (fixed above, gate NOFLIPSAME), present in
         // every run context — not a class-vs-full-suite difference.
         if (!Gate.isSet("NOVMIDIR")) {
+            // The facts are read off the graph, where a group is still its representative ('$__sv_buf.§m'): expanded
+            // to the members here, as everywhere else. A return variable also gets the filter handleReturnVariable
+            // applied above, which these facts arrive too late for: a rep or a local face reached the summary and
+            // the writer refused it (guava ByteStreams.toByteArrayInternal, ImmutableSortedMultiset.of,
+            // CodeLaser/maddi-mod#109). Gate NOVMIDIREXPAND.
             for (Link l : followGraph.graph().vmiDirectionalFacts(variable)) {
-                if (!builder.contains(l.from(), l.linkNature(), l.to())
-                    && !builder.contains(l.to(), l.linkNature().reverse(), l.from())) {
-                    builder.add(l.from(), l.linkNature(), l.to());
+                List<Variable> tos = NO_VMIDIR_EXPAND ? List.of(l.to())
+                        : followGraph.graph().expandRepToMembers(l.to()).toList();
+                for (Variable to : tos) {
+                    if (!NO_VMIDIR_EXPAND && (to.equals(l.from())
+                                              || variable instanceof ReturnVariable
+                                                 && !LinkVariable.acceptForLinkedVariables(to))) {
+                        continue;
+                    }
+                    if (!builder.contains(l.from(), l.linkNature(), to)
+                        && !builder.contains(to, l.linkNature().reverse(), l.from())) {
+                        builder.add(l.from(), l.linkNature(), to);
+                    }
                 }
             }
         }
