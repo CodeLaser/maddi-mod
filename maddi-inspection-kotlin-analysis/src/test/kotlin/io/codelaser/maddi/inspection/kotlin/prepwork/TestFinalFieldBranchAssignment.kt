@@ -30,20 +30,11 @@ import org.junit.jupiter.api.Test
  * lambda body, or an anonymous-object method — and demotes the field to non-final, in contrast with its control
  * (a private field assigned only in the constructor, which stays effectively final).
  *
- * The mechanism does not carry over faithfully, and the reason is instructive rather than a mere gap:
- *
- * The K2 front-end desugars a `var` property into a backing field **plus** a synthesized `setX` setter whose body
- * is `this.x = <param>`. The finality rule (`ComputePartOfConstructionFinalField`) demotes any field assigned by a
- * method that is not in `partOfConstruction`; the generated setter is exactly such a method. So **every** Kotlin
- * `var` is reported non-final — independent of whether anything ever calls the setter, and independent of any
- * branch/lambda/anon assignment. Conversely a `val` synthesizes only a getter, so it stays final.
- *
- * Consequence: the Java test's three "assigned outside construction" cases cannot be reproduced as genuine checks
- * here — a `var` is already non-final before the branch assignment is even considered, and a `val` cannot be
- * reassigned in a branch at all. What we *can* assert faithfully is the actual Kotlin invariant this exposes:
- * `val` ⟹ final, `var` ⟹ non-final (via its setter), the latter holding even when the only assignment is in the
- * constructor. [testValIsFinal] is the control; [testVarWithConstructorAssignmentOnly] isolates the setter as the
- * true cause; the remaining cases confirm the invariant is stable across branch / lambda / anon assignments.
+ * A private `var` with default accessors has no setter on the JVM, and the K2 front end no longer synthesizes one
+ * (maddi-mod#145). Before, that `setI` assigned the field outside construction, so every Kotlin `var` was non-final
+ * whatever else happened to it, and the three cases below could not fail. Now they are the Java test's checks:
+ * [testVarWithConstructorAssignmentOnly] is the control that stays final, and a `when` branch, a lambda and an
+ * `object :` method each demote it.
  */
 class TestFinalFieldBranchAssignment : CommonKotlinPrep() {
 
@@ -69,9 +60,8 @@ class TestFinalFieldBranchAssignment : CommonKotlinPrep() {
 
     @Test
     fun testVarWithConstructorAssignmentOnly() {
-        // the crux: even assigned ONLY in the constructor, a `var` is non-final -- its synthesized `setI`
-        // is an assigning method outside construction. This alone (no branch/lambda/anon) already demotes it.
-        assertFalse(isFinal("""
+        // control: a private `var` assigned only in the constructor is effectively final, as the Java field is
+        assertTrue(isFinal("""
             package a.b
             class X {
                 private var i: Int
