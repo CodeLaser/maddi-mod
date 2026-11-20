@@ -84,7 +84,7 @@ public record LinkAppliedFunctionalInterface(JavaInspector javaInspector,
         List<LinkFunctionalInterface.Triplet> toAdd = new LinkFunctionalInterface(runtime, virtualFieldComputer,
                 currentMethod).go(functionalType, fromTranslated, linkNature, builder.primary(), translated,
                 objectPrimary);
-        toAdd.forEach(t -> builder.add(t.from(), t.linkNature(), t.to()));
+        LinkFunctionalInterface.addResultLinks(builder, toAdd);
     }
 
     private boolean isLinkedToParameter(List<Links> list) {

@@ -250,9 +250,10 @@ public class TestStreamMapSpec extends CommonTest {
     @DisplayName("unbound accessor of a mutable class (Order::customer) is not the identity: like the lambda")
     @Test
     public void unboundAccessorIsNotIdentity() {
-        // #92: the classes of '∩' overlap the two hidden contents, for the lambda and the method reference alike
-        assertEquals("[-] --> mapCustomerLambda.§$s∩0:orders.§$s", mlv("mapCustomerLambda"));
-        assertEquals("[-] --> mapCustomerMR.§$s∩0:orders.§$s", mlv("mapCustomerMR"));
+        // #138: a field of the element lifts to '≤', the result's elements are in the object graph of the source's
+        // (it was '∩', #92's overlap), for the lambda and the method reference alike
+        assertEquals("[-] --> mapCustomerLambda.§$s≤0:orders.§$s", mlv("mapCustomerLambda"));
+        assertEquals("[-] --> mapCustomerMR.§$s≤0:orders.§$s", mlv("mapCustomerMR"));
     }
 
     // ---- known gaps (to fix) ----------------------------------------------------------------------------

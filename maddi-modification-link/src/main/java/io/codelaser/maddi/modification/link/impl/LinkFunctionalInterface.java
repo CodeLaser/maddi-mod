@@ -48,6 +48,7 @@ public record LinkFunctionalInterface(Runtime runtime, VirtualFieldComputer virt
                                       MethodInfo currentMethod) {
     private static final Logger LOGGER = LoggerFactory.getLogger(LinkFunctionalInterface.class);
     private static final boolean NO_FRESH_FUNCTION_RESULT = Gate.isSet("NOFRESHFUNCTIONRESULT");
+    private static final boolean NO_MAP_FIELD = Gate.isSet("NOMAPFIELD");
 
     record Triplet(Variable from, LinkNature linkNature, Variable to) {
     }
@@ -253,8 +254,27 @@ public record LinkFunctionalInterface(Runtime runtime, VirtualFieldComputer virt
                                 false);
                         Variable to = translateAndRecreateVirtualFields(tmMapSource, l.to(), vfMapSource, vfMapTarget,
                                 true);
+                        LinkNature nature = l.linkNature();
+                        /*
+                         CodeLaser/maddi-mod#138: 'a -> a.statement()', the function's result a real field of its
+                         parameter: the result's elements are in the object graph of the source's ('map.§$s ≤
+                         source.§$s', as 'items.get(0).statement()' is '≤ items.§$s'). Translated as is, the field
+                         hung off the map source ('$__rv0.statement'), which became a mere '∩'. Gate NOMAPFIELD
+                         */
+                        if (!NO_MAP_FIELD && to instanceof FieldReference toFr && !virtual(toFr)
+                            && from != null && from.equals(returnPrimary)
+                            && objectPrimary.equals(Util.primary(toFr))
+                            && vfMapSource.hiddenContent() != null && vfMapTarget.hiddenContent() != null
+                            && (nature == LinkNatureImpl.IS_ASSIGNED_FROM || nature == LinkNatureImpl.IS_IN_OBJECT_GRAPH
+                                || nature == LinkNatureImpl.IS_FIELD_OF)) {
+                            FieldInfo hcT = vfMapTarget.hiddenContent();
+                            FieldInfo hcS = vfMapSource.hiddenContent();
+                            from = runtime.newFieldReference(hcT, runtime.newVariableExpression(returnPrimary), hcT.type());
+                            to = runtime.newFieldReference(hcS, runtime.newVariableExpression(objectPrimary), hcS.type());
+                            nature = LinkNatureImpl.IS_IN_OBJECT_GRAPH;
+                        }
                         if (from != null && to != null && Util.acceptModificationLink(from, to)) {
-                            result.add(new Triplet(from, l.linkNature(), to));
+                            result.add(new Triplet(from, nature, to));
                         }
                     }
                 }
@@ -281,8 +301,29 @@ public record LinkFunctionalInterface(Runtime runtime, VirtualFieldComputer virt
         return result.typeInfo() != null && "kotlin.Unit".equals(result.typeInfo().fullyQualifiedName());
     }
 
+    /*
+     Only links of the result: a recursive method applying its function parameter ('T query(Group g, Function<Group,
+     T> action)', calling itself, or an overload, with 'action') lifts 'this.§$ ↗ query' too, the recursion's own return
+     value, which is no part of this call's result and broke the builder's assertion (hibernate-orm's
+     FromClause.queryTableGroups through LinkAppliedFunctionalInterface, queryTableReferences through
+     LinkMethodCall.translateHandleFunctional).
+     */
+    static void addResultLinks(Links.Builder builder, List<Triplet> toAdd) {
+        for (Triplet t : toAdd) {
+            if (builder.primary() instanceof io.codelaser.maddi.cst.api.variable.This
+                || Util.isPartOf(builder.primary(), t.from())) {
+                builder.add(t.from(), t.linkNature(), t.to());
+            }
+        }
+    }
+
     private Variable createSlice(int i, Variable base, Variable sub) {
         // essentially for a BiConsumer: (x,y)-> ...
+        // No slice of nothing, nor of the function itself: a BiConsumer handed on ('collect(ref, map::put)', then
+        // 'collect(join.ref(), consumer)') arrives with its own decoration link as the source, '1:consumer ↗ $_afi0'
+        // (hibernate-orm's CteInsertHandler.addDmlCtes; a null base in a loop body copy of
+        // SqmMutationStrategyHelper.forEachSelectableMapping)
+        if (base == null || io.codelaser.maddi.modification.common.FunctionTypes.isStandardFunctionalInterface(base.parameterizedType())) return null;
         ParameterizedType sourcePt = sub.parameterizedType();
         String name = sourcePt.typeParameter() != null ? sourcePt.typeParameter().simpleName().toLowerCase() : "$";
         String names = name + "s".repeat(sourcePt.arrays());

@@ -1071,7 +1071,10 @@ class WriteLinksAndModification {
                     .filter(alias -> !alias.equals(link.to()) && !rootedInLocal(alias)).toList();
             if (aliases.size() == 1) {
                 Variable alias = aliases.getFirst();
-                if (!alias.equals(link.from()) && !Util.primary(alias).equals(Util.primary(link.from()))
+                // an alias without a variable at its root ('c.getSubtypes()[k]', an element of a call's result) holds no
+                // longer-lived object: hibernate-orm's Cascade.cascadeLogicalOneToOneOrphanRemoval crashed here
+                Variable aliasPrimary = Util.primary(alias);
+                if (aliasPrimary != null && !alias.equals(link.from()) && !aliasPrimary.equals(Util.primary(link.from()))
                     && !isInternalSelfFieldLink(link.from(), alias)) {
                     added.add(new LinksImpl.LinkImpl(link.from(), link.linkNature(), alias, link.mediated()));
                 }
