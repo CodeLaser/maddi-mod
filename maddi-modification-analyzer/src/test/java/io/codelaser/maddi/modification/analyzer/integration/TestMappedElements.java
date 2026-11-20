@@ -18,6 +18,7 @@
 package io.codelaser.maddi.modification.analyzer.integration;
 
 import static io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl.METHOD_LINKS;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -31,6 +32,7 @@ import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.statement.Statement;
 import io.codelaser.maddi.modification.analyzer.CommonTest;
+import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
 import io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl;
 import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
 
@@ -156,24 +158,73 @@ public class TestMappedElements extends CommonTest {
                         }
                     }
                 }
+                static void p4(List<Item> items) {
+                    Set<St> sts = items.stream().map(a -> a.statement()).collect(Collectors.toSet());
+                    for (St st : sts) {
+                        List<List<String>> lists = new ArrayList<>();
+                        lists.add(st.getExprents());
+                        for (List<String> l : lists) l.removeAll(List.of("x"));
+                    }
+                }
+                static void p6(List<Item> items) {
+                    Set<St> sts = items.stream().map(a -> a.statement()).collect(Collectors.toSet());
+                    for (St st : sts) {
+                        St parent = st;
+                        while (parent != null) {
+                            List<List<String>> lists = new ArrayList<>();
+                            lists.add(parent.getExprents());
+                            for (List<String> l : lists) l.removeAll(List.of("x"));
+                            parent = parent.getParent();
+                        }
+                    }
+                }
+                static void p7(List<Item> items) {
+                    Set<St> sts = items.stream().map(a -> a.statement()).collect(Collectors.toSet());
+                    for (St st : sts) {
+                        List<List<String>> lists = new ArrayList<>();
+                        lists.add(new ArrayList<>(st.getExprents()));
+                        for (List<String> l : lists) l.clear();
+                    }
+                }
             }
             """;
 
     /*
      The steps of fernflower's SwitchHelper.removeTempVariableDeclarations: through a getter (p1), through an alias of
      the element (p2: 'St parent = st;', a shared-variable group, whose facts are on the group's representative),
-     walking up the parents (p3). p5 is the same walk without the stream. Not yet: the element's list put into a list
-     of lists and modified from there ('lists.add(st.getExprents()); for (List<String> l : lists) l.removeAll(..)'),
-     which fernflower's method does; see the issue.
+     walking up the parents (p3); the element's list put into a list of lists and modified from there (p4, and p6
+     inside the walk: 'lists.add(parent.getExprents()); for (List<String> l : lists) l.removeAll(..)'), which
+     fernflower's method does. p5 is the walk without the stream. p7, the control: the list of lists holds copies.
+     Both modes: production runs the reachability pass. fernflower's own parameter is right since the merge of
+     376c6ddb (the reachability pass's element sources) with b7cbf009.
      */
     @Test
-    public void steps() {
+    public void stepsReachability() {
+        assertEquals("p1=M p2=M p3=M p4=M p5=M p6=M p7=U", steps(true));
+    }
+
+    /*
+     KNOWN GAP, the fixpoint engine only (production runs the reachability pass): p4 and p6, the list of lists after
+     the stream; p5, the same without the stream, is right. Not traced. Likely: WriteLinksAndModification's #138
+     rule needs a modified element of 'sts' ('sts.§$s ∩ items.§$s'), and the list modified here
+     ('for (List<String> l : lists) l.removeAll(..)') is an element of 'lists', holding 'st.exprents'.
+     */
+    @Test
+    public void stepsFixpoint() {
+        assertEquals("p1=M p2=M p3=M p4=U p5=M p6=U p7=U", steps(false));
+    }
+
+    private String steps(boolean reach) {
         TypeInfo X = javaInspector.parse("a.b.X", INPUT2);
         List<Info> analysisOrder = prepWork(X);
-        analyzer.go(analysisOrder, 3);
-        for (String name : new String[]{"p1", "p2", "p3", "p5"}) {
+        new IteratingAnalyzerImpl(javaInspector, new IteratingAnalyzerImpl.ConfigurationBuilder()
+                .setMaxIterations(10).setModificationViaReachability(reach).build()).analyze(analysisOrder);
+        StringBuilder sb = new StringBuilder();
+        for (String name : new String[]{"p1", "p2", "p3", "p4", "p5", "p6", "p7"}) {
             MethodInfo mi = X.findUniqueMethod(name, 1);
-            assertFalse(mi.parameters().getFirst().isUnmodified(), name + ": items is modified");
+            if (!sb.isEmpty()) sb.append(' ');
+            sb.append(name).append('=').append(mi.parameters().getFirst().isUnmodified() ? 'U' : 'M');
         }
+        return sb.toString();
     }
 }
