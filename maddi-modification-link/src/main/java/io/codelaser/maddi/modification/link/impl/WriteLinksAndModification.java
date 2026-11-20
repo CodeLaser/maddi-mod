@@ -223,6 +223,8 @@ class WriteLinksAndModification {
     private static final boolean NO_OBJECT_GRAPH_MOD = Gate.isSet("NOOBJECTGRAPHMOD");
     private static final boolean NO_VIEW_ELEMENT_MOD = Gate.isSet("NOVIEWELEMENTMOD");
     private static final boolean NO_ITERATOR_STATE = Gate.isSet("NOITERATORSTATE");
+    // gate NOMAPPEDELEMENT: an element mapped out of a container's elements does not lead back to it (#138)
+    private static final boolean NO_MAPPED_ELEMENT = Gate.isSet("NOMAPPEDELEMENT");
 
     /* #117: see Util.hiddenAliasOwner. The container's own variable ('sequence.stats') is left alone: its element
        is modified, not it.
@@ -264,15 +266,28 @@ class WriteLinksAndModification {
         for (Map.Entry<Variable, Set<MethodInfo>> entry : modified.entrySet()) {
             Variable m = entry.getKey();
             if (Util.virtual(m)) continue;
-            for (Map.Entry<Variable, LinkNature> e : followGraph.graph().closure(m)) {
-                Variable container = e.getKey();
-                if (e.getValue() == IS_ELEMENT_OF && Util.virtual(container)
-                    && !Util.isVirtualModification(container)) {
-                    result.merge(container, entry.getValue(), (a, b) -> {
-                        Set<MethodInfo> union = new HashSet<>(a);
-                        union.addAll(b);
-                        return Set.copyOf(union);
-                    });
+            List<Variable> vertices = new ArrayList<>(2);
+            vertices.add(m);
+            if (!NO_MAPPED_ELEMENT) {
+                // #138: a member of a shared-variable group ('St parent = st;') has its facts on the group's rep
+                Variable rep = followGraph.graph().translateForward(m);
+                if (rep != null && !rep.equals(m)) vertices.add(rep);
+            }
+            for (Variable vertex : vertices) {
+                for (Map.Entry<Variable, LinkNature> e : followGraph.graph().closure(vertex)) {
+                    Variable container = e.getKey();
+                    if (e.getValue() == IS_ELEMENT_OF && Util.virtual(container)
+                        && !Util.isVirtualModification(container)) {
+                        Iterable<Variable> faces = vertex == m ? List.of(container)
+                                : followGraph.graph().expandRepToMembers(container).toList();
+                        for (Variable face : faces) {
+                            result.merge(face, entry.getValue(), (a, b) -> {
+                                Set<MethodInfo> union = new HashSet<>(a);
+                                union.addAll(b);
+                                return Set.copyOf(union);
+                            });
+                        }
+                    }
                 }
             }
         }
@@ -1301,12 +1316,15 @@ class WriteLinksAndModification {
                 && Util.virtual(link.from()) && !Util.isVirtualModification(link.from())
                 && Util.virtual(link.to()) && !Util.isVirtualModification(link.to())
                 && mutableElements(link.from())
-                && Util.elementsMayOverlap(link.from(), link.to())) {
+                && (Util.elementsMayOverlap(link.from(), link.to())
+                    || !NO_MAPPED_ELEMENT && Util.elementsMayHold(link.from(), link.to()))) {
                 Set<MethodInfo> causes = modifiedElementOf.get(link.to());
                 if (causes != null) {
                     // #134: 'x.map.§$$s[-2] ∩ rv.§$s', rv filled with the elements of one of the field's values
                     // (addAll, add per element), and an element of rv modified: it may be one of x's, so x is
                     // modified, deeply, as for the copy's '≥' below. A modification of rv itself does not count.
+                    // #138: or rv's elements may be objects inside x's elements ('sts.§$s ∩ items.§$s', sts
+                    // collected with 'items.stream().map(a -> a.statement())'): modifying one modifies x deeply.
                     modifiedVariablesAndTheirCause.putIfAbsent(builder.primary(), causes);
                     return false;
                 }

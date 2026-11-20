@@ -18,9 +18,13 @@ import io.codelaser.maddi.cst.api.expression.TypeExpression;
 import io.codelaser.maddi.cst.api.expression.VariableExpression;
 import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.ParameterInfo;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.runtime.Runtime;
 import io.codelaser.maddi.cst.api.translate.TranslationMap;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
+import io.codelaser.maddi.cst.api.variable.DependentVariable;
+import io.codelaser.maddi.cst.api.variable.FieldReference;
+import io.codelaser.maddi.cst.api.variable.This;
 import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
@@ -197,7 +201,14 @@ public record MethodModification(Runtime runtime, VariableData variableData, Sta
         // the author's, that includes the ones the callee's body performs on variables translated into our scope
         if (!receiverDisclaimed && !methodLinkedVariables.isEmpty() && objectPrimary != null) {
             Variable methodThis = runtime.newThis(methodInfo.typeInfo().asParameterizedType());
-            TranslationMap tm = new VariableTranslationMap(runtime).put(methodThis, objectPrimary);
+            VariableTranslationMap vtm = new VariableTranslationMap(runtime).put(methodThis, objectPrimary);
+            if (!NO_FOREIGN_MODIFIED) {
+                // the callee's body reaches its supertypes' code: their 'this' is the same object (#126)
+                for (var superType : methodInfo.typeInfo().superTypesExcludingJavaLangObject()) {
+                    vtm.put(runtime.newThis(superType.asParameterizedType()), objectPrimary);
+                }
+            }
+            TranslationMap tm = vtm;
             for (Variable mv : methodLinkedVariables.modified()) {
                 Variable translated = tm.translateVariableRecursively(mv);
                 // the SAM's own summary says its argument is modified: for a recorded parameter, that is the same
@@ -206,14 +217,55 @@ public record MethodModification(Runtime runtime, VariableData variableData, Sta
                 // the receiver rules excused the object: the callee's own claim on its 'this' (a shallow summary
                 // of an abstract callee claims exactly the union verdict) is the same claim, not a second one
                 if (receiverExcused && Util.variableAndScopes(translated).anyMatch(objectPrimary::equals)) continue;
-                if (translated.equals(mv)
-                    || variableData != null && variableData.isKnown(translated.fullyQualifiedName())) {
+                if (NO_FOREIGN_MODIFIED
+                    ? translated.equals(mv)
+                      || variableData != null && variableData.isKnown(translated.fullyQualifiedName())
+                    : inCallerScope(translated, translated.equals(mv))) {
                     LOGGER.debug("Propagated modification to {}", translated);
                     modified.addWithScopes(translated, !methodLinkedVariables.deepOnlyModified().contains(mv));
                 }
             }
         }
         return modified.build();
+    }
+
+    /*
+     CodeLaser/maddi-mod#126. The callee's modified set enters ours after translating the callee's 'this', and that of
+     each of its supertypes (the code it inherits or calls with 'super'), onto the receiver. What translation leaves
+     unchanged entered as it was, meant for static state. But a summary also carries the parameters of the callee and
+     of its own callees, and, from deep in those callees, a 'this' of an unrelated type. The parameters do no harm: they repeat what those methods' own summaries claim (TestWriteAnalysis2 pins
+     'setAdd(R):0:r' in its caller's set). A foreign 'this' does: jenkins' BuildStepCompatibilityLayerTest.testPerform()
+     took 'this.§$' from BuildStepCompatibilityLayer's overloads, the shadow pass read it as the test instance, and a
+     method that only uses locals was reported modifying. So a variable rooted in a 'this' enters only for the
+     caller's own type or a type enclosing it (an inner class modifying its outer instance), or a supertype of
+     either. Other roots as before.
+     Gate NOFOREIGNMODIFIED: a 'this' as well.
+     */
+    private static final boolean NO_FOREIGN_MODIFIED = Gate.isSet("NOFOREIGNMODIFIED");
+
+    // the caller's own object, or the outer instance of an enclosing type, seen through any of their supertypes
+    private boolean ownThis(This thisVar) {
+        for (TypeInfo t = currentMethod.typeInfo(); t != null; t = t.enclosingType()) {
+            if (t == thisVar.typeInfo() || t.superTypesExcludingJavaLangObject().contains(thisVar.typeInfo())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean inCallerScope(Variable translated, boolean untranslated) {
+        Variable root = translated;
+        while (true) {
+            if (root instanceof FieldReference fr && fr.scopeVariable() != null) {
+                root = fr.scopeVariable();
+            } else if (root instanceof DependentVariable dv && dv.arrayVariable() != null) {
+                root = dv.arrayVariable();
+            } else {
+                break;
+            }
+        }
+        if (root instanceof This thisVar) return ownThis(thisVar);
+        return untranslated || variableData != null && variableData.isKnown(translated.fullyQualifiedName());
     }
 
     /*
