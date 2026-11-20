@@ -358,6 +358,7 @@ public class PrepAnalyzer {
         // the computation silently assumes. Types the graph merely REACHED (a caller prepping one primary type at a
         // time) and binary types accepted by externalsToAccept are left undecided instead; see go()'s javadoc.
         cp.go(cg, typeInfo -> typeInfo.analysis().haveAnalyzedValueFor(PREPPED));
+        io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataCensus.log("after prep", primaryTypes);
         LOGGER.info("Done, returning ComputeCallGraph object");
         return ccg;
     }

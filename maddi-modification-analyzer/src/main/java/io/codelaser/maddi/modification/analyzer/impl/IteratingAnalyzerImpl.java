@@ -582,6 +582,12 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
             CanonicalVirtuals.endAnalysis();
             TolerantWrite.resetChangedTargets();
         }
+        if (io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataCensus.ON) {
+            io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataCensus.log("after modification",
+                    analysisOrder.stream().filter(i -> i instanceof io.codelaser.maddi.cst.api.info.TypeInfo)
+                            .map(i -> ((io.codelaser.maddi.cst.api.info.TypeInfo) i).primaryType()).distinct()
+                            .toList());
+        }
         if (configuration.nullability()) {
             // docs/design/nullability.md M3/B2: one-shot, over the converged link facts. The stored verdicts are the
             // Java annotations' (NullabilityDecorator): a parameter its method needs non-null is @NonNull, which

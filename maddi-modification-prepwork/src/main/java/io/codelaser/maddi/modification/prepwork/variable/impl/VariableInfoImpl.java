@@ -108,7 +108,7 @@ public final class VariableInfoImpl implements VariableInfo, PreviousOrInitial, 
         return contentKey(l1).equals(contentKey(l2));
     }
 
-    private static Set<List<Object>> contentKey(Links links) {
+    static Set<List<Object>> contentKey(Links links) {
         Set<List<Object>> set = new HashSet<>();
         for (Link link : links) {
             set.add(List.of(link.from(), link.linkNature(), link.to(), link.mediated()));
