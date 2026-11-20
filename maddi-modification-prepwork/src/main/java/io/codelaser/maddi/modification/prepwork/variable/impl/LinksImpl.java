@@ -170,14 +170,15 @@ public class LinksImpl implements Links {
         return contentKey(this).equals(contentKey(o));
     }
 
+    private static final boolean NO_LINK_SHARE = System.getenv("NOLINKSHARE") != null;
+    private static final boolean NO_LINK_REUSE = System.getenv("NOLINKREUSE") != null;
+
     /**
      * {@code existing} when it holds exactly the links of {@code candidate} (same primary, same links in the same
      * order, every component equal), otherwise {@code candidate}. Links are immutable, so a statement whose links
      * repeat those of the previous statement (or a merge repeating its evaluation) can hold the same instance: on a
      * large corpus the per-statement copies were most of the heap (300M LinkImpl, 7.2 GB, at 28 GB live).
      */
-    private static final boolean NO_LINK_SHARE = System.getenv("NOLINKSHARE") != null;
-
     public static Links shareIfIdentical(Links candidate, Links existing) {
         if (NO_LINK_SHARE || existing == null || candidate == existing
             || !(candidate instanceof LinksImpl c) || !(existing instanceof LinksImpl e)
@@ -185,15 +186,52 @@ public class LinksImpl implements Links {
             return candidate;
         }
         for (int i = 0; i < c.linkSet.size(); i++) {
-            Link a = c.linkSet.get(i);
-            Link b = e.linkSet.get(i);
-            if (a != b && !(Objects.equals(a.from(), b.from()) && Objects.equals(a.linkNature(), b.linkNature())
-                            && Objects.equals(a.to(), b.to()) && a.mediated() == b.mediated()
-                            && a.derived() == b.derived())) {
-                return candidate;
-            }
+            if (!sameLink(c.linkSet.get(i), e.linkSet.get(i))) return candidate;
         }
         return existing;
+    }
+
+    /**
+     * {@link #shareIfIdentical}, and when the lists differ, {@code candidate}'s links with every link that
+     * {@code existing} holds identically replaced by {@code existing}'s instance: a statement whose links differ
+     * from the previous statement's in a few links keeps the others shared. The candidate's own list and links
+     * become garbage at once; what stays is one list over mostly shared links.
+     */
+    public static Links shareLinks(Links candidate, Links existing) {
+        Links whole = shareIfIdentical(candidate, existing);
+        if (whole == existing || NO_LINK_SHARE || NO_LINK_REUSE || existing == null
+            || !(candidate instanceof LinksImpl c) || !(existing instanceof LinksImpl e)
+            || c.linkSet.isEmpty() || e.linkSet.isEmpty()) {
+            return whole;
+        }
+        // LinkImpl.equals is from/to only: index on that, then compare the remaining components
+        Map<Link, Link> byEnds = null;
+        List<Link> reused = null;
+        for (int i = 0; i < c.linkSet.size(); i++) {
+            Link a = c.linkSet.get(i);
+            Link b = null;
+            if (i < e.linkSet.size() && sameLink(a, e.linkSet.get(i))) {
+                b = e.linkSet.get(i);
+            } else {
+                if (byEnds == null) {
+                    byEnds = new HashMap<>(2 * e.linkSet.size());
+                    for (Link l : e.linkSet) byEnds.putIfAbsent(l, l);
+                }
+                Link found = byEnds.get(a);
+                if (found != null && sameLink(a, found)) b = found;
+            }
+            if (b != null && b != a) {
+                if (reused == null) reused = new ArrayList<>(c.linkSet);
+                reused.set(i, b);
+            }
+        }
+        return reused == null ? candidate : new LinksImpl(c.primary, List.copyOf(reused));
+    }
+
+    private static boolean sameLink(Link a, Link b) {
+        return a == b || Objects.equals(a.from(), b.from()) && Objects.equals(a.linkNature(), b.linkNature())
+                         && Objects.equals(a.to(), b.to()) && a.mediated() == b.mediated()
+                         && a.derived() == b.derived();
     }
 
     private static java.util.Set<java.util.List<Object>> contentKey(LinksImpl links) {

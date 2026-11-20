@@ -2026,10 +2026,11 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                 }
                 if (vic.hasEvaluation()) {
                     VariableInfoImpl eval = (VariableInfoImpl) vic.best(Stage.EVALUATION);
-                    // most variables keep the previous statement's links: hold that instance, not a copy. peek: the
-                    // content written does not depend on this read, so the link cache must not record it (#76)
+                    // most variables keep the previous statement's links: hold that instance, not a copy, or at
+                    // least its identical links (shareLinks). peek: the content written does not depend on this
+                    // read, so the link cache must not record it (#76)
                     Links previousLinks = vi instanceof VariableInfoImpl vii ? (Links) vii.peek(null) : null;
-                    eval.setLinkedVariables(LinksImpl.shareIfIdentical(links, previousLinks));
+                    eval.setLinkedVariables(LinksImpl.shareLinks(links, previousLinks));
                 }
             });
         }

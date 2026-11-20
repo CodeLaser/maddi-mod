@@ -65,6 +65,7 @@ public final class VariableDataCensus {
     private long linkRefs;           // links over those infos, as if none were shared
     private long distinctLinks;      // distinct Links instances
     private long distinctLinkCount;  // links held by the distinct instances
+    private long distinctLinkObjects; // distinct Link instances over them
 
     private VariableDataCensus() {
     }
@@ -81,12 +82,12 @@ public final class VariableDataCensus {
         LOGGER.info("VDCENSUS {}: statement VDs {}, containers {} (previous {}), untouched {}"
                     + " (same links {}, same links+properties {}), evaluations with links {}; merges {} (same"
                     + " assignments {}, same reads {}, same all {}); Reads {} holding {} indices, Assignments {}"
-                    + " holding {} indices; Links on {} infos holding {} links, {} distinct instances holding {}",
+                    + " holding {} indices; Links on {} infos holding {} links, {} distinct instances holding {}, {} distinct Link objects",
                 when, c.statementData, c.entries, c.previous,
                 c.untouched, c.untouchedSameLinks, c.untouchedSameAll, c.linksSet, c.merges,
                 c.mergeSameAssignments, c.mergeSameReads, c.mergeSameAll, c.distinctReads, c.readsIndices,
                 c.distinctAssignments, c.assignmentIndices, c.linksRefs, c.linkRefs, c.distinctLinks,
-                c.distinctLinkCount);
+                c.distinctLinkCount, c.distinctLinkObjects);
     }
 
     private void method(MethodInfo mi, Set<Object> seen, Set<Object> values) {
@@ -129,6 +130,7 @@ public final class VariableDataCensus {
             if (values.add(l)) {
                 distinctLinks++;
                 distinctLinkCount += l.size();
+                for (Object link : l) if (values.add(link)) distinctLinkObjects++;
             }
         }
         if (eval != null && eval.linkedVariables() != null) linksSet++;
