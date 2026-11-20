@@ -19,6 +19,7 @@ package io.codelaser.maddi.modification.prepwork;
 
 import static io.codelaser.maddi.modification.prepwork.StatementIndex.*;
 
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
@@ -255,7 +256,18 @@ public class Util {
      need not be the one the elements came from; the container it belongs to is the evidence.
      */
     public static boolean elementsMayOverlap(Variable a, Variable b) {
-        if (isSlice(a) || isSlice(b)) return true;
+        if (isSlice(a) || isSlice(b)) {
+            if (NO_SLICE_TYPES) return true;
+            List<ParameterizedType> ta = candidateElementTypes(a);
+            List<ParameterizedType> tb = candidateElementTypes(b);
+            if (ta == null || tb == null) return true;
+            for (ParameterizedType x : ta) {
+                for (ParameterizedType y : tb) {
+                    if (x.arrays() == y.arrays() && mayBeSameObject(x, y)) return true;
+                }
+            }
+            return false;
+        }
         ParameterizedType pa = a.parameterizedType().copyWithoutArrays();
         ParameterizedType pb = b.parameterizedType().copyWithoutArrays();
         if (pa.typeInfo() != null && isContainerType(pa.typeInfo())
@@ -263,6 +275,45 @@ public class Util {
             return true;
         }
         return mayBeSameObject(pa, pb);
+    }
+
+    /*
+     #121: the evidence for a slice is the container it belongs to, as the comment above says, but the slice answered
+     'may overlap' without consulting it. fernflower VarVersionsProcessor.setNewVarIndices' lambda: 'maxTypes.§$$s[-2]
+     ∩ lst.§$s' (a Map<VarVersion, VarType>'s values and a List<Exprent>'s elements, linked because a value is stored
+     into an exprent), an exprent of lst modified, so the captured map was modified, and through it the lambda.
+     A slice's candidates are the type arguments of its real container ('Map<String, VarType>': String, VarType); any
+     other element set's is its element type. null: no evidence (a type parameter, a wildcard, a virtual container
+     type, no type arguments), so they may overlap. Gate NOSLICETYPES.
+     */
+    private static final boolean NO_SLICE_TYPES = System.getenv("NOSLICETYPES") != null;
+
+    private static List<ParameterizedType> candidateElementTypes(Variable v) {
+        if (isSlice(v)) {
+            Variable owner = firstRealVariable(v);
+            if (owner == null || owner == v) return null;
+            ParameterizedType pt = owner.parameterizedType();
+            if (pt == null || pt.parameters().isEmpty()) return null;
+            List<ParameterizedType> result = new ArrayList<>();
+            // at any depth: 'map.§$$s[-2]' of a Map<K, List<V>> holds the V objects inside the values
+            return addTypeArguments(pt, result, 0) ? result : null;
+        }
+        ParameterizedType p = v.parameterizedType().copyWithoutArrays();
+        if (p.bestTypeInfo() == null || p.isTypeParameter() || p.typeInfo() != null && isContainerType(p.typeInfo())) {
+            return null;
+        }
+        return List.of(p);
+    }
+
+    // false: no evidence (a type parameter, a wildcard, an unknown type, or deeper than #147's argumentMayBe looks)
+    private static boolean addTypeArguments(ParameterizedType pt, List<ParameterizedType> result, int depth) {
+        if (depth > 3) return false;
+        for (ParameterizedType arg : pt.parameters()) {
+            if (arg.isTypeParameter() || arg.wildcard() != null || arg.bestTypeInfo() == null) return false;
+            result.add(arg.copyWithoutArrays());
+            if (!addTypeArguments(arg, result, depth + 1)) return false;
+        }
+        return true;
     }
 
     /*
