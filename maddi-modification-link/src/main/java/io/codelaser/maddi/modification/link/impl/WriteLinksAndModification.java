@@ -1289,6 +1289,20 @@ class WriteLinksAndModification {
         });
     }
 
+    /*
+     #138 (merge of 376c6ddb with b7cbf009): 'items.§$s ≥ copy.§$s', copy's elements inside the object graph of
+     items' elements (NOMAPFIELD: 'items.stream().map(a -> a.statement())', then copied). The ≥ rule (#112) was made
+     for a real object on the right ('≥ e'); for an element set only a modified ELEMENT of it reaches the owner, as
+     for '∩' above. copy.clear() modifies copy, not the objects it held (TestMappedElements copyCleared, flags,
+     flagsDirect). Gate NOFACEELEMENTONLY.
+     */
+    private static final boolean NO_FACE_ELEMENT_ONLY = Gate.isSet("NOFACEELEMENTONLY");
+
+    private boolean elementOfFaceModified(Variable to) {
+        if (NO_FACE_ELEMENT_ONLY || !Util.virtual(to) || Util.isVirtualModification(to)) return true;
+        return modifiedElementOf.containsKey(to);
+    }
+
     private boolean notLinkedToModified(Links.Builder builder,
                                         Map<Variable, Set<MethodInfo>> modifiedVariablesAndTheirCause) {
         return notLinkedToModified(builder, modifiedVariablesAndTheirCause, false);
@@ -1375,6 +1389,7 @@ class WriteLinksAndModification {
                     || ln == OBJECT_GRAPH_CONTAINS && !structural && !NO_OBJECT_GRAPH_MOD
                        && !sharesModificationGroup(toReal, builder.primary())
                        && !modificationStaysInGroup(toReal, causesOfModification)
+                       && elementOfFaceModified(link.to())
                     // #62: 'this.map.§$$s[-2] ∩ tags', tags, a whole object, among the elements of the container: a
                     // for-each over map.values() ends up there, the view's element field (§$s, from V) and the
                     // iterated one (§$ss, from Set<String>) differing. Modifying tags modifies the map deeply.

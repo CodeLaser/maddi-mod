@@ -74,6 +74,15 @@ public class TestMappedElements extends CommonTest {
                     List<Boolean> copy = new ArrayList<>(bs);
                     copy.clear();
                 }
+                static void copyCleared(List<Item> items) {
+                    List<St> sts = items.stream().map(a -> a.statement()).toList();
+                    List<St> copy = new ArrayList<>(sts);
+                    copy.clear();
+                }
+                static void flagsDirect(List<Item> items) {
+                    List<Boolean> bs = new ArrayList<>(items.stream().map(a -> a.delete()).toList());
+                    bs.clear();
+                }
             }
             """;
 
@@ -95,12 +104,15 @@ public class TestMappedElements extends CommonTest {
             if (mi.parameters().getFirst().isUnmodified()) wrong.append(name).append(' ');
         }
         assertFalse(!wrong.isEmpty(), "items reported unmodified in: " + wrong);
-        for (String name : new String[]{"fresh", "flags"}) {
+        StringBuilder wronglyModified = new StringBuilder();
+        for (String name : new String[]{"fresh", "flags", "copyCleared", "flagsDirect"}) {
             MethodInfo mi = X.findUniqueMethod(name, 1);
             System.out.println(name + ": unmodified=" + mi.parameters().getFirst().isUnmodified() + " "
                                + mi.analysis().getOrNull(METHOD_LINKS, MethodLinkedVariablesImpl.class));
-            assertTrue(mi.parameters().getFirst().isUnmodified(), name + ": the objects modified are not items'");
+            if (!mi.parameters().getFirst().isUnmodified()) wronglyModified.append(name).append(' ');
         }
+        assertTrue(wronglyModified.isEmpty(), "the objects modified are not items', yet items modified in: "
+                                              + wronglyModified);
     }
 
     @Language("java")
