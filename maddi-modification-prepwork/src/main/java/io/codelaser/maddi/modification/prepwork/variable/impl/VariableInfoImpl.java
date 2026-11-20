@@ -38,7 +38,7 @@ import io.codelaser.maddi.modification.prepwork.variable.Links;
 import io.codelaser.maddi.modification.prepwork.variable.ReturnVariable;
 import io.codelaser.maddi.modification.prepwork.variable.VariableInfo;
 
-public class VariableInfoImpl implements VariableInfo, AnalysisAccessRecorder.Owner {
+public final class VariableInfoImpl implements VariableInfo, PreviousOrInitial, AnalysisAccessRecorder.Owner {
     public static final Property UNMODIFIED_VARIABLE = new PropertyImpl("unmodifiedVariable");
     /**
      * The structural twin of {@link #UNMODIFIED_VARIABLE}: the variable's object is not modified itself, its hidden

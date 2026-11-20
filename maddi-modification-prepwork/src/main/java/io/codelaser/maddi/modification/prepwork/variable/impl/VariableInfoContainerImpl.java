@@ -27,41 +27,63 @@ import io.codelaser.maddi.modification.prepwork.variable.Stage;
 import io.codelaser.maddi.modification.prepwork.variable.VariableInfo;
 import io.codelaser.maddi.modification.prepwork.variable.VariableInfoContainer;
 import io.codelaser.maddi.modification.prepwork.variable.VariableNature;
-import io.codelaser.maddi.support.Either;
 import io.codelaser.maddi.support.SetOnce;
 
-public class VariableInfoContainerImpl implements VariableInfoContainer {
+public final class VariableInfoContainerImpl implements VariableInfoContainer, PreviousOrInitial {
     private final Variable variable;
     private final VariableNature variableNature;
-    private final Either<VariableInfoContainer, VariableInfoImpl> previousOrInitial;
+    // the previous statement's container, or this container's own initial info; final, and no wrapper: an Either
+    // here was 16 bytes per container, 0.66 GB of closed-core's prep
+    private final PreviousOrInitial previousOrInitial;
     private final VariableInfoImpl evaluation;
     private final SetOnce<VariableInfoImpl> merge;
 
-    public VariableInfoContainerImpl(Variable variable,
-                                     VariableNature variableNature,
-                                     Either<VariableInfoContainer, VariableInfoImpl> previousOrInitial,
-                                     VariableInfoImpl evaluation,
-                                     boolean haveMerge) {
+    /** A container that continues the previous statement's container of the same variable. */
+    public static VariableInfoContainerImpl withPrevious(Variable variable,
+                                                         VariableNature variableNature,
+                                                         VariableInfoContainer previous,
+                                                         VariableInfoImpl evaluation,
+                                                         boolean haveMerge) {
+        return new VariableInfoContainerImpl(variable, variableNature, (VariableInfoContainerImpl) previous,
+                evaluation, haveMerge);
+    }
+
+    /** A container that starts from an initial info of its own. */
+    public static VariableInfoContainerImpl withInitial(Variable variable,
+                                                        VariableNature variableNature,
+                                                        VariableInfoImpl initial,
+                                                        VariableInfoImpl evaluation,
+                                                        boolean haveMerge) {
+        return new VariableInfoContainerImpl(variable, variableNature, initial, evaluation, haveMerge);
+    }
+
+    private VariableInfoContainerImpl(Variable variable,
+                                      VariableNature variableNature,
+                                      PreviousOrInitial previousOrInitial,
+                                      VariableInfoImpl evaluation,
+                                      boolean haveMerge) {
         this.variable = variable;
         this.variableNature = variableNature;
         this.previousOrInitial = previousOrInitial;
         this.evaluation = evaluation;
         this.merge = haveMerge ? new SetOnce<>() : null;
         assert evaluation == null || evaluation.variable() == variable;
-        assert previousOrInitial.isLeft() && previousOrInitial.getLeft().variable() == variable
-               || previousOrInitial.isRight() && previousOrInitial.getRight().variable() == variable;
+        assert switch (previousOrInitial) {
+            case VariableInfoContainerImpl previous -> previous.variable() == variable;
+            case VariableInfoImpl initial -> initial.variable() == variable;
+        };
     }
 
     /** {@link VariableInfoImpl#clearDerived} on the infos this container owns: the initial, the evaluation, the merge. */
     public void clearDerived(Predicate<Property> derived) {
-        if (previousOrInitial.isRight()) previousOrInitial.getRight().clearDerived(derived);
+        if (previousOrInitial instanceof VariableInfoImpl initial) initial.clearDerived(derived);
         if (evaluation != null) evaluation.clearDerived(derived);
         if (merge != null && merge.isSet()) merge.get().clearDerived(derived);
     }
 
     /** The infos this container owns, as {@link #clearDerived} visits them: the initial, the evaluation, the merge. */
     public void forEachOwnInfo(Consumer<VariableInfoImpl> consumer) {
-        if (previousOrInitial.isRight()) consumer.accept(previousOrInitial.getRight());
+        if (previousOrInitial instanceof VariableInfoImpl initial) consumer.accept(initial);
         if (evaluation != null) consumer.accept(evaluation);
         if (merge != null && merge.isSet()) consumer.accept(merge.get());
     }
@@ -92,7 +114,7 @@ public class VariableInfoContainerImpl implements VariableInfoContainer {
 
     @Override
     public boolean isPrevious() {
-        return previousOrInitial.isLeft();
+        return previousOrInitial instanceof VariableInfoContainerImpl;
     }
 
     @Override
@@ -122,18 +144,20 @@ public class VariableInfoContainerImpl implements VariableInfoContainer {
 
     @Override
     public VariableInfo getPreviousOrInitial() {
-        return previousOrInitial.isLeft() ? previousOrInitial.getLeft().best() : previousOrInitial.getRight();
+        return switch (previousOrInitial) {
+            case VariableInfoContainerImpl previous -> previous.best();
+            case VariableInfoImpl initial -> initial;
+        };
     }
 
     @Override
     public boolean isInitial() {
-        return previousOrInitial.isRight();
+        return previousOrInitial instanceof VariableInfoImpl;
     }
 
     @Override
     public boolean isRecursivelyInitial() {
-        if (previousOrInitial.isRight()) return true;
-        VariableInfoContainer previous = previousOrInitial.getLeft();
+        if (!(previousOrInitial instanceof VariableInfoContainerImpl previous)) return true;
         if (!previous.hasEvaluation() && (stageForPrevious() == Stage.EVALUATION || !previous.hasMerge())) {
             return previous.isRecursivelyInitial();
         }
@@ -142,13 +166,14 @@ public class VariableInfoContainerImpl implements VariableInfoContainer {
 
     @Override
     public VariableInfo getRecursiveInitial() {
-        if (previousOrInitial.isRight()) return previousOrInitial.getRight();
-        VariableInfoContainer previous = previousOrInitial.getLeft();
-        return previous.getRecursiveInitial();
+        return switch (previousOrInitial) {
+            case VariableInfoContainerImpl previous -> previous.getRecursiveInitial();
+            case VariableInfoImpl initial -> initial;
+        };
     }
 
     private Stage stageForPrevious() {
-        VariableInfoContainer prev = previousOrInitial.getLeft();
+        VariableInfoContainer prev = (VariableInfoContainerImpl) previousOrInitial;
         return prev.hasMerge() ? Stage.MERGE : Stage.EVALUATION;
     }
 
@@ -162,8 +187,10 @@ public class VariableInfoContainerImpl implements VariableInfoContainer {
     public String indexOfDefinition() {
         if (evaluation != null) return evaluation.assignments().indexOfDefinition();
         if (merge != null && merge.isSet()) return merge.get().assignments().indexOfDefinition();
-        if (previousOrInitial.isRight()) return previousOrInitial.getRight().assignments().indexOfDefinition();
-        return previousOrInitial.getLeft().indexOfDefinition();
+        return switch (previousOrInitial) {
+            case VariableInfoContainerImpl previous -> previous.indexOfDefinition();
+            case VariableInfoImpl initial -> initial.assignments().indexOfDefinition();
+        };
     }
 
     /** See {@link VariableDataImpl#rewire}: once per rewire, the variable, previous and stages rewired with it. */
@@ -172,9 +199,10 @@ public class VariableInfoContainerImpl implements VariableInfoContainer {
             // ⚠ one Variable for all of them: the constructor asserts identity with the evaluation's and the
             // previous container's variable, which holds because Variable.rewire is itself once per rewire
             Variable rewiredVariable = variable.rewire(infoMap);
-            Either<VariableInfoContainer, VariableInfoImpl> rewiredPrevious = previousOrInitial.isLeft()
-                    ? Either.left(((VariableInfoContainerImpl) previousOrInitial.getLeft()).rewire(infoMap))
-                    : Either.right(previousOrInitial.getRight().rewire(infoMap));
+            PreviousOrInitial rewiredPrevious = switch (previousOrInitial) {
+                case VariableInfoContainerImpl previous -> (VariableInfoContainerImpl) previous.rewire(infoMap);
+                case VariableInfoImpl initial -> initial.rewire(infoMap);
+            };
             VariableInfoContainerImpl copy = new VariableInfoContainerImpl(rewiredVariable, variableNature,
                     rewiredPrevious, evaluation == null ? null : evaluation.rewire(infoMap), merge != null);
             if (merge != null && merge.isSet()) copy.setMerge(merge.get().rewire(infoMap));
@@ -192,8 +220,8 @@ public class VariableInfoContainerImpl implements VariableInfoContainer {
 
     @Override
     public VariableInfoContainer flattened() {
-        if (previousOrInitial.isRight()) return this; // already back-reference-free
-        // Collapse the Either.left(previousVic) chain link to a value snapshot of what
+        if (previousOrInitial instanceof VariableInfoImpl) return this; // already back-reference-free
+        // Collapse the previous-container chain link to a value snapshot of what
         // getPreviousOrInitial() currently resolves to. best()/best(stage)/has(stage)/
         // bestCurrentlyComputed() are unchanged because this container's own evaluation and merge are
         // carried over verbatim; only the "came from a previous statement" structure is dropped. The
@@ -202,7 +230,7 @@ public class VariableInfoContainerImpl implements VariableInfoContainer {
         // VARIABLE_DATA is dropped too.
         VariableInfoImpl previousSnapshot = (VariableInfoImpl) getPreviousOrInitial();
         VariableInfoContainerImpl copy = new VariableInfoContainerImpl(variable, variableNature,
-                Either.right(previousSnapshot), evaluation, merge != null);
+                previousSnapshot, evaluation, merge != null);
         if (merge != null && merge.isSet()) copy.setMerge(merge.get());
         return copy;
     }

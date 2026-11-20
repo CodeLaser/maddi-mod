@@ -47,7 +47,6 @@ import io.codelaser.maddi.modification.common.getset.ApplyGetSetTranslation;
 import io.codelaser.maddi.modification.prepwork.escape.ComputeAlwaysEscapes;
 import io.codelaser.maddi.modification.prepwork.variable.*;
 import io.codelaser.maddi.modification.prepwork.variable.impl.*;
-import io.codelaser.maddi.support.Either;
 
 /*
 do all the analysis of this phase
@@ -621,8 +620,8 @@ public class MethodAnalyzer {
                     VariableInfoImpl eval = new VariableInfoImpl(variable, readWriteData.assignmentIds(variable, vi),
                             readWriteData.isRead(variable, vi), closureVic != null);
                     boolean specificHasMerge = hasMerge && !readWriteData.seenFirstTime.containsKey(variable);
-                    VariableInfoContainer newVic = new VariableInfoContainerImpl(variable, vic.variableNature(),
-                            Either.left(vic), eval, specificHasMerge);
+                    VariableInfoContainer newVic = VariableInfoContainerImpl.withPrevious(variable,
+                            vic.variableNature(), vic, eval, specificHasMerge);
                     vdBuilder.put(variable, newVic);
                 } // e.g. a variable from outer shadowed in a lambda
             }
@@ -649,8 +648,8 @@ public class MethodAnalyzer {
                     VariableInfoImpl initial = new VariableInfoImpl(v, firstAssigned, Reads.NOT_YET_READ, false);
                     Reads reads = new Reads(i);
                     VariableInfoImpl eval = new VariableInfoImpl(v, readWriteData.assignmentIds(v, initial), reads, false);
-                    VariableInfoContainer vic = new VariableInfoContainerImpl(v, NormalVariableNature.INSTANCE,
-                            Either.right(initial), eval, false);
+                    VariableInfoContainer vic = VariableInfoContainerImpl.withInitial(v, NormalVariableNature.INSTANCE,
+                            initial, eval, false);
                     vdBuilder.put(v, vic);
                 });
     }
@@ -673,8 +672,7 @@ public class MethodAnalyzer {
         iv.setBreakVariable(bv);
         Assignments notYetAssigned = new Assignments(index + EVAL);
         VariableInfoImpl vii = new VariableInfoImpl(bv, notYetAssigned, Reads.NOT_YET_READ, false);
-        vdOfParent.put(bv, new VariableInfoContainerImpl(bv, SYNTHETIC, Either.right(vii), null,
-                false));
+        vdOfParent.put(bv, VariableInfoContainerImpl.withInitial(bv, SYNTHETIC, vii, null, false));
         VariableData previous = vdOfParent;
         boolean first = true;
         String indexOfFirstStatement = null;
@@ -805,7 +803,7 @@ public class MethodAnalyzer {
                     Assignments notYetAssigned = new Assignments(indexOfDefinition);
                     VariableInfoImpl initial = new VariableInfoImpl(v, notYetAssigned, Reads.NOT_YET_READ,
                             closureVi != null);
-                    vici = new VariableInfoContainerImpl(v, NormalVariableNature.INSTANCE, Either.right(initial), initial,
+                    vici = VariableInfoContainerImpl.withInitial(v, NormalVariableNature.INSTANCE, initial, initial,
                             true);
                     vdStatement.put(v, vici);
                 } else {
@@ -878,8 +876,7 @@ public class MethodAnalyzer {
         Reads reads = readWriteData.isRead(v, initial);
         VariableInfoImpl eval = new VariableInfoImpl(v, readWriteData.assignmentIds(v, initial), reads,
                 viInClosure != null);
-        return new VariableInfoContainerImpl(v, NormalVariableNature.INSTANCE,
-                Either.right(initial), eval, hasMerge);
+        return VariableInfoContainerImpl.withInitial(v, NormalVariableNature.INSTANCE, initial, eval, hasMerge);
     }
 
     private String indexOfDefinition(Variable v, String index, VariableData previousVd, InternalVariables iv) {
