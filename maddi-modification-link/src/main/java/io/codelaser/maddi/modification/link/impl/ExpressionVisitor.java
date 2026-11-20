@@ -249,6 +249,12 @@ public record ExpressionVisitor(Runtime runtime,
     }
 
 
+    /*
+     The binding's links -- `a ≡ b`, a record pattern's `a ≻ x` -- are links of the variables, side links of the
+     expression, whose VALUE is a boolean and has none. As the value they became the links of whatever held the
+     boolean: `return o instanceof U x && t == x.t` returned `←0:o`, so a caller's `a.equals(b)` was linked to `b`
+     (CodeLaser/maddi-mod#155, fernflower's VarExprent.equals reached through Kotlin's `!=`).
+     */
     private Result instanceOf(VariableData variableData, Stage stage, InstanceOf instanceOf) {
         if (instanceOf.patternVariable() != null) {
             Result r = visit(instanceOf.expression(), variableData, stage);
@@ -266,7 +272,7 @@ public record ExpressionVisitor(Runtime runtime,
                         // 'o instanceof Set set' where o is itself a bound deconstruction component: the cast
                         // alias is the same object, hence a component of o's containers too
                         sourceMethodComputer.followGraph.graph().markPatternBindingAlias(ve.variable(), lv);
-                        return r.moveLinksToExtra().with(linksBuilder.build());
+                        return r.moveLinksToExtra().with(linksBuilder.build()).moveLinksToExtra();
                     }
                 } else if (instanceOf.patternVariable().recordType() != null) {
                     // a instanceof Point(Coord x, Coord y) -> x is field of a, y is field of a
@@ -276,7 +282,7 @@ public record ExpressionVisitor(Runtime runtime,
                     for (Link link : linksBuilder.linkSet()) {
                         sourceMethodComputer.followGraph.graph().markPatternBinding(link.from(), link.to());
                     }
-                    return r.moveLinksToExtra().with(linksBuilder.build());
+                    return r.moveLinksToExtra().with(linksBuilder.build()).moveLinksToExtra();
                 }
             }
             // no need to set expression, it will be lost
