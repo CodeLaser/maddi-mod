@@ -61,6 +61,10 @@ public final class VariableDataCensus {
     private long distinctReads;
     private long assignmentIndices;
     private long distinctAssignments;
+    private long linksRefs;          // infos holding links
+    private long linkRefs;           // links over those infos, as if none were shared
+    private long distinctLinks;      // distinct Links instances
+    private long distinctLinkCount;  // links held by the distinct instances
 
     private VariableDataCensus() {
     }
@@ -77,10 +81,12 @@ public final class VariableDataCensus {
         LOGGER.info("VDCENSUS {}: statement VDs {}, containers {} (previous {}), untouched {}"
                     + " (same links {}, same links+properties {}), evaluations with links {}; merges {} (same"
                     + " assignments {}, same reads {}, same all {}); Reads {} holding {} indices, Assignments {}"
-                    + " holding {} indices", when, c.statementData, c.entries, c.previous,
+                    + " holding {} indices; Links on {} infos holding {} links, {} distinct instances holding {}",
+                when, c.statementData, c.entries, c.previous,
                 c.untouched, c.untouchedSameLinks, c.untouchedSameAll, c.linksSet, c.merges,
                 c.mergeSameAssignments, c.mergeSameReads, c.mergeSameAll, c.distinctReads, c.readsIndices,
-                c.distinctAssignments, c.assignmentIndices);
+                c.distinctAssignments, c.assignmentIndices, c.linksRefs, c.linkRefs, c.distinctLinks,
+                c.distinctLinkCount);
     }
 
     private void method(MethodInfo mi, Set<Object> seen, Set<Object> values) {
@@ -111,6 +117,18 @@ public final class VariableDataCensus {
             if (values.add(vi.assignments())) {
                 distinctAssignments++;
                 assignmentIndices += vi.assignments().size();
+            }
+        }
+        Set<Object> infos = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (VariableInfo vi : List.of(vic.best(Stage.MERGE), vic.best(Stage.EVALUATION),
+                vic.getPreviousOrInitial())) {
+            Links l = vi.linkedVariables();
+            if (l == null || vi == vic.getPreviousOrInitial() && vic.isPrevious() || !infos.add(vi)) continue;
+            linksRefs++;
+            linkRefs += l.size();
+            if (values.add(l)) {
+                distinctLinks++;
+                distinctLinkCount += l.size();
             }
         }
         if (eval != null && eval.linkedVariables() != null) linksSet++;

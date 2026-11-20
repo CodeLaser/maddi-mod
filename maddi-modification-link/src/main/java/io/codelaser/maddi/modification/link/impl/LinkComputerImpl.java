@@ -1987,7 +1987,8 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                     // in the condition of a method's last statement stayed undecided until cycle breaking wrote its
                     // links EMPTY (guava's MoreCollectors.ToOptionalState.element: @Independent, links lost)
                     if (!collected.isEmpty() || eval != null) {
-                        merge.setLinkedVariables(collected);
+                        // a merge that adds nothing to its evaluation shares the evaluation's links
+                        merge.setLinkedVariables(LinksImpl.shareIfIdentical(collected, eval));
                     }
                     if (TolerantWrite.setAllowControlledOverwrite(merge.analysis(), UNMODIFIED_VARIABLE,
                             ValueImpl.BoolImpl.from(unmodified.get()))) {
@@ -2025,7 +2026,10 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                 }
                 if (vic.hasEvaluation()) {
                     VariableInfoImpl eval = (VariableInfoImpl) vic.best(Stage.EVALUATION);
-                    eval.setLinkedVariables(links);
+                    // most variables keep the previous statement's links: hold that instance, not a copy. peek: the
+                    // content written does not depend on this read, so the link cache must not record it (#76)
+                    Links previousLinks = vi instanceof VariableInfoImpl vii ? (Links) vii.peek(null) : null;
+                    eval.setLinkedVariables(LinksImpl.shareIfIdentical(links, previousLinks));
                 }
             });
         }

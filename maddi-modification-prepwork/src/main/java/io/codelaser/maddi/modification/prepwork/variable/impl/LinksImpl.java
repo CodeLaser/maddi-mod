@@ -170,6 +170,32 @@ public class LinksImpl implements Links {
         return contentKey(this).equals(contentKey(o));
     }
 
+    /**
+     * {@code existing} when it holds exactly the links of {@code candidate} (same primary, same links in the same
+     * order, every component equal), otherwise {@code candidate}. Links are immutable, so a statement whose links
+     * repeat those of the previous statement (or a merge repeating its evaluation) can hold the same instance: on a
+     * large corpus the per-statement copies were most of the heap (300M LinkImpl, 7.2 GB, at 28 GB live).
+     */
+    private static final boolean NO_LINK_SHARE = System.getenv("NOLINKSHARE") != null;
+
+    public static Links shareIfIdentical(Links candidate, Links existing) {
+        if (NO_LINK_SHARE || existing == null || candidate == existing
+            || !(candidate instanceof LinksImpl c) || !(existing instanceof LinksImpl e)
+            || !Objects.equals(c.primary, e.primary) || c.linkSet.size() != e.linkSet.size()) {
+            return candidate;
+        }
+        for (int i = 0; i < c.linkSet.size(); i++) {
+            Link a = c.linkSet.get(i);
+            Link b = e.linkSet.get(i);
+            if (a != b && !(Objects.equals(a.from(), b.from()) && Objects.equals(a.linkNature(), b.linkNature())
+                            && Objects.equals(a.to(), b.to()) && a.mediated() == b.mediated()
+                            && a.derived() == b.derived())) {
+                return candidate;
+            }
+        }
+        return existing;
+    }
+
     private static java.util.Set<java.util.List<Object>> contentKey(LinksImpl links) {
         java.util.Set<java.util.List<Object>> set = new java.util.HashSet<>();
         for (Link link : links.linkSet) {
