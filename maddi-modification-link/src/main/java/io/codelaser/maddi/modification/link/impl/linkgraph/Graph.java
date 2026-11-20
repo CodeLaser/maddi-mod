@@ -1208,6 +1208,13 @@ public class Graph {
      refused by the writer (hibernate-core: 19 fields, 'ComponentType.propertyNullability[$__sv_i]'). Shared with
      WriteLinksAndModification.iterateOverShared.
      */
+    // gate NOEXPANSIONBOUND: the unbounded expansion of before
+    private static final long MAX_DEPENDENT_EXPANSION = io.codelaser.maddi.modification.link.impl.Gate
+            .isSet("NOEXPANSIONBOUND") ? Long.MAX_VALUE : 1024;
+    private static final java.util.concurrent.atomic.AtomicInteger EXPANSION_WARNINGS =
+            new java.util.concurrent.atomic.AtomicInteger();
+    private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger(Graph.class);
+
     public static Stream<Variable> expandDependent(Runtime runtime, DependentVariable dv,
                                                    Function<Variable, Stream<Variable>> expandBase) {
         // the index expanded as the base is: a rep as the whole index ('[$__sv_i]'), or deeper in it, at the root of a
@@ -1221,7 +1228,20 @@ public class Graph {
             }
         }
         List<Variable> finalIndices = indices;
-        return expandBase.apply(dv.arrayVariable()).flatMap(arr -> {
+        List<Variable> arrays = expandBase.apply(dv.arrayVariable()).toList();
+        long size = (long) arrays.size() * (finalIndices == null ? 1 : finalIndices.size());
+        if (size > MAX_DEPENDENT_EXPANSION) {
+            // every member of the base times every member of the index, again at each level of a nested access:
+            // closed-core grew past 28 GB in one method. Keep the access unexpanded, as before the index case.
+            if (EXPANSION_WARNINGS.getAndIncrement() < 20) {
+                String s = dv.toString();
+                LOGGER.warn("Dependent variable expansion bounded: {} array member(s) x {} index member(s) for {}",
+                        arrays.size(), finalIndices == null ? 1 : finalIndices.size(),
+                        s.length() > 200 ? s.substring(0, 200) + "..." : s);
+            }
+            return Stream.of(dv);
+        }
+        return arrays.stream().flatMap(arr -> {
             if (finalIndices == null) {
                 return Stream.of(arr.equals(dv.arrayVariable()) ? dv
                         : runtime.newDependentVariable(runtime.newVariableExpression(arr), dv.indexExpression(),
