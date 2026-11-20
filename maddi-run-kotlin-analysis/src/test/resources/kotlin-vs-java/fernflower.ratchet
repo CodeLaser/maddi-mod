@@ -34,34 +34,29 @@
 # NestedClassProcessor.iterateExprents#1. StackVarsProcessor.replaceSingleVar#3, which Java gained with #147, stays
 # in agreement. MethodProcessorRunnable.root stays: Java links root to the StructMethod handed to the same
 # MethodProcessorRunnable; neither MethodWrapper.root nor .methodStruct is modified on either side.
+#
+# 2026-11-20, kotlin-weaker (Kotlin modifying, Java not) F 2 -> 1, M 15 -> 1; T differ 1 -> 0. maddi d9a9f7297 (an
+# inherited @JvmField read is the field: DoStatement's `first` was `this.getFirst()`, which checkCanceled()s; all
+# getSequentialObjects, sortEdges; 16 placeholders fewer), fb992a6d1 (a bare call in a companion is on its `this`)
+# with maddi-mod a2b4e152 (a call on a stateless static singleton modifies no static state; IfHelper, MergeHelper,
+# whose companions call an abandoned reorderIf/matchWhile), 538613844 (no setter for a private `var`: VarVersion and
+# VarFieldPair.hashCode, StrongConnectivityHelper; kotlin-only-accessor M 214 -> 107, P 121 -> 14).
+# MethodProcessorRunnable.root now agrees. New: DomHelper.findSimpleStatements, Kotlin's analysis abandoned at the
+# work ceiling since d9a9f7297 (graph 281 against Java's 82, #153); BasicBlockStatement.toJava, Java's chain through
+# listToJava (#152), no longer hidden by the getFirst() modification. appendTypeParameters#3 is Java imprecision:
+# both sides have TypeAnnotation.writeTo modifying, and Kotlin's lowered loop over extract(..) keeps the link.
 
 java primaryTypes=227 placeholders=0 prepErrors=0
-kotlin primaryTypes=227 placeholders=41 prepErrors=0
-T: agree=226 kotlin-weaker=0 kotlin-stronger=0 differ=1 kotlin-none=0 java-none=0 java-only=0 kotlin-only-accessor=0 kotlin-only-companion=0 kotlin-only-static-init=0 kotlin-only-data-class=0 kotlin-only-enum-name=0 kotlin-only-nested-type=87 kotlin-only-other=0 java-only-initializer=0
-F: agree=1523 kotlin-weaker=2 kotlin-stronger=1 differ=0 kotlin-none=0 java-none=0 java-only=0 kotlin-only-accessor=0 kotlin-only-companion=136 kotlin-only-static-init=0 kotlin-only-data-class=0 kotlin-only-enum-name=0 kotlin-only-nested-type=0 kotlin-only-other=0 java-only-initializer=0
-M: agree=2276 kotlin-weaker=15 kotlin-stronger=2 differ=0 kotlin-none=0 java-none=0 java-only=0 kotlin-only-accessor=214 kotlin-only-companion=0 kotlin-only-static-init=62 kotlin-only-data-class=62 kotlin-only-enum-name=12 kotlin-only-nested-type=0 kotlin-only-other=20 java-only-initializer=2
-P: agree=2336 kotlin-weaker=8 kotlin-stronger=4 differ=0 kotlin-none=0 java-none=0 java-only=0 kotlin-only-accessor=121 kotlin-only-companion=0 kotlin-only-static-init=0 kotlin-only-data-class=85 kotlin-only-enum-name=0 kotlin-only-nested-type=0 kotlin-only-other=4 java-only-initializer=0
-T differ  @FinalFields -> @Mutable  org.jetbrains.java.decompiler.modules.decompiler.StrongConnectivityHelper
-F kotlin-weaker  true -> false  org.jetbrains.java.decompiler.main.rels.NestedClassProcessor.VarFieldPair.varPair
+kotlin primaryTypes=227 placeholders=25 prepErrors=0
+T: agree=227 kotlin-weaker=0 kotlin-stronger=0 differ=0 kotlin-none=0 java-none=0 java-only=0 kotlin-only-accessor=0 kotlin-only-companion=0 kotlin-only-static-init=0 kotlin-only-data-class=0 kotlin-only-enum-name=0 kotlin-only-nested-type=87 kotlin-only-other=0 java-only-initializer=0
+F: agree=1525 kotlin-weaker=1 kotlin-stronger=0 differ=0 kotlin-none=0 java-none=0 java-only=0 kotlin-only-accessor=0 kotlin-only-companion=136 kotlin-only-static-init=0 kotlin-only-data-class=0 kotlin-only-enum-name=0 kotlin-only-nested-type=0 kotlin-only-other=0 java-only-initializer=0
+M: agree=2289 kotlin-weaker=1 kotlin-stronger=3 differ=0 kotlin-none=0 java-none=0 java-only=0 kotlin-only-accessor=107 kotlin-only-companion=0 kotlin-only-static-init=62 kotlin-only-data-class=62 kotlin-only-enum-name=12 kotlin-only-nested-type=0 kotlin-only-other=20 java-only-initializer=2
+P: agree=2336 kotlin-weaker=8 kotlin-stronger=4 differ=0 kotlin-none=0 java-none=0 java-only=0 kotlin-only-accessor=14 kotlin-only-companion=0 kotlin-only-static-init=0 kotlin-only-data-class=85 kotlin-only-enum-name=0 kotlin-only-nested-type=0 kotlin-only-other=4 java-only-initializer=0
 F kotlin-weaker  true -> false  org.jetbrains.java.decompiler.modules.decompiler.SwitchPatternHelper.SwitchOnReferenceCandidate.myPreviousSelector
-F kotlin-stronger  false -> true  org.jetbrains.java.decompiler.main.rels.MethodProcessorRunnable.root
-M kotlin-weaker  true -> false  org.jetbrains.java.decompiler.main.rels.NestedClassProcessor.VarFieldPair.hashCode()
-M kotlin-weaker  true -> false  org.jetbrains.java.decompiler.modules.decompiler.IfHelper.mergeAllIfs(org.jetbrains.java.decompiler.modules.decompiler.stats.RootStatement)
-M kotlin-weaker  true -> false  org.jetbrains.java.decompiler.modules.decompiler.IfHelper.mergeAllIfsRec(org.jetbrains.java.decompiler.modules.decompiler.stats.Statement,java.util.Set)
-M kotlin-weaker  true -> false  org.jetbrains.java.decompiler.modules.decompiler.IfHelper.mergeIfs(org.jetbrains.java.decompiler.modules.decompiler.stats.Statement,java.util.Set)
-M kotlin-weaker  true -> false  org.jetbrains.java.decompiler.modules.decompiler.MergeHelper.enhanceLoop(org.jetbrains.java.decompiler.modules.decompiler.stats.DoStatement)
-M kotlin-weaker  true -> false  org.jetbrains.java.decompiler.modules.decompiler.MergeHelper.enhanceLoops(org.jetbrains.java.decompiler.modules.decompiler.stats.Statement)
-M kotlin-weaker  true -> false  org.jetbrains.java.decompiler.modules.decompiler.MergeHelper.enhanceLoopsRec(org.jetbrains.java.decompiler.modules.decompiler.stats.Statement)
-M kotlin-weaker  true -> false  org.jetbrains.java.decompiler.modules.decompiler.stats.CatchStatement.getSequentialObjects()
-M kotlin-weaker  true -> false  org.jetbrains.java.decompiler.modules.decompiler.stats.DoStatement.getSequentialObjects()
-M kotlin-weaker  true -> false  org.jetbrains.java.decompiler.modules.decompiler.stats.IfStatement.getSequentialObjects()
-M kotlin-weaker  true -> false  org.jetbrains.java.decompiler.modules.decompiler.stats.Statement.getSequentialObjects()
-M kotlin-weaker  true -> false  org.jetbrains.java.decompiler.modules.decompiler.stats.SwitchStatement.getSequentialObjects()
-M kotlin-weaker  true -> false  org.jetbrains.java.decompiler.modules.decompiler.stats.SwitchStatement.sortEdges(java.util.List,java.util.List)
-M kotlin-weaker  true -> false  org.jetbrains.java.decompiler.modules.decompiler.stats.SynchronizedStatement.getSequentialObjects()
-M kotlin-weaker  true -> false  org.jetbrains.java.decompiler.modules.decompiler.vars.VarVersion.hashCode()
+M kotlin-weaker  true -> false  org.jetbrains.java.decompiler.modules.decompiler.DomHelper.findSimpleStatements(org.jetbrains.java.decompiler.modules.decompiler.stats.Statement,java.util.HashMap)
 M kotlin-stronger  false -> true  org.jetbrains.java.decompiler.modules.decompiler.exps.ConstExprent.toJava(int,org.jetbrains.java.decompiler.main.collectors.BytecodeMappingTracer)
 M kotlin-stronger  false -> true  org.jetbrains.java.decompiler.modules.decompiler.exps.ConstExprent.toString()
+M kotlin-stronger  false -> true  org.jetbrains.java.decompiler.modules.decompiler.stats.BasicBlockStatement.toJava(int,org.jetbrains.java.decompiler.main.collectors.BytecodeMappingTracer)
 M kotlin-only-other  true  org.jetbrains.java.decompiler.main.ClassWriter.MType.getEntries()
 M kotlin-only-other  true  org.jetbrains.java.decompiler.main.extern.IFernflowerLogger.Severity.getEntries()
 M kotlin-only-other  true  org.jetbrains.java.decompiler.main.extern.IMemberIdentifierRenamer.Type.getEntries()
