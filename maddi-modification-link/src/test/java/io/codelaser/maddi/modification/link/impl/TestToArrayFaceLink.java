@@ -63,9 +63,11 @@ public class TestToArrayFaceLink extends CommonTest {
                     .append('\n');
         }
         // the argument's face survives into the summary even though nothing else links the result to 'a' (its
-        // content comes from the receiver); the library's face is named after its own type parameter, §mT
+        // content comes from the receiver); the library's face is named after its own type parameter, §mT.
+        // 'this' is not modified: toArray only reads delegate, as genericParam's 0:l (maddi-mod#138, 0a86c17b: the
+        // array written into no longer passes its modification to the owner of its elements)
         assertEquals("""
-                generic: [-] --> generic.§m←this*.delegate.§m,generic.§mT≡0:a*.§mT,generic.§ts⊆this*.delegate.§es
+                generic: [-] --> generic.§m←this.delegate.§m,generic.§mT≡0:a*.§mT,generic.§ts⊆this.delegate.§es
                 genericParam: [-, -] --> genericParam.§m←0:l.§m,genericParam.§mT≡1:a*.§mT,genericParam.§ts⊆0:l.§$s
                 concrete: [-, -] --> concrete.§$s⊆0:l.§$s,concrete.§m←0:l.§m,concrete.§mT≡1:a*.§mT
                 sync: [-] --> sync.§$s⊆0:l.§$s,sync.§m≡0:l.§m
