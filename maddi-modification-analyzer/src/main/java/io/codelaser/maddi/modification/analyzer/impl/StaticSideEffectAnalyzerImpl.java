@@ -42,6 +42,7 @@ import io.codelaser.maddi.cst.api.info.MethodInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.statement.ExplicitConstructorInvocation;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
+import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 import io.codelaser.maddi.modification.common.util.Culprits;
@@ -256,6 +257,22 @@ public class StaticSideEffectAnalyzerImpl {
     }
 
     /*
+     An object with no state to modify: of a final type without an instance field, its own or a superclass's. A Kotlin
+     companion or `object` usually is one, and `Outer.Companion.f()` -- every @JvmStatic facade's body -- then
+     modifies no static state, whatever f's verdict: what f does to static state is its own set, taken as a callee's.
+     Under cycle breaking a call whose NON_MODIFYING_METHOD was not in yet counted as modifying: fernflower's
+     IfHelper.mergeAllIfs, whose companion calls an abandoned reorderIf (maddi-mod#145).
+     */
+    private static boolean stateless(Variable variable) {
+        TypeInfo type = variable.parameterizedType().typeInfo();
+        if (type == null || !type.isFinal() || variable.parameterizedType().arrays() > 0) return false;
+        for (TypeInfo t = type; t != null && !t.isJavaLangObject(); t = t.parentClass() == null ? null : t.parentClass().typeInfo()) {
+            if (t.fields().stream().anyMatch(f -> !f.isStatic())) return false;
+        }
+        return true;
+    }
+
+    /*
      Adds to sets.get(mi) what mi's body modifies itself and what its decided callees modify; collects the callees
      of the group in inGroup. Returns true when the set depends on a decision still out.
      */
@@ -273,7 +290,8 @@ public class StaticSideEffectAnalyzerImpl {
             // Not on an @IgnoreModifications field ('System.out.println(...)', road §050), nor of an
             // @IgnoreModifications method ('LOG.info(...)')
             if (e instanceof MethodCall mc && mc.object() instanceof VariableExpression ve
-                && OwnStaticState.staticRoot(ve.variable()) instanceof FieldReference fr && !mc.methodInfo().isIgnoreModification()) {
+                && OwnStaticState.staticRoot(ve.variable()) instanceof FieldReference fr && !mc.methodInfo().isIgnoreModification()
+                && !stateless(ve.variable())) {
                 Value.Bool nonModifying = mc.methodInfo().analysis()
                         .getOrNull(PropertyImpl.NON_MODIFYING_METHOD, ValueImpl.BoolImpl.class);
                 if (nonModifying == null && !activateCycleBreaking) waits[0] = true;
