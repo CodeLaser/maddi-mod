@@ -362,7 +362,39 @@ public class TestShadowCloneBench extends CommonTest {
         // loops over HashSets out of map fields, String.equals and a read-only getUuid. The fixpoint keeps it
         // modifying; the pass no longer imports that through the deep-only summary entry, so the pass is right.
         // NODEEPWALK=1 gives 327 again.
-        Assertions.assertEquals(328, totalRev,
+        // ⭐ Re-baselined 2026-11-21 after the maddi slowTest gate 44885559618 (maddi 5d911d486, maddi-mod cf819f77, 141
+        // reverse): measured at maddi-mod 9eb374ab, reverse 328 -> 143, divergences 47 -> 41 {unmodifiedField 13 -> 16,
+        // unmodifiedParameter 34 -> 25} {propagated 37 -> 33, seed 10 -> 8}. Twice on laser3, identical; the pass sees
+        // MORE than at the baseline (seeds 21401 -> 21627, edges 11937 -> 12099), so nothing closed for lack of reach.
+        // Bisected over devel's first-parent states, each with the maddi devel of its time:
+        //   maddi-mod 24afee10 (merge of ws/maddi-null, #127: a recursive method keeps its library callees' summaries,
+        //     87f2ed38; a call back into the recursion marks nothing while its verdict is undecided, f00f2078):
+        //     reverse 335 -> 151. A/B at 9eb374ab with NONARROWRECURSION=1: 143 -> 327, divergences 41 -> 33.
+        //     188 reverse closed (131 nonModifyingMethod, 57 unmodifiedParameter), all the recursion's own pessimism the
+        //     10-12 note already named: deleteDirectory / recursiveFileDelete / findFiles over a File, getMethod up the
+        //     superclass chain, setParameter(String,Object) calling itself, qsort / quickSort, dfsVisit's graph, ...
+        //     4 reverse opened, the fixpoint now seeing a library callee inside a recursive method: setEnable(Container)'s
+        //     c.getComponents()[i].setEnabled, displayInterfaceInformation(NetworkInterface) x2, hashRabin(Serializable).
+        //     ⚠ 10 divergences opened, the gap f00f2078 documents ("the fixpoint alone does not revisit the skipped
+        //     mark, pinned"): modification that only the recursive call carries. mergeSort(src, dest, srcMap, dstMap, ...)
+        //     calls itself as mergeSort(dest, src, dstMap, srcMap, ...), so src and srcMap are written (x2 clones, 4); and
+        //     findFiles(File, List files) adds to its list and recurses as findFiles(c, procFiles) / srcPathFiles /
+        //     supportFiles, so those three fields are modified (x2 clones, 6). The reachability pass finds all ten, and
+        //     it is the production verdict (MODREACH defaults on); the frozen fixpoint alone loses them. 2 divergences
+        //     closed: recursivelyGetFiles' extension and getClassesByPackageFile's recursive, the pass's own seeds.
+        //   maddi-mod 4ea84450 then cd305e24 (shallow links; a returned view's face): reverse 348 -> 345 -> 335.
+        //   ebbae3c3 -> 8df45807 (11-12 .. 11-13, ws/maddi-null #112-#119, ownership stages, dispatch union on): reverse
+        //     328 -> 341, divergences 47 -> 34, 13 closed and none opened, the fixpoint now modifying what the pass
+        //     already did: StringBuffer/StringBuilder appends (appendByteAsHexString, getBeforeSign, runShellCommand's
+        //     two builders, reportCsvContent), Scanner/InputStreamReader over a stream (loadWords,
+        //     readLinesFromInputStream), Console.readLine, Map.remove in alternativeComputeIfPresent2 (x2),
+        //     URLConnection.getHeaderFields, Manifest.getMainAttributes, MidiEvent.getMessage.
+        //   1bdd8970 .. cf819f77: reverse 151 -> 145 -> 141, divergences 42 -> 41 (read(InputStream)'s Scanner closed).
+        //   maddi-mod ca738802 (OVERLAPBYTYPE default on, #134): reverse 141 -> 143 (NOOVERLAPBYTYPE=1 gives 141). Both
+        //     opened are fixpoint pessimism, the pass is right: invertIndexToClusterToSequence(HashMap targetHash) and
+        //     createTreatmentToTargetSequenceIndex(HashMap values) only read the map; the sets they add to are fresh,
+        //     held by a fresh map.
+        Assertions.assertEquals(143, totalRev,
                 "reverse divergences are expected since design A (110695ece) retired the "
                 + "walkable-summary seed channel; re-baseline deliberately, and reclassify");
         // Re-baselined 2026-09-22 for the RECEIVER-DISCLAIMER rule (@IgnoreModifications on a parameter now
@@ -381,10 +413,12 @@ public class TestShadowCloneBench extends CommonTest {
         // 2026-10-30: unmodifiedField 12 -> 13, unmodifiedParameter 43 -> 34, {propagated 46 -> 38, seed 10};
         // classified with the reverse re-baseline above.
         // 2026-11-11: nonModifyingMethod 1 -> 0 {propagated 38 -> 37}, #100's onChange(); classified above.
+        // 2026-11-21: unmodifiedField 13 -> 16, unmodifiedParameter 34 -> 25 {propagated 37 -> 33, seed 10 -> 8};
+        // classified with the reverse re-baseline above (#127's ten, the 11-13 closings).
         Assertions.assertEquals(
-                Map.of("unmodifiedField", 13, "unmodifiedParameter", 34),
+                Map.of("unmodifiedField", 16, "unmodifiedParameter", 25),
                 byProperty);
-        Assertions.assertEquals(Map.of("propagated", 37, "seed", 10), byClass);
+        Assertions.assertEquals(Map.of("propagated", 33, "seed", 8), byClass);
     }
 
     private volatile int totalMethods, totalSeeds, totalEdges, totalMissingArgLinks, totalUnprojectedReceivers;
