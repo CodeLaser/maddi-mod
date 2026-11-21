@@ -136,6 +136,18 @@ public class AbstractMethodAnalyzerImpl extends CommonAnalyzerImpl implements Ab
 
     // no implementation means we can completely ignore it
     private void doMethodWithoutImplementation(MethodInfo methodInfo) {
+        if (methodInfo.typeInfo().isAnnotation()) {
+            // an annotation interface's members are attribute accessors: they modify nothing. Left undecided, the
+            // reachability pass took them as undecided abstract callees, so modifying, and with them every method
+            // that reads an annotation attribute (TestAnnotationMembers)
+            for (var property : List.of(NON_MODIFYING_METHOD, STRUCTURALLY_NON_MODIFYING_METHOD)) {
+                if (!methodInfo.analysis().haveAnalyzedValueFor(property)) {
+                    TolerantWrite.setOnce(methodInfo.analysis(), property, TRUE, methodInfo);
+                    DECIDE.debug("AMA: Decide non-modifying annotation member {}", methodInfo);
+                    propertyChanges.incrementAndGet();
+                }
+            }
+        }
         if (!methodInfo.analysis().haveAnalyzedValueFor(INDEPENDENT_METHOD)) {
             TolerantWrite.setOnce(methodInfo.analysis(), INDEPENDENT_METHOD, INDEPENDENT, methodInfo);
             DECIDE.debug("AMA: Decide independent method without implementations {}", methodInfo);
