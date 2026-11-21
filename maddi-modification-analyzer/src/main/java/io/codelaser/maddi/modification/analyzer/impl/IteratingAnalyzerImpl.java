@@ -807,11 +807,12 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                 LOGGER.debug("Worklist: {} of {} elements dirty", subset.size(), analysisOrder.size());
             }
             if (budget != null) budget.startPass(iterations, subset.size());
+            String passKind = nextPassKind != null ? nextPassKind
+                    : dirty != null ? "worklist"
+                    : iterations == 1 ? "first"
+                    : verifying ? "verification" : "full";
             {
-                String kind = nextPassKind != null ? nextPassKind
-                        : dirty != null ? "worklist"
-                        : iterations == 1 ? "first"
-                        : verifying ? "verification" : "full";
+                String kind = passKind;
                 nextPassKind = null;
                 int it = iterations;
                 int max = maxIterations;
@@ -862,6 +863,11 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                     .map(e -> e.getKey().substring(TolerantWrite.RECOMPUTED.length()) + "=" + e.getValue())
                     .reduce((a, b) -> a + ", " + b).map(r -> "; recomputed: " + r).orElse("");
             LOGGER.debug("Iteration {} property changes (top 10): {}{}", iterations, topChanges, recomputed);
+            if (ModReachReachLog.ENABLED) {
+                System.out.println("MODREACH_REACH iteration " + iterations + " " + passKind + " " + subset.size()
+                        + ": " + propertiesChanged + " changed, summaries "
+                        + singleIterationAnalyzer.summaryChangedInfos().size() + "; " + topChanges + recomputed);
+            }
             // under an active worklist, a zero-change SUBSET iteration is not a fixpoint certificate — only a
             // zero-change FULL pass is; route through the verification branch below instead of stopping here
             boolean done = propertiesChanged == 0 && (dependersOf == null || verifying);
