@@ -339,10 +339,33 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
         return selfSummaries.get().get(method);
     }
 
+    /*
+     The first round's summary as the call to itself sees it, without its returned nulls (Options.nullConstantReturns,
+     'return ← $_ce'). The call returns what the method returns, and the second round links each of the method's own
+     returns again, a null at the statement that returns it, where the nullability pass applies that statement's
+     guards. Carried to the self call, the null came first in walk order with no guard: in timefold
+     ValueRangeState.getFromEntity, 'return getFromEntity(requireNonNull(newItem.entity()), sorter);' carried
+     pickValueBySorter's 'return null', which the method returns only past 'if (valueRange != null) return
+     valueRange;', and the C# translation typed the method nullable (nullableWarnings 152 -> 157). Gate
+     SELFNULLRETURNS keeps them.
+     */
+    private static final boolean SELF_NULL_RETURNS = System.getenv("SELFNULLRETURNS") != null;
+
+    private static MethodLinkedVariables withoutNullReturns(MethodLinkedVariables first) {
+        if (SELF_NULL_RETURNS || !(first instanceof MethodLinkedVariablesImpl m) || m.ofReturnValue() == null
+            || m.ofReturnValue().isEmpty()) {
+            return first;
+        }
+        Links returned = m.ofReturnValue().removeIfTo(SourceMethodComputer::isNullConstant);
+        if (returned.stream().count() == m.ofReturnValue().stream().count()) return first;
+        return new MethodLinkedVariablesImpl(returned, m.ofParameters(), m.modified(), m.assigned(),
+                m.deepOnlyModified());
+    }
+
     /** #127: the second round of a method that called itself in the first; see {@link #selfSummary}. */
     private MethodLinkedVariables secondRound(MethodInfo methodInfo, MethodLinkedVariables first) {
         if (!selfCalls.get().remove(methodInfo) || first.isDefault()) return first;
-        selfSummaries.get().put(methodInfo, first);
+        selfSummaries.get().put(methodInfo, withoutNullReturns(first));
         try {
             return new SourceMethodComputer(methodInfo).go();
         } catch (DegradedAnalysisException dae) {
