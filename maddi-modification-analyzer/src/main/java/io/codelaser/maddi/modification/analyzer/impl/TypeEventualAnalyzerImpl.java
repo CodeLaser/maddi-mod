@@ -81,7 +81,6 @@ import io.codelaser.maddi.cst.api.variable.Variable;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 import io.codelaser.maddi.modification.link.impl.Gate;
-import io.codelaser.maddi.modification.common.util.TolerantWrite;
 import io.codelaser.maddi.modification.analyzer.IteratingAnalyzer;
 import io.codelaser.maddi.modification.analyzer.TypeEventualAnalyzer;
 import io.codelaser.maddi.modification.analyzer.TypeImmutableAnalyzer;
@@ -189,7 +188,7 @@ public class TypeEventualAnalyzerImpl extends CommonAnalyzerImpl implements Type
             if (!contracted) eventual = computeEventual(typeInfo, methodInfo);
             if (eventual != null && eventual.isEventual()) {
                 if (siteDebug()) ecsite("WRITE eventual=" + eventual);
-                TolerantWrite.setOnce(methodInfo.analysis(), EVENTUAL_METHOD, eventual, methodInfo);
+                EventualWrite.setOnce(methodInfo.analysis(), EVENTUAL_METHOD, eventual, methodInfo);
                 DECIDE.debug("TE: {} eventual of method {} = {}", contracted ? "Contracted" : "Decide",
                         methodInfo, eventual);
                 propertyChanges.incrementAndGet();
@@ -212,7 +211,7 @@ public class TypeEventualAnalyzerImpl extends CommonAnalyzerImpl implements Type
             if (siteDebug()) ecsite(labels != null && !labels.isEmpty()
                     ? "WRITE enm=" + new TreeSet<>(labels) : "no enm (" + labels + ")");
             if (labels != null && !labels.isEmpty()) {
-                TolerantWrite.setOnce(methodInfo.analysis(), EVENTUALLY_NON_MODIFYING_METHOD,
+                EventualWrite.setOnce(methodInfo.analysis(), EVENTUALLY_NON_MODIFYING_METHOD,
                         new ValueImpl.SetOfStringsImpl(Set.copyOf(labels)), methodInfo);
                 DECIDE.debug("TE: Decide eventually-non-modifying of method {} after {}", methodInfo, labels);
                 propertyChanges.incrementAndGet();
@@ -234,7 +233,7 @@ public class TypeEventualAnalyzerImpl extends CommonAnalyzerImpl implements Type
                     if (siteDebug()) ecsite(labels != null && !labels.isEmpty()
                             ? "WRITE eup=" + new TreeSet<>(labels) : "no eup (" + labels + ")");
                     if (labels != null && !labels.isEmpty()) {
-                        TolerantWrite.setOnce(pi.analysis(), EVENTUALLY_UNMODIFIED_PARAMETER,
+                        EventualWrite.setOnce(pi.analysis(), EVENTUALLY_UNMODIFIED_PARAMETER,
                                 new ValueImpl.SetOfStringsImpl(Set.copyOf(labels)), pi);
                         DECIDE.debug("TE: Decide eventually-unmodified of parameter {} after {}", pi, labels);
                         propertyChanges.incrementAndGet();
@@ -289,7 +288,7 @@ public class TypeEventualAnalyzerImpl extends CommonAnalyzerImpl implements Type
         if (existing == null) {
             Value.EventuallyImmutable contracted = eventuallyImmutable(typeInfo);
             if (contracted.isEventual()) {
-                TolerantWrite.setOnce(typeInfo.analysis(), EVENTUALLY_IMMUTABLE_TYPE, contracted, typeInfo);
+                EventualWrite.setOnce(typeInfo.analysis(), EVENTUALLY_IMMUTABLE_TYPE, contracted, typeInfo);
                 propertyChanges.incrementAndGet();
                 return; // contracts win
             }
@@ -511,9 +510,9 @@ public class TypeEventualAnalyzerImpl extends CommonAnalyzerImpl implements Type
             if (afterMarkLevel.compareTo(existing.immutableAfterMark()) <= 0) return; // no upgrade
             if (dbg) System.out.println("ECTYPE " + typeInfo.fullyQualifiedName() + " upgrade " + existing
                                         + " -> " + value);
-            TolerantWrite.setAllowControlledOverwrite(typeInfo.analysis(), EVENTUALLY_IMMUTABLE_TYPE, value, typeInfo);
+            EventualWrite.setAllowControlledOverwrite(typeInfo.analysis(), EVENTUALLY_IMMUTABLE_TYPE, value, typeInfo);
         } else {
-            TolerantWrite.setOnce(typeInfo.analysis(), EVENTUALLY_IMMUTABLE_TYPE, value, typeInfo);
+            EventualWrite.setOnce(typeInfo.analysis(), EVENTUALLY_IMMUTABLE_TYPE, value, typeInfo);
         }
         DECIDE.debug("TE: Decide eventual immutability of type {} = {}", typeInfo, value);
         propertyChanges.incrementAndGet();
