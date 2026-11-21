@@ -270,6 +270,28 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
      * not-null) are modification-independent and stay; the three modification properties are frozen.
      */
     private static int clearDerivedFamily(List<Info> analysisOrder) {
+        Set<String> keys = derivedFamilyKeys();
+        int[] cleared = {0};
+        for (Info info : analysisOrder) {
+            info.analysis().removeIf(p -> {
+                boolean remove = keys.contains(p.key());
+                if (remove) cleared[0]++;
+                return remove;
+            });
+            if (info instanceof MethodInfo mi) {
+                for (ParameterInfo pi : mi.parameters()) {
+                    pi.analysis().removeIf(p -> {
+                        boolean remove = keys.contains(p.key());
+                        if (remove) cleared[0]++;
+                        return remove;
+                    });
+                }
+            }
+        }
+        return cleared[0];
+    }
+
+    private static Set<String> derivedFamilyKeys() {
         Set<String> keys = new HashSet<>(Set.of(
                 PropertyImpl.IMMUTABLE_TYPE.key(),
                 PropertyImpl.INDEPENDENT_TYPE.key(),
@@ -296,24 +318,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
             keys.add(PropertyImpl.EVENTUALLY_UNMODIFIED_PARAMETER.key());
             keys.add(PropertyImpl.EVENTUALLY_IMMUTABLE_TYPE.key());
         }
-        int[] cleared = {0};
-        for (Info info : analysisOrder) {
-            info.analysis().removeIf(p -> {
-                boolean remove = keys.contains(p.key());
-                if (remove) cleared[0]++;
-                return remove;
-            });
-            if (info instanceof MethodInfo mi) {
-                for (ParameterInfo pi : mi.parameters()) {
-                    pi.analysis().removeIf(p -> {
-                        boolean remove = keys.contains(p.key());
-                        if (remove) cleared[0]++;
-                        return remove;
-                    });
-                }
-            }
-        }
-        return cleared[0];
+        return keys;
     }
 
     /**
@@ -665,6 +670,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
         Map<Info, List<Boolean>> modReachHistory = new HashMap<>();
         Set<Info> modReachSettled = new HashSet<>();
         ModReachReachLog reachLog = null; // MODREACH_REACHLOG: the pending re-derivation's measurement
+        ScopedRederivation scoped = null; // MODREACH_SCOPED: the running scoped re-derivation
         int cutoffModReachRounds = 0; // the early cutoff's own rounds, over the seed: see cutoffModReach
         modReachFailures = 0;
         int eventualDeferralRounds = 0; // terminal-phase re-derivation of the eventual family, once
@@ -833,6 +839,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                 // what a cold run does in its first iteration only, for the elements cleared just now
                 if (iterations > 1) singleIterationAnalyzer.setFirstVisits(firstVisits);
             }
+            if (scoped != null && dirty != null && !verifying) scoped.beforePass(subset);
             if (singleIterationAnalyzer instanceof SingleIterationAnalyzerImpl s) s.setFullPass(dirty == null || verifying);
             Instant start = Instant.now();
             singleIterationAnalyzer.go(subset, cycleBreakingActive, iterations == 1,
@@ -1010,6 +1017,10 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                     reachLog.report();
                     reachLog = null;
                 }
+                if (scoped != null) {
+                    LOGGER.info("MODREACH round {}: scoped re-derivation, {}", modReachRounds, scoped.summary());
+                    scoped = null;
+                }
                 LOGGER.info("Stop iterating after {} iterations, done? {}{}", iterations, done,
                         plateau ? " (plateau: " + propertiesChanged + " vs " + previousPropertiesChanged + ")" : "");
                 // incremental: not yet. Its rounds clear and re-derive the derived family over the whole order, which
@@ -1127,6 +1138,35 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                             // the eventual family is write-once: the deferral round re-derives it over the new state
                             eventualDeferralRounds = 0;
                             nextPassKind = "re-derivation after MODREACH round " + modReachRounds;
+                            dirty = seeds;
+                            verifying = false;
+                            previousPropertiesChanged = Integer.MAX_VALUE;
+                            maxIterations += configuration.maxIterations();
+                            continue;
+                        }
+                        if (ScopedRederivation.ENABLED && dependersOf != null
+                            && counts.downgraded() + counts.decidedFalse() + counts.decidedTrue()
+                               + counts.reverseUpgraded() > 0) {
+                            Set<Info> seeds = new HashSet<>();
+                            for (Info c : counts.changed()) {
+                                Info owner = c instanceof ParameterInfo pi ? pi.methodInfo() : c;
+                                Info mc = mapToOrderElement(owner, orderSet);
+                                if (mc != null) seeds.add(mc);
+                                for (Info d : dependersOf.getOrDefault(owner, Set.of())) {
+                                    Info md = mapToOrderElement(d, orderSet);
+                                    if (md != null) seeds.add(md);
+                                }
+                            }
+                            LOGGER.info("MODREACH round {}: weakened; scoped re-derivation from {} element(s), {} "
+                                        + "changed", modReachRounds, seeds.size(), counts.changed().size());
+                            if (ModReachReachLog.ENABLED) {
+                                reachLog = ModReachReachLog.start(modReachRounds + " (scoped)", counts.changed(),
+                                        analysisOrder, dependersOf, i -> mapToOrderElement(i, orderSet));
+                            }
+                            scoped = new ScopedRederivation(derivedFamilyKeys());
+                            eventualDeferralRounds = 0;
+                            nextPassKind = "scoped re-derivation after MODREACH round " + modReachRounds;
+                            cycleBreakingActive = false;
                             dirty = seeds;
                             verifying = false;
                             previousPropertiesChanged = Integer.MAX_VALUE;
@@ -1345,6 +1385,15 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                 // analysis, and the call graph does not guarantee a self-edge (v2's first cut excluded self and
                 // froze recursive methods at their early conservative verdicts).
                 Set<Info> changed = singleIterationAnalyzer.summaryChangedInfos();
+                if (scoped != null) {
+                    // a re-derived element that came back where it was before its clear wakes nobody
+                    ScopedRederivation sr = scoped;
+                    Map<Info, Boolean> cameBack = new HashMap<>();
+                    changed = changed.stream()
+                            .filter(c -> !cameBack.computeIfAbsent(mapToOrderElement(c, orderSet), sr::cameBack))
+                            .collect(java.util.stream.Collectors.toUnmodifiableSet());
+                    scoped.afterPass();
+                }
                 Set<Info> next = new HashSet<>();
                 for (Info c : changed) {
                     // an anonymous-class/lambda method is a graph vertex but NOT an analysis-order element:
