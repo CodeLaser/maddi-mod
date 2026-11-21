@@ -47,6 +47,8 @@ public class FieldAnalyzerImpl extends CommonAnalyzerImpl implements FieldAnalyz
     private static final Logger LOGGER = LoggerFactory.getLogger(FieldAnalyzerImpl.class);
     // see computeIndependent
     private static final boolean CB_FIELD_PESSIMISM = System.getenv("NOCBFIELDPESSIMISM") == null;
+    // CodeLaser/maddi-mod#103: a link whose transported type is undecided waits, as the field's own content type does
+    private static final boolean WAIT_TRANSPORTED = System.getenv("NOWAITTRANSPORTED") == null;
 
     private final Runtime runtime;
     private final AnalysisHelper analysisHelper = new AnalysisHelper();
@@ -486,6 +488,18 @@ public class FieldAnalyzerImpl extends CommonAnalyzerImpl implements FieldAnalyz
                             toIndependent = analysisHelper.typeIndependentFromImmutableOrNull(transported);
                         } else {
                             toIndependent = analysisHelper.typeIndependentFromImmutableOrNull(link.to().parameterizedType());
+                        }
+                        /*
+                         A null here is an undecided type, not immutable content: typeImmutable reads an undecided
+                         type as @Mutable, typeIndependentFromImmutableOrNull gives null for it. Skipping the link
+                         wrote an optimistic @Independent, which is never recomputed: fernflower's ConstantPool.pool,
+                         linked to getLinkConstant, was @Independent when the field came before LinkConstant's
+                         immutability, @Dependent when after (CodeLaser/maddi-mod#103, a shuffled submission order).
+                         */
+                        if (toIndependent == null && WAIT_TRANSPORTED
+                            && !(transportedImm != null && transportedImm.isImmutable())) {
+                            if (!cycleBreakingActive || !CB_FIELD_PESSIMISM) return null; // wait
+                            toIndependent = ValueImpl.IndependentImpl.DEPENDENT;
                         }
                     } else {
                         toIndependent = null;
