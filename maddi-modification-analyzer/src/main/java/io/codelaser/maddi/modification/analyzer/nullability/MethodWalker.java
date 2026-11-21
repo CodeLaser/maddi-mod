@@ -1304,6 +1304,7 @@ final class MethodWalker {
         if (unwrapped instanceof MethodCall amc && amc.methodInfo() != null && index.analysed.contains(amc.methodInfo())
             && !amc.methodInfo().isConstructor() && !amc.methodInfo().returnType().isVoid()) {
             graph.addEdge(amc.methodInfo(), site); // conservative: the nested call's result, ungated
+            if (calleeResultDecides(unwrapped)) return;
         }
         if (list == null || i >= list.list().size()) {
             if (!(unwrapped instanceof MethodCall)) graph.addEdge(nodes.argumentNode(mi, scope, argument), site);
@@ -1434,6 +1435,10 @@ final class MethodWalker {
             seeds.seedIndirect(pi, "argument " + lib + " in " + mi.fullyQualifiedName(), mi.typeInfo());
             return;
         }
+        if (calleeResultDecides(unwrappedArgument)) {
+            callResultArgument(unwrappedArgument, pi);
+            return;
+        }
         if (list == null || i >= list.list().size()) {
             // no argument links ('super(attributes)', 'this(...)' carry none): each value the argument may take, its
             // own node; a null branch seeds ('this(r, text == null ? null : AiMessage.from(text), …)', langchain4j
@@ -1508,6 +1513,39 @@ final class MethodWalker {
                                      rt.typeParameter().equals(p.parameterizedType().typeParameter())));
         if (!isTypeVariable(rt) || ownNull) graph.addEdge(callee, pi);
     }
+
+    /*
+     Kotlin: an analysed method's result as the argument, of a type that is not a type variable, is the callee's
+     return node, which its own walk computed with the callee's guards. The argument's links run through the
+     callee's summary to the caller's variables, and links ignore guards: 'new State<>(FluentFuture.from(future), ..)'
+     with 'from(f) { return f instanceof FluentFuture ? (FluentFuture<V>) f : new ForwardingFluentFuture<>(f); }'
+     linked State's parameter to 'future', past the instanceof (guava ClosingFuture.State.future became
+     'FluentFuture<V>?', ClosingFuture.kt:793 failed to compile, once CodeLaser/maddi-mod#127 a192ab5a kept the
+     return's link through the ternary). Gate NOCALLEERESULTARGS.
+     */
+    private boolean calleeResultDecides(Expression argument) {
+        if (!policy.callResults() || CALLEE_RESULT_ARGS_OFF.get() || !(argument instanceof MethodCall mc)
+            || mc.methodInfo() == null) {
+            return false;
+        }
+        MethodInfo callee = mc.methodInfo();
+        if (!index.analysed.contains(callee) || callee.isConstructor() || callee.returnType().isVoid()
+            || isTypeVariable(callee.returnType())) {
+            return false;
+        }
+        // a static method ('Futures.immediateCancelledFuture()': 'if (instance != null) return instance;' on the
+        // @Nullable field ImmediateCancelledFuture.INSTANCE, which reached ClosingFuture.eventuallyClosing's
+        // parameter past the guard), or a pass-through, whose summary returns one of its parameters. Not an instance
+        // method otherwise: its return node merges every override and lazy cache, where the links name the value
+        // itself; 'reserializeAndAssertLenient(map.keySet())' took keySet()'s cache null (guava
+        // LenientSerializableTester.kt, 2026-11-21)
+        if (callee.isStatic()) return true;
+        MethodLinkedVariablesImpl summary = callee.analysis().getOrNull(MethodLinkedVariablesImpl.METHOD_LINKS,
+                MethodLinkedVariablesImpl.class);
+        return summary != null && summary.ofReturnValue().stream().anyMatch(l -> l.to() instanceof ParameterInfo);
+    }
+
+    private static final Switches.Gate CALLEE_RESULT_ARGS_OFF = Switches.gate("NOCALLEERESULTARGS");
 
     private void sourcesOf(MethodInfo mi, Scope scope, Variable primary, Links links, Object pi, Expression value) {
         for (Link link : links) {
