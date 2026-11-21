@@ -1505,9 +1505,10 @@ public class ShadowModificationPass {
                                             // #134: 'rv.§$s ∩ 0:x.map.§$$s[-2]', rv filled with the elements of one
                                             // of x's values (addAll, add per element): x, deep-only, as for ≤ below.
                                             // The engine's WriteLinksAndModification rule for the same overlap
-                                            // OVERLAPBYTYPE (experiment): judged on the modified object's type, as #139
-                                            // judges a face's element: a map filled with parts of x's values is no element
-                                            // of them (langchain4j's JsonSchemaElementJsonUtils.toMap, TestMapFromParts)
+                                            // Judged on the modified object's type, as #139 judges a face's element: a
+                                            // map filled with parts of x's values is no element of them (langchain4j's
+                                            // JsonSchemaElementJsonUtils.toMap). Gate NOOVERLAPBYTYPE: the old,
+                                            // type-blind overlap.
                                             if (!NO_OBJECT_GRAPH_MOD) overlappingContainers(vd, l.to(),
                                                     OVERLAP_BY_TYPE ? v.parameterizedType() : null, containers);
                                         });
@@ -1587,7 +1588,7 @@ public class ShadowModificationPass {
         if (deepOnly) out.forEach(node -> nodes.add(accessibleReach(written, node) ? node : deepOnly(node)));
     }
 
-    private static final boolean OVERLAP_BY_TYPE = System.getenv("OVERLAPBYTYPE") != null;
+    private static final boolean OVERLAP_BY_TYPE = System.getenv("NOOVERLAPBYTYPE") == null;
 
     private static final String[] PROJECTTRACE = System.getenv("PROJECTTRACE") == null ? null
             : System.getenv("PROJECTTRACE").split(",");
