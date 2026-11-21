@@ -664,6 +664,7 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
         // FALSE, TRUE, FALSE is oscillating (its links depend on its own verdict) and is settled at FALSE
         Map<Info, List<Boolean>> modReachHistory = new HashMap<>();
         Set<Info> modReachSettled = new HashSet<>();
+        ModReachReachLog reachLog = null; // MODREACH_REACHLOG: the pending re-derivation's measurement
         int cutoffModReachRounds = 0; // the early cutoff's own rounds, over the seed: see cutoffModReach
         modReachFailures = 0;
         int eventualDeferralRounds = 0; // terminal-phase re-derivation of the eventual family, once
@@ -999,6 +1000,10 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                 // optimistic values; re-evaluated on each terminal pass, so a MODREACH re-derivation that continues
                 // overwrites it and the final pass wins.
                 certifiedWithoutFrozenValues = done && refusedSum == 0;
+                if (reachLog != null) {
+                    reachLog.report();
+                    reachLog = null;
+                }
                 LOGGER.info("Stop iterating after {} iterations, done? {}{}", iterations, done,
                         plateau ? " (plateau: " + propertiesChanged + " vs " + previousPropertiesChanged + ")" : "");
                 // incremental: not yet. Its rounds clear and re-derive the derived family over the whole order, which
@@ -1109,6 +1114,10 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                             LOGGER.debug("MODREACH round {}: only strengthened; re-deriving {} element(s) from {} "
                                         + "changed, without clearing", modReachRounds, seeds.size(),
                                     counts.changed().size());
+                            if (ModReachReachLog.ENABLED) {
+                                reachLog = ModReachReachLog.start(modReachRounds + " (worklist)", counts.changed(),
+                                        analysisOrder, dependersOf, i -> mapToOrderElement(i, orderSet));
+                            }
                             // the eventual family is write-once: the deferral round re-derives it over the new state
                             eventualDeferralRounds = 0;
                             nextPassKind = "re-derivation after MODREACH round " + modReachRounds;
@@ -1124,6 +1133,10 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                             // values; clear it and re-derive with modification frozen. Cycle breaking
                             // re-stages at its own certification point; the terminal phase (and
                             // certification) lands after the re-derivation converges — the §14 order.
+                            if (ModReachReachLog.ENABLED) {
+                                reachLog = ModReachReachLog.start("" + modReachRounds, counts.changed(),
+                                        analysisOrder, dependersOf, i -> mapToOrderElement(i, orderSet));
+                            }
                             int cleared = clearDerivedFamily(analysisOrder);
                             if (EventualCluster.ENABLED
                                 && singleIterationAnalyzer instanceof SingleIterationAnalyzerImpl sia) {
@@ -1252,6 +1265,10 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                     && !"0".equals(System.getenv("EVENTUALDEFER"))
                     && singleIterationAnalyzer instanceof SingleIterationAnalyzerImpl sia) {
                     eventualDeferralRounds++;
+                    if (ModReachReachLog.ENABLED) {
+                        reachLog = ModReachReachLog.start("eventual", List.of(), analysisOrder, dependersOf,
+                                i -> mapToOrderElement(i, orderSet));
+                    }
                     int cleared = clearEventualFamily(analysisOrder);
                     sia.eventualCluster().resetForRederivation();
                     // the warm-up window opens HERE only: the terminal epoch re-derives the whole family and
