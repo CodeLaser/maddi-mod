@@ -40,6 +40,13 @@
 # are committed, guava's sources, classes and input configuration date from 2026-10-13, and neither machine's JDK
 # changed after 2026-11-05. The cause of the +33 is not known (a library jar resolved from the Gradle cache, or a
 # 1,779 measured on a state that was not committed, remain).
-unsafe	229
-noise	1812
+# 2026-11-21, devel at maddi 5d911d486 / maddi-mod 9eb374ab plus the commit that records this, on the Mac: 226 unsafe,
+# 1,786 noise. The gate of 2026-11-21 measured 1,952 noise (laser1; the Mac 1,977): #127's a192ab5a keeps every path
+# of a return, so asImmutableList's 'case 0: return of();' links every ImmutableList factory to
+# RegularImmutableList.EMPTY, and under NULL_MARKED the null in that one slot reached some 300 fields, parameters and
+# returns. The unchecked-conversion cut of the Kotlin policy now holds under every policy (gate
+# UNCHECKEDSLOTSKOTLINONLY restores the old scope): noise 1,977 -> 1,786, unsafe 229 -> 226. Not yet re-measured on
+# laser1.
+unsafe	226
+noise	1786
 noiseSlack	20

@@ -411,6 +411,8 @@ final class NullGraph {
     private static final Switches.Gate WILDCARD_SLOTS_OFF = Switches.gate("NOWILDCARDSLOTS");
     // gate NOUNCHECKEDSLOTS: slots of different concrete type arguments are tied as any other (A/B)
     private static final Switches.Gate UNCHECKED_SLOTS_OFF = Switches.gate("NOUNCHECKEDSLOTS");
+    // gate UNCHECKEDSLOTSKOTLINONLY: the unchecked-conversion cut under the call-result policies only, as before #127
+    private static final Switches.Gate UNCHECKED_SLOTS_KOTLIN_ONLY = Switches.gate("UNCHECKEDSLOTSKOTLINONLY");
     // gate NOTYPEVARSLOTS: a slot holding a type variable takes null as any other (A/B)
     private static final Switches.Gate TYPE_VARIABLE_SLOTS_OFF = Switches.gate("NOTYPEVARSLOTS");
 
@@ -563,10 +565,16 @@ final class NullGraph {
                     // not through a generic method's own type variable: each call instantiates it anew
                     // ('ImmutableMap.copyOf(Map<? extends K, ? extends V>)' would tie the maps of all its callers)
                     if (isMethodTypeVariable(p0) || isMethodTypeVariable(p1)) continue;
-                    // Kotlin: nor between two different concrete arguments, which only an unchecked conversion
-                    // relates ('(ImmutableMap<K, V>) RegularImmutableMap.EMPTY', an ImmutableMap<Object, Object> the
-                    // links see as every caller's map): each conversion starts an instantiation of its own
-                    if (policy.callResults() && !UNCHECKED_SLOTS_OFF.get() && uncheckedConversion(p0, p1)) continue;
+                    // nor between two different concrete arguments, which only an unchecked conversion relates
+                    // ('(ImmutableMap<K, V>) RegularImmutableMap.EMPTY', an ImmutableMap<Object, Object> the links see
+                    // as every caller's map): each conversion starts an instantiation of its own. Under every policy
+                    // since CodeLaser/maddi-mod#127 (a192ab5a): once a return summary keeps all of its paths,
+                    // 'asImmutableList(..)'s 'case 0: return of();' links every ImmutableList factory to
+                    // RegularImmutableList.EMPTY, and under NULL_MARKED that one slot (null from a test's
+                    // 'AbstractCollectionTester.collection') reached hundreds of fields and parameters: the guava
+                    // oracle's noise 1,812 -> 1,977; with the cut 1,786, and unsafe 229 -> 226
+                    if ((policy.callResults() || !UNCHECKED_SLOTS_KOTLIN_ONLY.get()) && !UNCHECKED_SLOTS_OFF.get()
+                        && uncheckedConversion(p0, p1)) continue;
                     // A slot typed by a CLASS type variable ('FastFixedSet<E> spawnEmptySet()' in Factory<E>,
                     // 'union(FastFixedSet<E> set)', 'Factory(Collection<E> set)') is parametric: it receives nothing
                     // from one instantiation's slot ('FastFixedSet<Statement?> tmpSet'), or Kotlin would see 'E?'
