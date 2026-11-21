@@ -32,6 +32,7 @@ import io.codelaser.maddi.cst.api.element.SourceSet;
 import io.codelaser.maddi.cst.api.info.Info;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.runtime.Runtime;
+import io.codelaser.maddi.inspection.api.resource.MD5FingerPrint;
 import io.codelaser.maddi.modification.analyzer.CommonTest;
 import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
 import io.codelaser.maddi.modification.prepwork.io.AnalysisFingerprint;
@@ -148,6 +149,11 @@ public class TestAnalysisFingerprint extends CommonTest {
         SourceSet ss = a.typeInfo().compilationUnit().sourceSet();
         FingerPrint direct = AnalysisFingerprint.ofSourceSet(a.runtime(), List.of(a.typeInfo()));
         assertEquals(direct, AnalysisFingerprint.ofSourceSet(a.runtime(), List.of(a.typeInfo())), "deterministic");
+        // streamed into the digest: the same hash as the concatenated dumps it replaced (persisted values stay valid)
+        String concatenated = a.typeInfo().fullyQualifiedName() + '=' + AnalysisFingerprint.normalize(
+                AnalysisFingerprint.dump(a.runtime(), a.typeInfo(), AnalysisFingerprint.ANALYZER_OUTPUT_ONLY),
+                AnalysisFingerprint.DEFAULT) + '\n';
+        assertEquals(MD5FingerPrint.compute(concatenated), direct);
 
         assertNull(ss.analysisFingerPrintOrNull(), "not set before storePerSourceSet");
         Map<SourceSet, FingerPrint> stored = AnalysisFingerprint.storePerSourceSet(a.runtime(), List.of(a.typeInfo()));

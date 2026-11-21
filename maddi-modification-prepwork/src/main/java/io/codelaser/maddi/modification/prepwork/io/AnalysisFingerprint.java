@@ -20,6 +20,8 @@ package io.codelaser.maddi.modification.prepwork.io;
 import java.io.IOException;
 import java.io.StringWriter;
 import java.io.UncheckedIOException;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
@@ -128,11 +130,19 @@ public class AnalysisFingerprint {
      * dependent set need not be re-analyzed — the coarse cross-source-set early cutoff.
      */
     public static FingerPrint ofSourceSet(Runtime runtime, Collection<TypeInfo> primaryTypes) {
-        StringBuilder sb = new StringBuilder();
+        // streamed into the digest type by type: the concatenated dumps of a large source set exceed the maximal
+        // String length (closed-core: "Required length exceeds implementation limit" after a 14-hour analysis).
+        // The bytes, and so the hash, are those of the former concatenation.
+        MessageDigest md;
+        try {
+            md = MessageDigest.getInstance("MD5");
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException(e);
+        }
         primaryTypes.stream().sorted(Comparator.comparing(TypeInfo::fullyQualifiedName)).forEach(pt ->
-                sb.append(pt.fullyQualifiedName()).append('=')
-                        .append(normalize(dump(runtime, pt, ANALYZER_OUTPUT_ONLY), DEFAULT)).append('\n'));
-        return MD5FingerPrint.compute(sb.toString());
+                md.update((pt.fullyQualifiedName() + '='
+                           + normalize(dump(runtime, pt, ANALYZER_OUTPUT_ONLY), DEFAULT) + '\n').getBytes()));
+        return new MD5FingerPrint(md.digest());
     }
 
     /**
