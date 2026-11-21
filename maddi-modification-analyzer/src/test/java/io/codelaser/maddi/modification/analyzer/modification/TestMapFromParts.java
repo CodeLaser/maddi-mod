@@ -44,6 +44,10 @@ public class TestMapFromParts extends CommonTest {
                 interface E { String description(); }
                 record S(String description, List<String> values) implements E { }
                 record O(String description, Map<String, E> properties) implements E { }
+                static class Builder {
+                    private final Map<String, Object> metadata = new HashMap<>();
+                    Builder addMetadata(String key, Object value) { metadata.put(key, value); return this; }
+                }
                 static Map<String, Object> typed(String type, String description) {
                     Map<String, Object> map = new LinkedHashMap<>();
                     map.put("type", type);
