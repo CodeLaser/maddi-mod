@@ -331,7 +331,7 @@ public class AbstractMethodAnalyzerImpl extends CommonAnalyzerImpl implements Ab
                 EventualCluster.sitePrint("WRITE abstract eventual " + methodInfo.fullyQualifiedName()
                                           + " = " + fromImplementations);
             }
-            methodInfo.analysis().set(EVENTUAL_METHOD, fromImplementations);
+            TolerantWrite.setOnce(methodInfo.analysis(), EVENTUAL_METHOD, fromImplementations, methodInfo);
             DECIDE.debug("AM: Decide eventual of abstract method {} = {}", methodInfo, fromImplementations);
             propertyChanges.incrementAndGet();
         }
@@ -401,7 +401,8 @@ public class AbstractMethodAnalyzerImpl extends CommonAnalyzerImpl implements Ab
             }
         }
         if (agreed != null) {
-            methodInfo.analysis().set(EVENTUALLY_NON_MODIFYING_METHOD, new ValueImpl.SetOfStringsImpl(Set.copyOf(agreed)));
+            TolerantWrite.setOnce(methodInfo.analysis(), EVENTUALLY_NON_MODIFYING_METHOD,
+                    new ValueImpl.SetOfStringsImpl(Set.copyOf(agreed)), methodInfo);
             DECIDE.debug("AM: Decide eventually-non-modifying of abstract method {} after {}", methodInfo, agreed);
             propertyChanges.incrementAndGet();
         }
@@ -533,7 +534,8 @@ public class AbstractMethodAnalyzerImpl extends CommonAnalyzerImpl implements Ab
             }
         }
         if (agreed != null) {
-            pi.analysis().set(EVENTUALLY_UNMODIFIED_PARAMETER, new ValueImpl.SetOfStringsImpl(Set.copyOf(agreed)));
+            TolerantWrite.setOnce(pi.analysis(), EVENTUALLY_UNMODIFIED_PARAMETER,
+                    new ValueImpl.SetOfStringsImpl(Set.copyOf(agreed)), pi);
             DECIDE.debug("AM: Decide eventually-unmodified of abstract method parameter {} after {}", pi, agreed);
             propertyChanges.incrementAndGet();
         }
