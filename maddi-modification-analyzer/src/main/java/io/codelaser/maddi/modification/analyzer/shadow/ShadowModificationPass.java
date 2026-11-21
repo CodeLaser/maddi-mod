@@ -1406,9 +1406,17 @@ public class ShadowModificationPass {
         Set<Object> out = deepOnly ? new LinkedHashSet<>() : nodes;
         Deque<Variable> todo = new ArrayDeque<>();
         push(todo, start);
+        // gate PROJECTTRACE=<method fqn substrings>: the walk's steps, each variable with the one it was reached from
+        Map<String, String> parents = projectTraceMatches(mi.fullyQualifiedName()) ? new HashMap<>() : null;
+        int containersBefore = containers.size();
         while (!todo.isEmpty()) {
             Variable v = todo.poll();
             if (v == null || !done.add(v.fullyQualifiedName())) continue;
+            if (parents != null) {
+                System.out.println("PROJECTTRACE " + mi.fullyQualifiedName() + " from " + start.fullyQualifiedName()
+                                   + (deepOnly ? " (deep-only)" : "") + ": " + v.fullyQualifiedName() + " <- "
+                                   + parents.getOrDefault(v.fullyQualifiedName(), "start"));
+            }
             // an immutable object cannot be modified: a receiver/argument face of immutable type
             // contributes no nodes and implicates nothing through its scope (the projection-layer
             // mirror of the closure()'s immutable cut and the writer's immutable guard; the engine
@@ -1424,7 +1432,7 @@ public class ShadowModificationPass {
                     if (!fr.isIgnoreModifications() && isFieldNode(fr.fieldInfo())) out.add(fr.fieldInfo());
                     if (fr.scopeIsRecursivelyThis()) out.add(mi);
                     if (fr.scopeVariable() != null) {
-                        push(todo, fr.scopeVariable());
+                        pushT(todo, v, parents, fr.scopeVariable());
                     } else if (!NO_SHADOW_CALL_RESULT_FIELD && fr.scope() != null) {
                         // a field of an expression's result ('parent.getWrapper().getH().list.clear()'): what the
                         // result stands for, as a modifying call on it (seedAssignmentTarget's #71 rule, for a
@@ -1441,7 +1449,7 @@ public class ShadowModificationPass {
                 case ParameterInfo pi -> {
                     if (!pi.isIgnoreModifications()) out.add(pi);
                 }
-                case DependentVariable dv -> push(todo, dv.arrayVariable());
+                case DependentVariable dv -> pushT(todo, v, parents, dv.arrayVariable());
                 default -> {
                     if (!NO_VIEW_LOCAL && v instanceof LocalVariable lv) out.addAll(projectViewLocal(mi, vd, lv));
                     hiddenContentHolders(vd, v, containers);
@@ -1450,7 +1458,7 @@ public class ShadowModificationPass {
                         Links links = vic.best().linkedVariables();
                         if (links != null) {
                             if (links.isEmpty() && links.primary() != null) {
-                                push(todo, links.primary());
+                                pushT(todo, v, parents, links.primary());
                             } else {
                                 // follow only links whose endpoint is exactly this variable: a link on a
                                 // COMPONENT face (td.f <- ...) must not widen "td modified" to "td.f modified" —
@@ -1458,10 +1466,10 @@ public class ShadowModificationPass {
                                 links.stream().filter(ShadowModificationPass::carriesWholeObjectModification)
                                         .forEach(l -> {
                                             if (l.from().fullyQualifiedName().equals(v.fullyQualifiedName())) {
-                                                push(todo, l.to());
+                                                pushT(todo, v, parents, l.to());
                                             }
                                             if (l.to().fullyQualifiedName().equals(v.fullyQualifiedName())) {
-                                                push(todo, l.from());
+                                                pushT(todo, v, parents, l.from());
                                             }
                                         });
                                 // the local is a field of another object ('w ≺ 0:parent', a call result its callee
@@ -1473,7 +1481,7 @@ public class ShadowModificationPass {
                                                                && !Util.virtual(l.from()) && !Util.virtual(l.to())
                                                                && l.from().fullyQualifiedName()
                                                                        .equals(v.fullyQualifiedName()))
-                                            .forEach(l -> push(todo, l.to()));
+                                            .forEach(l -> pushT(todo, v, parents, l.to()));
                                 }
                                 links.stream().filter(l -> l.linkNature() == LinkNatureImpl.IS_ELEMENT_OF
                                                            && l.from().fullyQualifiedName().equals(v.fullyQualifiedName()))
@@ -1487,17 +1495,22 @@ public class ShadowModificationPass {
                                                     // element's own mode, structural when it is
                                                     List<Variable> co = new ArrayList<>();
                                                     coElements(vd, l.to(), co);
-                                                    co.forEach(c -> push(todo, c));
+                                                    co.forEach(c -> pushT(todo, v, parents, c));
                                                 }
                                             }
                                             // #117: the element may be the object of an accessible field of an
                                             // owner of the container; that owner, in the element's own mode
                                             Variable aliasOwner = Util.hiddenAliasOwner(l.to(), v);
-                                            if (aliasOwner != null) push(todo, aliasOwner);
+                                            if (aliasOwner != null) pushT(todo, v, parents, aliasOwner);
                                             // #134: 'rv.§$s ∩ 0:x.map.§$$s[-2]', rv filled with the elements of one
                                             // of x's values (addAll, add per element): x, deep-only, as for ≤ below.
                                             // The engine's WriteLinksAndModification rule for the same overlap
-                                            if (!NO_OBJECT_GRAPH_MOD) overlappingContainers(vd, l.to(), containers);
+                                            // Judged on the modified object's type, as #139 judges a face's element: a
+                                            // map filled with parts of x's values is no element of them (langchain4j's
+                                            // JsonSchemaElementJsonUtils.toMap). Gate NOOVERLAPBYTYPE: the old,
+                                            // type-blind overlap.
+                                            if (!NO_OBJECT_GRAPH_MOD) overlappingContainers(vd, l.to(),
+                                                    OVERLAP_BY_TYPE ? v.parameterizedType() : null, containers);
                                         });
                                 // #62: 'tags ∩ this.map.§$$s[-2]', the whole object overlapping a container's
                                 // element content (a for-each over map.values()): its container, deep-only, as for ∈.
@@ -1566,7 +1579,30 @@ public class ShadowModificationPass {
                 }
             }
         }
+        if (parents != null) {
+            System.out.println("PROJECTTRACE " + mi.fullyQualifiedName() + " from " + start.fullyQualifiedName()
+                               + ": nodes " + out.stream().map(Report::label).sorted().toList() + ", containers "
+                               + containers.subList(containersBefore, containers.size()).stream()
+                                       .map(Variable::fullyQualifiedName).toList());
+        }
         if (deepOnly) out.forEach(node -> nodes.add(accessibleReach(written, node) ? node : deepOnly(node)));
+    }
+
+    private static final boolean OVERLAP_BY_TYPE = System.getenv("NOOVERLAPBYTYPE") == null;
+
+    private static final String[] PROJECTTRACE = System.getenv("PROJECTTRACE") == null ? null
+            : System.getenv("PROJECTTRACE").split(",");
+
+    private static boolean projectTraceMatches(String fqn) {
+        if (PROJECTTRACE == null) return false;
+        for (String s : PROJECTTRACE) if (!s.isBlank() && fqn.contains(s)) return true;
+        return false;
+    }
+
+    private static void pushT(Deque<Variable> todo, Variable from, Map<String, String> parents, Variable v) {
+        if (v == null) return;
+        todo.add(v);
+        if (parents != null) parents.putIfAbsent(v.fullyQualifiedName(), from.fullyQualifiedName());
     }
 
     /*

@@ -188,7 +188,7 @@ public class TypeEventualAnalyzerImpl extends CommonAnalyzerImpl implements Type
             if (!contracted) eventual = computeEventual(typeInfo, methodInfo);
             if (eventual != null && eventual.isEventual()) {
                 if (siteDebug()) ecsite("WRITE eventual=" + eventual);
-                methodInfo.analysis().set(EVENTUAL_METHOD, eventual);
+                EventualWrite.setOnce(methodInfo.analysis(), EVENTUAL_METHOD, eventual, methodInfo);
                 DECIDE.debug("TE: {} eventual of method {} = {}", contracted ? "Contracted" : "Decide",
                         methodInfo, eventual);
                 propertyChanges.incrementAndGet();
@@ -211,8 +211,8 @@ public class TypeEventualAnalyzerImpl extends CommonAnalyzerImpl implements Type
             if (siteDebug()) ecsite(labels != null && !labels.isEmpty()
                     ? "WRITE enm=" + new TreeSet<>(labels) : "no enm (" + labels + ")");
             if (labels != null && !labels.isEmpty()) {
-                methodInfo.analysis().set(EVENTUALLY_NON_MODIFYING_METHOD,
-                        new ValueImpl.SetOfStringsImpl(Set.copyOf(labels)));
+                EventualWrite.setOnce(methodInfo.analysis(), EVENTUALLY_NON_MODIFYING_METHOD,
+                        new ValueImpl.SetOfStringsImpl(Set.copyOf(labels)), methodInfo);
                 DECIDE.debug("TE: Decide eventually-non-modifying of method {} after {}", methodInfo, labels);
                 propertyChanges.incrementAndGet();
                 eventualCluster.commitAssumptionBuffer();
@@ -233,8 +233,8 @@ public class TypeEventualAnalyzerImpl extends CommonAnalyzerImpl implements Type
                     if (siteDebug()) ecsite(labels != null && !labels.isEmpty()
                             ? "WRITE eup=" + new TreeSet<>(labels) : "no eup (" + labels + ")");
                     if (labels != null && !labels.isEmpty()) {
-                        pi.analysis().set(EVENTUALLY_UNMODIFIED_PARAMETER,
-                                new ValueImpl.SetOfStringsImpl(Set.copyOf(labels)));
+                        EventualWrite.setOnce(pi.analysis(), EVENTUALLY_UNMODIFIED_PARAMETER,
+                                new ValueImpl.SetOfStringsImpl(Set.copyOf(labels)), pi);
                         DECIDE.debug("TE: Decide eventually-unmodified of parameter {} after {}", pi, labels);
                         propertyChanges.incrementAndGet();
                         eventualCluster.commitAssumptionBuffer();
@@ -288,7 +288,7 @@ public class TypeEventualAnalyzerImpl extends CommonAnalyzerImpl implements Type
         if (existing == null) {
             Value.EventuallyImmutable contracted = eventuallyImmutable(typeInfo);
             if (contracted.isEventual()) {
-                typeInfo.analysis().set(EVENTUALLY_IMMUTABLE_TYPE, contracted);
+                EventualWrite.setOnce(typeInfo.analysis(), EVENTUALLY_IMMUTABLE_TYPE, contracted, typeInfo);
                 propertyChanges.incrementAndGet();
                 return; // contracts win
             }
@@ -510,9 +510,9 @@ public class TypeEventualAnalyzerImpl extends CommonAnalyzerImpl implements Type
             if (afterMarkLevel.compareTo(existing.immutableAfterMark()) <= 0) return; // no upgrade
             if (dbg) System.out.println("ECTYPE " + typeInfo.fullyQualifiedName() + " upgrade " + existing
                                         + " -> " + value);
-            typeInfo.analysis().setAllowControlledOverwrite(EVENTUALLY_IMMUTABLE_TYPE, value);
+            EventualWrite.setAllowControlledOverwrite(typeInfo.analysis(), EVENTUALLY_IMMUTABLE_TYPE, value, typeInfo);
         } else {
-            typeInfo.analysis().set(EVENTUALLY_IMMUTABLE_TYPE, value);
+            EventualWrite.setOnce(typeInfo.analysis(), EVENTUALLY_IMMUTABLE_TYPE, value, typeInfo);
         }
         DECIDE.debug("TE: Decide eventual immutability of type {} = {}", typeInfo, value);
         propertyChanges.incrementAndGet();
