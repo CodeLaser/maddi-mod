@@ -36,6 +36,7 @@ The documents kept next to the code; these describe the current state and are up
 - [design/handoff-eventual-interface-nonmodification.md](design/handoff-eventual-interface-nonmodification.md) — Handoff — surface the `*Info` interfaces' eventual verdict (greatest-fixpoint Part B)
 - [design/handoff-verification-residue.md](design/handoff-verification-residue.md) — Handoff — the verification-pass residue (the gate on the eventual-immutability endgame)
 - [design/independent-type-optimism.md](design/independent-type-optimism.md) — `INDEPENDENT_TYPE` can be permanently optimistic
+- [design/link-cache-experiments.md](design/link-cache-experiments.md) — Link cache: experiments tried and rejected (fresh owners, REPRODUCEDOK; 2026-11)
 - [design/nullability.md](design/nullability.md) — Nullability inference: Java annotations and Java→Kotlin, design (2026-10-06)
 - [design/receiver-level.md](design/receiver-level.md) — The receiver decides too: level and cone rules at a call site (2026-09-29)
 - [design/spec-eventually-unmodified-parameter.md](design/spec-eventually-unmodified-parameter.md) — Spec — `EVENTUALLY_UNMODIFIED_PARAMETER` (`@NotModified(after=…)` on parameters)
