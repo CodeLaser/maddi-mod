@@ -59,7 +59,7 @@ public class TestIncrementalFernflower {
     public void test(@TempDir Path tmp) throws Exception {
         int exitValue = TestRewireFernflower.rewire(tmp, Map.of(
                 "maddi.rewire.iterations", "7",
-                "maddi.rewire.oracleEvery", "7",
+                "maddi.rewire.oracleEvery", System.getProperty("maddi.rewire.oracleEvery", "7"),
                 "maddi.rewire.analysis", "true",
                 "maddi.rewire.requireIncremental", "true"));
         assertEquals(Main.EXIT_OK, exitValue, "a seeded analysis fell back to the cold analysis, or the oracle found"
