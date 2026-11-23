@@ -213,6 +213,7 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
     private final AtomicInteger linkCacheHits = new AtomicInteger();
     private final Map<String, AtomicInteger> linkCacheMisses = new ConcurrentHashMap<>();
     private final AtomicInteger linkCacheCheckFailures = new AtomicInteger();
+    private final AtomicInteger linkCacheCheckMoved = new AtomicInteger();
     // per pass: why a method's links were computed rather than taken from the cache; shown on the slow-element line
     private final Map<Info, String> linkOutcome = new ConcurrentHashMap<>();
     // LINKCACHECHECK: hits that are recomputed, to compare with the recording they would have replaced
@@ -560,8 +561,9 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
         if (linkCacheEnabled()) {
             Map<String, Integer> misses = new TreeMap<>();
             linkCacheMisses.forEach((k, v) -> misses.put(k, v.get()));
-            LOGGER.debug("Link cache: {} hit(s), {} check failure(s), misses by first changed property {}",
-                    linkCacheHits.getAndSet(0), linkCacheCheckFailures.getAndSet(0), misses);
+            LOGGER.debug("Link cache: {} hit(s), {} check failure(s), {} moved input(s), misses by first changed "
+                         + "property {}", linkCacheHits.getAndSet(0), linkCacheCheckFailures.getAndSet(0),
+                    linkCacheCheckMoved.getAndSet(0), misses);
             linkCacheMisses.clear();
         }
         unionInWriteTargets();
@@ -757,7 +759,20 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
             // "write-once on a fresh expression"), so every computation writes a slot no other one can see
             String difference = previous.differenceFrom(recording,
                     Set.of(LinkComputerImpl.VARIABLES_LINKED_TO_OBJECT.key()));
-            if (difference != null) {
+            if (difference != null && difference.contains("first changed read")) {
+                // an input the hit had seen was rewritten before the computation read it: by another thread in this
+                // pass (a callee's links), so the skip stands for a computation run a moment earlier, and the next
+                // pass sees the change. Not the cache's doing: the same inputs did not give another output
+                linkCacheCheckMoved.incrementAndGet();
+                LOGGER.info("LINKCACHECHECK moved: an input of {} changed during the check: {}", methodInfo,
+                        difference);
+            } else if (difference != null && difference.contains("(on an owner new to it); same reads")) {
+                // same inputs; the output lands on an object this computation made itself (a call expression it
+                // creates, as for variablesLinkedToObject): the skipped run's own object holds its own copy
+                linkCacheCheckMoved.incrementAndGet();
+                LOGGER.info("LINKCACHECHECK fresh owner: {} writes onto an object it creates: {}", methodInfo,
+                        difference);
+            } else if (difference != null) {
                 linkCacheCheckFailures.incrementAndGet();
                 LOGGER.warn("LINKCACHECHECK: a cache hit on {} would differ from its computation: {}", methodInfo,
                         difference);
