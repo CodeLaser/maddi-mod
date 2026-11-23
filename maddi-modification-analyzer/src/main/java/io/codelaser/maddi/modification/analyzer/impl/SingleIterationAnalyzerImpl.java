@@ -213,6 +213,8 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
     private final AtomicInteger linkCacheHits = new AtomicInteger();
     private final Map<String, AtomicInteger> linkCacheMisses = new ConcurrentHashMap<>();
     private final AtomicInteger linkCacheCheckFailures = new AtomicInteger();
+    // per pass: why a method's links were computed rather than taken from the cache; shown on the slow-element line
+    private final Map<Info, String> linkOutcome = new ConcurrentHashMap<>();
     // LINKCACHECHECK: hits that are recomputed, to compare with the recording they would have replaced
     private final Set<MethodInfo> linkCheckPending = ConcurrentHashMap.newKeySet();
 
@@ -443,7 +445,8 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
                 linkComputer.setLockComputeDisabled(false);
             }
             joinAll(futures);
-            logSlowest("parallel", elementMillis);
+            logSlowest("parallel", elementMillis, linkOutcome);
+            linkOutcome.clear();
         } else {
             // the same "slowest elements" line the parallel branch prints: the sequential first iteration is
             // the one every corpus probe runs, and it had no per-element figure at all
@@ -453,7 +456,8 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
                 processElement(info, loopCycleBreaking, firstIteration, abstractTypes);
                 elementMillis.put(info, (System.nanoTime() - t0) / 1_000_000);
             }
-            logSlowest("sequential", elementMillis);
+            logSlowest("sequential", elementMillis, linkOutcome);
+            linkOutcome.clear();
         }
         long endLoop = System.currentTimeMillis();
         // derived rather than collected during the loop: same content as before, in deterministic
@@ -582,12 +586,15 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
         return 5_000L;
     }
 
-    private static void logSlowest(String mode, Map<Info, Long> elementMillis) {
+    private static void logSlowest(String mode, Map<Info, Long> elementMillis, Map<Info, String> outcome) {
         List<Map.Entry<Info, Long>> sorted = elementMillis.entrySet().stream()
                 .sorted(Map.Entry.<Info, Long>comparingByValue().reversed())
                 .toList();
+        // the bracket says why a slow method was linked again: the cache's first changed read, "context", "new",
+        // "first" (first iteration), or why its computation was not stored
         String slow = sorted.stream().takeWhile(e -> e.getValue() >= SLOW_ELEMENT_MS)
-                .map(e -> e.getKey().fullyQualifiedName() + "=" + e.getValue() + "ms")
+                .map(e -> e.getKey().fullyQualifiedName() + "=" + e.getValue() + "ms"
+                          + (outcome.get(e.getKey()) == null ? "" : "[" + outcome.get(e.getKey()) + "]"))
                 .reduce((a, b) -> a + ", " + b).orElse(null);
         if (slow != null) {
             LOGGER.info("Slow elements (at least {} ms, {}, {} elements): {}", SLOW_ELEMENT_MS, mode,
@@ -698,11 +705,16 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
      * LINKCACHECHECK, a hit is recomputed, and its recording compared afterwards in linkCacheStore.
      */
     private boolean linkCacheHit(MethodInfo methodInfo, boolean firstIteration) {
-        if (!linkCacheEnabled() || firstIteration) return false;
+        if (!linkCacheEnabled()) return false;
+        if (firstIteration) {
+            linkOutcome.put(methodInfo, "first");
+            return false;
+        }
         AnalysisAccessRecorder.Recording previous = linkRecordings.get(methodInfo);
         String change = previous == null ? "new" : previous.firstChange(linkCacheContext());
         if (change != null) {
             linkCacheMisses.computeIfAbsent(change, _ -> new AtomicInteger()).incrementAndGet();
+            linkOutcome.put(methodInfo, change);
             return false;
         }
         linkCacheHits.incrementAndGet();
@@ -726,6 +738,7 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
 
     private void linkCacheStore(MethodInfo methodInfo, AnalysisAccessRecorder.Recording recording, boolean completed) {
         if (!completed) {
+            linkOutcome.merge(methodInfo, "not completed", (a, b) -> a + ", " + b);
             AnalysisAccessRecorder.abandon(recording);
             linkRecordings.remove(methodInfo);
             return;
@@ -735,6 +748,7 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
         if (recording.unusable() != null) {
             linkCacheMisses.computeIfAbsent("not stored: " + recording.unusable(), _ -> new AtomicInteger())
                     .incrementAndGet();
+            linkOutcome.merge(methodInfo, "not stored: " + recording.unusable(), (a, b) -> a + ", " + b);
         }
         AnalysisAccessRecorder.Recording previous = recording.unusable() == null
                 ? linkRecordings.put(methodInfo, recording) : linkRecordings.remove(methodInfo);
