@@ -4,9 +4,11 @@ import static io.codelaser.maddi.modification.link.impl.LinkNatureImpl.CONTAINS_
 import static io.codelaser.maddi.modification.prepwork.Util.virtual;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -47,6 +49,7 @@ import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
 public record LinkFunctionalInterface(Runtime runtime, VirtualFieldComputer virtualFieldComputer,
                                       MethodInfo currentMethod) {
     private static final Logger LOGGER = LoggerFactory.getLogger(LinkFunctionalInterface.class);
+    private static final boolean NO_ORDERED_PRIMARIES = Gate.isSet("NOORDEREDPRIMARIES");
     private static final boolean NO_FRESH_FUNCTION_RESULT = Gate.isSet("NOFRESHFUNCTIONRESULT");
     private static final boolean NO_MAP_FIELD = Gate.isSet("NOMAPFIELD");
 
@@ -223,9 +226,15 @@ public record LinkFunctionalInterface(Runtime runtime, VirtualFieldComputer virt
                 // the result of 'm.computeIfAbsent(k, X::mk)' assigned from m, and with it from whatever m holds
                 // (CodeLaser/maddi-mod#114). The function's result is then as unrelated to its input as without the
                 // tracking. Gate NOFRESHFUNCTIONRESULT
-                Set<Variable> toPrimaries = links.stream().map(l -> Util.primary(l.to()))
-                        .filter(v -> NO_FRESH_FUNCTION_RESULT || !(v instanceof ObjectCreationVariable))
-                        .collect(Collectors.toUnmodifiableSet());
+                // in the links' order (CodeLaser/maddi-mod#103): the loop below adds per primary, and an unmodifiable
+                // set iterates in an order salted per JVM start. fernflower's SwitchPatternHelper
+                // .findNestedLastStatement, an Optional chain with 'p -> { ... return x; ... return null; }', came out
+                // 'rv ∩ null' in one JVM and 'rv ≈ null, rv.§$ ≺ null' in the next. Gate NOORDEREDPRIMARIES
+                Stream<Variable> primaries = links.stream().map(l -> Util.primary(l.to()))
+                        .filter(v -> NO_FRESH_FUNCTION_RESULT || !(v instanceof ObjectCreationVariable));
+                Set<Variable> toPrimaries = NO_ORDERED_PRIMARIES
+                        ? primaries.collect(Collectors.toUnmodifiableSet())
+                        : primaries.collect(Collectors.toCollection(LinkedHashSet::new));
 
                 VirtualFields vfMapSource = virtualFieldComputer.compute(objectPrimary.parameterizedType(),
                         false).virtualFields();
