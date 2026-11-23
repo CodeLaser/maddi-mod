@@ -69,6 +69,9 @@ public final class VariableInfoImpl implements VariableInfo, PreviousOrInitial, 
         this.assignments = assignments;
         this.reads = reads;
         this.isVariableInClosure = isVariableInClosure;
+        // created by a link computation: its linked variables are that computation's output (the analysis map
+        // registers itself)
+        if (AnalysisAccessRecorder.active()) AnalysisAccessRecorder.created(this);
     }
 
     /**
