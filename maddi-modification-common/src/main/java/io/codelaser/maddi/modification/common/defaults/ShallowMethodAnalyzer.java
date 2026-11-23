@@ -65,15 +65,38 @@ public class ShallowMethodAnalyzer extends AnnotationToProperty {
         this.analysisHelper = new AnalysisHelper();
     }
 
+    /*
+     CodeLaser/maddi-mod#103: the claim (DEFAULTS_ANALYZER) and the verdicts under ONE hold of the method's analysis
+     map. The link computer analyses a library method only when it has no DEFAULTS_ANALYZER yet, and then reads the
+     verdicts: with the claim set first and the monitor let go, a second thread on the same method skipped the analysis
+     and read the defaults (modified). Every read of the map takes this monitor (PropertyValueMapImpl), so a reader of
+     the claim now waits for the verdicts. Locks taken inside are leaves (parameter maps, the type's, the overridden
+     methods' up the hierarchy), so no cycle. Gate NOCLAIMWAIT (presence): the claim alone under the monitor, as before.
+     */
+    private static final boolean NO_CLAIM_WAIT = System.getenv("NOCLAIMWAIT") != null;
+
     public Map<Info, ShallowAnalyzer.InfoData> analyze(MethodInfo methodInfo) {
-        // atomic claim: check-then-set on the same monitor as the analysis map, so two threads reaching the
-        // same (callee's) method don't both pass the guard and double-set the write-once property
-        synchronized (methodInfo.analysis()) {
-            if (methodInfo.analysis().getOrDefault(DEFAULTS_ANALYZER, FALSE).isTrue()) {
-                return Map.of(); // already done
+        if (NO_CLAIM_WAIT) {
+            synchronized (methodInfo.analysis()) {
+                if (!claim(methodInfo)) return Map.of();
             }
-            methodInfo.analysis().set(DEFAULTS_ANALYZER, TRUE);
+            return analyzeClaimed(methodInfo);
         }
+        synchronized (methodInfo.analysis()) {
+            if (!claim(methodInfo)) return Map.of(); // already done
+            return analyzeClaimed(methodInfo);
+        }
+    }
+
+    // atomic claim: check-then-set on the same monitor as the analysis map, so two threads reaching the same
+    // (callee's) method don't both pass the guard and double-set the write-once property
+    private static boolean claim(MethodInfo methodInfo) {
+        if (methodInfo.analysis().getOrDefault(DEFAULTS_ANALYZER, FALSE).isTrue()) return false;
+        methodInfo.analysis().set(DEFAULTS_ANALYZER, TRUE);
+        return true;
+    }
+
+    private Map<Info, ShallowAnalyzer.InfoData> analyzeClaimed(MethodInfo methodInfo) {
         Map<Info, ShallowAnalyzer.InfoData> dataMap = new HashMap<>();
 
         boolean explicitlyEmpty = methodInfo.explicitlyEmptyMethod();
