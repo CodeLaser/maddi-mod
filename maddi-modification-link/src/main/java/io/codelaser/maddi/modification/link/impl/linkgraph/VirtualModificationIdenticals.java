@@ -138,9 +138,20 @@ public class VirtualModificationIdenticals {
                 .map(g -> groups.getOrDefault(g, EMPTY));
     }
 
+    /*
+     CodeLaser/maddi-mod#103: in a fixed order. The summary expands each of these members' groups into 'v ≡ w' links
+     (Graph.virtualModificationEdgeStream), so the order decides which way round a pair of the same primary comes
+     first and survives, and the order of the summary. An unmodifiable set iterates in an order salted per JVM start:
+     fernflower's MergeHelper.tryConvertForEach had 'firstDoExprent.right.instance.§m ≡ firstDoExprent.left.bytecode
+     .§m' one way round in one JVM, the other in the next, identical in every analysis within one. By FQN, as
+     Variable compares. Gate NOSORTVMI (presence): the unmodifiable set, as before.
+     */
+    private static final boolean NO_SORT = System.getenv("NOSORTVMI") != null;
+
     public Set<Variable> variablesPartOf(Variable primary) {
-        return memberToGroup.keySet().stream().filter(v -> primary.equals(Util.primary(v)))
-                .collect(Collectors.toUnmodifiableSet());
+        Stream<Variable> stream = memberToGroup.keySet().stream().filter(v -> primary.equals(Util.primary(v)));
+        if (NO_SORT) return stream.collect(Collectors.toUnmodifiableSet());
+        return stream.sorted().collect(Collectors.toCollection(LinkedHashSet::new));
     }
 
     // pass semantics are per-EDGE: a strict ≡ and a pass-marked ☷ between the same members live in

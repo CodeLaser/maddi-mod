@@ -63,6 +63,7 @@ import io.codelaser.maddi.modification.analyzer.nullability.World;
 import io.codelaser.maddi.modification.analyzer.shadow.ShadowModificationPass;
 import io.codelaser.maddi.modification.common.util.Culprits;
 import io.codelaser.maddi.modification.common.util.TolerantWrite;
+import io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl;
 import io.codelaser.maddi.modification.link.vf.CanonicalVirtuals;
 import io.codelaser.maddi.modification.link.impl.Gate;
 import io.codelaser.maddi.modification.link.impl.LinkComputerImpl;
@@ -419,7 +420,11 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
                         String structMethod = System.getenv("FPDUMP_STRUCT") == null ? ""
                                 : " sNonModifying=" + info.analysis().getOrNull(
                                 PropertyImpl.STRUCTURALLY_NON_MODIFYING_METHOD, ValueImpl.BoolImpl.class);
-                        v = "method nonModifying=" + b + structMethod + getset + evNonMod + evMethod + indMethod;
+                        // FPDUMP_LINKS: the method's link summary too, to compare runs of different JVMs (#103)
+                        String links = System.getenv("FPDUMP_LINKS") == null ? ""
+                                : " links=" + info.analysis().getOrNull(MethodLinkedVariablesImpl.METHOD_LINKS,
+                                MethodLinkedVariablesImpl.class);
+                        v = "method nonModifying=" + b + structMethod + getset + evNonMod + evMethod + indMethod + links;
                     } else if (info instanceof FieldInfo) {
                         var b = info.analysis().getOrNull(PropertyImpl.UNMODIFIED_FIELD,
                                 ValueImpl.BoolImpl.class);
