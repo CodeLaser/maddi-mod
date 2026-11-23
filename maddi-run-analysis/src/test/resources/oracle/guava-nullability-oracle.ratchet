@@ -47,6 +47,10 @@
 # returns. The unchecked-conversion cut of the Kotlin policy now holds under every policy (gate
 # UNCHECKEDSLOTSKOTLINONLY restores the old scope): noise 1,977 -> 1,786, unsafe 229 -> 226. Not yet re-measured on
 # laser1.
-unsafe	226
-noise	1786
+# 2026-11-21, the same plus the self call's summary without its returned nulls (LinkComputerImpl.withoutNullReturns,
+# gate SELFNULLRETURNS, for timefold's C# nullableWarnings 157 -> 152), on the Mac: unsafe 226 -> 224, noise 1,789.
+# That run had none of the TypeToken.runtimeType / Class.ownerType rows, which come and go run to run (0-35, about
+# as many noise; CodeLaser/maddi-mod#157), so a run with them reads up to ~1,820.
+unsafe	224
+noise	1789
 noiseSlack	20
