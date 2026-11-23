@@ -116,13 +116,30 @@ public class TestAnalysisFingerprint extends CommonTest {
         assertNotEquals(fImm, fMut, "the verdicts differ, so the fingerprints must differ");
     }
 
+    /*
+     the copy constructor's 'other.x' keeps its scope, and with it a source position, in the link encoding; 'this.x'
+     no longer does (maddi befc67579: an explicit 'this.x' is written as 'x'), so without it the raw fingerprints of
+     the shifted source would be equal and the test would not show the normalization doing anything
+     */
     @Language("java")
-    private static final String IMMUTABLE_SHIFTED = """
+    private static final String POSITIONED = """
+            package a.b;
+            public class X {
+                private final int x;
+                public X(int x) { this.x = x; }
+                public X(X other) { this.x = other.x; }
+                public int x() { return x; }
+            }
+            """;
+
+    @Language("java")
+    private static final String POSITIONED_SHIFTED = """
             package a.b;
             // a leading comment that shifts every line down: the analysis is identical, only positions move
             public class X {
                 private final int x;
                 public X(int x) { this.x = x; }
+                public X(X other) { this.x = other.x; }
                 public int x() { return x; }
             }
             """;
@@ -130,8 +147,8 @@ public class TestAnalysisFingerprint extends CommonTest {
     @DisplayName("a line-shifting edit does not change the position-normalized fingerprint")
     @Test
     public void testLineShiftInvariant() throws IOException {
-        Analyzed base = analyze("a.b.X", IMMUTABLE);
-        Analyzed shifted = analyze("a.b.X", IMMUTABLE_SHIFTED);
+        Analyzed base = analyze("a.b.X", POSITIONED);
+        Analyzed shifted = analyze("a.b.X", POSITIONED_SHIFTED);
         // raw dumps differ only in the embedded source positions...
         assertNotEquals(AnalysisFingerprint.of(base.runtime(), base.typeInfo(), AnalysisFingerprint.RAW),
                 AnalysisFingerprint.of(shifted.runtime(), shifted.typeInfo(), AnalysisFingerprint.RAW),

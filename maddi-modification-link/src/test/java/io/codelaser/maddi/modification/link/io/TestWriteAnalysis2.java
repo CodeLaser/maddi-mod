@@ -96,7 +96,7 @@ public class TestWriteAnalysis2 extends CommonTest {
             {"name": "Ta.b.X", "data":{"partOfConstructionType":["C<init>(0,int)"]}, "subs":[
              {"name": "Fi(0)", "data":{"finalField":1}},
              {"name": "Fn(1)", "data":{"finalField":1}},
-             {"name": "C<init>(0,int)", "data":{"methodLinks":[[],[[["P",["Ta.b.X","C<init>(0,int)","Pn(0)"]],[["P",["Ta.b.X","C<init>(0,int)","Pn(0)"]],"→",["F",["Ta.b.X","Fn(1)"],["variableExpression","5-23:5-26",["T",["Ta.b.X"]]]]]]],["T",["Ta.b.X"]],["A",["F",["Ta.b.X","Fn(1)"],["variableExpression","5-23:5-26",["T",["Ta.b.X"]]]]]]}},
+             {"name": "C<init>(0,int)", "data":{"methodLinks":[[],[[["P",["Ta.b.X","C<init>(0,int)","Pn(0)"]],[["P",["Ta.b.X","C<init>(0,int)","Pn(0)"]],"→",["F",["Ta.b.X","Fn(1)"]]]]],["T",["Ta.b.X"]],["A",["F",["Ta.b.X","Fn(1)"]]]]}},
              {"name": "MgetI(0)", "data":{"getSetField":["Fi(0)",false,false],"methodLinks":[[["R",["Ta.b.X","MgetI(0)"]],[["R",["Ta.b.X","MgetI(0)"]],"←",["F",["Ta.b.X","Fi(0)"]]]],[]],"nonModifyingMethod":1,"structurallyNonModifyingMethod":1}},
              {"name": "MgetN(1)", "data":{"getSetField":["Fn(1)",false,false],"methodLinks":[[["R",["Ta.b.X","MgetN(1)"]],[["R",["Ta.b.X","MgetN(1)"]],"←",["F",["Ta.b.X","Fn(1)"]]]],[]],"nonModifyingMethod":1,"structurallyNonModifyingMethod":1}}]}
             ]
