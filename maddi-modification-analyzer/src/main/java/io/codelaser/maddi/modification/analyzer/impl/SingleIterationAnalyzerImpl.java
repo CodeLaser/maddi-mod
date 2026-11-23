@@ -766,6 +766,12 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
                 linkCacheCheckMoved.incrementAndGet();
                 LOGGER.info("LINKCACHECHECK moved: an input of {} changed during the check: {}", methodInfo,
                         difference);
+            } else if (difference != null && difference.contains("(on an owner new to it); same reads")) {
+                // same inputs; the output lands on an object this computation made itself (a call expression it
+                // creates, as for variablesLinkedToObject): the skipped run's own object holds its own copy
+                linkCacheCheckMoved.incrementAndGet();
+                LOGGER.info("LINKCACHECHECK fresh owner: {} writes onto an object it creates: {}", methodInfo,
+                        difference);
             } else if (difference != null) {
                 linkCacheCheckFailures.incrementAndGet();
                 LOGGER.warn("LINKCACHECHECK: a cache hit on {} would differ from its computation: {}", methodInfo,
