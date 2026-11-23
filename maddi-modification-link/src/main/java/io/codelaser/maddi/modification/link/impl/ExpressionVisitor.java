@@ -1199,9 +1199,28 @@ public record ExpressionVisitor(Runtime runtime,
         return methodInfo.analysis().getOrDefault(PropertyImpl.RECURSIVE_METHOD, ValueImpl.BoolImpl.FALSE).isTrue();
     }
 
-    /** #127: a call from {@code current} back into its recursion (as far as RECURSIVE_METHOD can tell) */
+    /*
+     #127: a call from 'current' back into its recursion (as far as RECURSIVE_METHOD can tell). RECURSIVE_METHOD marks
+     a method that calls itself, or an enclosing method called from its own lambda or local class (ComputeCallGraph.
+     isRecursion), so one recursion lives inside one outermost method. Both methods recursive is not enough: two
+     self-recursive methods are two recursions, and an undecided verdict of the callee marked nothing, the caller then
+     read it as unmodified, and which of the two was linked first is thread timing in the parallel first pass
+     (CodeLaser/maddi-mod#103: fernflower's identifySecondaryFunctions(Statement, VarProcessor) hands varProc to its
+     Exprent overload, which modifies it; unmodified in 2 of 6 runs). Gate NOSAMERECURSION: both recursive, as before.
+     */
+    private static final boolean NO_SAME_RECURSION = System.getenv("NOSAMERECURSION") != null;
+
     static boolean inRecursion(MethodInfo current, MethodInfo callee) {
-        return callee.equals(current) || recursive(current) && recursive(callee);
+        if (callee.equals(current)) return true;
+        if (!recursive(current) || !recursive(callee)) return false;
+        return NO_SAME_RECURSION || outermost(current).equals(outermost(callee));
+    }
+
+    private static MethodInfo outermost(MethodInfo methodInfo) {
+        MethodInfo m = methodInfo;
+        MethodInfo enclosing;
+        while ((enclosing = m.typeInfo().enclosingMethod()) != null) m = enclosing;
+        return m;
     }
 
     private MethodLinkedVariables recurseIntoLinkComputer(MethodInfo methodInfo) {
