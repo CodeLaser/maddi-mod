@@ -96,7 +96,7 @@ public class TestBook040Containers extends BookTest {
                     @Override
                     public void set(int index, Integer i) { byteBuffer.putInt(index * Integer.BYTES, i); }
                 }
-                static class ErrorRegistry2 {
+                static class ErrorLog {
                     private final List<ErrorMessage> messages = new ArrayList<>();
                     public void add(ErrorMessage message) { messages.add(message); }
                     public void changeFirst() {
@@ -122,13 +122,13 @@ public class TestBook040Containers extends BookTest {
                 "BinaryExpression = !@Container",
                 "BinaryExpression.evaluate(errorRegistry) = @Modified",
                 "IntArray = @FinalFields @Container",
-                // ErrorRegistry2 is the class ErrorRegistry of the chapter's last example
+                // ErrorLog is the class of the chapter's last example
                 // DEVIATION: the book says not a @Container, with 'message' @Modified: the modification of the element
                 // in changeFirst reaches the field, but is not carried back to the parameter that was added to it
-                "ErrorRegistry2 = @Container",
-                "ErrorRegistry2.messages = @Modified",
-                "ErrorRegistry2.add() = @Modified",
-                "ErrorRegistry2.add(message) = @NotModified",
-                "ErrorRegistry2.changeFirst() = @Modified");
+                "ErrorLog = @Container",
+                "ErrorLog.messages = @Modified",
+                "ErrorLog.add() = @Modified",
+                "ErrorLog.add(message) = @NotModified",
+                "ErrorLog.changeFirst() = @Modified");
     }
 }

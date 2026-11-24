@@ -143,7 +143,7 @@ public class TestBook050Immutability extends BookTest {
                 interface Marker { }
                 static class EmptyClass { }
                 static class ImplementsMarker implements Marker { }
-                static class ExtendsEmptyClass extends ImplementsMarker { }
+                static class ExtendsEmptyClass extends EmptyClass { }
 
                 interface HasSize {
                     @NotModified

@@ -161,7 +161,9 @@ public class TestOverrideWeakensContract extends CommonTest {
                 "contract-violation @ a.b.X.MyString.size()",
                 "contract-violation @ a.b.X.Plain.equals(Object)",
                 "contract-violation @ a.b.X.Plain.toString()"), describe(run.messages()));
-        assertTrue(run.messages().stream().allMatch(m -> m.level().isError()));
+        // the authored conflict is an error; a computed violation of a library contract is a warning
+        assertTrue(run.messages().stream().allMatch(m -> m.level().isError()
+                                                         == m.category().toString().startsWith("contract-conflict")));
         assertTrue(!nonModifying(run, "MyString", "size"));
         assertTrue(!nonModifying(run, "Plain", "toString"));
         assertTrue(!nonModifying(run, "Plain", "equals"));
