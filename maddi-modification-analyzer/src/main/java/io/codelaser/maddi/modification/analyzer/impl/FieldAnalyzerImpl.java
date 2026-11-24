@@ -425,6 +425,21 @@ public class FieldAnalyzerImpl extends CommonAnalyzerImpl implements FieldAnalyz
                 // the virtual field realFieldPathRoot stops at
                 boolean sharesModification = LinkToField.sharesModification(link);
                 Variable toPrimary = sharesModification ? Util.primary(link.to()) : realFieldPathRoot(link.to());
+                /*
+                 #159, the holder's view: the field's content linked to a parameter's or return value's content
+                 ('this.list.§$s ⊆ 0:in.§$s', a copy constructor). The elements are hidden content of the list, but
+                 to the type that wrote 'List<C> list' they are C objects, shared with the caller: graded by the type
+                 arguments the holder wrote (holderContentIndependence). Before, such a link did not count, and a copy
+                 of the caller's mutable elements left the field, and the type, independent.
+                 */
+                boolean contentLink = false;
+                if (toPrimary == null && !Util.NO_HOLDER_ELEMENTS && !link.linkNature().isDecoration()) {
+                    Variable primaryTo = Util.primary(link.to());
+                    if (primaryTo instanceof ParameterInfo || primaryTo instanceof ReturnVariable) {
+                        toPrimary = primaryTo;
+                        contentLink = true;
+                    }
+                }
                 // a parameter every caller hands over, kept only in this owned field (the ownership round's feed): the
                 // field holds the caller's object, or a view of it, which the caller no longer holds. Its content
                 // still counts below.
@@ -457,6 +472,12 @@ public class FieldAnalyzerImpl extends CommonAnalyzerImpl implements FieldAnalyz
                         // marker's own type decided instead, and a getter returning items.subList(..) left the
                         // field, and the type, @Independent
                         toIndependent = independentOfType;
+                    } else if (contentLink) {
+                        toIndependent = holderContentIndependence(fieldInfo.type(), 0);
+                        if (toIndependent == null) {
+                            if (!cycleBreakingActive || !CB_FIELD_PESSIMISM) return null; // wait
+                            toIndependent = ValueImpl.IndependentImpl.DEPENDENT;
+                        }
                     } else if (!link.linkNature().isDecoration()) {
                         // a part of the field is linked to a parameter or return value. The
                         // TRANSPORTED CONTENT decides dependence, not the container: a content-tier
@@ -510,6 +531,40 @@ public class FieldAnalyzerImpl extends CommonAnalyzerImpl implements FieldAnalyz
                 }
             }
             return independentOfType.max(independent);
+        }
+
+        private static final int MAX_CONTENT_DEPTH = 4;
+
+        /*
+         #159: what the content of a field of declared type 'type' shares, to the type that declared it: the
+         component of an array, the type arguments of a generic type. A type parameter or Object is hidden content of
+         the holder as well (@Independent(hc=true)); an immutable-HC argument shares its own arguments in turn. A type
+         without arguments names no content: dependent. Null while an argument's immutability is undecided.
+         */
+        private Value.Independent holderContentIndependence(ParameterizedType type, int depth) {
+            List<ParameterizedType> contents = type.arrays() > 0 ? List.of(type.copyWithOneFewerArrays())
+                    : type.parameters();
+            if (contents.isEmpty()) return ValueImpl.IndependentImpl.DEPENDENT;
+            Value.Independent result = INDEPENDENT;
+            for (ParameterizedType content : contents) {
+                if (content.isTypeParameter() || content.bestTypeInfo() == null
+                    || content.arrays() == 0 && content.bestTypeInfo().isJavaLangObject()) {
+                    result = result.min(ValueImpl.IndependentImpl.INDEPENDENT_HC);
+                    continue;
+                }
+                Value.Immutable immutable = analysisHelper.typeImmutableNullIfUndecided(content);
+                if (immutable == null) return null;
+                if (immutable.isImmutable()) continue;
+                if (!immutable.isAtLeastImmutableHC() || content.arrays() > 0) {
+                    return ValueImpl.IndependentImpl.DEPENDENT;
+                }
+                Value.Independent inner = depth >= MAX_CONTENT_DEPTH || content.parameters().isEmpty()
+                        ? ValueImpl.IndependentImpl.INDEPENDENT_HC
+                        : holderContentIndependence(content, depth + 1);
+                if (inner == null) return null;
+                result = result.min(inner.isIndependent() ? ValueImpl.IndependentImpl.INDEPENDENT_HC : inner);
+            }
+            return result;
         }
 
         /*

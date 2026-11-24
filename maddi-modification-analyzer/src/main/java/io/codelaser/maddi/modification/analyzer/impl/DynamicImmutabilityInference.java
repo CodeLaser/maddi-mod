@@ -178,7 +178,7 @@ public class DynamicImmutabilityInference {
         if (value instanceof MethodCall mc) return ofMethodCall(mc);
         if (value instanceof VariableExpression ve) {
             if (ve.variable() instanceof FieldReference fr) {
-                return DynamicImmutability.ofField(fr.fieldInfo()); // already carries the promise
+                return DynamicImmutability.ofFieldObject(fr.fieldInfo()); // already carries the promise
             }
             if (ve.variable() instanceof ParameterInfo pi) {
                 return immutabilityOfParameter(pi, depth);
