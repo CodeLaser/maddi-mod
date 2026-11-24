@@ -1,6 +1,8 @@
 package io.codelaser.maddi.run.openjdkmain;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Set;
 
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
@@ -30,10 +32,35 @@ public class TestJavaToKotlinGuavaNullability {
                 .setLevel(Level.INFO);
     }
 
+    /*
+     ⛔ #158, FOR 0.9.7 ONLY: compilingFiles is not ratcheted but held to a floor. Thread timing in the parallel passes
+     after the first decides one nullability verdict on a group of Class parameters (Primitives.wrap, ClassToInstanceMap.
+     getInstance, ...), and with it whether MutableClassToInstanceMap.kt compiles: 610 or 609 at the same commits. The
+     ratchet fails on progress as on regress, so no recorded value passes every run. 608 still fails here. The ratchet
+     file keeps 610. REMOVE THIS FLOOR WITH THE #158 FIX: drop the reportedOnly set and COMPILING_FLOOR.
+     */
+    private static final String COMPILING = "compilingFiles";
+    private static final long COMPILING_FLOOR = 609;
+
     @Test
     public void test() throws Exception {
         JavaToKotlinRatchet.Corpus corpus = JavaToKotlinRatchet.parse("guava");
-        new JavaToKotlinRatchet("guava-nullability", Path.of("src/test/resources/j2k/guava-nullability.ratchet"))
+        new JavaToKotlinRatchet("guava-nullability", Path.of("src/test/resources/j2k/guava-nullability.ratchet"),
+                Set.of(COMPILING))
                 .run(corpus, CorpusNullability.kotlinOptions(corpus));
+
+        // run() writes the report before it ratchets, and the output directory is fresh for each run
+        Path report = Path.of("build/j2k/guava-nullability/report.txt");
+        long compiling = Files.readAllLines(report).stream()
+                .map(String::trim)
+                .filter(l -> l.startsWith(COMPILING + " "))
+                .map(l -> Long.parseLong(l.split("\\s+")[1]))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no " + COMPILING + " in " + report.toAbsolutePath()));
+        if (compiling < COMPILING_FLOOR) {
+            throw new AssertionError("THE TRANSLATION GOT WORSE on guava-nullability: " + COMPILING + " " + compiling
+                                     + " < " + COMPILING_FLOOR + " (the #158 floor; the ratchet file records 610). "
+                                     + "Read " + report + ".");
+        }
     }
 }

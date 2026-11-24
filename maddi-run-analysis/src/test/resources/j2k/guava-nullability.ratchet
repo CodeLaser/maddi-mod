@@ -52,14 +52,18 @@
 # while (true) body, which kotlinc does not smart-cast: LocalCache and MapMakerInternalMap, 608 compiling. maddi
 # ca521a7b4 brings the !! back there. The 25 more passing tests came with devel's verdict changes in the same range
 # (worktree-maddi-all measured 861,641 at maddi-mod 3040f720 already).
-# 2026-11-24, compilingFiles 610 -> 609 for the 0.9.7 release: the #158 nondeterminism (link summaries depend on
-# thread timing in the parallel passes; the Class-parameter group, MutableClassToInstanceMap.kt:89) made 610
-# unreliable. Back to 610 in 0.9.8 with the fix. A run at 610 still passes: the ratchet fails on worse only.
+# 2026-11-24, for the 0.9.7 release: compilingFiles is NOT RATCHETED but held to a floor of 609 in
+# TestJavaToKotlinGuavaNullability itself. The #158 nondeterminism (link summaries depend on thread timing in the
+# parallel passes after the first; the Class-parameter group, MutableClassToInstanceMap.kt:89) gives 610 or 609 at the
+# same commits, and the ratchet fails on progress as it does on regress, so no value written here passes every run.
+# (37acd825 wrote 609 here and said a run at 610 would still pass. It did not: gate 45448611544 failed on "Progress".)
+# The 610 below is the recorded value, not read while the floor is in place. With the #158 fix (0.9.8), remove the
+# floor and the reportedOnly set from the test, and 610 is ratcheted again.
 types	610
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	610
-compilingFiles	609
+compilingFiles	610
 bytecodeFiles	494
 testsPassing	861641
 testBytecodeFiles	341
