@@ -69,10 +69,11 @@ public class TestKotlinAnalyzerConstruction extends CommonKotlinAnalyzerTest {
     @Test
     public void initBlock() {
         a.assertSameAsJava("SnapInit");
-        assertEquals("type SnapFlat: @Immutable(hc=true) @Independent(hc=true)",
+        // CodeLaser/maddi-mod#159, the holder's view: a copy of mutable StringBuilders shares them with the caller
+        assertEquals("type SnapFlat: @FinalFields @Dependent",
                 a.java("SnapFlat").lines().findFirst().orElseThrow());
-        assertEquals("type SnapInit: @Immutable(hc=true) @Independent(hc=true)", a.kotlin("SnapInit").lines().findFirst().orElseThrow());
-        assertEquals("field items: final=true unmodified=true @Independent(hc=true)", a.kotlin("SnapInit", "items").lines().skip(1)
+        assertEquals("type SnapInit: @FinalFields @Dependent", a.kotlin("SnapInit").lines().findFirst().orElseThrow());
+        assertEquals("field items: final=true unmodified=true @Dependent", a.kotlin("SnapInit", "items").lines().skip(1)
                 .filter(l -> l.startsWith("field")).findFirst().orElseThrow());
     }
 
