@@ -433,7 +433,7 @@ public class FieldAnalyzerImpl extends CommonAnalyzerImpl implements FieldAnalyz
                  of the caller's mutable elements left the field, and the type, independent.
                  */
                 boolean contentLink = false;
-                if (toPrimary == null && !Util.NO_HOLDER_ELEMENTS && !link.linkNature().isDecoration()) {
+                if (toPrimary == null && !link.linkNature().isDecoration()) {
                     Variable primaryTo = Util.primary(link.to());
                     if (primaryTo instanceof ParameterInfo || primaryTo instanceof ReturnVariable) {
                         toPrimary = primaryTo;

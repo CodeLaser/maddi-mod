@@ -130,8 +130,6 @@ public class Util {
      tell a direct write from a call, so it is coarser than the reachability pass (WriteLinksAndModification.mayAliasAccessibleField, TestAccessibleReach 'reset').
      */
     public static final boolean NO_ACCESSIBLE_REACH = System.getenv("NOACCESSIBLEREACH") != null;
-    // #159: the type arguments a holder writes on the types of its fields are accessible types of that holder
-    public static final boolean NO_HOLDER_ELEMENTS = System.getenv("NOHOLDERELEMENTS") != null;
     private static final int ACCESSIBLE_TYPES_LIMIT = 400;
     /*
      Keyed by name, but a hit only for the very same TypeInfo. A name is not a type: the gate runs many tests in one
@@ -180,7 +178,7 @@ public class Util {
             } else {
                 // a generic type is a member per instantiation: 'Map<String, Map<String, Object>>' holds a
                 // 'Map<String, Object>', which mayBeSameObject tells apart from the outer map (#159)
-                if (ti == null || !seen.add(pt.arrays() + ":" + (!NO_HOLDER_ELEMENTS && !pt.parameters().isEmpty()
+                if (ti == null || !seen.add(pt.arrays() + ":" + (!pt.parameters().isEmpty()
                         ? pt.detailedString() : ti.fullyQualifiedName()))) {
                     continue;
                 }
@@ -198,7 +196,7 @@ public class Util {
              ('Plain<Block> plain', Plain extending ArrayList<E>). Not for the root: an object whose own type is the
              container has no holder that wrote the type argument.
              */
-            if (!NO_HOLDER_ELEMENTS && !isRoot) {
+            if (!isRoot) {
                 pt.parameters().stream().filter(a -> !hiddenFieldType(a)).forEach(todo::add);
             }
             if (isJdk(ti)) continue;

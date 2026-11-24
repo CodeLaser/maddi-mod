@@ -23,7 +23,6 @@ import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
 import io.codelaser.maddi.modification.common.AnalysisHelper;
-import io.codelaser.maddi.modification.prepwork.Util;
 
 /**
  * What a field HOLDS, as opposed to what its declared type says it may hold.
@@ -54,7 +53,7 @@ import io.codelaser.maddi.modification.prepwork.Util;
  * does. So the promise counts for the holder only when every type argument it wrote on the field's type is immutable
  * (with hidden content, then recursively its own arguments) or hidden content of the holder as well (a type
  * parameter, {@code Object}): {@link #ofField}. {@link #ofFieldObject} is the promise about the object itself, for
- * the inference that passes it from field to field and for the guard. Gate NOHOLDERELEMENTS.
+ * the inference that passes it from field to field and for the guard.
  *
  * <h2>Contract only, for now</h2>
  * Nothing infers the property yet — only a hand-written annotation, via {@code SourceContractMaterializer}. On
@@ -75,7 +74,7 @@ final class DynamicImmutability {
      */
     static Value.Immutable ofField(FieldInfo fieldInfo) {
         Value.Immutable dynamic = ofFieldObject(fieldInfo);
-        if (dynamic == null || Util.NO_HOLDER_ELEMENTS) return dynamic;
+        if (dynamic == null) return null;
         return argumentsImmutableForHolder(fieldInfo.type(), 0) ? dynamic : null;
     }
 

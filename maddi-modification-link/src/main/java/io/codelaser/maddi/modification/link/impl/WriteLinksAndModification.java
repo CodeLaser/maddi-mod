@@ -257,7 +257,7 @@ class WriteLinksAndModification {
      hidden content of the list; the field stays structurally unmodified, and the question is asked with the
      receiver's type instead: when it holds, 'this' is modified structurally (receiverStructurallyModified, handed out
      with the statement's modifications). The reachability pass asks with the method's type as the owner
-     (ShadowModificationPass.accessibleReach). Gate NOHOLDERELEMENTS.
+     (ShadowModificationPass.accessibleReach).
      */
     private Set<Variable> receiverStructurallyModified = new HashSet<>();
     // this statement's views, set per variable by verdictAndFlips
@@ -266,7 +266,7 @@ class WriteLinksAndModification {
 
     /** @return the causes when the primary itself is modified structurally by the element the link reaches */
     private Set<MethodInfo> holderElementModified(Variable primary, Link link) {
-        if (Util.NO_HOLDER_ELEMENTS || primary instanceof This) return null;
+        if (primary instanceof This) return null;
         LinkNature ln = link.linkNature();
         if (ln != CONTAINS_AS_MEMBER && ln != OBJECT_GRAPH_CONTAINS && ln != OBJECT_GRAPH_OVERLAPS) return null;
         Variable element = Util.firstRealVariable(link.to());

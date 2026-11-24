@@ -416,13 +416,12 @@ public record LinkMethodCall(JavaInspector javaInspector,
     /*
      #159: 'in.clone()' on an array is Object.clone(), whose summary relates its result to nothing, so a copy of a
      constructor's array argument linked nothing and the parameter came out independent while the getter handing out
-     an element was dependent. A clone shares the elements: 'result.§ ⊆ object.§', as Arrays.copyOf. Gate NOARRAYCLONE.
+     an element was dependent. A clone shares the elements: 'result.§ ⊆ object.§', as Arrays.copyOf.
      */
-    private static final boolean NO_ARRAY_CLONE = Gate.isSet("NOARRAYCLONE");
 
     private Links arrayCloneReturnValue(MethodInfo methodInfo, ParameterizedType concreteReturnType,
                                         Variable objectPrimary) {
-        if (NO_ARRAY_CLONE || objectPrimary == null || !"clone".equals(methodInfo.name())
+        if (objectPrimary == null || !"clone".equals(methodInfo.name())
             || !methodInfo.parameters().isEmpty()) {
             return null;
         }
