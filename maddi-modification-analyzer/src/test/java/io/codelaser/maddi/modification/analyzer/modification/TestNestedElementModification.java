@@ -17,8 +17,8 @@ import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
 /**
  * CodeLaser/maddi-mod#62: a modification reaching a local only through its own element ({@code vlist.get(i).put(..)},
  * a cast {@code Object} value) marked the local modified, but not the field holding the local as an element: the
- * completion of the modified set was written for a ≡-hit only. Deep modifying, structurally not, as #59's one-level
- * {@code deactivate}.
+ * completion of the modified set was written for a ≡-hit only. Deep modifying; structurally too since #159 (the
+ * holder's view), except where the object written is held as an {@code Object}.
  */
 public class TestNestedElementModification extends CommonTest {
 
@@ -81,11 +81,12 @@ public class TestNestedElementModification extends CommonTest {
         new IteratingAnalyzerImpl(javaInspector, new IteratingAnalyzerImpl.ConfigurationBuilder()
                 .setMaxIterations(10).setModificationViaReachability(modReach).build()).analyze(ao);
         // deep / structural
-        assertEquals("false/true", m(p, "deactivate"));
-        assertEquals("false/true", m(p, "labelVersion"));
-        assertEquals("false/true", m(p, "setAttr"));
-        assertEquals("false/true", m(p, "addNote"));
-        assertEquals("false/true", m(p, "renameInList"));
-        assertEquals("true/true", m(p, "count"));
+        // #159, the holder's view: the inner maps, lists and sets are of types P wrote, so modifying them is
+        // structural; the objects setAttr and addNote modify are held as Object values, hidden content of P too
+        assertEquals("deactivate=false/false labelVersion=false/false setAttr=false/true addNote=false/true"
+                     + " renameInList=false/false count=true/true",
+                "deactivate=" + m(p, "deactivate") + " labelVersion=" + m(p, "labelVersion")
+                + " setAttr=" + m(p, "setAttr") + " addNote=" + m(p, "addNote")
+                + " renameInList=" + m(p, "renameInList") + " count=" + m(p, "count"));
     }
 }

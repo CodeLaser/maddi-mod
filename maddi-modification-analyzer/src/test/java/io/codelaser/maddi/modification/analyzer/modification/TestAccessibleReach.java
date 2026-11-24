@@ -38,8 +38,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * accessible content, by SOME path of accessible fields, whichever path the method took to it; accessible content
  * judged by declared types. fernflower's LabelHelper: an edge comes out of the statement's edge list (hidden content),
  * and the statement it points to is modified. Statements are accessible content of a statement ('parent', 'first'),
- * so the write may be to the parameter's own state: structural. Writing the edge itself is not: no field of St
- * declares an Edge (IfSt's does, a subclass: hidden content of St, accessible content of an IfSt).
+ * so the write may be to the parameter's own state: structural. Since #159 (the holder's view) writing the edge
+ * itself is structural as well: St declared 'List<Edge> edges', so to St the edges are accessible content.
  */
 public class TestAccessibleReach extends CommonTest {
 
@@ -75,7 +75,7 @@ public class TestAccessibleReach extends CommonTest {
                 static void lift(St s) {
                     for (Edge e : s.getEdges()) e.getDest().addLabel(e);
                 }
-                // resetAllEdges: the edges themselves are written, and St declares no Edge field
+                // resetAllEdges: the edges themselves are written; St wrote 'List<Edge>' (#159)
                 static void reset(St s) {
                     for (Edge e : s.getEdges()) e.labeled = true;
                 }
@@ -83,7 +83,7 @@ public class TestAccessibleReach extends CommonTest {
                 static void resetIf(IfSt s) {
                     for (Edge e : s.getEdges()) e.labeled = true;
                 }
-                // a container of items that hold nothing back: deep only, as before
+                // a container of items: Bag wrote 'List<Item>', so the items are Bag's accessible content (#159)
                 static void touchAll(Bag b) {
                     for (Item i : b.items) i.touch();
                 }
@@ -108,11 +108,10 @@ public class TestAccessibleReach extends CommonTest {
         new IteratingAnalyzerImpl(javaInspector, new IteratingAnalyzerImpl.ConfigurationBuilder()
                 .setMaxIterations(10).setModificationViaReachability(reach).build()).analyze(ao);
         assertEquals("false/false", p(x, "lift"));
-        // the reachability pass knows the edge's own field is written (exact); the engine knows only that the edge is
-        // modified, maybe in what it holds, a St: structural, sound but coarser
-        assertEquals(reach ? "false/true" : "false/false", p(x, "reset"));
+        // #159: the edges are St's accessible content, the items Bag's
+        assertEquals("false/false", p(x, "reset"));
         assertEquals("false/false", p(x, "resetIf"));
-        assertEquals("false/true", p(x, "touchAll"));
+        assertEquals("false/false", p(x, "touchAll"));
     }
 
     /**

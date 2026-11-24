@@ -148,12 +148,13 @@ public class TestDeepOnlyRecursion extends CommonTest {
             List<Info> ao = prepWork(x);
             new IteratingAnalyzerImpl(javaInspector, new IteratingAnalyzerImpl.ConfigurationBuilder()
                     .setMaxIterations(10).setModificationViaReachability(true).build()).analyze(ao);
-            assertEquals("false/true", m(x, "viaValues"));
-            assertEquals("false/true", m(x, "viaGetter"));
+            // #159, the holder's view: Owner wrote the C of its maps and list, C's 'pool' is Owner's accessible content
+            assertEquals("false/false", m(x, "viaValues"));
+            assertEquals("false/false", m(x, "viaGetter"));
             // two element links deep, 'for (C c : groups.get(k)) c.getPool()' (CodeLaser/maddi-mod#104)
-            assertEquals("false/true", m(x, "viaMapGet"));
-            assertEquals("false/true", m(x, "viaField"));
-            assertEquals("false/true", m(x, "viaLocal"));
+            assertEquals("false/false", m(x, "viaMapGet"));
+            assertEquals("false/false", m(x, "viaField"));
+            assertEquals("false/false", m(x, "viaLocal"));
             assertEquals("true/true", m(x, "reads"));
         } finally {
             ShadowModificationPass.DEEP_WALK = before;

@@ -50,6 +50,10 @@ import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
  * <li>The reachability pass follows a local's element link ({@code i ∈ items.§$s}) and a call result's
  *     ({@code m.get(k)}) to the container, deep-only: its structural closure skips those edges. Before, its deep
  *     verdict missed every element-only modification of a parameter in a walkable body (touchAll true/true).</li>
+ * <li>{@code Holder.touchAll()}: #159, the holder's view. Holder wrote {@code List<Item> touched}, so the items are its
+ *     accessible content: the method is structurally modifying, the field (a list whose elements changed) is not. The
+ *     fixpoint asks with the receiver's type for a field of the receiver (WriteLinksAndModification.receiverAccessible).
+ *     The static {@code touchAll(List<Item>)} stays deep-only: the list is the parameter itself.</li>
  * </ul>
  */
 public class TestStructuralModification extends CommonTest {
@@ -162,7 +166,7 @@ public class TestStructuralModification extends CommonTest {
                                                     + " addVia=false/false touchVia=false/true"
                                                     + " addLambda=true/true,false/false"
                                                     + " Holder.items=false/false Holder.touched=false/true"
-                                                    + " Holder.add=false/false Holder.touchAll=false/true"
+                                                    + " Holder.add=false/false Holder.touchAll=false/false"
                                                     + " Sink.accept=false/false Reader.read=false/true"
                                                     + " useSink=true/true useReader=true/true";
 

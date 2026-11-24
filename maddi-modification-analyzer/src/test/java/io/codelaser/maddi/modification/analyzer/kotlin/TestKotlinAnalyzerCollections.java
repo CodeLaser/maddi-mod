@@ -46,16 +46,18 @@ public class TestKotlinAnalyzerCollections extends CommonKotlinAnalyzerTest {
     @Test
     public void listCopyOf() {
         a.assertSameAsJava("SnapJ", "items");
-        assertEquals("type SnapJ: @Immutable(hc=true) @Independent(hc=true)", a.kotlin("SnapJ").lines().findFirst().orElseThrow());
+        // CodeLaser/maddi-mod#159, the holder's view: a copy of mutable StringBuilders shares them with the caller
+        assertEquals("type SnapJ: @FinalFields @Dependent", a.kotlin("SnapJ").lines().findFirst().orElseThrow());
     }
 
-    /* by design: `toList()` is a mutable copy, and the accessor hands it out (the Java `Snap` keeps an immutable one) */
+    /* `toList()` is a mutable copy, `List.copyOf` an immutable one; both share the StringBuilders (#159) */
     @Test
     public void defensiveCopy() {
+        // CodeLaser/maddi-mod#159: List.copyOf and toList() agree now, the StringBuilders being shared either way
         assertEquals("""
-                type Snap: @Immutable(hc=true) @Independent(hc=true)
-                field items: final=true unmodified=true @Independent(hc=true)
-                method items: nonModifying=true @Independent(hc=true)""", a.java("Snap", "items"));
+                type Snap: @FinalFields @Dependent
+                field items: final=true unmodified=true @Dependent
+                method items: nonModifying=true @Dependent""", a.java("Snap", "items"));
         assertEquals("""
                 type Snap: @FinalFields @Dependent
                 field items: final=true unmodified=true @Dependent

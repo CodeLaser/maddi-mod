@@ -172,6 +172,7 @@ public record LinkMethodCall(JavaInspector javaInspector,
             // must be realized here at concrete types (Tier 1: Stream.collect(Collectors.toList()) -> result.§xs ⊆
             // stream.§xs). See collectorReturnValue.
             Links collectorLinks = collectorReturnValue(methodInfo, concreteReturnType, objectPrimary);
+            if (collectorLinks == null) collectorLinks = arrayCloneReturnValue(methodInfo, concreteReturnType, objectPrimary);
             concreteReturnValue = collectorLinks != null ? collectorLinks : LinksImpl.EMPTY;
             extraModified = new HashSet<>();
             extraDeepOnly = new HashSet<>();
@@ -405,6 +406,32 @@ public record LinkMethodCall(JavaInspector javaInspector,
                               || !collectTypeParametersFromVirtualField(hcObj.type()).containsAll(retTps))) {
             return null;
         }
+        Variable newPrimary = IntermediateVariable.returnValue(runtime, variableCounter.getAndIncrement(),
+                concreteReturnType);
+        Variable retHc = runtime.newFieldReference(hcRet, runtime.newVariableExpression(newPrimary), hcRet.type());
+        Variable objHc = runtime.newFieldReference(hcObj, runtime.newVariableExpression(objectPrimary), hcObj.type());
+        return new LinksImpl.Builder(newPrimary).add(retHc, LinkNatureImpl.IS_SUBSET_OF, objHc).build();
+    }
+
+    /*
+     #159: 'in.clone()' on an array is Object.clone(), whose summary relates its result to nothing, so a copy of a
+     constructor's array argument linked nothing and the parameter came out independent while the getter handing out
+     an element was dependent. A clone shares the elements: 'result.§ ⊆ object.§', as Arrays.copyOf.
+     */
+
+    private Links arrayCloneReturnValue(MethodInfo methodInfo, ParameterizedType concreteReturnType,
+                                        Variable objectPrimary) {
+        if (objectPrimary == null || !"clone".equals(methodInfo.name())
+            || !methodInfo.parameters().isEmpty()) {
+            return null;
+        }
+        ParameterizedType objectType = objectPrimary.parameterizedType();
+        if (objectType == null || objectType.arrays() == 0 || concreteReturnType.arrays() != objectType.arrays()) {
+            return null;
+        }
+        FieldInfo hcRet = virtualFieldComputer.compute(concreteReturnType, false).virtualFields().hiddenContent();
+        FieldInfo hcObj = virtualFieldComputer.compute(objectType, false).virtualFields().hiddenContent();
+        if (hcRet == null || hcObj == null) return null;
         Variable newPrimary = IntermediateVariable.returnValue(runtime, variableCounter.getAndIncrement(),
                 concreteReturnType);
         Variable retHc = runtime.newFieldReference(hcRet, runtime.newVariableExpression(newPrimary), hcRet.type());

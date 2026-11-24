@@ -220,9 +220,9 @@ public class TestBook050Immutability extends BookTest {
                 // modification of the field, and the type stops at @FinalFields
                 "ArrayContainer3b = @FinalFields @Container",
                 "ArrayContainer3b.data = @Modified",
-                // with clone(), the type is immutable, but the parameter loses its hc=true
+                // with clone(), as with Arrays.copyOf: the clone shares the elements (CodeLaser/maddi-mod#159)
                 "ArrayContainer3c = @Immutable(hc=true) @Container",
-                "ArrayContainer3c.<init>(ts) = @Independent",
+                "ArrayContainer3c.<init>(ts) = @Independent(hc=true)",
                 "SetBasedContainer1 = @FinalFields @Container",
                 "SetBasedContainer1.<init>(ts) = @Dependent",
                 "SetBasedContainer2 = @FinalFields @Container",

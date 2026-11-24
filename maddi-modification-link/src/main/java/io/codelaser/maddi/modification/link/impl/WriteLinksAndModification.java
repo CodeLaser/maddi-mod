@@ -117,6 +117,9 @@ class WriteLinksAndModification {
                             Map<Variable, Set<MethodInfo>> modifiedDuringEvaluation,
                             Set<Variable> deepOnlyDuringEvaluation) {
         Set<Variable> unmarkedModifications = new HashSet<>(modifiedDuringEvaluation.keySet());
+        receiverStructurallyModified = new HashSet<>();
+        modifiedNow = Map.of();
+        structurallyModifiedNow = Map.of();
         Map<Variable, Links.Builder> newLinkedVariables = new HashMap<>();
         List<Link> toRemove = new ArrayList<>();
         ReuseContext reuse = prepareReuse();
@@ -207,6 +210,8 @@ class WriteLinksAndModification {
         Set<Variable> unmarkedDeepOnly = deepOnlyDuringEvaluation.isEmpty() ? Set.of()
                 : unmarkedModifications.stream().filter(deepOnlyDuringEvaluation::contains)
                 .collect(Collectors.toUnmodifiableSet());
+        // #159: the receiver, modified structurally through an element of one of its fields (holderElementModified)
+        unmarkedModifications.addAll(receiverStructurallyModified);
         return new WriteResult(builtNewLinkedVariables, unmarkedModifications, unmarkedDeepOnly, sum);
     }
 
@@ -239,6 +244,71 @@ class WriteLinksAndModification {
         return Util.mayBeAccessibleContent(element.parameterizedType(), primary.parameterizedType(), false,
                 pt -> new AnalysisHelper().typeImmutable(pt).isAtLeastImmutableHC());
     }
+    /*
+     #159, the holder's view: the type arguments a type writes on its fields are accessible types of that type
+     (Util.accessibleTypes). An element modified, reached through a container ('x.items.§$s ∋ e', 'x.map.§$$s[-2] ≥ e',
+     '∩ e'), is then a structural modification of the variable whose type wrote the container's type, when the element's
+     type, or for an element modified only in what it holds its type arguments, is among that variable's accessible
+     types. The structural pass asks it with the deep view of the statement: the element need not be modified
+     structurally itself ('vlist.get(i).put(..)', vlist an element of 'Map<String, List<Map<String, String>>> versions').
+
+     The receiver gap: the method's structural verdict is read off 'this' and its fields, and 'this' keeps only its
+     direct links. A field of the receiver ('this.touched', a List) is judged with its own type, whose elements are
+     hidden content of the list; the field stays structurally unmodified, and the question is asked with the
+     receiver's type instead: when it holds, 'this' is modified structurally (receiverStructurallyModified, handed out
+     with the statement's modifications). The reachability pass asks with the method's type as the owner
+     (ShadowModificationPass.accessibleReach).
+     */
+    private Set<Variable> receiverStructurallyModified = new HashSet<>();
+    // this statement's views, set per variable by verdictAndFlips
+    private Map<Variable, Set<MethodInfo>> modifiedNow = Map.of();
+    private Map<Variable, Set<MethodInfo>> structurallyModifiedNow = Map.of();
+
+    /** @return the causes when the primary itself is modified structurally by the element the link reaches */
+    private Set<MethodInfo> holderElementModified(Variable primary, Link link) {
+        if (primary instanceof This) return null;
+        LinkNature ln = link.linkNature();
+        if (ln != CONTAINS_AS_MEMBER && ln != OBJECT_GRAPH_CONTAINS && ln != OBJECT_GRAPH_OVERLAPS) return null;
+        Variable element = Util.firstRealVariable(link.to());
+        if (element == null) return null;
+        Set<MethodInfo> causes = modifiedNow.get(element);
+        if (causes == null) return null;
+        Variable owner = primary;
+        if (primary instanceof FieldReference fr) {
+            if (!fr.scopeIsRecursivelyThis()) return null; // a field of another object: asked for that object
+            Variable v = fr;
+            while (v instanceof FieldReference f) v = f.scopeVariable();
+            if (!(v instanceof This) || receiverStructurallyModified.contains(v)) return null;
+            owner = v;
+        }
+        if (!writesAccessibleContent(owner, element)) return null;
+        if (owner != primary) {
+            receiverStructurallyModified.add(owner);
+            return null;
+        }
+        return causes;
+    }
+
+    private boolean writesAccessibleContent(Variable owner, Variable element) {
+        ParameterizedType ot = owner.parameterizedType();
+        ParameterizedType et = element.parameterizedType();
+        if (ot == null || et == null) return false;
+        // the element itself; or, modified in what it holds only, its type arguments (a container's elements)
+        List<ParameterizedType> written = structurallyModifiedNow.containsKey(element) ? List.of(et)
+                : et.arrays() > 0 ? List.of(et.copyWithoutArrays())
+                : et.parameters();
+        AnalysisHelper analysisHelper = new AnalysisHelper();
+        for (ParameterizedType w : written) {
+            // hidden content, of the holder as of anything: a type parameter, Object
+            if (w.isTypeParameter() || w.arrays() == 0 && w.isJavaLangObject()) continue;
+            if (Util.mayBeAccessibleContent(w, ot, false,
+                    pt -> analysisHelper.typeImmutable(pt).isAtLeastImmutableHC())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private Map<Variable, Set<MethodInfo>> modifiedElementOf = Map.of();
 
     /*
@@ -681,6 +751,8 @@ class WriteLinksAndModification {
                                  Map<Variable, Set<MethodInfo>> modifiedInThisEvaluation,
                                  Map<Variable, Set<MethodInfo>> structurallyModifiedInThisEvaluation,
                                  List<Link> toRemove) {
+        modifiedNow = modifiedInThisEvaluation;
+        structurallyModifiedNow = structurallyModifiedInThisEvaluation;
         // 'modified by THIS statement's evaluation' — directly, or through a link to something modified now.
         // For previouslyModified variables only the direct check runs: the notLinked* probes (and
         // notLinkedToModified's completion side effect) stay short-circuited exactly as before.
@@ -1317,6 +1389,13 @@ class WriteLinksAndModification {
                                         boolean structural) {
         Map<Variable, Set<MethodInfo>> elementOf = structural ? structurallyModifiedElementOf : modifiedElementOf;
         for (Link link : builder) {
+            if (structural) {
+                Set<MethodInfo> causes = holderElementModified(builder.primary(), link);
+                if (causes != null) {
+                    modifiedVariablesAndTheirCause.putIfAbsent(builder.primary(), causes);
+                    return false;
+                }
+            }
             if (link.linkNature() == IS_ELEMENT_OF && !elementOf.isEmpty()) {
                 Set<MethodInfo> causes = elementOf.get(link.to());
                 if (causes != null) {

@@ -19,8 +19,10 @@ package io.codelaser.maddi.modification.analyzer.impl;
 
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.info.FieldInfo;
+import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.impl.analysis.PropertyImpl;
 import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
+import io.codelaser.maddi.modification.common.AnalysisHelper;
 
 /**
  * What a field HOLDS, as opposed to what its declared type says it may hold.
@@ -44,6 +46,15 @@ import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
  * about the container would silently be read as a promise about everything inside it. Each caller is responsible
  * for that check; this class only supplies the value.
  *
+ * <h2>The holder's view (#159)</h2>
+ * The elements are hidden content of the container, not of the type that holds it: a type that declares
+ * {@code List<C> list} wrote {@code C}, and to it the elements are C objects it can call {@code increment()} on. A
+ * {@code List.copyOf(in)} of mutable C shares those objects with the caller exactly as {@code new ArrayList<>(in)}
+ * does. So the promise counts for the holder only when every type argument it wrote on the field's type is immutable
+ * (with hidden content, then recursively its own arguments) or hidden content of the holder as well (a type
+ * parameter, {@code Object}): {@link #ofField}. {@link #ofFieldObject} is the promise about the object itself, for
+ * the inference that passes it from field to field and for the guard.
+ *
  * <h2>Contract only, for now</h2>
  * Nothing infers the property yet — only a hand-written annotation, via {@code SourceContractMaterializer}. On
  * unannotated code every method here returns null and the declared type decides exactly as before, which is why
@@ -62,9 +73,39 @@ final class DynamicImmutability {
      * {@code @FinalFields} must not be read as an independence claim.
      */
     static Value.Immutable ofField(FieldInfo fieldInfo) {
+        Value.Immutable dynamic = ofFieldObject(fieldInfo);
+        if (dynamic == null) return null;
+        return argumentsImmutableForHolder(fieldInfo.type(), 0) ? dynamic : null;
+    }
+
+    /** The promise about the object the field holds, whatever its elements are to the field's owner. */
+    static Value.Immutable ofFieldObject(FieldInfo fieldInfo) {
         Value.Immutable dynamic = fieldInfo.analysis().getOrNull(PropertyImpl.IMMUTABLE_FIELD,
                 ValueImpl.ImmutableImpl.class);
         return dynamic != null && dynamic.isAtLeastImmutableHC() ? dynamic : null;
+    }
+
+    private static final AnalysisHelper ANALYSIS_HELPER = new AnalysisHelper();
+    private static final int MAX_ARGUMENT_DEPTH = 4;
+
+    /*
+     An undecided argument reads as mutable (AnalysisHelper.typeImmutable): no promise yet, the declared type decides,
+     and a later pass improves the verdict once the argument is decided.
+     */
+    private static boolean argumentsImmutableForHolder(ParameterizedType type, int depth) {
+        for (ParameterizedType arg : type.parameters()) {
+            if (arg.isTypeParameter() || arg.bestTypeInfo() == null
+                || arg.arrays() == 0 && arg.bestTypeInfo().isJavaLangObject()) {
+                continue; // hidden content of the holder too
+            }
+            Value.Immutable immutable = ANALYSIS_HELPER.typeImmutable(arg);
+            if (immutable == null || !immutable.isAtLeastImmutableHC()) return false;
+            if (!immutable.isImmutable()
+                && (depth >= MAX_ARGUMENT_DEPTH || !argumentsImmutableForHolder(arg, depth + 1))) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

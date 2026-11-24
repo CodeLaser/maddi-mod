@@ -40,7 +40,8 @@ import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
  * <p>
  * Modification is per-parameter "unmodified/structurally unmodified" (U or M). The written {@code Bits} is accessible
  * content of a {@code BitsMap} (a plain array field) and so of a {@code Node} (#130): structural. A {@code Node} out of
- * the {@code Graph}'s list is hidden content of the {@code Ssa}: deep only.
+ * the {@code Graph}'s list is accessible content of the {@code Ssa} since #159 (the holder's view: Graph wrote
+ * {@code List<Node>}): structural too.
  */
 public class TestEntryValueModification extends CommonTest {
 
@@ -105,14 +106,15 @@ public class TestEntryValueModification extends CommonTest {
     @DisplayName("an entry's value modified: the owner of the entries' values, with the reachability pass")
     @Test
     public void reachability() {
-        assertEquals("s1=MM s2=MM s3=MM s4=MU", run(true));
+        // #159, the holder's view: Graph wrote 'List<Node>', so s4's Node is accessible content of the Ssa as well
+        assertEquals("s1=MM s2=MM s3=MM s4=MM", run(true));
     }
 
     // KNOWN GAP, the fixpoint engine only (production runs the reachability pass): the explicit iterator shapes
     @DisplayName("idem, the fixpoint engine: the for-each only")
     @Test
     public void fixpoint() {
-        assertEquals("s1=MU s2=UU s3=UU s4=UU", run(false));
+        assertEquals("s1=MM s2=UU s3=UU s4=UU", run(false));
     }
 
     /*

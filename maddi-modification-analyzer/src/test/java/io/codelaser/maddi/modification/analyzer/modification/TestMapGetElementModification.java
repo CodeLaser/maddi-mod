@@ -35,7 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 /**
  * CodeLaser/maddi-mod#104: an element of a collection held as a map field's value, reached by a for-each directly over
  * the lookup ({@code for (C c : groups.get(k))}), modified. The element sits two links deep; the map's content is
- * modified, so the method is deep-modifying, not structurally.
+ * modified, so the method is deep-modifying; structurally too since #159, Owner having written the element type.
  */
 public class TestMapGetElementModification extends CommonTest {
 
@@ -76,7 +76,8 @@ public class TestMapGetElementModification extends CommonTest {
                 .setMaxIterations(10).setModificationViaReachability(reach).build()).analyze(ao);
         String verdicts = Stream.of("viaMapGet", "viaListGet", "viaLocal", "reads")
                 .map(n -> n + "=" + m(x, n)).collect(Collectors.joining(", "));
-        assertEquals("viaMapGet=false/true, viaListGet=false/true, viaLocal=false/true, reads=true/true", verdicts);
+        // #159, the holder's view: Owner wrote the C of 'Map<String, List<C>>', C's 'pool' is Owner's accessible content
+        assertEquals("viaMapGet=false/false, viaListGet=false/false, viaLocal=false/false, reads=true/true", verdicts);
     }
 
     private static String m(TypeInfo typeInfo, String name) {

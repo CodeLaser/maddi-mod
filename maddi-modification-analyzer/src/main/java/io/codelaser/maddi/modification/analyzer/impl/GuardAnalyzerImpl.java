@@ -896,7 +896,7 @@ public class GuardAnalyzerImpl extends CommonAnalyzerImpl implements GuardAnalyz
             return Proof.MUTABLE;
         }
         if (value instanceof VariableExpression ve && ve.variable() instanceof FieldReference fr
-            && DynamicImmutability.ofField(fr.fieldInfo()) != null) {
+            && DynamicImmutability.ofFieldObject(fr.fieldInfo()) != null) {
             return Proof.IMMUTABLE; // another field carrying the same promise
         }
         // The parameter case, which used to be unverifiable by definition: since part 2,
