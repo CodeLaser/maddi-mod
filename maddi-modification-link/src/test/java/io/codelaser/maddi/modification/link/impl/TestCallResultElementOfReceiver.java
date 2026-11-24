@@ -20,6 +20,8 @@ import io.codelaser.maddi.modification.prepwork.variable.MethodLinkedVariables;
  a map or list held in a field ('getClass ∈ this.classes.§..'), and the caller modifies it. The element is the field's
  hidden content: modifying it modifies 'this', deep-only, as the direct 'classes.get(n)' does. Found by the rust-llvm
  oracle on fernflower's StructContext.instanceOf ('getClass(valclass)', then the lazily loading 'getPool()').
+ Since CodeLaser/maddi-mod#159 (the holder's view) the direct form marks 'this' as well: Ctx wrote 'Map<String, C>', so
+ to Ctx a C is accessible content, and 'getPool()' writes its field.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class TestCallResultElementOfReceiver extends CommonTest {
@@ -67,7 +69,7 @@ public class TestCallResultElementOfReceiver extends CommonTest {
     @DisplayName("modifying an element handed out by a getter modifies 'this', as the direct form does")
     @Test
     public void viaGetter() {
-        assertEquals("[-] --> -  MOD[this.classes]", mlv("direct"));
+        assertEquals("[-] --> -  MOD[this, this.classes]", mlv("direct"));
         assertEquals("[-] --> -  MOD[this]", mlv("viaGetter"));
         assertEquals("[-] --> -  MOD[this]", mlv("viaGetterChain"));
         assertEquals("[] --> -  MOD[this]", mlv("viaFirst"));
