@@ -1035,10 +1035,17 @@ public class GuardAnalyzerImpl extends CommonAnalyzerImpl implements GuardAnalyz
         if (methodInfo.isAbstract()) return; // nothing computed; its implementations override the library method too
         Value.Bool computed = methodInfo.analysis().getOrNull(NON_MODIFYING_METHOD, ValueImpl.BoolImpl.class);
         if (computed != null && computed.isFalse()) {
-            reportViolation(methodInfo, blameMethodModifying(methodInfo),
-                    MessageImpl.cause(contracted, "@NotModified in the annotated API"),
+            // A WARNING, not an error: the computed verdict rests on the annotated APIs' defaults, which assume
+            // the parameters of mutable type modified where nobody wrote otherwise (Arrays.deepHashCode(Object[])),
+            // and on @NotModified contracts that stateful iterators and lazy lists legitimately break. As an error
+            // it failed the timefold corpus with 92 of them (gate 2026-11-24). An authored @Modified, above,
+            // stays an error.
+            Message blame = blameMethodModifying(methodInfo);
+            Message location = MessageImpl.cause(contracted, "@NotModified in the annotated API");
+            analyzerMessages.add(MessageImpl.warn(methodInfo, CONTRACT_VIOLATION,
                     methodInfo.fullyQualifiedName() + " overrides " + contracted.fullyQualifiedName()
-                    + " but is modifying, violating its @NotModified contract");
+                    + " but is modifying, violating its @NotModified contract",
+                    blame == null ? new Message[]{location} : new Message[]{blame, location}));
         }
     }
 
