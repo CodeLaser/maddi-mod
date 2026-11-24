@@ -126,6 +126,9 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
     // pass that moment depends on thread timing, and so does the verdict (guava, 8 threads: 6-10 FPDUMP lines
     // differ between runs, 0 sequentially). Opt-in while measuring.
     static final boolean SEQUENTIAL_CYCLE_BREAKING = Gate.isSet("SEQCYCLEBREAKING");
+    // DIAGNOSTIC (#158): SEQLATERPASSES runs every pass after the first sequentially; the first keeps its waves.
+    // guava, 3 JVMs: identical verdict and link dumps with it (22 min a run), 3 different ones without (6 min).
+    static final boolean SEQUENTIAL_LATER_PASSES = Gate.isSet("SEQLATERPASSES");
     // CBSWEEP (#82): the deterministic alternative to SEQCYCLEBREAKING that keeps the loop parallel; see goInternal.
     // The default since it measured identical outputs on the oracles and corpora, and converges jenkins; NOCBSWEEP
     // turns it off.
@@ -420,7 +423,7 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
             }
         } else if (PARALLEL_THREADS > 1 && !firstIteration
                    && analysisOrder.size() >= MIN_ELEMENTS_FOR_PARALLEL
-                   && !(activateCycleBreaking && SEQUENTIAL_CYCLE_BREAKING)) {
+                   && !(activateCycleBreaking && SEQUENTIAL_CYCLE_BREAKING) && !SEQUENTIAL_LATER_PASSES) {
             LOGGER.debug("Parallel iteration: {} threads over {} elements", PARALLEL_THREADS, analysisOrder.size());
             List<Future<?>> futures = new ArrayList<>(analysisOrder.size());
             Map<Info, Long> elementMillis = new ConcurrentHashMap<>();
