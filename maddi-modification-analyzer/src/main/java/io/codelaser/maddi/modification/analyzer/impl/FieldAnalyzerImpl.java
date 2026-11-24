@@ -539,12 +539,14 @@ public class FieldAnalyzerImpl extends CommonAnalyzerImpl implements FieldAnalyz
          #159: what the content of a field of declared type 'type' shares, to the type that declared it: the
          component of an array, the type arguments of a generic type. A type parameter or Object is hidden content of
          the holder as well (@Independent(hc=true)); an immutable-HC argument shares its own arguments in turn. A type
-         without arguments names no content: dependent. Null while an argument's immutability is undecided.
+         without arguments names nothing the holder wrote: its content is its own hidden content, and the link counts
+         as before #159, not at all (langchain4j's 'Method isVirtualMethod', fernflower's 'LimitContainer
+         limitsContainer'). Null while an argument's immutability is undecided.
          */
         private Value.Independent holderContentIndependence(ParameterizedType type, int depth) {
             List<ParameterizedType> contents = type.arrays() > 0 ? List.of(type.copyWithOneFewerArrays())
                     : type.parameters();
-            if (contents.isEmpty()) return ValueImpl.IndependentImpl.DEPENDENT;
+            if (contents.isEmpty()) return INDEPENDENT;
             Value.Independent result = INDEPENDENT;
             for (ParameterizedType content : contents) {
                 if (content.isTypeParameter() || content.bestTypeInfo() == null
