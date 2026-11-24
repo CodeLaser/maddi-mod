@@ -35,7 +35,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 /**
  * CodeLaser/maddi-mod#62, the channel left after df3d86a2: an element of a map field reached through one of the map's
  * views, a for-each over {@code values()} or an entry's {@code getValue()}, modified. The map's content is modified,
- * so the method is deep-modifying; not structurally, the map itself keeps its keys and values.
+ * so the method is deep-modifying; the map itself keeps its keys and values, but P wrote the sets' type, so to P they
+ * are accessible content: structurally modifying since #159 (the holder's view).
  */
 public class TestMapViewElementModification extends CommonTest {
 
@@ -82,7 +83,8 @@ public class TestMapViewElementModification extends CommonTest {
                 .setMaxIterations(10).setModificationViaReachability(reach).build()).analyze(ao);
         String verdicts = Stream.of("renameTags", "clearTags", "renameInList", "count")
                 .map(n -> n + "=" + m(p, n)).collect(Collectors.joining(", "));
-        assertEquals("renameTags=false/true, clearTags=false/true, renameInList=false/true, count=true/true",
+        // #159, the holder's view: P wrote the Set<String> of its map and list, the sets are P's accessible content
+        assertEquals("renameTags=false/false, clearTags=false/false, renameInList=false/false, count=true/true",
                 verdicts);
     }
 

@@ -101,7 +101,8 @@ public class TestBook080Elements extends CommonTest {
         assertEquals("false/true", p(x, "clearList"), "(3): the list changes in its elements only");
         assertEquals("false/true", p(x, "clearBox"), "(4): to Box, the elements are its type parameter T");
         assertEquals("false/false", p(x, "addChild"), "(5)");
-        assertEquals("false/true", p(x, "clearLeaves"), "no accessible field a child could be");
+        // #159, the holder's view: Leaf wrote 'List<Leaf>', so to Leaf its children are accessible content
+        assertEquals("false/false", p(x, "clearLeaves"), "the children are Leaf's own declared content");
         // the step back to the elements: done when the element is modified locally (CodeLaser/maddi-mod#113),
         // not yet through a callee
         assertEquals("true/true", p(x, "useClearList"));

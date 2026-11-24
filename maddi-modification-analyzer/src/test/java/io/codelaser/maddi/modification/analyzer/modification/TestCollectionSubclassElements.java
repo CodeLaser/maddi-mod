@@ -80,14 +80,14 @@ public class TestCollectionSubclassElements extends CommonTest {
         List<Info> ao = prepWork(x);
         new IteratingAnalyzerImpl(javaInspector, new IteratingAnalyzerImpl.ConfigurationBuilder()
                 .setMaxIterations(10).setModificationViaReachability(reach).build()).analyze(ao);
-        assertEquals("false/true", m(x, "listMarkers"));
-        assertEquals("false/true", m(x, "plainMarkers"));
-        assertEquals("false/true", m(x, "keyedMarkers"));
-        assertEquals("false/true", m(x, "keyedCall"));
-        assertEquals("false/true", m(x, "keyedGet"));
-        assertEquals("true/true", m(x, "keyedRead"));
-        assertEquals("false/true", f(x, "keyed"));
-        assertEquals("false/true", f(x, "plain"));
+        // #159, the holder's view: X wrote the Block of 'List<Block>', 'Plain<Block>', 'Keyed<Block, Integer>', so the
+        // blocks are X's accessible content; the fields themselves change in their elements only
+        assertEquals("listMarkers=false/false plainMarkers=false/false keyedMarkers=false/false keyedCall=false/false"
+                     + " keyedGet=false/false keyedRead=true/true keyed=false/true plain=false/true",
+                "listMarkers=" + m(x, "listMarkers") + " plainMarkers=" + m(x, "plainMarkers")
+                + " keyedMarkers=" + m(x, "keyedMarkers") + " keyedCall=" + m(x, "keyedCall")
+                + " keyedGet=" + m(x, "keyedGet") + " keyedRead=" + m(x, "keyedRead")
+                + " keyed=" + f(x, "keyed") + " plain=" + f(x, "plain"));
     }
 
     private static String m(TypeInfo typeInfo, String name) {

@@ -33,7 +33,8 @@ import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
 
 /**
  * CodeLaser/maddi-mod#59: modifying a value taken out of a map field ({@code products.get(sku).put(...)}) modifies the
- * field's content, so the method is modifying (deep) but structurally non-modifying. The reachability pass skipped
+ * field's content, so the method is modifying (deep); since #159 structurally modifying as well, the value being of a
+ * type the holder wrote ('Map<String, Map<String, Object>>'). The reachability pass skipped
  * the summary's receiver-rooted deep-only entry of a walkable body, and its walk does not follow the element link
  * {@code p ∈ this.products}: it wrote the deep verdict TRUE.
  */
@@ -88,9 +89,10 @@ public class TestMapValueModification extends CommonTest {
         new IteratingAnalyzerImpl(javaInspector, new IteratingAnalyzerImpl.ConfigurationBuilder()
                 .setMaxIterations(10).setModificationViaReachability(modReach).build()).analyze(ao);
         // deep / structural
-        assertEquals("false/true", m(c, "deactivate"));
-        assertEquals("false/true", m(c, "deactivateDirect"));
-        assertEquals("false/true", m(c, "tag"));
-        assertEquals("false/false", m(c, "put"));
+        // #159, the holder's view: Catalog wrote 'Map<String, Object>' and 'List<String>' as the values of its maps,
+        // so modifying such a value modifies Catalog's accessible content
+        assertEquals("deactivate=false/false deactivateDirect=false/false tag=false/false put=false/false",
+                "deactivate=" + m(c, "deactivate") + " deactivateDirect=" + m(c, "deactivateDirect")
+                + " tag=" + m(c, "tag") + " put=" + m(c, "put"));
     }
 }

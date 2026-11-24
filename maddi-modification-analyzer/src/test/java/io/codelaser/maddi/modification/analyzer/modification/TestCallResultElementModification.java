@@ -35,7 +35,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 /**
  * CodeLaser/maddi-mod#96, fernflower's NestedClassProcessor.setLambdaVars reduced: an object reached as a call result
  * through a collection element ({@code parent.getWrapper().getMethods().getWithKey(k)}), modified. It is in the
- * parameter's object graph ({@code ≤}), not a field of it ({@code ≺}); the parameter is modified deeply.
+ * parameter's object graph ({@code ≤}), not a field of it ({@code ≺}); the parameter is modified deeply, and since
+ * #159 structurally: the types on the way wrote the container types (the holder's view).
  */
 public class TestCallResultElementModification extends CommonTest {
 
@@ -100,7 +101,9 @@ public class TestCallResultElementModification extends CommonTest {
                 .setMaxIterations(10).setModificationViaReachability(reach).build()).analyze(ao);
         String verdicts = Stream.of("setVars", "readVars").map(n -> n + "=" + p0(p, n))
                 .collect(Collectors.joining(", "));
-        assertEquals("setVars=false/true, readVars=true/true", verdicts);
+        // #159, the holder's view: ClassWrapper wrote 'KeyedList<MethodWrapper>', so the VarProc's map is accessible content
+        // of a Node, all the way down
+        assertEquals("setVars=false/false, readVars=true/true", verdicts);
     }
 
     private static String p0(TypeInfo typeInfo, String name) {

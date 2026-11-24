@@ -116,18 +116,22 @@ public class Util {
      modification of p when the object written is p's accessible content, reached by SOME path of accessible fields in
      the heap the call leaves, whichever path the method took to it. Accessible content is judged by declared types:
      the fields of the declared type and its supertypes, not a subclass's (IfStatement.ifedge, seen through 'Statement
-     parent', is hidden content of Statement); a field typed by a type parameter or Object, and the elements of a
-     container, are hidden. An object a method reaches through hidden content (an element of p's edge list) may so
-     be accessible content of p as well: fernflower's 'edge.getDestination().addLabeledEdge(edge)' writes a
+     parent', is hidden content of Statement); a field typed by a type parameter or Object is hidden. The elements of
+     a JDK container are hidden content of the container, but accessible content of the type that declared the field
+     with that type argument (#159, the holder's view: to List<E> its elements are E, to the type that wrote
+     'List<Item> items' they are Items). An object a method reaches through hidden content (an element of p's edge
+     list) may so be accessible content of p as well: fernflower's 'edge.getDestination().addLabeledEdge(edge)' writes a
      Statement, and a Statement is accessible content of the Statement p ('parent', 'first'; p itself). The run-time
      check (rust codelaser-dynamic-modification, Walk) follows the same definition. Gate NOACCESSIBLEREACH.
      Three approximations, accepted by Bart on 2026-11-19 and described in the book (§080, 'structural-definition'):
      (a) a call compares the written object and the application objects it holds, not its JDK containers
      (mayBeAccessibleContent, exact = false); (b) the owner's own type counts only through a field back to it
-     (accessibleTypes); (c) the fixpoint engine cannot tell a direct write from a call, so it is coarser than the
-     reachability pass (WriteLinksAndModification.mayAliasAccessibleField, TestAccessibleReach 'reset').
+     (accessibleTypes), a container field 'List<Leaf> children' included since #159; (c) the fixpoint engine cannot
+     tell a direct write from a call, so it is coarser than the reachability pass (WriteLinksAndModification.mayAliasAccessibleField, TestAccessibleReach 'reset').
      */
     public static final boolean NO_ACCESSIBLE_REACH = System.getenv("NOACCESSIBLEREACH") != null;
+    // #159: the type arguments a holder writes on the types of its fields are accessible types of that holder
+    public static final boolean NO_HOLDER_ELEMENTS = System.getenv("NOHOLDERELEMENTS") != null;
     private static final int ACCESSIBLE_TYPES_LIMIT = 400;
     /*
      Keyed by name, but a hit only for the very same TypeInfo. A name is not a type: the gate runs many tests in one
@@ -142,12 +146,13 @@ public class Util {
 
     /**
      * The declared types of the accessible content of an object of declared type {@code type}, reached through at
-     * least one field: the type itself only when a field leads back to it ('Statement parent'). An element of hidden
-     * content that is the owner itself, with no field to it (a Leaf in its own 'List<Leaf> children'), is left out,
-     * as #117 left it out (the book's §080, TestBook080Elements clearLeaves). Closed over the non-static fields of each type and its supertypes, a field typed by a type parameter
-     * or {@code Object} left out (hidden content), an array field with its element type (unless that is hidden). The
-     * JDK's types are members but are not walked into: their own fields are their implementation (the run-time check
-     * does not walk them either), and a container's elements are hidden content.
+     * least one field: the type itself only when a field leads back to it ('Statement parent', or since #159 the
+     * type argument of 'List<Leaf> children'). Closed over the non-static fields of each type and its supertypes, a
+     * field typed by a type parameter or {@code Object} left out (hidden content), an array field with its element
+     * type (unless that is hidden). A generic type is a member per instantiation, and its type arguments are walked
+     * (#159, the holder's view): the type that declared 'List<Item> items' wrote Item. Not for the root: an object
+     * whose own type is the container has no holder that wrote the argument, its elements are hidden content. The
+     * JDK's own fields are not walked: they are their implementation (the run-time check does not walk them either).
      */
     public static List<ParameterizedType> accessibleTypes(ParameterizedType type) {
         TypeInfo root = type.bestTypeInfo();
@@ -169,10 +174,16 @@ public class Util {
         while (!todo.isEmpty() && result.size() < ACCESSIBLE_TYPES_LIMIT) {
             ParameterizedType pt = todo.poll();
             TypeInfo ti = pt.bestTypeInfo();
+            boolean isRoot = root;
             if (root) {
                 root = false; // walked, not a member: it becomes one when a field leads back to it
             } else {
-                if (ti == null || !seen.add(pt.arrays() + ":" + ti.fullyQualifiedName())) continue;
+                // a generic type is a member per instantiation: 'Map<String, Map<String, Object>>' holds a
+                // 'Map<String, Object>', which mayBeSameObject tells apart from the outer map (#159)
+                if (ti == null || !seen.add(pt.arrays() + ":" + (!NO_HOLDER_ELEMENTS && !pt.parameters().isEmpty()
+                        ? pt.detailedString() : ti.fullyQualifiedName()))) {
+                    continue;
+                }
                 result.add(pt);
             }
             if (ti == null) continue;
@@ -180,6 +191,15 @@ public class Util {
                 ParameterizedType element = pt.copyWithoutArrays();
                 if (!hiddenFieldType(element)) todo.add(element);
                 continue;
+            }
+            /*
+             #159, the holder's view: to List<E> its elements are hidden content, to the type that declares a field
+             'List<Item> items' they are Items, accessible content of that holder; the same for a type of its own
+             ('Plain<Block> plain', Plain extending ArrayList<E>). Not for the root: an object whose own type is the
+             container has no holder that wrote the type argument.
+             */
+            if (!NO_HOLDER_ELEMENTS && !isRoot) {
+                pt.parameters().stream().filter(a -> !hiddenFieldType(a)).forEach(todo::add);
             }
             if (isJdk(ti)) continue;
             Stream.concat(Stream.of(ti), ti.superTypesExcludingJavaLangObject().stream())

@@ -34,7 +34,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 /**
  * CodeLaser/maddi-mod#114, fernflower's Statement.addEdgeDirectInternal: in 'm.computeIfAbsent(k, ..).add(e)' the first
  * call modifies m structurally (it may put a key), the second modifies one of m's values. The chained call kept only
- * the second, deep-only. 'm.get(k).add(e)' modifies a value only: structurally non-modifying.
+ * the second, deep-only. 'm.get(k).add(e)' modifies a value only: structurally non-modifying for a parameter whose
+ * own type is the map, structurally modifying for the type that wrote the map's type (#159, the holder's view).
  */
 public class TestChainedReceiverStructural extends CommonTest {
 
@@ -89,7 +90,8 @@ public class TestChainedReceiverStructural extends CommonTest {
         assertEquals("false/false", m(x, "addTernary"));
         assertEquals("false/false", m(x, "addLocal"));
         assertEquals("false/false", m(x, "addDirect"));
-        assertEquals("false/true", m(x, "addToValue"));
+        // #159, the holder's view: X wrote 'Map<String, List<String>> other', its lists are X's accessible content
+        assertEquals("false/false", m(x, "addToValue"));
         assertEquals("false/false", p(x, "param"));
         assertEquals("false/true", p(x, "paramValue"));
         assertEquals("false/false", f(x, "pred"));

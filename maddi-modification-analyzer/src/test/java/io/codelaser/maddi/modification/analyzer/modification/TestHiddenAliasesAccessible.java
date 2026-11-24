@@ -86,8 +86,8 @@ public class TestHiddenAliasesAccessible extends CommonTest {
         new IteratingAnalyzerImpl(javaInspector, new IteratingAnalyzerImpl.ConfigurationBuilder()
                 .setMaxIterations(10).setModificationViaReachability(reach).build()).analyze(ao);
         assertEquals("false/false", p(x, "merge"));
-        // control: Box has no accessible field an Item could be
-        assertEquals("false/true", p(x, "incAll"));
+        // #159, the holder's view: Box wrote 'List<Item>', so its items are Box's accessible content
+        assertEquals("false/false", p(x, "incAll"));
     }
 
     private static String p(TypeInfo typeInfo, String name) {

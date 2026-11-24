@@ -35,7 +35,8 @@ import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
  * CodeLaser/maddi-mod#139: a modification two element-levels down, an element of a gathered list (#134) of an element
  * of the parameter's list. fernflower's {@code SwitchPatternHelper.SwitchOnReferenceCandidate.normalizeCaseLabels}
  * indexes the switch's case statements and sets {@code labeled} on a case's one successor edge. The edges are behind
- * lists, hidden content of the parameter: modified deep only, "MU".
+ * lists, hidden content of the lists, but St wrote {@code Map<String, List<Edge>>} and Sw {@code List<St>}: accessible
+ * content of the parameter (#159, the holder's view), modified structurally, "MM".
  */
 public class TestNestedGatheredElements extends CommonTest {
 
@@ -93,7 +94,7 @@ public class TestNestedGatheredElements extends CommonTest {
     @DisplayName("two element-levels down, with the reachability pass")
     @Test
     public void reachability() {
-        assertEquals("forEach=MU indexed=MU reassigned=MU oneLevel=MU keysOnly=UU", run(true));
+        assertEquals("forEach=MM indexed=MM reassigned=MM oneLevel=MM keysOnly=UU", run(true));
     }
 
     /*
@@ -106,7 +107,7 @@ public class TestNestedGatheredElements extends CommonTest {
     @DisplayName("two element-levels down, the fixpoint engine")
     @Test
     public void fixpoint() {
-        assertEquals("forEach=MU indexed=UU reassigned=MU oneLevel=MU keysOnly=MU", run(false));
+        assertEquals("forEach=MM indexed=UU reassigned=MM oneLevel=MM keysOnly=MU", run(false));
     }
 
     private String run(boolean reach) {

@@ -117,12 +117,13 @@ public class TestCopiedMutableElements extends CommonTest {
         assertEquals("@Dependent", independent(x, "allEdges"));
         assertEquals("@Independent", independent(x, "addAllNames"));
         MethodInfo resetAll = find(x, "resetAll");
-        assertEquals("false/true", resetAll.parameters().getFirst().isUnmodified() + "/"
+        // #159, the holder's view: X wrote 'Map<String, List<Edge>>', its edges are X's accessible content
+        assertEquals("false/false", resetAll.parameters().getFirst().isUnmodified() + "/"
                                    + resetAll.parameters().getFirst().isStructurallyUnmodified());
         // modifying the gathered list itself is not a modification of x
         assertEquals(true, find(x, "clearCopy").parameters().getFirst().isUnmodified());
         MethodInfo reset = find(x, "reset");
-        assertEquals("false/true", reset.parameters().getFirst().isUnmodified() + "/"
+        assertEquals("false/false", reset.parameters().getFirst().isUnmodified() + "/"
                                    + reset.parameters().getFirst().isStructurallyUnmodified());
     }
 
