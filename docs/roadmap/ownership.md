@@ -223,9 +223,11 @@ receiver**, and its rules are ownership rules.
 | `@Finalizer` rule | In ownership terms |
 |---|---|
 | no method may be called after the finalizer | the receiver is not used after the call: stage 5's check, with the receiver as argument |
-| 1. a type with finalizers has effectively final fields | the owner cannot be swapped out (`FINAL_FIELD`, computed) |
-| 2. a finalizer is called on a field only inside a finalizer | an owner consumes what it owns only while it is itself consumed (Rust: moving out of a field needs `self` by value) |
-| 3. never on a parameter or anything linked to it | a borrowed object cannot be consumed |
+| 1. a finalizer is called on a field only inside a finalizer | an owner consumes what it owns only while it is itself consumed (Rust: moving out of a field needs `self` by value) |
+| 2. not on a parameter or anything dependent on it, unless it is transferred | a borrowed object cannot be consumed |
+
+(The book had a rule that a type with finalizers has effectively final fields; it was never checked, an owned field
+may be replaced, and it left the book on 2026-11-24. The rules above are numbered as the book numbers them now.)
 
 **Receiver transfer.** For a method `m`, every call site's receiver must be handed over in stage 5's sense, read
 for the receiver instead of an argument:

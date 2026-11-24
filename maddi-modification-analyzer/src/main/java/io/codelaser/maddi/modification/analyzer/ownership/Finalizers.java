@@ -62,8 +62,8 @@ import io.codelaser.maddi.cst.impl.analysis.MessageImpl;
  * <b>Checked</b>, for the contracted ones (source annotations, the annotated APIs: the stream operations), at every
  * call site in the analysed sources, for the use after the call only: a temporary is used once; a local not after the
  * call's statement (a rebinding {@code s = s.filter(p)} is no use after); a parameter only when it transfers (stage
- * 5: every caller hands its argument over; the book's rule 3, with Rust's by-value parameter as the exception);
- * {@code this.f} only inside a finalizer of its owner (rule 2); {@code this} only inside a finalizer. Each violation is
+ * 5: every caller hands its argument over; the book's rule 2, with Rust's by-value parameter as the exception);
+ * {@code this.f} only inside a finalizer of its owner (rule 1); {@code this} only inside a finalizer. Each violation is
  * a warning of category {@value #CATEGORY}. The modification exemption of a finalizer call (it never modifies its
  * receiver) relies on the contract, so a violation also marks where that exemption is not sound.
  */
@@ -323,7 +323,7 @@ final class Finalizers {
     }
 
     /*
-     Rule 3's exception, Rust's by-value parameter: every call site is known (stage 5's rule 1) and no caller uses its
+     The book's rule 2, its exception, Rust's by-value parameter: every call site is known (stage 5's rule 1) and no caller uses its
      argument after the call: a temporary, or a local in stage 5's ordering. Not stage 5's transfer, which also wants
      the argument fresh: here only the use after counts.
      */
