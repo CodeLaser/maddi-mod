@@ -78,7 +78,9 @@ public class TestBook055Finalizers extends BookTest {
     @DisplayName("§055, finalizers")
     @Test
     public void test() throws IOException {
-        Map<String, String> actual = verdicts("a.b.X", INPUT);
+        // a builder is called from elsewhere: its call sites are known only in a closed world (the book's §055,
+        // 'Handing over what you own'); in an open world @Finalizer on build() is a contract
+        Map<String, String> actual = verdicts("a.b.X", INPUT, true);
         assertVerdicts(actual,
                 "Names = @Immutable(hc=true) @Container",
                 "Names.upperCase() = @NotModified",

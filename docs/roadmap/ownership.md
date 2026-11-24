@@ -166,7 +166,8 @@ parameter was tried and reverted: Java's callers went on using the object).
 Built (`Transfers`, test `TestTransfer`) with a syntactic check of the call sites rather than the per-call argument
 links and prepwork's last-use data the plan named: narrower, but each step is visible in the source.
 
-- **All call sites known.** The callee is private or package-private, or the world is closed (`OWNERSHIP_WORLD=closed`,
+- **All call sites known.** The callee is private (until 2026-11-24 also package-private; a package is not closed, anyone can add a class to
+  it), or the world is closed (`OWNERSHIP_WORLD=closed`,
   `Configuration.ownershipClosedWorld`: an application rather than a library). It overrides nothing, nothing
   overrides it, no method reference names it, the parameter is not variadic, and no field initializer calls it.
 - **Every argument handed over**, through casts, parentheses and `@Identity` methods (`Objects.requireNonNull`):
@@ -248,7 +249,7 @@ passes. So a method is computed a finalizer only when it also *needs* to be one:
 (returns `this.f`, or hands it over as above). Need and permission together:
 
 - need (body): the method moves at least one `OWNED_FIELD` of its type out;
-- permission (sites): receiver transfer at every call site, with stage 5's rule 1 (private or package-private, or
+- permission (sites): receiver transfer at every call site, with stage 5's rule 1 (private, or
   `OWNERSHIP_WORLD=closed`; no method reference names it; nothing overrides it, or every override is judged too).
 
 This is a greatest fixpoint with stage 3: the moved field is owned only if the method that moves it is a finalizer.

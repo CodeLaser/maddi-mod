@@ -66,39 +66,39 @@ public class TestLending extends CommonTest {
                 private final List<List<String>> all = new ArrayList<>();
                 private N first;
 
-                List<String> getSized() { return sized; }
+                private List<String> getSized() { return sized; }
                 int n() { return getSized().size(); }
 
-                List<String> getViaLocal() { return viaLocal; }
+                private List<String> getViaLocal() { return viaLocal; }
                 void put(String s) { List<String> x = getViaLocal(); x.add(s); }
 
-                List<String> getIterated() { return iterated; }
+                private List<String> getIterated() { return iterated; }
                 int count() { int c = 0; for (String s : getIterated()) c += s.length(); return c; }
 
-                List<String> getCopied() { return copied; }
+                private List<String> getCopied() { return copied; }
                 void copy(List<String> out) { out.addAll(getCopied()); }
 
-                List<String> getPassedOn() { return passedOn; }
+                private List<String> getPassedOn() { return passedOn; }
                 List<String> pass() { return getPassedOn(); }
 
-                List<String> getStored() { return stored; }
+                private List<String> getStored() { return stored; }
                 void store() { other = getStored(); }
 
-                List<String> getAsElement() { return asElement; }
+                private List<String> getAsElement() { return asElement; }
                 void collect() { all.add(getAsElement()); }
 
                 public List<String> getPublicly() { return publicly; }
 
-                List<String> getKept() { return kept; }
+                private List<String> getKept() { return kept; }
                 void give(Keeper k) { k.keep(getKept()); }
 
-                List<String> getCaptured() { return captured; }
+                private List<String> getCaptured() { return captured; }
                 Runnable later() { List<String> x = getCaptured(); return () -> x.clear(); }
 
                 void grow() { nodes.add(new N()); keptNodes.add(new N()); }
-                N node(int i) { return nodes.get(i); }
+                private N node(int i) { return nodes.get(i); }
                 void bump() { node(0).inc(); }
-                N keptNode(int i) { return keptNodes.get(i); }
+                private N keptNode(int i) { return keptNodes.get(i); }
                 void keepFirst() { first = keptNode(0); }
 
                 int size() { return other.size() + all.size() + (first == null ? 0 : 1); }

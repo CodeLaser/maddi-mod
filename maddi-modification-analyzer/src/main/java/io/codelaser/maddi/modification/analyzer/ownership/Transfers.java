@@ -62,7 +62,8 @@ import io.codelaser.maddi.modification.prepwork.variable.MethodLinkedVariables;
  * Transfer (docs/roadmap/ownership.md stage 5): a parameter whose every argument is handed over, created by the
  * caller for the call and not used by it afterwards. Stage 3 then counts a field assigned from it as arriving fresh.
  * <ol>
- *   <li><b>Every call site is known.</b> The method or constructor is private or package-private, or the world is
+ *   <li><b>Every call site is known.</b> The method or constructor is private (package-private does not do: on the class path anyone can add a class to
+ *   a package, a test source set to begin with; 2026-11-24), or the world is
  *   closed ({@code ownershipClosedWorld}: the analysed code is an application, not a library). It overrides nothing,
  *   nothing overrides it, no method reference names it, it is not variadic in that position, and it has at least one
  *   call site.</li>
@@ -275,7 +276,7 @@ final class Transfers {
         if (!OwnershipPass.implementationsOf(callee).isEmpty()) return "overridden";
         if (referenced.contains(callee)) return "named by a method reference";
         var access = callee.effectiveAccess();
-        if (!closedWorld && !access.isPrivate() && !access.isPackage()) return "callable from outside";
+        if (!closedWorld && !access.isPrivate()) return "callable from outside";
         if (!sites.containsKey(callee)) {
             return "no call site in a method body";
         }

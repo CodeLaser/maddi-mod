@@ -53,7 +53,7 @@ import io.codelaser.maddi.cst.impl.analysis.ValueImpl;
  * returns, and none keeps it: Rust's {@code fn children(&self) -> &Vec<T>}. A getter that returns an owned field (or
  * one of its owned elements) then leaves the field owned.
  * <ol>
- *   <li><b>Every call site known</b>, stage 5's rule 1: private or package-private, or a closed world; it overrides
+ *   <li><b>Every call site known</b>, stage 5's rule 1: private, or a closed world; it overrides
  *   nothing, nothing overrides it, no method reference names it, no field initializer calls it; at least one call.</li>
  *   <li><b>Every use borrows</b>: at each call, the result (or a local that holds it) is only the receiver of a call
  *   that keeps nothing (it neither may leak {@code this} nor dispatch elsewhere, and its result is discarded, cannot
@@ -132,7 +132,7 @@ final class Lending {
         if (referenced.contains(m)) return "named by a method reference";
         if (calledByFieldInitializer.contains(m)) return "called by a field initializer";
         var access = m.effectiveAccess();
-        if (!closedWorld && !access.isPrivate() && !access.isPackage()) return "callable from outside";
+        if (!closedWorld && !access.isPrivate()) return "callable from outside";
         List<Site> list = sites.get(m);
         if (list == null) return "no call site in a method body";
         for (Site site : list) {

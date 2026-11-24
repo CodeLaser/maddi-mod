@@ -50,7 +50,7 @@ import io.codelaser.maddi.cst.impl.analysis.MessageImpl;
  * <ul>
  *   <li>need: it moves an owned field of its object out, returning {@code this.f} or handing it over to a parameter
  *   that transfers (stage 5's moves), mentioning the field once, outside loops and lambdas;</li>
- *   <li>permission: stage 5's rule 1 (every call site known: private or package-private, or a closed world; it
+ *   <li>permission: stage 5's rule 1 (every call site known: private, or a closed world; it
  *   overrides nothing, nothing overrides it, no method reference names it, no field initializer calls it), and at
  *   every call site a receiver that is handed over and was never shared: a construction whose constructor does not
  *   leak {@code this}, a fresh call, a fluent chain on one, a local in stage 5's sense, or {@code this.f} inside a
@@ -183,7 +183,7 @@ final class Finalizers {
         if (!OwnershipPass.implementationsOf(m).isEmpty()) return "overridden";
         if (referenced.contains(m)) return "named by a method reference";
         var access = m.effectiveAccess();
-        if (!closedWorld && !access.isPrivate() && !access.isPackage()) return "callable from outside";
+        if (!closedWorld && !access.isPrivate()) return "callable from outside";
         List<Site> list = sites.get(m);
         if (list == null) return "no call site in a method body";
         for (FieldInfo f : fieldsWithInitializers) {
@@ -334,7 +334,7 @@ final class Finalizers {
         if (!OwnershipPass.implementationsOf(m).isEmpty()) return "its method is overridden";
         if (referenced.contains(m)) return "a method reference names its method";
         var access = m.effectiveAccess();
-        if (!closedWorld && !access.isPrivate() && !access.isPackage()) return "its method is callable from outside";
+        if (!closedWorld && !access.isPrivate()) return "its method is callable from outside";
         List<ArgSite> list = argSites.get(m);
         if (list == null) return "its method has no call site";
         for (ArgSite site : list) {
