@@ -50,7 +50,7 @@ import io.codelaser.maddi.cst.impl.analysis.MessageImpl;
  * <ul>
  *   <li>need: it moves an owned field of its object out, returning {@code this.f} or handing it over to a parameter
  *   that transfers (stage 5's moves), mentioning the field once, outside loops and lambdas;</li>
- *   <li>permission: stage 5's rule 1 (every call site known: private or package-private, or a closed world; it
+ *   <li>permission: stage 5's rule 1 (every call site known: private, or a closed world; it
  *   overrides nothing, nothing overrides it, no method reference names it, no field initializer calls it), and at
  *   every call site a receiver that is handed over and was never shared: a construction whose constructor does not
  *   leak {@code this}, a fresh call, a fluent chain on one, a local in stage 5's sense, or {@code this.f} inside a
@@ -62,8 +62,8 @@ import io.codelaser.maddi.cst.impl.analysis.MessageImpl;
  * <b>Checked</b>, for the contracted ones (source annotations, the annotated APIs: the stream operations), at every
  * call site in the analysed sources, for the use after the call only: a temporary is used once; a local not after the
  * call's statement (a rebinding {@code s = s.filter(p)} is no use after); a parameter only when it transfers (stage
- * 5: every caller hands its argument over; the book's rule 3, with Rust's by-value parameter as the exception);
- * {@code this.f} only inside a finalizer of its owner (rule 2); {@code this} only inside a finalizer. Each violation is
+ * 5: every caller hands its argument over; the book's rule 2, with Rust's by-value parameter as the exception);
+ * {@code this.f} only inside a finalizer of its owner (rule 1); {@code this} only inside a finalizer. Each violation is
  * a warning of category {@value #CATEGORY}. The modification exemption of a finalizer call (it never modifies its
  * receiver) relies on the contract, so a violation also marks where that exemption is not sound.
  */
@@ -183,7 +183,7 @@ final class Finalizers {
         if (!OwnershipPass.implementationsOf(m).isEmpty()) return "overridden";
         if (referenced.contains(m)) return "named by a method reference";
         var access = m.effectiveAccess();
-        if (!closedWorld && !access.isPrivate() && !access.isPackage()) return "callable from outside";
+        if (!closedWorld && !access.isPrivate()) return "callable from outside";
         List<Site> list = sites.get(m);
         if (list == null) return "no call site in a method body";
         for (FieldInfo f : fieldsWithInitializers) {
@@ -323,7 +323,7 @@ final class Finalizers {
     }
 
     /*
-     Rule 3's exception, Rust's by-value parameter: every call site is known (stage 5's rule 1) and no caller uses its
+     The book's rule 2, its exception, Rust's by-value parameter: every call site is known (stage 5's rule 1) and no caller uses its
      argument after the call: a temporary, or a local in stage 5's ordering. Not stage 5's transfer, which also wants
      the argument fresh: here only the use after counts.
      */
@@ -334,7 +334,7 @@ final class Finalizers {
         if (!OwnershipPass.implementationsOf(m).isEmpty()) return "its method is overridden";
         if (referenced.contains(m)) return "a method reference names its method";
         var access = m.effectiveAccess();
-        if (!closedWorld && !access.isPrivate() && !access.isPackage()) return "its method is callable from outside";
+        if (!closedWorld && !access.isPrivate()) return "its method is callable from outside";
         List<ArgSite> list = argSites.get(m);
         if (list == null) return "its method has no call site";
         for (ArgSite site : list) {

@@ -136,7 +136,7 @@ public interface IteratingAnalyzer {
         /**
          * The ownership pass's world (stage 5, transfer): closed when the analysed sources are an application, whose
          * public methods and constructors are called only from those sources, so that their call sites are all known.
-         * Open (the default) for a library: only private and package-private callees transfer.
+         * Open (the default) for a library: only private callees transfer (a package is not closed: anyone can add a class to it).
          */
         default boolean ownershipClosedWorld() {
             return false;

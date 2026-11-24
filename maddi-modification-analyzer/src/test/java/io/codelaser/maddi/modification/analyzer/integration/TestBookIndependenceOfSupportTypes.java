@@ -62,7 +62,8 @@ import io.codelaser.maddi.modification.analyzer.CommonTest;
  * The fixtures are the <b>shipped</b> bodies, reduced to the members under test and stripped of annotations and
  * javadoc, so that nothing is contracted and every value below is computed. The positions are the book's.
  * {@code Lazy} gets three fixtures rather than one, because it is the listing whose <em>code</em> differs and
- * the book's argument for extending rule 2 ("all fields are private, of immutable type, or equal to null") turns
+ * the book's blanking argument (a field emptied at the transition has no content, so rules 1 and 3 are met
+ * eventually; until 2026-11-24 worded as an extension of rule 2, "or equal to null") turns
  * on a single assignment: the shipped shape, which drops {@code supplier} at the transition as Kotlin's
  * {@code Lazy} does; the shape from before that alignment, which never drops it; and the book's own listing,
  * which drops it as printed. All three produce the same three verdicts, so on the analyzer's own reading the
@@ -412,9 +413,9 @@ public class TestBookIndependenceOfSupportTypes extends CommonTest {
 
     /**
      * The one block that is not a formality. The book annotates the {@code supplier} field
-     * {@code @Independent(hc=true, after="t")} and spends fifteen lines explaining why it may be: the field is
-     * blanked at the transition, so it is out of the picture afterwards, which is the case the book's extension of
-     * rule 2 ("or equal to null") exists to license. The analyzer says {@code DEPENDENT}.
+     * {@code @Final(after="t")}, null after the mark (until 2026-11-24 also {@code @Independent(hc=true, after="t")},
+     * a parameter the annotation does not have), and explains why its dependence ends: the field is blanked at the
+     * transition, so it has no content afterwards. The analyzer says {@code DEPENDENT}.
      */
     @DisplayName("Lazy as shipped: the three positions the book annotates @Independent(hc=true)")
     @Test
@@ -423,7 +424,7 @@ public class TestBookIndependenceOfSupportTypes extends CommonTest {
     }
 
     /**
-     * The control, and the reason the expected block above is not evidence for the rule-2 argument: the shape
+     * The control, and the reason the expected block above is not evidence for the blanking argument: the shape
      * that never clears {@code supplier} produces exactly the same three verdicts.
      */
     @DisplayName("Lazy before the alignment: not clearing supplier produces the same three")
@@ -434,8 +435,8 @@ public class TestBookIndependenceOfSupportTypes extends CommonTest {
 
     /**
      * And so does the book's own listing. So on the analyzer's reading {@code supplier = null} buys nothing at
-     * any of the three positions, whether it is written safely or as printed: the book's argument for the rule 2
-     * extension does not survive being run. See finding 2.
+     * any of the three positions, whether it is written safely or as printed: the book's blanking argument is
+     * not what the analyzer computes. See finding 2.
      */
     @DisplayName("Lazy as the book prints it: clearing supplier changes none of the three")
     @Test

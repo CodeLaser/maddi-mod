@@ -52,7 +52,7 @@ public class TestOwnershipDecorated extends CommonTest {
                 static class B {
                     private final List<String> list = new ArrayList<>();
                     B add(String s) { list.add(s); return this; }
-                    List<String> build() { return list; }
+                    private List<String> build() { return list; }
                     static List<String> use() { return new B().add("a").build(); }
                 }
             }
@@ -78,6 +78,6 @@ public class TestOwnershipDecorated extends CommonTest {
         assertTrue(printed.contains("@Owned @Independent private final List<String> names"), printed);
         assertTrue(printed.contains("int count(@Borrowed"), printed);
         assertTrue(printed.contains("@Fresh @Independent @NotModified static List<X.N> make()"), printed);
-        assertTrue(printed.contains("@Finalizer @GetSet(\"list\") List<String> build()"), printed);
+        assertTrue(printed.contains("@Finalizer @GetSet(\"list\") private List<String> build()"), printed);
     }
 }

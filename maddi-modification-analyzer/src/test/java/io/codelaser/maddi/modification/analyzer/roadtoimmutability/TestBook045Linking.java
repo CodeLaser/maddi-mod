@@ -100,7 +100,9 @@ public class TestBook045Linking extends BookTest {
                 "LinkExample2.add() = @Modified",
                 "LinkExample2.add(x) = @NotModified",
                 // DEVIATION: the book says @FinalFields @Container, as Counter is accessible content of Counters and
-                // the constructor's parameter is therefore dependent; the analyzer treats the map's values as hidden
+                // the constructor's parameter is therefore dependent. Computed immutable because the interface Counter
+                // has no implementation here: its increment() folds over none and is @NotModified, so Counter itself
+                // is @Immutable(hc=true). With a mutable class in its place Counters is @FinalFields (maddi-mod#159)
                 "Counters = @Immutable(hc=true) @Container",
                 "Counters.getCounter() = @NotModified",
                 "Counters.getValue() = @NotModified");

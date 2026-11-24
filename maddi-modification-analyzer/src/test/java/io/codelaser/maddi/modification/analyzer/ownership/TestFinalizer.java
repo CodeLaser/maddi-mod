@@ -53,27 +53,27 @@ public class TestFinalizer extends CommonTest {
                 static class B1 {
                     private final List<String> list = new ArrayList<>();
                     B1 add(String s) { list.add(s); return this; }
-                    List<String> build() { return list; }
+                    private List<String> build() { return list; }
                     static List<String> make() { return new B1().add("a").add("b").build(); }
                 }
                 // a local, used before as the receiver of add
                 static class B2 {
                     private final List<String> list = new ArrayList<>();
                     B2 add(String s) { list.add(s); return this; }
-                    List<String> build() { return list; }
+                    private List<String> build() { return list; }
                     static List<String> make() { B2 b = new B2(); b.add("x"); return b.build(); }
                 }
                 // used after
                 static class B3 {
                     private final List<String> list = new ArrayList<>();
                     B3 add(String s) { list.add(s); return this; }
-                    List<String> build() { return list; }
+                    private List<String> build() { return list; }
                     static List<String> make() { B3 b = new B3(); List<String> l = b.build(); b.add("y"); return l; }
                 }
                 // called on a parameter
                 static class B4 {
                     private final List<String> list = new ArrayList<>();
-                    List<String> build() { return list; }
+                    private List<String> build() { return list; }
                     static List<String> make(B4 b) { return b.build(); }
                     static List<String> other() { return new B4().build(); }
                 }
@@ -92,7 +92,7 @@ public class TestFinalizer extends CommonTest {
                 static class B5 {
                     private final List<String> list = new ArrayList<>();
                     B5 add(String s) { list.add(s); return this; }
-                    T5 build() { return new T5(list); }
+                    private T5 build() { return new T5(list); }
                     static T5 make() { return new B5().add("a").build(); }
                 }
                 // public: callers outside the sources
@@ -107,7 +107,7 @@ public class TestFinalizer extends CommonTest {
                     static final List<Object> REG = new ArrayList<>();
                     private final List<String> list = new ArrayList<>();
                     B7() { REG.add(this); }
-                    List<String> build() { return list; }
+                    private List<String> build() { return list; }
                     static List<String> make() { return new B7().build(); }
                 }
 

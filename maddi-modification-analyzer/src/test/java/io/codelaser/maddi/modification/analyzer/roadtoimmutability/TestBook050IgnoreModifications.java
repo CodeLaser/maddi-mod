@@ -35,10 +35,14 @@ public class TestBook050IgnoreModifications extends BookTest {
             import io.codelaser.maddi.annotation.rare.IgnoreModifications;
             import java.util.*;
             public class X {
-                static class Price {
-                    private int amount;
+                static final class Price {
+                    private final int amount;
                     Price(int amount) { this.amount = amount; }
                     int amount() { return amount; }
+                }
+                static class Offer {
+                    private int amount;
+                    Offer(int amount) { this.amount = amount; }
                     void discount() { amount = amount / 2; }
                 }
 
@@ -74,10 +78,10 @@ public class TestBook050IgnoreModifications extends BookTest {
                 }
 
                 public static class Escape {
-                    private final Price base = new Price(10);
+                    private final Offer base = new Offer(10);
 
                     @IgnoreModifications
-                    private final List<Price> recent = new ArrayList<>();
+                    private final List<Offer> recent = new ArrayList<>();
 
                     public void touch() {
                         recent.add(base);
