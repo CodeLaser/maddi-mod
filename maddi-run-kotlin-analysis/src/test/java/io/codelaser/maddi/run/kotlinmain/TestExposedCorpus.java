@@ -139,8 +139,15 @@ public class TestExposedCorpus {
         // invoking a function value modifies it, as Java's `Function.apply` does. Through `IColumnType.valueToString`
         // and `LiteralOp.toQueryBuilder` that makes `Expression` @FinalFields, and 24 subclasses with it. The 250 held
         // only while the `apply` call hid that chain (diagnosis: maddi-mod#140).
+        //
+        // Immutable types 225 -> 224 at maddi-mod c5ce22f9 (maddi-mod#159, the holder's view): exposed-r2dbc's file class
+        // R2dbcConnectionImplKt is @FinalFields. Its field `isolationLevelMapping$delegate`, a `Lazy<Map<IsolationLevel,
+        // Int>>`, hands a key out through `Int.asIsolationLevel()`; a link from a field's content to a return value's now
+        // counts, graded by the type argument the holder wrote, `Map<IsolationLevel, Int>`, a mutable type: @Dependent.
+        // Coarse but safe: what is handed out is an r2dbc IsolationLevel (no annotated API), not the map. Nothing else
+        // moved in an FPDUMP A/B but 15 fields and 6 more types to @Dependent, all still immutable or @FinalFields as before.
         CensusRatchet.noWorseThan("exposed placeholders", summary.placeholders(), 3);
         CensusRatchet.noWorseThan("exposed elements isolated by prep", summary.prepErrors(), 0);
-        CensusRatchet.noWorseThanAtLeast("exposed immutable types", summary.immutableTypes(), 225);
+        CensusRatchet.noWorseThanAtLeast("exposed immutable types", summary.immutableTypes(), 224);
     }
 }
