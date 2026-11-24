@@ -908,8 +908,11 @@ public class GuardAnalyzerImpl extends CommonAnalyzerImpl implements GuardAnalyz
     }
 
     private void guardMethod(MethodInfo methodInfo) {
-        if (!methodInfo.isAbstract()) return;
+        // contract vs contract is independent of a body: an authored @Modified on an override of a method contracted
+        // @NotModified is a conflict whether or not there is a body to compute from
         guardContractConflict(methodInfo);
+        guardLibraryContract(methodInfo);
+        if (!methodInfo.isAbstract()) return;
         Map<Property, Value> contracts = contractReader.contracts(methodInfo);
         // @NotModified: no implementation may modify its receiver.
         if (contracts.get(NON_MODIFYING_METHOD) instanceof Value.Bool nonModifying && nonModifying.isTrue()) {
@@ -992,6 +995,50 @@ public class GuardAnalyzerImpl extends CommonAnalyzerImpl implements GuardAnalyz
                             + " but is dependent, violating its @Independent contract");
                 }
             }
+        }
+    }
+
+    /**
+     * The contracts of the annotated APIs bind source code as those written in source do (road-to-immutability 050
+     * §Inheritance: no implementation of {@code Collection.size()}, no {@code equals()} or {@code toString()} in any
+     * class, may be modifying). A library method's {@code @NotModified} is read from {@code analysis()}, where the
+     * hints put it; a TRUE there is always stated (by annotation, by its type, or inherited), only a FALSE can be an
+     * assumed default. Two shapes, at most one report per method: an authored {@code @Modified} on the override
+     * (contract vs contract), else an override with a body that is computed modifying (contract vs computed).
+     * <p>
+     * Kept out of {@link ContractResolution} on purpose: there an inherited contract DECIDES a bodiless method, and
+     * letting library contracts decide source declarations is a change of verdicts, not of reporting.
+     */
+    private void guardLibraryContract(MethodInfo methodInfo) {
+        if (methodInfo.overrides().isEmpty()) return;
+        MethodInfo contracted = null;
+        for (MethodInfo parent : methodInfo.overrides()) {
+            if (!parent.typeInfo().compilationUnit().externalLibrary()) continue;
+            Value.Bool nm = parent.analysis().getOrNull(NON_MODIFYING_METHOD, ValueImpl.BoolImpl.class);
+            if (nm != null && nm.isTrue()) {
+                contracted = parent;
+                break;
+            }
+        }
+        if (contracted == null) return;
+        boolean ownModified = !methodInfo.annotations().isEmpty()
+                              && contractReader.contracts(methodInfo).get(NON_MODIFYING_METHOD) instanceof Value.Bool own
+                              && own.isFalse();
+        if (ownModified) {
+            analyzerMessages.add(MessageImpl.error(methodInfo, CONTRACT_CONFLICT,
+                    methodInfo.fullyQualifiedName() + " contracts " + NON_MODIFYING_METHOD.key()
+                    + " more weakly than the contract it inherits from " + contracted.fullyQualifiedName()
+                    + "; an override may strengthen a contract, never weaken it.",
+                    new Message[]{MessageImpl.cause(contracted, "@NotModified in the annotated API")}));
+            return;
+        }
+        if (methodInfo.isAbstract()) return; // nothing computed; its implementations override the library method too
+        Value.Bool computed = methodInfo.analysis().getOrNull(NON_MODIFYING_METHOD, ValueImpl.BoolImpl.class);
+        if (computed != null && computed.isFalse()) {
+            reportViolation(methodInfo, blameMethodModifying(methodInfo),
+                    MessageImpl.cause(contracted, "@NotModified in the annotated API"),
+                    methodInfo.fullyQualifiedName() + " overrides " + contracted.fullyQualifiedName()
+                    + " but is modifying, violating its @NotModified contract");
         }
     }
 
