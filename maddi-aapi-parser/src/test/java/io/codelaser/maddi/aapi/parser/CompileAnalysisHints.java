@@ -27,6 +27,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
 
@@ -137,6 +138,15 @@ public class CompileAnalysisHints {
             Files.writeString(JDK_RELEASE_FILE, running + "\n");
             LOGGER.warn("Moved the jdk results from JDK {} to JDK {}", committed, running);
         }
+        LOGGER.info("{} hint line(s) matched nothing in their target, {} of them known", DROPPED_HINTS.size(),
+                DROPPED_HINTS.size() - unexpectedDroppedHints().size());
+        List<String> unexpected = unexpectedDroppedHints();
+        if (!unexpected.isEmpty()) {
+            // the results are written: the task fails so that the hint is fixed, or listed with its reason
+            throw new IllegalStateException(unexpected.size() + " hint line(s) matched nothing in their target and"
+                    + " were dropped (fix them, or list them in KNOWN_DROPPED_HINTS with the reason):\n  "
+                    + String.join("\n  ", unexpected));
+        }
     }
 
     /** The release recorded in {@link #JDK_RELEASE_FILE}. */
@@ -165,6 +175,7 @@ public class CompileAnalysisHints {
 
     /** As {@link #compileAll(Path)}; {@code includeJdk} false leaves the {@code jdk} library out (see {@link #JDK_RELEASE_FILE}). */
     public static void compileAll(Path resultsBase, boolean includeJdk) throws IOException {
+        DROPPED_HINTS.clear();
         // the archive covers java.desktop (swing/awt), java.net.http and java.logging, which the lean default omits
         AnalysisHintsCompiler compiler = new AnalysisHintsCompiler(
                 javaInspectorFactory("java.desktop", "java.net.http", "java.logging"));
@@ -335,6 +346,27 @@ public class CompileAnalysisHints {
         };
     }
 
+    /*
+     CodeLaser/maddi#216: the hint lines a compilation could not transfer, collected over all libraries. main fails on any
+     not listed below, so a hint that silently matches nothing (a method the type only inherits, a member a newer release
+     removed) is seen when it is written, not when a verdict turns out wrong.
+     */
+    private static final List<String> DROPPED_HINTS = new ArrayList<>();
+
+    /** Dropped on purpose, or for a reason the hint cannot fix: "library: message" as {@link #compile} records it. */
+    static final Set<String> KNOWN_DROPPED_HINTS = Set.of(
+            // the parser does not match an inner class's constructor, whose outer instance is an implicit parameter
+            "jdk: Ignoring constructor 'io.codelaser.maddi.aapi.archive.jdk.JavaxSwingText.JTextComponent$.AccessibleJTextComponent.<init>(javax.swing.text.JTextComponent)', not found in target type 'javax.swing.text.JTextComponent.AccessibleJTextComponent'",
+            // newer than the JUnit on this class path
+            "libs/test: Ignoring subtype 'TimeoutFailureFactory', cannot find it in the target type 'org.junit.jupiter.api.Assertions'",
+            // inline-only, so private in the class file: the hint documents the contract, nothing calls it
+            "libs/kotlin: Ignoring method 'io.codelaser.maddi.aapi.archive.libs.kotlin.KotlinCollections.ArraysKt__ArraysJVMKt$.toTypedArray(java.util.Collection)', not found in target type 'kotlin.collections.ArraysKt__ArraysJVMKt'");
+
+    /** The dropped hints of the last {@link #compileAll} that {@link #KNOWN_DROPPED_HINTS} does not list. */
+    static List<String> unexpectedDroppedHints() {
+        return DROPPED_HINTS.stream().filter(d -> !KNOWN_DROPPED_HINTS.contains(d)).toList();
+    }
+
     private static void compile(AnalysisHintsCompiler compiler, String library, Path resultsBase) throws IOException {
         AnalysisHints analysisHints = new AnalysisHints.Builder()
                 .setLibraryName(library)
@@ -347,6 +379,7 @@ public class CompileAnalysisHints {
         // they are the only signal that a contract was parsed but said nothing. The task stays exit 0 either way.
         List<Message> messages = compiler.go(analysisHints);
         messages.forEach(m -> LOGGER.warn("Message while compiling '{}': {}", library, m));
+        compiler.droppedHints().forEach(d -> DROPPED_HINTS.add(library + ": " + d));
     }
 
     /**

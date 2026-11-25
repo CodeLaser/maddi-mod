@@ -17,6 +17,7 @@
 
 package io.codelaser.maddi.aapi.parser;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.fail;
 
 import java.io.IOException;
@@ -89,6 +90,9 @@ public class TestAnalysisHintsCompiler extends CommonTest {
         Files.createDirectories(tempDirectory.resolve(CompileAnalysisHints.JDK_LIBRARY)); // packageJars lists it
         CompileAnalysisHints.compileAll(tempDirectory, withJdk);
         CompileAnalysisHints.packageJars(tempDirectory);
+        // CodeLaser/maddi#216: a hint line that matches nothing is dropped; it must be fixed or listed with its reason
+        assertEquals(List.of(), CompileAnalysisHints.unexpectedDroppedHints(),
+                "hint lines dropped (CompileAnalysisHints.KNOWN_DROPPED_HINTS)");
 
         List<String> complaints = new ArrayList<>();
         for (String library : CompileAnalysisHints.LIBRARIES) {
