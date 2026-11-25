@@ -93,7 +93,10 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
     /** CodeLaser/maddi-mod#158: see LinkComputer.setCallCycles */
     void setCallCycles(Map<MethodInfo, Integer> cycleOf) {
         linkComputer.setCallCycles(cycleOf);
+        this.callCycles = Map.copyOf(cycleOf);
     }
+
+    private Map<MethodInfo, Integer> callCycles = Map.of();
     private final TypeImmutableAnalyzer typeImmutableAnalyzer;
     private final TypeIndependentAnalyzer typeIndependentAnalyzer;
     private final ShallowTypeAnalyzer shallowTypeAnalyzer;
@@ -271,21 +274,49 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
         }
     }
 
+    /*
+     Which methods a pass catches coming back depends on thread timing: of guava's TypeResolver group, one run
+     caught 6 and another 10, other ones, and the oracle differed (noise 1792 against 1784). So what is settled is
+     not the method caught but its call cycle, all of it: a set the sources decide. A method caught that is in no
+     call cycle only relays what a cycle hands it, and settles by itself once that cycle is; it is settled alone
+     only when it is still coming back OSCILLATION_PASSES passes after it was first caught.
+     */
+    private final Map<MethodInfo, Integer> firstCaught = new ConcurrentHashMap<>();
+
     private void settleOscillating() {
         if (oscillating.isEmpty()) return;
-        List<MethodInfo> methods = oscillating.stream()
-                .sorted(java.util.Comparator.comparing(MethodInfo::fullyQualifiedName)).toList();
+        int pass = churnPass.get();
+        Set<MethodInfo> toSettle = new HashSet<>();
+        Set<Integer> cycles = new HashSet<>();
+        for (MethodInfo methodInfo : oscillating) {
+            Integer cycle = callCycles.get(methodInfo);
+            if (cycle != null) {
+                cycles.add(cycle);
+            } else if (pass - firstCaught.computeIfAbsent(methodInfo, _ -> pass) >= OSCILLATION_PASSES) {
+                toSettle.add(methodInfo);
+            }
+        }
         oscillating.clear();
+        if (!cycles.isEmpty()) {
+            callCycles.forEach((methodInfo, cycle) -> {
+                if (cycles.contains(cycle)) toSettle.add(methodInfo);
+            });
+        }
+        toSettle.removeIf(linkComputer::settledShallow);
+        if (toSettle.isEmpty()) return;
+        List<MethodInfo> methods = toSettle.stream()
+                .sorted(java.util.Comparator.comparing(MethodInfo::fullyQualifiedName)).toList();
         for (MethodInfo methodInfo : methods) {
             linkComputer.settleShallow(methodInfo);
             linkRecordings.remove(methodInfo);
             summaryHistory.remove(methodInfo);
+            firstCaught.remove(methodInfo);
             changedInfos.add(methodInfo);
             summaryChangedInfos.add(methodInfo);
             propertiesChanged.incrementAndGet();
         }
         LOGGER.info("Oscillating summaries: {} method(s) settled at their shallow links in pass {}: {}",
-                methods.size(), churnPass.get(), methods.stream().map(MethodInfo::fullyQualifiedName)
+                methods.size(), pass, methods.stream().map(MethodInfo::fullyQualifiedName)
                         .reduce((x, y) -> x + ", " + y).orElse(""));
     }
 
@@ -424,6 +455,7 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
         if (firstIteration) {
             churnPass.set(0);
             summaryHistory.clear();
+            firstCaught.clear();
         }
         churnPass.incrementAndGet();
         linkComputer.reset();
