@@ -176,8 +176,9 @@ public class CarryDerived {
 
     private static MethodInfo calleeInfo(Expression call) {
         if (call instanceof MethodCall mc) return mc.methodInfo();
-        ConstructorCall cc = (ConstructorCall) call;
-        return cc.callsConstructorOfCreatedType() ? cc.constructor() : null;
+        // an anonymous creation's is the superclass constructor (maddi#214): two creations of different
+        // supertypes no longer compare equal
+        return ((ConstructorCall) call).constructor();
     }
 
     // the calls of a body in visit order, as body() walks it: a lambda's and a local type's are their own methods'

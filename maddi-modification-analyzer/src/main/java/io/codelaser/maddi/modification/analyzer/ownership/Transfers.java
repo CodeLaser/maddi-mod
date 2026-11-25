@@ -118,7 +118,8 @@ final class Transfers {
                         if (mr.methodInfo() != null) referenced.add(mr.methodInfo());
                     }
                     case ConstructorCall cc -> {
-                        if (cc.callsConstructorOfCreatedType()) {
+                        // an anonymous creation is a call site of the superclass constructor (maddi#214)
+                        if (cc.constructor() != null) {
                             sites.computeIfAbsent(cc.constructor(), _ -> new ArrayList<>())
                                     .add(new Site(caller, cc.parameterExpressions(), cc));
                         }
@@ -289,7 +290,7 @@ final class Transfers {
     private static boolean mentionsCall(Expression expression, MethodInfo callee) {
         boolean[] found = new boolean[1];
         expression.visit((Element e) -> {
-            if (e instanceof ConstructorCall cc && cc.callsConstructorOfCreatedType() && callee.equals(cc.constructor())
+            if (e instanceof ConstructorCall cc && callee.equals(cc.constructor())
                 || e instanceof MethodCall mc && callee.equals(mc.methodInfo())) {
                 found[0] = true;
             }

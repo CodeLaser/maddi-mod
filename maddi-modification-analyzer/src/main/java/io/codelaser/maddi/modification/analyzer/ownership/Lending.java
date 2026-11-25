@@ -195,8 +195,8 @@ final class Lending {
                     }
                     arguments(c.parameterExpressions(), c.methodInfo(), isLent, allowed);
                 }
-                case ConstructorCall cc -> arguments(cc.parameterExpressions(),
-                        cc.callsConstructorOfCreatedType() ? cc.constructor() : null, isLent, allowed);
+                // an anonymous creation's arguments go to the superclass constructor (maddi#214)
+                case ConstructorCall cc -> arguments(cc.parameterExpressions(), cc.constructor(), isLent, allowed);
                 case BinaryOperator bo -> {
                     if (isLent.test(bo.lhs())) allowed[0]++;
                     if (isLent.test(bo.rhs())) allowed[0]++;

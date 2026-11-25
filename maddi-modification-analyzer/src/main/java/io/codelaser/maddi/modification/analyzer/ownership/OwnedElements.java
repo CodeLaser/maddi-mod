@@ -282,8 +282,8 @@ final class OwnedElements {
                     if (isElementExpr(c, isField) && discarded.contains(c)) allowed[0]++;
                     arguments(c.parameterExpressions(), callee, onField, isElement, borrowedParameters, allowed);
                 }
-                case ConstructorCall cc -> arguments(cc.parameterExpressions(),
-                        cc.callsConstructorOfCreatedType() ? cc.constructor() : null, false, isElement,
+                // an anonymous creation's arguments go to the superclass constructor (maddi#214)
+                case ConstructorCall cc -> arguments(cc.parameterExpressions(), cc.constructor(), false, isElement,
                         borrowedParameters, allowed);
                 case BinaryOperator bo -> {
                     if (isElement.test(bo.lhs())) allowed[0]++;

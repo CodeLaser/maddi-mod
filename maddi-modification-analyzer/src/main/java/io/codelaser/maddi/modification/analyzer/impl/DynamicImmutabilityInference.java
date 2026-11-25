@@ -206,7 +206,9 @@ public class DynamicImmutabilityInference {
 
         List<Expression> arguments = new ArrayList<>();
         forEachMethodOfPrimaryType(owner.typeInfo(), mi -> mi.methodBody().visit(e -> {
-            if (e instanceof ConstructorCall cc && cc.callsConstructorOfCreatedType() && cc.constructor() == owner) {
+            // 'new T(a) { }' (an enum constant with a body, an anonymous subclass) calls the private constructor too:
+            // without it the walk is not the complete set of callers it must be (maddi#214)
+            if (e instanceof ConstructorCall cc && cc.constructor() == owner) {
                 collectArgument(cc.parameterExpressions(), pi, arguments);
             } else if (e instanceof MethodCall mc && mc.methodInfo() == owner) {
                 collectArgument(mc.parameterExpressions(), pi, arguments);

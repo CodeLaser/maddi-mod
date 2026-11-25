@@ -970,7 +970,21 @@ public final class NonNullFacts {
 
     private static MethodInfo callee(Expression call) {
         return call instanceof MethodCall mc ? mc.methodInfo()
-                : call instanceof ConstructorCall cc && cc.callsConstructorOfCreatedType() ? cc.constructor() : null;
+                : call instanceof ConstructorCall cc ? anonymousOrPlainConstructor(cc) : null;
+    }
+
+    /*
+     The constructor a creation's arguments go to: for 'new X(a) { }' the superclass constructor X(a) (maddi#214), but
+     only when the anonymous class runs nothing of its own at construction. An instance initializer or a field
+     initializer there can reach a captured variable that is also an argument, which X(a)'s parameters do not show.
+     */
+    private static MethodInfo anonymousOrPlainConstructor(ConstructorCall cc) {
+        if (!cc.isAnonymousCreation()) return cc.constructor();
+        TypeInfo anonymous = cc.anonymousClass();
+        boolean ownConstructionCode = anonymous.fields().stream()
+                                              .anyMatch(f -> !f.isStatic() && f.initializer() != null && !f.initializer().isEmpty())
+                                      || anonymous.methods().stream().anyMatch(MethodInfo::isInstanceInitializer);
+        return ownConstructionCode ? null : cc.constructor();
     }
 
     // may the call remove the key: one on the map itself other than a read, or one handed the map (callMade)

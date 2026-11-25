@@ -1607,6 +1607,14 @@ abstract class IsolationCore {
                         // the supertype is what the verbatim text names ('new Comparator<X>() {...}'), and an
                         // interface has no constructor, so the cc.constructor() branch below never reaches it
                         visitNestedTypeBodies(cc.anonymousClass(), ds(cc));
+                        // maddi#214: 'new Point(6) { }' calls Point(int), which a stub of Point must declare, as for
+                        // 'new Point(6)' below; an interface's anonymous implementation calls Object(), nothing to stub
+                        MethodInfo superConstructor = cc.constructor();
+                        ParameterizedType superType = cc.anonymousClass().parentClass();
+                        if (superConstructor != null && !superConstructor.typeInfo().isJavaLangObject()
+                            && superType != null && superType.typeInfo() == superConstructor.typeInfo()) {
+                            ensureMethodInfo(ensureTypes(superType, ds(cc)).typeInfo(), superConstructor);
+                        }
                     }
                     if (cc.callsConstructorOfCreatedType()) {
                         // stub the constructed type first, so the constructor lands on the stub, not the real type

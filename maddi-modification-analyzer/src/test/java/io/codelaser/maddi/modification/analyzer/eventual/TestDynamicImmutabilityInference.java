@@ -117,6 +117,35 @@ public class TestDynamicImmutabilityInference extends CommonTest {
         assertNull(m.fieldImmutable(), "must not infer through a publicly reachable constructor");
     }
 
+    @Language("java")
+    private static final String ANONYMOUS_SUBCLASS_CALL_SITE = """
+            import java.util.ArrayList;
+            import java.util.List;
+            public class B {
+              private final List<String> items;
+              private B(List<String> items) { this.items = items; }
+              public List<String> items() { return items; }
+              public static class Builder {
+                private final List<String> collected = new ArrayList<>();
+                public B commit() { return new B(List.copyOf(collected)); }
+                public B commitRaw() { return new B(collected) { }; }
+              }
+            }
+            """;
+
+    /**
+     * CodeLaser/maddi#214: {@code new B(collected) { }} calls the private constructor too. The caller walk used to see
+     * only {@code new B(...)}, so it took {@code commit()}'s copy for the complete set and inferred the field immutable,
+     * while the anonymous subclass hands over the builder's own, still modified, list.
+     */
+    @DisplayName("an anonymous subclass's creation is a call site of the private constructor too")
+    @Test
+    public void testAnonymousSubclassCallSiteBlocks() {
+        Measured m = measure(ANONYMOUS_SUBCLASS_CALL_SITE, "B", "items");
+        assertTrue(m.fieldImmutable() == null || !m.fieldImmutable().isAtLeastImmutableHC(),
+                "the anonymous creation passes the raw list: " + m.fieldImmutable());
+    }
+
     // ---- gate 2: every call site must pass an immutable object ----
 
     @Language("java")
