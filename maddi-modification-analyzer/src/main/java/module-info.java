@@ -5,6 +5,9 @@ module io.codelaser.maddi.modification.analyzer {
     exports io.codelaser.maddi.modification.analyzer;
     exports io.codelaser.maddi.modification.analyzer.shadow;
     exports io.codelaser.maddi.modification.analyzer.nullability;
+    // the ownership pass on its own, over a finished analysis, without feeding the fixpoint: a client that wants
+    // the facts on demand (refactor-base's OWNERSHIP resource, for query.classifyConcern)
+    exports io.codelaser.maddi.modification.analyzer.ownership;
 
     requires io.codelaser.maddi.modification.common;
     requires io.codelaser.maddi.modification.link;
