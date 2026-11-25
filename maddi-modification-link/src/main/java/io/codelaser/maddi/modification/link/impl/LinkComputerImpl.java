@@ -626,9 +626,56 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
         return false;
     }
 
+    /*
+     EXPERIMENT (CodeLaser/maddi-mod#158), gate BRIDGEFIELDCYCLE (presence). Removing the links that have an end going
+     round a field cycle removes what they carried: the engine may have written 'x ≺ m' and 'm ← S' where m is such
+     a path (an assignment group took m as its name), and without them nothing says 'x ≺ S' any more. So a richer
+     input gave a poorer summary (TestWrapUnwrapRing). With the gate, the links through such an end are composed
+     first ('x ≺ m' and 'm ← S' give 'x ≺ S'), and then the end goes.
+     */
+    private static final boolean BRIDGE_FIELD_CYCLE = Gate.isSet("BRIDGEFIELDCYCLE");
+
     private static Links withoutFieldCycles(Links links) {
-        return EXPORT_FIELD_CYCLES || links.primary() == null ? links
-                : links.removeIfFromTo(LinkComputerImpl::goesRoundAFieldCycle);
+        if (EXPORT_FIELD_CYCLES || links.primary() == null) return links;
+        if (BRIDGE_FIELD_CYCLE) links = bridgedOverFieldCycles(links);
+        return links.removeIfFromTo(LinkComputerImpl::goesRoundAFieldCycle);
+    }
+
+    private static Links bridgedOverFieldCycles(Links links) {
+        Map<Variable, List<Link>> fromGone = new HashMap<>();
+        List<Link> toGone = new ArrayList<>();
+        Set<List<Object>> present = new HashSet<>();
+        for (Link link : links) {
+            present.add(List.of(link.from(), link.to()));
+            if (goesRoundAFieldCycle(link.from())) {
+                fromGone.computeIfAbsent(link.from(), _ -> new ArrayList<>()).add(link);
+            } else if (goesRoundAFieldCycle(link.to())) {
+                toGone.add(link);
+            }
+        }
+        if (fromGone.isEmpty() || toGone.isEmpty()) return links;
+        LinksImpl.Builder builder = new LinksImpl.Builder(links);
+        boolean added = false;
+        // x R m, m S y: follow chains of gone ends up to the first end that stays
+        ArrayDeque<Link> todo = new ArrayDeque<>(toGone);
+        Set<List<Object>> seen = new HashSet<>();
+        int budget = 10_000;
+        while (!todo.isEmpty() && budget-- > 0) {
+            Link in = todo.poll();
+            for (Link out : fromGone.getOrDefault(in.to(), List.of())) {
+                if (out.to().equals(in.from())) continue;
+                io.codelaser.maddi.modification.prepwork.variable.LinkNature nature = in.linkNature().combine(out.linkNature());
+                if (nature == LinkNatureImpl.NONE || nature == LinkNatureImpl.EMPTY) continue;
+                if (!seen.add(List.of(in.from(), nature, out.to()))) continue;
+                if (goesRoundAFieldCycle(out.to())) {
+                    todo.add(new LinksImpl.LinkImpl(in.from(), nature, out.to()));
+                } else if (present.add(List.of(in.from(), out.to()))) {
+                    builder.add(in.from(), nature, out.to());
+                    added = true;
+                }
+            }
+        }
+        return added ? builder.build() : links;
     }
 
     // 'oc:N.f', 'oc:N.§$s', 'oc:N.f.g': a field or virtual-field face rooted at an object-creation marker; the
