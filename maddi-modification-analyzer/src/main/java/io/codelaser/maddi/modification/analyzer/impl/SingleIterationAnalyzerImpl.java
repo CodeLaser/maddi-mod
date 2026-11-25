@@ -245,7 +245,17 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
     private final Set<MethodInfo> oscillating = ConcurrentHashMap.newKeySet();
 
     private void recordSummaryWrite(MethodInfo methodInfo, MethodLinkedVariables mlv) {
-        String text = String.valueOf(mlv);
+        // the whole value: toString() leaves out the modified, assigned and deep-only sets, and a summary whose
+        // modified set shrinks pass after pass while its links stay is converging, not coming back
+        StringBuilder sb = new StringBuilder(String.valueOf(mlv));
+        if (mlv instanceof io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl impl) {
+            for (Set<? extends io.codelaser.maddi.cst.api.variable.Variable> set
+                    : List.of(impl.modified(), impl.assigned(), impl.deepOnlyModified())) {
+                sb.append('|');
+                set.stream().map(String::valueOf).sorted().forEach(v -> sb.append(v).append(','));
+            }
+        }
+        String text = sb.toString();
         long fingerprint = ((long) text.hashCode() << 32) ^ text.length();
         long pass = churnPass.get();
         java.util.ArrayDeque<long[]> history = summaryHistory.computeIfAbsent(methodInfo,
