@@ -193,6 +193,18 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
         return consumedSummaries;
     }
 
+    private final Set<MethodInfo> settledShallow = ConcurrentHashMap.newKeySet();
+
+    @Override
+    public void settleShallow(MethodInfo methodInfo) {
+        settledShallow.add(methodInfo);
+    }
+
+    @Override
+    public boolean settledShallow(MethodInfo methodInfo) {
+        return settledShallow.contains(methodInfo);
+    }
+
     private volatile Map<MethodInfo, Integer> callCycles = Map.of();
 
     @Override
@@ -467,6 +479,9 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                 try {
                     if (DEGRADE_FOR_TESTING != null && DEGRADE_FOR_TESTING.test(methodInfo)) {
                         throw new DegradedAnalysisException(DegradedAnalysisException.Reason.WORK_CEILING);
+                    }
+                    if (settledShallow.contains(methodInfo)) {
+                        throw new DegradedAnalysisException(DegradedAnalysisException.Reason.OSCILLATION);
                     }
                     try {
                         tlv = computer.go();

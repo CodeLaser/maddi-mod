@@ -50,6 +50,18 @@ public interface LinkComputer {
         // no-op by default
     }
 
+    /**
+     * CodeLaser/maddi-mod#158: from now on, this method's links are the shallow ones, as after a work-ceiling trip.
+     * For a method whose summary keeps alternating between a few states instead of settling.
+     */
+    default void settleShallow(MethodInfo methodInfo) {
+        // no-op by default
+    }
+
+    default boolean settledShallow(MethodInfo methodInfo) {
+        return false;
+    }
+
     int propertiesChanged();
 
     void reset();

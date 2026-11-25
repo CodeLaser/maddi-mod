@@ -227,6 +227,58 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
     // LINKCACHECHECK: hits that are recomputed, to compare with the recording they would have replaced
     private final Set<MethodInfo> linkCheckPending = ConcurrentHashMap.newKeySet();
 
+    /*
+     EXPERIMENT (CodeLaser/maddi-mod#158), gate SETTLEOSCILLATION (presence): a safety net under the fixpoint. A
+     method's summary that comes back to a value it had left twice already, within OSCILLATION_PASSES passes, is not
+     converging: the group it is in alternates between a few states (guava's recursive TypeResolver group, period 2
+     or 4), each pass counts changes, and the analysis runs to its iteration limit and ends on whichever state it
+     stood on. Such a method is settled: its links are the shallow ones from the next pass on, exactly what a
+     work-ceiling trip gives (degradation marker included), a value that does not depend on the other members of
+     the group. Decided at the end of a pass, on the coordinator, for all the methods the pass found, in name order.
+     The history holds changing writes only; the first iteration starts it afresh.
+     */
+    private static final boolean SETTLE_OSCILLATION = Gate.isSet("SETTLEOSCILLATION");
+    private static final int OSCILLATION_PASSES = 16;
+    private static final int OSCILLATION_HISTORY = 12;
+    // per method: {pass, fingerprint} of its last changing summary writes
+    private final Map<MethodInfo, java.util.ArrayDeque<long[]>> summaryHistory = new ConcurrentHashMap<>();
+    private final Set<MethodInfo> oscillating = ConcurrentHashMap.newKeySet();
+
+    private void recordSummaryWrite(MethodInfo methodInfo, MethodLinkedVariables mlv) {
+        String text = String.valueOf(mlv);
+        long fingerprint = ((long) text.hashCode() << 32) ^ text.length();
+        long pass = churnPass.get();
+        java.util.ArrayDeque<long[]> history = summaryHistory.computeIfAbsent(methodInfo,
+                _ -> new java.util.ArrayDeque<>());
+        synchronized (history) {
+            int seen = 0;
+            for (long[] entry : history) {
+                if (entry[1] == fingerprint && entry[0] >= pass - OSCILLATION_PASSES) ++seen;
+            }
+            history.addLast(new long[]{pass, fingerprint});
+            if (history.size() > OSCILLATION_HISTORY) history.removeFirst();
+            if (seen >= 2) oscillating.add(methodInfo);
+        }
+    }
+
+    private void settleOscillating() {
+        if (oscillating.isEmpty()) return;
+        List<MethodInfo> methods = oscillating.stream()
+                .sorted(java.util.Comparator.comparing(MethodInfo::fullyQualifiedName)).toList();
+        oscillating.clear();
+        for (MethodInfo methodInfo : methods) {
+            linkComputer.settleShallow(methodInfo);
+            linkRecordings.remove(methodInfo);
+            summaryHistory.remove(methodInfo);
+            changedInfos.add(methodInfo);
+            summaryChangedInfos.add(methodInfo);
+            propertiesChanged.incrementAndGet();
+        }
+        LOGGER.info("Oscillating summaries: {} method(s) settled at their shallow links in pass {}: {}",
+                methods.size(), churnPass.get(), methods.stream().map(MethodInfo::fullyQualifiedName)
+                        .reduce((x, y) -> x + ", " + y).orElse(""));
+    }
+
     void setBudget(AnalysisBudget budget) {
         this.budget = budget;
     }
@@ -359,7 +411,10 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
 
     private void goInternal(List<Info> analysisOrder, boolean activateCycleBreaking, boolean firstIteration,
                             List<List<List<Info>>> firstIterationWaves) {
-        if (firstIteration) churnPass.set(0);
+        if (firstIteration) {
+            churnPass.set(0);
+            summaryHistory.clear();
+        }
         churnPass.incrementAndGet();
         linkComputer.reset();
         elementsDoneInPass.set(0);
@@ -575,6 +630,7 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
             linkCacheMisses.clear();
         }
         unionInWriteTargets();
+        if (SETTLE_OSCILLATION) settleOscillating();
     }
 
     /*
@@ -827,10 +883,27 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
                         // early value for good (EC O4, booleanIterator; dogfood: 29 methods stuck @Dependent).
                         // A library method's shallow links are a function of its annotations: ordinary retention.
                         boolean source = !methodInfo.typeInfo().compilationUnit().externalLibrary();
-                        boolean written = source
-                                ? TolerantWrite.setLatestWins(methodInfo.analysis(), METHOD_LINKS, mlv, methodInfo)
-                                : TolerantWrite.setAllowControlledOverwrite(methodInfo.analysis(), METHOD_LINKS, mlv,
-                                methodInfo);
+                        boolean written;
+                        if (SETTLE_OSCILLATION && linkComputer.settledShallow(methodInfo)) {
+                            // the settled value replaces whatever state the method stood on, whatever the rules
+                            // for an ordinary overwrite say (a modified set may only shrink)
+                            MethodLinkedVariables current = methodInfo.analysis().getOrNull(METHOD_LINKS,
+                                    io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl.class);
+                            written = current == null || !current.sameContent(mlv);
+                            if (written) {
+                                methodInfo.analysis().overwrite(METHOD_LINKS, mlv);
+                                TolerantWrite.count(METHOD_LINKS.key());
+                                summaryChangedInfos.add(methodInfo);
+                            }
+                        } else {
+                            written = source
+                                    ? TolerantWrite.setLatestWins(methodInfo.analysis(), METHOD_LINKS, mlv, methodInfo)
+                                    : TolerantWrite.setAllowControlledOverwrite(methodInfo.analysis(), METHOD_LINKS,
+                                    mlv, methodInfo);
+                            if (written && SETTLE_OSCILLATION && source && !firstIteration) {
+                                recordSummaryWrite(methodInfo, mlv);
+                            }
+                        }
                         if (written) propertiesChanged.incrementAndGet();
                         if (written && LINK_CHURN > 0 && churnPass.get() >= LINK_CHURN) {
                             System.out.println("LINKCHURN pass=" + churnPass.get() + ' '
