@@ -85,6 +85,12 @@ public class AnalysisHintsCompiler {
     }
 
     private final List<String> preloadResults;
+    private List<String> droppedHints = List.of();
+
+    /** CodeLaser/maddi#216: the hint lines the last {@link #go} could not transfer (AnalysisHintsParser.droppedHints). */
+    public List<String> droppedHints() {
+        return droppedHints;
+    }
 
     public List<Message> go(AnalysisHints analysisHints) throws IOException {
         LOGGER.info("Compiling analysis hints {}", analysisHints);
@@ -92,6 +98,7 @@ public class AnalysisHintsCompiler {
 
         AnalysisHintsParser analysisHintsParser = new AnalysisHintsParser(javaInspectorFactory);
         JavaInspector javaInspector = analysisHintsParser.go(analysisHints);
+        droppedHints = analysisHintsParser.droppedHints();
         if (compilerVisitor != null) {
             compilerVisitor.afterAnnotatedApiParsing(javaInspector);
         }

@@ -138,12 +138,10 @@ public class AnalysisHintsParser implements AnnotationProvider {
                 annotatedTypes++;
                 transferAnnotations(typeInfo, targetType);
             } else {
-                warnings++;
-                LOGGER.warn("Ignoring type '{}', cannot load it.", fqn);
+                dropped("Ignoring type '{}', cannot load it.", fqn);
             }
         } else {
-            LOGGER.warn("Ignoring type '{}', name does not end in $.", typeInfo);
-            warnings++;
+            dropped("Ignoring type '{}', name does not end in $.", typeInfo);
         }
     }
 
@@ -207,8 +205,7 @@ public class AnalysisHintsParser implements AnnotationProvider {
             if (targetSubType != null) {
                 transferAnnotations(subType, targetSubType);
             } else {
-                warnings++;
-                LOGGER.warn("Ignoring subtype '{}', cannot find it in the target type '{}'",
+                dropped("Ignoring subtype '{}', cannot find it in the target type '{}'",
                         subType.simpleName(), targetType);
             }
         }
@@ -223,8 +220,7 @@ public class AnalysisHintsParser implements AnnotationProvider {
                     declarations.put(targetMethod, sourceMethod);
                     doParameters(sourceMethod, targetMethod);
                 } else {
-                    LOGGER.warn("Ignoring method '{}', not found in target type '{}'", sourceMethod, targetType);
-                    ++warnings;
+                    dropped("Ignoring method '{}', not found in target type '{}'", sourceMethod, targetType);
                 }
             }
         }
@@ -238,8 +234,7 @@ public class AnalysisHintsParser implements AnnotationProvider {
                     declarations.put(targetMethod, sourceMethod);
                     doParameters(sourceMethod, targetMethod);
                 } else {
-                    LOGGER.warn("Ignoring constructor '{}', not found in target type '{}'", sourceMethod, targetType);
-                    ++warnings;
+                    dropped("Ignoring constructor '{}', not found in target type '{}'", sourceMethod, targetType);
                 }
             }
         }
@@ -250,8 +245,7 @@ public class AnalysisHintsParser implements AnnotationProvider {
                 Data fieldData = makeData(sourceField);
                 infoMap.put(targetField, fieldData);
             } else {
-                LOGGER.warn("Ignoring field '{}', not found in target type '{}'", sourceField, targetType);
-                ++warnings;
+                dropped("Ignoring field '{}', not found in target type '{}'", sourceField, targetType);
             }
         }
     }
@@ -402,6 +396,25 @@ public class AnalysisHintsParser implements AnnotationProvider {
 
     public int getWarnings() {
         return warnings;
+    }
+
+    /*
+     CodeLaser/maddi#216: a hint that matches nothing in its target (a method the type only inherits, a member a newer
+     release removed) is not transferred. Logged one by one before, and nothing read the count, so the task exited 0 and
+     a dropped hint looked like an applied one. Kept here so that the compiler can report them together.
+     */
+    private final List<String> droppedHints = new java.util.ArrayList<>();
+
+    private void dropped(String format, Object... args) {
+        String message = org.slf4j.helpers.MessageFormatter.arrayFormat(format, args).getMessage();
+        LOGGER.warn(message);
+        droppedHints.add(message);
+        ++warnings;
+    }
+
+    /** The hint lines this parse could not transfer, one message each, in the order met. */
+    public List<String> droppedHints() {
+        return List.copyOf(droppedHints);
     }
 
     public List<TypeInfo> types() {
