@@ -609,6 +609,23 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                && !primary.equals(v);
     }
 
+    /*
+     EXPERIMENT (CodeLaser/maddi-mod#158), gate DROPCONSTFACES (presence). '$_ce2.ownerType', '$_ce2.§$': a face of a
+     constant marker. A constant has no fields, and one marker stands for the constant at every place it reaches, so
+     its faces tie together the fields of everything that was ever assigned it. The rules that keep the marker itself
+     out of compositions (see the engine's composite predicate) do not see a field reference scoped on it. In guava's
+     recursive TypeResolver group, 'return new ParameterizedTypeImpl(owner == null ? null : resolveType(owner), ..)'
+     exported such faces; re-imported and re-exported round the recursion they grew one field per lap, and the
+     summaries of 22 methods alternate between two states for good. As for created objects (isFaceOfObjectCreation),
+     the summary does not export them; the bare marker ('return ← $_ce2', a returned null) stays.
+     */
+    private static final boolean DROP_CONSTANT_FACES = Gate.isSet("DROPCONSTFACES");
+
+    static boolean isFaceOfConstant(Variable v) {
+        Variable primary = Util.primary(v);
+        return primary instanceof MarkerVariable mv && mv.isConstant() && !primary.equals(v);
+    }
+
     // DIAGNOSTIC (#23): TRIPDIAG=<fqn substring>. When a matching method trips the work ceiling, print its graph
     // sizes and a fingerprint of every input summary it read (its own previous METHOD_LINKS included), one line per
     // callee, so two linkings that cut at different places can be diffed for the input that changed.
@@ -828,6 +845,9 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
             // the face links are intact; the summary is not the place. Gate KEEPOCFACES restores the old export.
             if (!KEEP_OC_FACES && ofReturnValue.primary() != null) {
                 ofReturnValue = ofReturnValue.removeIfFromTo(LinkComputerImpl::isFaceOfObjectCreation);
+            }
+            if (DROP_CONSTANT_FACES && ofReturnValue.primary() != null) {
+                ofReturnValue = ofReturnValue.removeIfFromTo(LinkComputerImpl::isFaceOfConstant);
             }
             ofReturnValue = withoutFieldCycles(ofReturnValue);
             Set<ParameterInfo> paramsInOfReturnValue = ofReturnValue.stream()
@@ -1129,7 +1149,8 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
             Links links = viLinks.removeIfFromTo(v -> !(LinkVariable.acceptForLinkedVariables(v)
                                                         || isInClosure(v, inClosure))
                                                       || isParameterOfSiblingMethod(v)
-                                                      || !KEEP_OC_FACES && isFaceOfObjectCreation(v));
+                                                      || !KEEP_OC_FACES && isFaceOfObjectCreation(v)
+                                                      || DROP_CONSTANT_FACES && isFaceOfConstant(v));
             if (ignoreReturnValue.contains(pi)) {
                 // the parameter's link to this method's own return variable is the return's link, read there, and
                 // one to the return variable of an ENCLOSED method (an anonymous class returning the captured
