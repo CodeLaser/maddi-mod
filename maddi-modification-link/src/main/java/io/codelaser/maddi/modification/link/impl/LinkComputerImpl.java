@@ -935,6 +935,11 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                                                   && !vi.assignments().isEmpty())
                                     .map(VariableInfo::variable),
                             assignedInCallees.stream())
+                    // the bound of the modified set and of the links, see goesRoundAFieldCycle: without it two
+                    // types whose fields point at each other (ActiveMQ's TransportConnection.duplexBridge and
+                    // DemandForwardingBridgeSupport.duplexInitiatingConnection) hand each other's assigned slots
+                    // round, one lap deeper per round, and the summaries never stop changing (#158)
+                    .filter(v -> EXPORT_FIELD_CYCLES || !goesRoundAFieldCycle(v))
                     .collect(Collectors.toUnmodifiableSet());
             MethodLinkedVariables mlv = new MethodLinkedVariablesImpl(ofReturnValue, ofParameters, summaryModified,
                     assignedOwnFields, summaryDeepOnly);
