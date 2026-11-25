@@ -89,6 +89,11 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
         ((FieldAnalyzerImpl) fieldAnalyzer).setOwnershipFeed(ownershipFeed);
         ((TypeModIndyAnalyzerImpl) typeModIndyAnalyzer).setOwnershipFeed(ownershipFeed);
     }
+
+    /** CodeLaser/maddi-mod#158: see LinkComputer.setCallCycles */
+    void setCallCycles(Map<MethodInfo, Integer> cycleOf) {
+        linkComputer.setCallCycles(cycleOf);
+    }
     private final TypeImmutableAnalyzer typeImmutableAnalyzer;
     private final TypeIndependentAnalyzer typeIndependentAnalyzer;
     private final ShallowTypeAnalyzer shallowTypeAnalyzer;

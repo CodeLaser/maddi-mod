@@ -193,6 +193,21 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
         return consumedSummaries;
     }
 
+    private volatile Map<MethodInfo, Integer> callCycles = Map.of();
+
+    @Override
+    public void setCallCycles(Map<MethodInfo, Integer> cycleOf) {
+        this.callCycles = Map.copyOf(cycleOf);
+    }
+
+    @Override
+    public boolean sameCallCycle(MethodInfo a, MethodInfo b) {
+        Map<MethodInfo, Integer> map = callCycles;
+        if (map.isEmpty()) return false;
+        Integer ca = map.get(a);
+        return ca != null && ca.equals(map.get(b));
+    }
+
     @Override
     public void setLockComputeDisabled(boolean disabled) {
         this.lockComputeDisabled = disabled;

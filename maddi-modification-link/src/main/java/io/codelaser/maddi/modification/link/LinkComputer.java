@@ -42,6 +42,14 @@ public interface LinkComputer {
         return Map.of();
     }
 
+    /**
+     * CodeLaser/maddi-mod#158: the call cycles of the analysed sources, as a cycle id per method that is in one
+     * (mutual recursion; a method that only calls itself is in none). Set once, before the first pass.
+     */
+    default void setCallCycles(Map<MethodInfo, Integer> cycleOf) {
+        // no-op by default
+    }
+
     int propertiesChanged();
 
     void reset();
