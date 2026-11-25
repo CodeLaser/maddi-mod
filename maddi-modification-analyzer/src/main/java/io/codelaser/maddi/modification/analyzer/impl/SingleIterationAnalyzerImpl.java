@@ -143,6 +143,8 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
     static final boolean CYCLE_BREAKING_SWEEP = !Gate.isSet("NOCBSWEEP");
 
     // LINKCHURN=<pass>: from that pass of an analysis on, every method whose summary write changed it (#23)
+    // LINKCHURNFULL=<fqn substring>: with LINKCHURN, the whole value written, for the methods that match
+    private static final String LINK_CHURN_FULL = Gate.get("LINKCHURNFULL");
     private static final int LINK_CHURN = Gate.get("LINKCHURN") == null ? 0 : Integer.parseInt(Gate.get("LINKCHURN"));
     private final AtomicInteger churnPass = new AtomicInteger();
     private static final int MAX_SWEEP_ROUNDS = 25;
@@ -951,6 +953,14 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
                             System.out.println("LINKCHURN pass=" + churnPass.get() + ' '
                                                + Integer.toHexString(String.valueOf(mlv).hashCode()) + ' '
                                                + methodInfo.fullyQualifiedName());
+                            if (LINK_CHURN_FULL != null && methodInfo.fullyQualifiedName().contains(LINK_CHURN_FULL)
+                                && mlv instanceof io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl impl) {
+                                System.out.println("LINKCHURNFULL pass=" + churnPass.get() + ' '
+                                                   + methodInfo.fullyQualifiedName() + "\n  links=" + mlv
+                                                   + "\n  modified=" + impl.modified().stream().map(String::valueOf).sorted().toList()
+                                                   + "\n  assigned=" + impl.assigned().stream().map(String::valueOf).sorted().toList()
+                                                   + "\n  deepOnly=" + impl.deepOnlyModified().stream().map(String::valueOf).sorted().toList());
+                            }
                         }
                         // flatten-snapshot Phase 5: this method is fully linked (summary written), so flatten
                         // its last-statement VD and drop the intermediates RIGHT HERE — concurrently, inside
