@@ -651,7 +651,7 @@ class WriteLinksAndModification {
             // FollowGraph suppresses such redundancy within its own builder, but the finer field links can arrive
             // from a different builder (the shared-variable reconstruct), which FollowGraph's block never sees. So
             // re-apply the redundancy suppression across the fully-assembled return builder.
-            suppressRedundantScopeUps(builder);
+            if (!RV_COMPLETE) suppressRedundantScopeUps(builder);
             // return variables will always be complete
             handleReturnVariable(rv, builder);
             returnSideModificationCompanions(rv, builder);
@@ -912,6 +912,8 @@ class WriteLinksAndModification {
      the summary's export then drops it too, and nothing says anything about S any more: a richer input gave a poorer
      summary (TestWrapUnwrapRing). With the gate such a link suppresses nothing.
      */
+    // EXPERIMENT (CodeLaser/maddi-mod#158), gate RVCOMPLETE (presence): no scope-up suppression on a return variable
+    private static final boolean RV_COMPLETE = Gate.isSet("RVCOMPLETE");
     private static final boolean SUPPRESS_SURVIVES = Gate.isSet("SUPPRESSSURVIVES");
 
     private void suppressRedundantScopeUps(Links.Builder builder) {
