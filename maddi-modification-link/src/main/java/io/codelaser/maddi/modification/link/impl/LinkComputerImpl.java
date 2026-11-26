@@ -496,6 +496,7 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                     }
                     reportWork(methodInfo, computer, false);
                     tlv = secondRound(methodInfo, tlv);
+                    printStatementLinks(methodInfo);
                     boolean changed = false;
                     if (write) {
                         if (TolerantWrite.setAllowControlledOverwrite(methodInfo.analysis(), METHOD_LINKS, tlv, methodInfo)) {
@@ -664,6 +665,34 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
     private static final String TRIP_DIAG_FULL = System.getenv("TRIPDIAG_FULL");
     // LINKINPUTS=<fqn substring>: the same input fingerprint at EVERY linking of a matching method, tripped or not
     private static final String LINK_INPUTS = System.getenv("LINKINPUTS");
+    // DIAGNOSTIC (#158): STMTLINKS=<fqn substring>[@<first pass>]. After every linking of a matching method from that
+    // pass on, the links of every variable at every statement, one line each, to diff the phases of a ring inside
+    // the method rather than at its summary.
+    private static final String STMT_LINKS = Gate.get("STMTLINKS");
+
+    private void printStatementLinks(MethodInfo methodInfo) {
+        if (STMT_LINKS == null || methodInfo.methodBody() == null) return;
+        int at = STMT_LINKS.indexOf('@');
+        String name = at < 0 ? STMT_LINKS : STMT_LINKS.substring(0, at);
+        int from = at < 0 ? 0 : Integer.parseInt(STMT_LINKS.substring(at + 1));
+        int pass = diagPass.get();
+        if (pass < from || !methodInfo.fullyQualifiedName().contains(name)) return;
+        StringBuilder sb = new StringBuilder();
+        printStatementLinks(methodInfo.methodBody(), pass, sb);
+        System.out.print(sb);
+    }
+
+    private static void printStatementLinks(Block block, int pass, StringBuilder sb) {
+        for (Statement statement : block.statements()) {
+            VariableData vd = VariableDataImpl.of(statement);
+            if (vd != null) {
+                vd.variableInfoStream().forEach(vi -> sb.append("STMTLINKS pass=").append(pass).append(' ')
+                        .append(statement.source().index()).append(' ').append(vi.variable().fullyQualifiedName())
+                        .append(" : ").append(vi.linkedVariables()).append('\n'));
+            }
+            statement.subBlockStream().forEach(b -> printStatementLinks(b, pass, sb));
+        }
+    }
     private static final boolean LINK_OUT_FULL = Gate.isSet("LINKOUTFULL");
     private final AtomicInteger tripDiagCount = new AtomicInteger();
     // the analyzer\'s pass number as seen by the diagnostics: reset() is called once at the start of every pass
