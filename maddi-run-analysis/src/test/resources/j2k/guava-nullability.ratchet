@@ -59,12 +59,16 @@
 # (37acd825 wrote 609 here and said a run at 610 would still pass. It did not: gate 45448611544 failed on "Progress".)
 # The 610 below is the recorded value, not read while the floor is in place. With the #158 fix (0.9.8), remove the
 # floor and the reportedOnly set from the test, and 610 is ratcheted again.
+# 2026-11-26, maddi 86548b08e (maddi#227-#230: string templates, open only where the world extends, list[i], one-line
+# blocks, a declaration and its next-statement assignment as one, @BeforeEach fixtures as non-null lateinit), maddi-mod
+# devel 46cf4ece, on the Mac, compilingFiles 610: 342 test files to class files, 861,747 tests pass with the Kotlin
+# classes, 861,720 with the translated tests.
 types	610
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	610
 compilingFiles	610
 bytecodeFiles	494
-testsPassing	861641
-testBytecodeFiles	341
-translatedTestsPassing	861614
+testsPassing	861747
+testBytecodeFiles	342
+translatedTestsPassing	861720
