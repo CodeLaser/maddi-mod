@@ -79,6 +79,66 @@ public class TestEffectiveTable {
         return closed;
     }
 
+    /*
+     Two facts on one pair: 'a p b' and 'a q b', added in both orders. The closure keeps one nature per pair, so
+     1. which one is kept, and does that depend on the order;
+     2. is what 'b' holds about 'a' the reverse of what 'a' holds about 'b';
+     3. with a third edge 'c l a': does the fact between c and b depend on the order of p and q.
+     */
+    @Test
+    public void parallel() {
+        StringBuilder sb = new StringBuilder();
+        for (boolean production : new boolean[]{false, true}) {
+            String mode = production ? "PRODUCTION" : "TEST";
+            List<LinkNature> natures = ALL.stream().filter(ln -> !production || !OBJECT_GRAPH.contains(ln)).toList();
+            int pairs = 0;
+            int orderOfTwo = 0;
+            int notReverse = 0;
+            int orderOfThree = 0;
+            for (int i = 0; i < natures.size(); i++) {
+                for (int j = i + 1; j < natures.size(); j++) {
+                    LinkNature p = natures.get(i);
+                    LinkNature q = natures.get(j);
+                    ++pairs;
+                    Edge ep = new Edge("a", "b", p);
+                    Edge eq = new Edge("a", "b", q);
+                    String pq = chain(production, List.of(ep, eq), "a", "b");
+                    String qp = chain(production, List.of(eq, ep), "a", "b");
+                    String back = chain(production, List.of(ep, eq), "b", "a");
+                    if (!pq.equals(qp)) {
+                        ++orderOfTwo;
+                        sb.append("PAR-ORDER   ").append(mode).append(" a").append(p).append("b, a").append(q)
+                                .append("b: a-b is ").append(pq).append(" or ").append(qp).append('\n');
+                    }
+                    String expectedBack = natures.stream().filter(n -> n.toString().equals(pq)).findFirst()
+                            .map(n -> n.reverse().toString()).orElse(".");
+                    if (!back.equals(expectedBack)) {
+                        ++notReverse;
+                        sb.append("PAR-REVERSE ").append(mode).append(" a").append(p).append("b, a").append(q)
+                                .append("b: a-b is ").append(pq).append(", b-a is ").append(back).append('\n');
+                    }
+                    for (LinkNature l : natures) {
+                        Edge ca = new Edge("c", "a", l);
+                        Set<String> results = new TreeSet<>();
+                        for (List<Edge> order : List.of(List.of(ca, ep, eq), List.of(ca, eq, ep), List.of(ep, eq, ca),
+                                List.of(eq, ep, ca), List.of(ep, ca, eq), List.of(eq, ca, ep))) {
+                            results.add(chain(production, order, "c", "b"));
+                        }
+                        if (results.size() > 1) {
+                            ++orderOfThree;
+                            sb.append("PAR-THIRD   ").append(mode).append(" c").append(l).append("a, a").append(p)
+                                    .append("b, a").append(q).append("b: c-b is ").append(results).append('\n');
+                        }
+                    }
+                }
+            }
+            sb.append("PARALLEL ").append(mode).append(" pairs=").append(pairs).append(" order of the two=")
+                    .append(orderOfTwo).append(" not the reverse=").append(notReverse)
+                    .append(" third edge depends on order=").append(orderOfThree).append('\n');
+        }
+        System.out.print(sb);
+    }
+
     @Test
     public void test() {
         StringBuilder sb = new StringBuilder();
