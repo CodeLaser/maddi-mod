@@ -1033,7 +1033,6 @@ public record ExpressionVisitor(Runtime runtime,
         Result r = new LinkMethodCall(javaInspector, runtime, linkComputerOptions, virtualFieldComputer, variableCounter,
                 currentMethod, variableData, stage)
                 .methodCall(mc.methodInfo(), mc.concreteReturnType(), object, params, mlvTranslated2);
-        if (IMPORT_FIELD_CYCLE) r = r.removeIfFromTo(LinkComputerImpl::goesRoundAFieldCycle);
         // the callee's summary says its result is a field of its receiver, or of an object reachable from it
         // ('getWrapper ≺ this.parent' when it walks a parent chain): genuine containment, which the containment
         // filter must keep for the local holding the result, as it does for a pattern binding. Unlike an accessor
@@ -1193,19 +1192,6 @@ public record ExpressionVisitor(Runtime runtime,
      for good, and the analysis certified on whichever it stood on (the uncounted overwrite, LATESTWINSCOUNTS).
      With the gate, a callee in the current method's call cycle is a call back into the recursion: the empty summary.
      */
-    /*
-     EXPERIMENT (CodeLaser/maddi-mod#158), gate IMPORTFIELDCYCLE (presence). A summary drops, on export, every link with
-     an end that goes round a field cycle (LinkComputerImpl.goesRoundAFieldCycle). A call builds such paths again: the
-     callee wraps its argument ('rv.delegate <- 0:a'), the argument has 'a.delegate.delegate', and the result has
-     'rv.delegate.delegate.delegate'. Inside the method that path is a vertex like any other: an assignment group may
-     take it as the name for what it stands for ('rv.delegate.delegate.delegate <- SYSTEM' groups SYSTEM with it), the
-     links of the other variables are then written against it, and the export removes them all, with what they said
-     about SYSTEM. So a richer argument gave a poorer summary, and two default methods wrapping and unwrapping each
-     other's result alternated for good (TestWrapUnwrapRing; Jenkins' Queue.Task.getDefaultAuthentication). With the
-     gate, what a call hands back is bounded as an export is.
-     */
-    static final boolean IMPORT_FIELD_CYCLE = System.getenv("IMPORTFIELDCYCLE") != null;
-
     static final boolean CALL_CYCLE_EMPTY = System.getenv("CALLCYCLEEMPTY") != null;
 
     private static MethodLinkedVariables returnLinksOnly(MethodInfo methodInfo, MethodLinkedVariables full) {

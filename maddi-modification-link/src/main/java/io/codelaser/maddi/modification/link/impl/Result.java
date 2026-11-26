@@ -210,20 +210,6 @@ public class Result {
         return variablesRepresentingConstants;
     }
 
-    // CodeLaser/maddi-mod#158: the links, and the extra links, without those that have an end the predicate rejects
-    public Result removeIfFromTo(java.util.function.Predicate<Variable> predicate) {
-        Links filtered = links.primary() == null ? links : links.removeIfFromTo(predicate);
-        Map<Variable, Links> map = new HashMap<>();
-        extra.map().forEach((v, l) -> {
-            if (!predicate.test(v)) map.put(v, l.primary() == null ? l : l.removeIfFromTo(predicate));
-        });
-        Result r = new Result(filtered, new LinkedVariablesImpl(map), modified, deepOnlyModified, writeMethodCalls,
-                casts, erase, variablesRepresentingConstants);
-        r.evaluated = evaluated;
-        r.expressionScopePrimary = expressionScopePrimary;
-        return r;
-    }
-
     public Result with(Links links) {
         return new Result(links, extra, modified, deepOnlyModified, writeMethodCalls, casts,
                 erase, variablesRepresentingConstants).setEvaluated(evaluated);

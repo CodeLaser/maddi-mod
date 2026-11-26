@@ -289,7 +289,7 @@ All with `LATESTWINSCOUNTS` and `CALLCYCLEEMPTY` on.
 |
 
 | `TestWrapUnwrapRing`
-| `RVCOMPLETE` or `SUPPRESSSURVIVES`
+| `RVCOMPLETE`
 | certified in 8 passes
 |
 
@@ -353,21 +353,19 @@ All are environment variables read by presence, and all are off by default.
 | `RVCOMPLETE`
 | No scope-up suppression on a return variable: the summary keeps the complete set.
 
-| `SUPPRESSSURVIVES`
-| A link with an end that goes round a field cycle suppresses no other link. Subsumed by `RVCOMPLETE`.
-
 | `SETTLEOSCILLATION`
 | The backstop of <<backstop>>.
 
 | `KEEPOCFACES`
 | The export keeps the faces of created objects (the behaviour before CodeLaser/maddi#91).
 
-| `IMPORTFIELDCYCLE`, `BRIDGEFIELDCYCLE`
-| Two attempts that settle `TestWrapUnwrapRing` and no corpus. To be removed.
-
 | `LINKCHURN=<pass>`, `LINKCHURNFULL=<substring>`
 | Diagnostics: from that pass on, print every method whose summary write changed; for matching methods, the whole value.
 |===
+
+Three further gates were tried and removed again (their commits are in the history of #158):
+`SUPPRESSSURVIVES`, in which a link with an end that goes round a field cycle suppresses no other link, settled `TestWrapUnwrapRing` and Guava and is subsumed by `RVCOMPLETE`;
+`IMPORTFIELDCYCLE` and `BRIDGEFIELDCYCLE`, which applied the field-cycle bound to what a call hands back and composed links across a path before deleting it, settled the unit test and no corpus.
 
 The bound on the assigned set is on by default and shares the opt-out `NOFIELDCYCLE` with the bound on links.
 
