@@ -229,7 +229,7 @@ public final class IncrementalFixpointEngine<V, L> {
     private static final java.util.regex.Pattern TRACE_ONLY = System.getenv("LINKTRACEONLY") == null ? null
             : java.util.regex.Pattern.compile(System.getenv("LINKTRACEONLY"));
 
-    static void lt(String message) {
+    public static void lt(String message) {
         if (TRACE_ONLY != null && !TRACE_ONLY.matcher(message).find()) return;
         System.out.println("LT " + message);
     }

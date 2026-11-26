@@ -20,6 +20,7 @@ import io.codelaser.maddi.modification.prepwork.variable.LinkNature;
 import io.codelaser.maddi.modification.prepwork.variable.Links;
 import io.codelaser.maddi.modification.prepwork.variable.ReturnVariable;
 import io.codelaser.maddi.modification.prepwork.variable.impl.LinksImpl;
+import io.codelaser.maddi.modification.link.impl.graph.IncrementalFixpointEngine;
 
 public record FollowGraph(Graph graph) {
     // sorting is needed to consistently take the same direction for tests
@@ -180,6 +181,17 @@ public record FollowGraph(Graph graph) {
                     Variable primaryTo = Util.primary(to);
                     if (primaryTo == null) continue;//array expression not a variable
                     Variable firstRealTo = Util.firstRealVariable(to);
+                    // LINKTRACE (#158): every candidate of the extraction, and why it is kept or dropped
+                    if (IncrementalFixpointEngine.TRACE) {
+                        boolean internal = primaryTo.equals(primaryFrom)
+                                           && !(!firstRealFrom.equals(primaryFrom) && !firstRealTo.equals(primaryTo)
+                                                && !firstRealFrom.equals(firstRealTo));
+                        String verdict = !linkNature.valid() ? "invalid" : internal ? "internal"
+                                : !Util.acceptModificationLink(from, to) ? "not accepted"
+                                : block.contains(new Edge(from, linkNature, to)) ? "blocked" : "emitted";
+                        IncrementalFixpointEngine.lt("follow primary=" + primary + " " + from + " " + linkNature + " "
+                                + to + " query=" + fromPair.queryFrom() + " : " + verdict);
+                    }
                     // remove internal references (field inside primary to primary or other field in primary)
                     // see TestStaticValues1,5 for an example where s.k ← s.r.i, which requires the 2nd clause
                     if (linkNature.valid()
