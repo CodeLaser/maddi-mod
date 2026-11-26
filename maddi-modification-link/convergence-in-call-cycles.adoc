@@ -273,6 +273,150 @@ The return cap, the scope-up suppression and the export by deletion each fail it
 
 The same property gives an audit: every place in the link engine where a fact, a link or a whole summary is removed or replaced is a candidate negative edge, to be either made monotone or listed as covered by the backstop.
 
+[[audit]]
+== Audit, 2026-11-26
+
+The link engine and the analyzer's storage were read once for rules that fail this property.
+Status of a row: *tested* (a test shows it), *read* (checked against the code by hand), *reported* (found by the audit, not checked again).
+No row beyond the four of <<negative-edges>> has been shown to drive a ring on a corpus.
+Class of a row: the design rule that would make it monotone, or *backstop* when no such rule is known.
+
+=== The closure
+
+The closure keeps one nature per pair of variables, the one of the highest rank (`Closure.add`, `LinkNature.best`).
+The raw graph keeps the last label put (`LabeledGraph`).
+The ranks are a total order, and composition is not monotone in it.
+`TestLinkNatureMonotone` lists the triples: of 5508, 923 lose the derived fact and 149 weaken it.
+Most concern natures that do not meet on one pair.
+These do, as a pair is refined from one pass to the next:
+
+[cols="1,2,2"]
+|===
+| Pair goes from | Before | After
+
+| `~` to `⊆` | `~ ∘ ⊇ = ∩`, `~ ∘ ∋ = ∋?` | `⊆ ∘ ⊇` and `⊆ ∘ ∋` give nothing
+| `∩` to `⊆` | `∩ ∘ ⊇ = ∩` | `⊆ ∘ ⊇` gives nothing
+| `∈?` to `∈` | `∈? ∘ ∈? = ∈?` | `∈? ∘ ∈` gives nothing
+| `⊆` to `⊇` (both hold) | `∈ ∘ ⊆ = ∈`, `≺ ∘ ⊆ = ≤` | `∈ ∘ ⊇` and `≺ ∘ ⊇` give nothing
+| `≤` to `∈` | `≤ ∘ ⊇ = ∩` | `∈ ∘ ⊇` gives nothing
+|===
+
+So a sharper fact on one pair removes a consequence elsewhere, below the level of any filter or limit.
+Inside one computation a derived fact is not withdrawn, and the seeds are sorted, so one method is deterministic; the loss shows between two passes that differ in one seed.
+Status: *tested* for the table of compositions, not exercised on a method.
+Two repairs exist.
+Either the table is completed so that a nature which implies another derives at least what the other derives (then the test, restricted to the implication order, becomes an assertion), or a pair holds a set of natures.
+The first is local; whether the completed table costs precision is not known.
+
+=== Import of a callee summary
+
+[cols="3,4,1,1"]
+|===
+| Rule | Why it is negative | Class | Status
+
+| A receiver whose links have no primary is treated as "no object" (`LinkMethodCall`, leaf 5 against leaf 4).
+| A callee whose return links are empty gives such a receiver for the next call in a chain. When its return links appear, the branch changes: the links between the arguments go, the links to the object come. The return cap feeds this.
+| collapse | reported
+
+| An imported `from ← to` goes through the branch of an assignment in the source, eviction from the group included (`Graph.mergeEdgeBi`).
+| "The callee may assign this field" acts as "this field is reassigned here" and removes what held before.
+| collapse | reported
+
+| A callee in progress on this thread is read as its shallow summary, which follows its current verdicts (`ShallowMethodLinkComputer`).
+| Undecided reads as modifying with dependent links; once a verdict is decided the stand-in becomes empty. Which method of a cycle is entered first decides who sees which.
+| start from empty | reported
+
+| About a dozen defaults for an undecided verdict while linking, in both directions (`MethodModification`).
+| A verdict that arrives flips the links derived under the default.
+| start from empty | reported
+
+| `PassedFunction.elementOf` and `LinkAppliedFunctionalInterface` answer all or nothing.
+| One more link in the function's summary makes the whole contribution disappear.
+| saturate | reported
+|===
+
+=== Extraction and export
+
+[cols="3,4,1,1"]
+|===
+| Rule | Why it is negative | Class | Status
+
+| The `block` set of `FollowGraph`: an emitted link blocks its coarser forms on the scopes of both ends.
+| The same rule as the scope-up suppression, applied earlier, on every variable including the return variable, and not switched off by `RVCOMPLETE`. A blocking link that the export deletes afterwards leaves nothing. Candidate cause of the Jenkins parser ring.
+| presentation | read
+
+| More than 30 expansion rounds in one statement gives the shallow summary (`LinkGraph`).
+| Same shape as the work ceiling, other trigger.
+| saturate | read
+
+| `RedundantLinks` on parameters in sub-blocks of the last statement.
+| Scope-up suppression again, on stored statement data that the summary reads.
+| presentation | reported
+
+| `filteredPi` removes a parameter's links to the return variable once a return link mentions it.
+| One more return link removes parameter links.
+| presentation | reported
+
+| `addAllDistinct` keeps the first nature of a pair; `LinkImpl.equals` compares the two ends only.
+| Arrival order decides the nature; a second nature is dropped silently.
+| monotone table | reported
+
+| The `⊇` to `~` rewrite follows the one recorded witness of a pair.
+| Which raw edges are demoted depends on which derivation was recorded. The code comment records a ring of period 2 on Timefold.
+| backstop | reported
+
+| Group against plain edges for a recipient of several sources; "finer stands in for coarser" when an element's links are lifted onto the array.
+| The representation changes with the number of sources, and the two do not give the same facts.
+| collapse | reported
+|===
+
+=== Storage and verdicts
+
+The storage was built for values that start pessimistic and improve; a call cycle starts empty and grows.
+Where the two meet, a growing summary is refused or not counted.
+
+[cols="3,4,1,1"]
+|===
+| Rule | Why it matters | Class | Status
+
+| A recomputed summary whose modified set is not a subset of the stored one is refused as a whole (`MethodLinkedVariablesImpl.overwriteAllowed`).
+| The first stored value decides. The refusal is not counted, wakes nobody, and with the link cache is invisible in the certifying pass.
+| start from empty | read
+
+| A summary with the same primaries and modified set but other links replaces the stored one without counting as a change, unless `LATESTWINSCOUNTS` (`TolerantWrite`).
+| A pass can report zero changes while summaries moved in it: the second symptom, still the default.
+| count it | read
+
+| "Richer wins" for on-demand, library and enclosed methods is a maximum by content count, then by rendering, not a union.
+| Facts held only by the loser are lost; at equal count the string order decides.
+| accumulate | reported
+
+| Verdicts are upgrade-only and decided from summaries that still move: statement-level `UNMODIFIED_VARIABLE`, and through it `NON_MODIFYING_METHOD`, `UNMODIFIED_PARAMETER`, `UNMODIFIED_FIELD`; `INDEPENDENT_METHOD`, `INDEPENDENT_PARAMETER`, `INDEPENDENT_FIELD` from empty or short links.
+| A link or a modification that arrives after the optimistic value was written is refused. This is the mechanism of the run-to-run variance in single verdicts.
+| decide after the cycle settles | reported
+
+| Cycle breaking writes the top value on an undecided input; a field's links are written as empty with another key.
+| The awaited verdict cannot lower it; the real links are refused later.
+| backstop | reported
+
+| The field analyzer reads statement-level data of methods that may be recomputing in the same parallel pass, and is not woken by a statement-level change.
+| The field sees old or new links by timing, and keeps the more optimistic verdict.
+| schedule | reported
+
+| `TypeModIndyAnalyzerImpl` derives independence from a degraded method's shallow summary as if computed.
+| An abandoned body can read as independent. The field analyzer checks the degraded marker, this one does not.
+| saturate | reported
+|===
+
+Found sound: the link cache for reads of analysis maps, `RecursionPrevention`, the type-level analyzers and the folds over implementations outside cycle breaking, the cycle-breaking sweep, and the choice of methods by `SETTLEOSCILLATION`.
+
+=== What the audit changes
+
+. Full monotonicity is not one gate away. The closure, the import and the storage each hold rules that fail the property, so by the trilemma the backstop stays until they are repaired, and the claim "no ring is possible" cannot be made today.
+. The closure is the one finding with a mechanical repair and a test that can become an assertion.
+. The `block` set is the cheapest experiment: it may explain the Jenkins parser ring without keeping created-object faces.
+. The variance in single verdicts has a cause separate from the rings: verdicts written once, early, on a summary that grows. Starting the cycle from empty does not remove it; deciding the verdicts of a call cycle after its summaries settle would.
+
 [[measurements]]
 == Measurements, 2026-11-26
 
@@ -381,7 +525,8 @@ A ring can disappear when elements are left out, because a rule over all impleme
 . Whether the work ceiling can saturate upward without making every caller of an expensive method pessimistic.
 . Whether the first phase of Guava and Jenkins, which ends at the pass limit in every configuration, is one more ring or slow convergence.
 . The verdict differences of the fixes: `Types.newParameterizedType` becoming modifying on Guava with `RVCOMPLETE`, and 14 rows around `hudson.model.Label` becoming unmodified on Jenkins with the bound on the assigned set, have not been checked against the source.
-. An audit of the link engine for negative edges, as described under "Monotonicity as a test".
+. The rows of the <<audit>> marked _reported_ have not been checked by hand, and none of its rows has been exercised on a corpus.
+. Whether the table of compositions can be completed along the implication order without a cost in precision.
 . The memory cost of storing complete summaries.
 
 [bibliography]
