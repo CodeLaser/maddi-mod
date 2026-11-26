@@ -51,6 +51,19 @@ public class TestSiblingSubsets extends CommonTest {
                     b.addAll(a);
                     return new ArrayList<>(b);
                 }
+                // the copy alone, and the modification alone before a copy
+                List<T> copyOnly(List<T> b) {
+                    return new ArrayList<>(b);
+                }
+                List<T> clearThenCopy(List<T> b) {
+                    b.clear();
+                    return new ArrayList<>(b);
+                }
+                List<T> copyViaLocal(List<T> a, List<T> b) {
+                    b.addAll(a);
+                    List<T> c = new ArrayList<>(b);
+                    return c;
+                }
             }
             """;
 
@@ -60,7 +73,8 @@ public class TestSiblingSubsets extends CommonTest {
         PrepAnalyzer analyzer = new PrepAnalyzer(runtime, new PrepAnalyzer.Options.Builder().build());
         analyzer.doPrimaryType(X);
         LinkComputer tlc = new LinkComputerImpl(javaInspector);
-        for (String name : List.of("views", "copies", "fedThenCopied", "returned")) {
+        for (String name : List.of("views", "copies", "fedThenCopied", "returned", "copyOnly", "clearThenCopy",
+                "copyViaLocal")) {
             MethodInfo method = X.methodStream().filter(m -> name.equals(m.name())).findFirst().orElseThrow();
             MethodLinkedVariables mlv = method.analysis().getOrCreate(METHOD_LINKS, () -> tlc.doMethod(method));
             System.out.println("SIBLING " + name + " summary: " + mlv);
