@@ -21,7 +21,9 @@ public class DegradedAnalysisException extends UnsupportedOperationException {
         /** the per-statement graph expansion loop did not reach a fixed point within its round limit. */
         EXPANSION_ROUNDS("expansion rounds"),
         /** the per-method edge-visit budget in {@link IncrementalFixpointEngine} ran out. */
-        WORK_CEILING("work ceiling");
+        WORK_CEILING("work ceiling"),
+        /** the method's summary kept alternating between a few states, pass after pass (CodeLaser/maddi-mod#158). */
+        OSCILLATION("oscillating summary");
 
         private final String label;
 

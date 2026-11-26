@@ -1181,6 +1181,19 @@ public record ExpressionVisitor(Runtime runtime,
     static final int RECURSION_RETURN_CAP = Integer.parseInt(Objects.requireNonNullElse(
             System.getenv("RECURSIONRETURNCAP"), "8"));
 
+    /*
+     EXPERIMENT (CodeLaser/maddi-mod#158), gate CALLCYCLEEMPTY (presence). The bounded summary rests on "the callee is
+     not recursive itself, so computing it cannot re-enter the cycle". RECURSIVE_METHOD marks a method that calls
+     itself; a callee that reaches the current method through other methods (mutual recursion) is not marked, and
+     its summary does depend on the current method's. The cap then makes that dependence a switch: guava's
+     TypeToken.canonicalizeWildcardsInType (calls itself) reads canonicalizeWildcardsInParameterizedType, which
+     reaches it again through canonicalizeTypeArg. With 8 return links the callee is read in full and the group's
+     summaries grow; grown, it has more than 8, is read as empty, and they shrink again: two states, alternating
+     for good, and the analysis certified on whichever it stood on (the uncounted overwrite, LATESTWINSCOUNTS).
+     With the gate, a callee in the current method's call cycle is a call back into the recursion: the empty summary.
+     */
+    static final boolean CALL_CYCLE_EMPTY = System.getenv("CALLCYCLEEMPTY") != null;
+
     private static MethodLinkedVariables returnLinksOnly(MethodInfo methodInfo, MethodLinkedVariables full) {
         Links ofReturn = full == null ? LinksImpl.EMPTY : full.ofReturnValue();
         int n = 0;
@@ -1232,6 +1245,7 @@ public record ExpressionVisitor(Runtime runtime,
         boolean returnLinksOnly = false;
         if (methodInfo.equals(currentMethod)
             || recursive(currentMethod) && (NO_NARROW_RECURSION || recursive(methodInfo)
+                                            || CALL_CYCLE_EMPTY && linkComputer.sameCallCycle(currentMethod, methodInfo)
                                             || !RECURSION_SOURCE_SUMMARIES && !withoutBody(methodInfo)
                                                && !(returnLinksOnly = RECURSION_RETURN_SUMMARIES))) {
             // direct recursion, lambda to enclosing method

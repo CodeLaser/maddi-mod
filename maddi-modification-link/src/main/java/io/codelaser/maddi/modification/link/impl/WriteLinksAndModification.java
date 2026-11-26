@@ -651,7 +651,7 @@ class WriteLinksAndModification {
             // FollowGraph suppresses such redundancy within its own builder, but the finer field links can arrive
             // from a different builder (the shared-variable reconstruct), which FollowGraph's block never sees. So
             // re-apply the redundancy suppression across the fully-assembled return builder.
-            suppressRedundantScopeUps(builder);
+            if (!RV_COMPLETE) suppressRedundantScopeUps(builder);
             // return variables will always be complete
             handleReturnVariable(rv, builder);
             returnSideModificationCompanions(rv, builder);
@@ -905,6 +905,15 @@ class WriteLinksAndModification {
         }
         return 0;
     }
+
+    /*
+     EXPERIMENT (CodeLaser/maddi-mod#158), gate RVCOMPLETE (presence): no scope-up suppression on a return variable, the
+     summary keeps the complete set. Which coarser links a finer one stands in for is not a monotone function of the
+     set: one more fact changes it, and when the summary's export then removes the finer link, nothing is left of
+     either. Two methods that wrap and unwrap each other's result then never write the same summary twice
+     (TestWrapUnwrapRing; Guava's TypeResolver; convergence-in-call-cycles.adoc).
+     */
+    private static final boolean RV_COMPLETE = Gate.isSet("RVCOMPLETE");
 
     private void suppressRedundantScopeUps(Links.Builder builder) {
         List<Link> links = new ArrayList<>(builder.linkSet());

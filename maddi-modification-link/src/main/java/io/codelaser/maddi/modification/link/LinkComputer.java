@@ -42,6 +42,26 @@ public interface LinkComputer {
         return Map.of();
     }
 
+    /**
+     * CodeLaser/maddi-mod#158: the call cycles of the analysed sources, as a cycle id per method that is in one
+     * (mutual recursion; a method that only calls itself is in none). Set once, before the first pass.
+     */
+    default void setCallCycles(Map<MethodInfo, Integer> cycleOf) {
+        // no-op by default
+    }
+
+    /**
+     * CodeLaser/maddi-mod#158: from now on, this method's links are the shallow ones, as after a work-ceiling trip.
+     * For a method whose summary keeps alternating between a few states instead of settling.
+     */
+    default void settleShallow(MethodInfo methodInfo) {
+        // no-op by default
+    }
+
+    default boolean settledShallow(MethodInfo methodInfo) {
+        return false;
+    }
+
     int propertiesChanged();
 
     void reset();

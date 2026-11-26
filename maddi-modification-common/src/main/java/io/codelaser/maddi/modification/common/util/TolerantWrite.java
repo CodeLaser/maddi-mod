@@ -87,6 +87,15 @@ public final class TolerantWrite {
         }
     }
 
+    /*
+     EXPERIMENT (CodeLaser/maddi-mod#158), gate LATESTWINSCOUNTS (presence). PropertyValueMap.overwrite reports
+     '!value.equals(previous)'. Where the value's equals() is key-only (methodLinks, a field's links) and the write
+     replaces an equal value with other content, that is false: the value is replaced, the pass does not count a
+     change, and the target's dependents are not woken. A verification pass then certifies while summaries still
+     move (guava's TypeResolver group). With the gate, such a replacement is a change. Off until measured.
+     */
+    private static final boolean LATEST_WINS_COUNTS = System.getenv("LATESTWINSCOUNTS") != null;
+
     /** Bookkeeping for a deliberate overwrite made outside this class: counts it and wakes the target's dependents. */
     /**
      * The write of an ANALYSIS-ORDER recomputation (the method's slot in the main loop, or the link computer's
@@ -124,7 +133,7 @@ public final class TolerantWrite {
             if (current == value || current.sameContent(value)) return false;
             traceBefore = MLTRACE ? String.valueOf(current) : null;
             if (RETAINTRACE) System.out.println("RT latest " + context);
-            if (!analysis.overwrite(property, value)) return false;
+            if (!analysis.overwrite(property, value) && !LATEST_WINS_COUNTS) return false;
         }
         CHANGES.computeIfAbsent(property.key(), _ -> new LongAdder()).increment();
         if (context != null && !(context instanceof String) && !INTERNAL_PROPERTIES.contains(property.key())) {
@@ -261,7 +270,7 @@ public final class TolerantWrite {
                     // freezes — the measured fork of the composed-dogfood 24↔10 bistability
                     // (docs/design/eventual-info-hierarchy.md §"The retention round").
                     if (RETAINTRACE) System.out.println("RT upgrade " + context);
-                    boolean upgraded = analysis.overwrite(property, value);
+                    boolean upgraded = analysis.overwrite(property, value) || LATEST_WINS_COUNTS;
                     if (upgraded) {
                         CHANGES.computeIfAbsent(property.key(), _ -> new LongAdder())
                                 .increment();

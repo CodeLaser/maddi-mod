@@ -193,6 +193,33 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
         return consumedSummaries;
     }
 
+    private final Set<MethodInfo> settledShallow = ConcurrentHashMap.newKeySet();
+
+    @Override
+    public void settleShallow(MethodInfo methodInfo) {
+        settledShallow.add(methodInfo);
+    }
+
+    @Override
+    public boolean settledShallow(MethodInfo methodInfo) {
+        return settledShallow.contains(methodInfo);
+    }
+
+    private volatile Map<MethodInfo, Integer> callCycles = Map.of();
+
+    @Override
+    public void setCallCycles(Map<MethodInfo, Integer> cycleOf) {
+        this.callCycles = Map.copyOf(cycleOf);
+    }
+
+    @Override
+    public boolean sameCallCycle(MethodInfo a, MethodInfo b) {
+        Map<MethodInfo, Integer> map = callCycles;
+        if (map.isEmpty()) return false;
+        Integer ca = map.get(a);
+        return ca != null && ca.equals(map.get(b));
+    }
+
     @Override
     public void setLockComputeDisabled(boolean disabled) {
         this.lockComputeDisabled = disabled;
@@ -453,6 +480,9 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                     if (DEGRADE_FOR_TESTING != null && DEGRADE_FOR_TESTING.test(methodInfo)) {
                         throw new DegradedAnalysisException(DegradedAnalysisException.Reason.WORK_CEILING);
                     }
+                    if (settledShallow.contains(methodInfo)) {
+                        throw new DegradedAnalysisException(DegradedAnalysisException.Reason.OSCILLATION);
+                    }
                     try {
                         tlv = computer.go();
                     } catch (DegradedAnalysisException dae) {
@@ -607,6 +637,23 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
         Variable primary = Util.primary(v);
         return primary instanceof ObjectCreationVariable
                && !primary.equals(v);
+    }
+
+    /*
+     EXPERIMENT (CodeLaser/maddi-mod#158), gate DROPCONSTFACES (presence). '$_ce2.ownerType', '$_ce2.§$': a face of a
+     constant marker. A constant has no fields, and one marker stands for the constant at every place it reaches, so
+     its faces tie together the fields of everything that was ever assigned it. The rules that keep the marker itself
+     out of compositions (see the engine's composite predicate) do not see a field reference scoped on it. In guava's
+     recursive TypeResolver group, 'return new ParameterizedTypeImpl(owner == null ? null : resolveType(owner), ..)'
+     exported such faces; re-imported and re-exported round the recursion they grew one field per lap, and the
+     summaries of 22 methods alternate between two states for good. As for created objects (isFaceOfObjectCreation),
+     the summary does not export them; the bare marker ('return ← $_ce2', a returned null) stays.
+     */
+    private static final boolean DROP_CONSTANT_FACES = Gate.isSet("DROPCONSTFACES");
+
+    static boolean isFaceOfConstant(Variable v) {
+        Variable primary = Util.primary(v);
+        return primary instanceof MarkerVariable mv && mv.isConstant() && !primary.equals(v);
     }
 
     // DIAGNOSTIC (#23): TRIPDIAG=<fqn substring>. When a matching method trips the work ceiling, print its graph
@@ -829,6 +876,9 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
             if (!KEEP_OC_FACES && ofReturnValue.primary() != null) {
                 ofReturnValue = ofReturnValue.removeIfFromTo(LinkComputerImpl::isFaceOfObjectCreation);
             }
+            if (DROP_CONSTANT_FACES && ofReturnValue.primary() != null) {
+                ofReturnValue = ofReturnValue.removeIfFromTo(LinkComputerImpl::isFaceOfConstant);
+            }
             ofReturnValue = withoutFieldCycles(ofReturnValue);
             Set<ParameterInfo> paramsInOfReturnValue = ofReturnValue.stream()
                     .flatMap(Link::parameterStream)
@@ -885,6 +935,11 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                                                   && !vi.assignments().isEmpty())
                                     .map(VariableInfo::variable),
                             assignedInCallees.stream())
+                    // the bound of the modified set and of the links, see goesRoundAFieldCycle: without it two
+                    // types whose fields point at each other (ActiveMQ's TransportConnection.duplexBridge and
+                    // DemandForwardingBridgeSupport.duplexInitiatingConnection) hand each other's assigned slots
+                    // round, one lap deeper per round, and the summaries never stop changing (#158)
+                    .filter(v -> EXPORT_FIELD_CYCLES || !goesRoundAFieldCycle(v))
                     .collect(Collectors.toUnmodifiableSet());
             MethodLinkedVariables mlv = new MethodLinkedVariablesImpl(ofReturnValue, ofParameters, summaryModified,
                     assignedOwnFields, summaryDeepOnly);
@@ -1129,7 +1184,8 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
             Links links = viLinks.removeIfFromTo(v -> !(LinkVariable.acceptForLinkedVariables(v)
                                                         || isInClosure(v, inClosure))
                                                       || isParameterOfSiblingMethod(v)
-                                                      || !KEEP_OC_FACES && isFaceOfObjectCreation(v));
+                                                      || !KEEP_OC_FACES && isFaceOfObjectCreation(v)
+                                                      || DROP_CONSTANT_FACES && isFaceOfConstant(v));
             if (ignoreReturnValue.contains(pi)) {
                 // the parameter's link to this method's own return variable is the return's link, read there, and
                 // one to the return variable of an ENCLOSED method (an anonymous class returning the captured

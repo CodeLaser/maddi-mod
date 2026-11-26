@@ -7,6 +7,11 @@ import io.codelaser.maddi.modification.prepwork.variable.MethodLinkedVariables;
 interface LinkComputerRecursion {
     void doAnonymousType(TypeInfo typeInfo);
 
+    /** CodeLaser/maddi-mod#158: are the two methods in one call cycle (mutual recursion)? */
+    default boolean sameCallCycle(MethodInfo a, MethodInfo b) {
+        return false;
+    }
+
     /** see {@link io.codelaser.maddi.modification.link.LinkComputer#setLockComputeDisabled(boolean)} */
     default boolean lockComputeDisabled() {
         return false;

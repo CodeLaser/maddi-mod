@@ -680,6 +680,9 @@ public class IteratingAnalyzerImpl extends CommonAnalyzerImpl implements Iterati
         modReachFailures = 0;
         int eventualDeferralRounds = 0; // terminal-phase re-derivation of the eventual family, once
         SingleIterationAnalyzer singleIterationAnalyzer = new SingleIterationAnalyzerImpl(javaInspector, configuration);
+        if (dependencyGraph != null && singleIterationAnalyzer instanceof SingleIterationAnalyzerImpl sia) {
+            sia.setCallCycles(CallCycles.of(dependencyGraph));
+        }
         int ownershipRounds = 0;
         OwnershipFeed ownershipFeed = new OwnershipFeed();
         boolean feeding = configuration.ownership() && !NO_OWNERSHIP_FEED;

@@ -89,6 +89,14 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
         ((FieldAnalyzerImpl) fieldAnalyzer).setOwnershipFeed(ownershipFeed);
         ((TypeModIndyAnalyzerImpl) typeModIndyAnalyzer).setOwnershipFeed(ownershipFeed);
     }
+
+    /** CodeLaser/maddi-mod#158: see LinkComputer.setCallCycles */
+    void setCallCycles(Map<MethodInfo, Integer> cycleOf) {
+        linkComputer.setCallCycles(cycleOf);
+        this.callCycles = Map.copyOf(cycleOf);
+    }
+
+    private Map<MethodInfo, Integer> callCycles = Map.of();
     private final TypeImmutableAnalyzer typeImmutableAnalyzer;
     private final TypeIndependentAnalyzer typeIndependentAnalyzer;
     private final ShallowTypeAnalyzer shallowTypeAnalyzer;
@@ -135,6 +143,8 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
     static final boolean CYCLE_BREAKING_SWEEP = !Gate.isSet("NOCBSWEEP");
 
     // LINKCHURN=<pass>: from that pass of an analysis on, every method whose summary write changed it (#23)
+    // LINKCHURNFULL=<fqn substring>: with LINKCHURN, the whole value written, for the methods that match
+    private static final String LINK_CHURN_FULL = Gate.get("LINKCHURNFULL");
     private static final int LINK_CHURN = Gate.get("LINKCHURN") == null ? 0 : Integer.parseInt(Gate.get("LINKCHURN"));
     private final AtomicInteger churnPass = new AtomicInteger();
     private static final int MAX_SWEEP_ROUNDS = 25;
@@ -221,6 +231,96 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
     private final Map<Info, String> linkOutcome = new ConcurrentHashMap<>();
     // LINKCACHECHECK: hits that are recomputed, to compare with the recording they would have replaced
     private final Set<MethodInfo> linkCheckPending = ConcurrentHashMap.newKeySet();
+
+    /*
+     EXPERIMENT (CodeLaser/maddi-mod#158), gate SETTLEOSCILLATION (presence): a safety net under the fixpoint. A
+     method's summary that comes back to a value it had left twice already, within OSCILLATION_PASSES passes, is not
+     converging: the group it is in alternates between a few states (guava's recursive TypeResolver group, period 2
+     or 4), each pass counts changes, and the analysis runs to its iteration limit and ends on whichever state it
+     stood on. Such a method is settled: its links are the shallow ones from the next pass on, exactly what a
+     work-ceiling trip gives (degradation marker included), a value that does not depend on the other members of
+     the group. Decided at the end of a pass, on the coordinator, for all the methods the pass found, in name order.
+     The history holds changing writes only; the first iteration starts it afresh.
+     */
+    private static final boolean SETTLE_OSCILLATION = Gate.isSet("SETTLEOSCILLATION");
+    private static final int OSCILLATION_PASSES = 16;
+    private static final int OSCILLATION_HISTORY = 12;
+    // per method: {pass, fingerprint} of its last changing summary writes
+    private final Map<MethodInfo, java.util.ArrayDeque<long[]>> summaryHistory = new ConcurrentHashMap<>();
+    private final Set<MethodInfo> oscillating = ConcurrentHashMap.newKeySet();
+
+    private void recordSummaryWrite(MethodInfo methodInfo, MethodLinkedVariables mlv) {
+        // the whole value: toString() leaves out the modified, assigned and deep-only sets, and a summary whose
+        // modified set shrinks pass after pass while its links stay is converging, not coming back
+        StringBuilder sb = new StringBuilder(String.valueOf(mlv));
+        if (mlv instanceof io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl impl) {
+            for (Set<? extends io.codelaser.maddi.cst.api.variable.Variable> set
+                    : List.of(impl.modified(), impl.assigned(), impl.deepOnlyModified())) {
+                sb.append('|');
+                set.stream().map(String::valueOf).sorted().forEach(v -> sb.append(v).append(','));
+            }
+        }
+        String text = sb.toString();
+        long fingerprint = ((long) text.hashCode() << 32) ^ text.length();
+        long pass = churnPass.get();
+        java.util.ArrayDeque<long[]> history = summaryHistory.computeIfAbsent(methodInfo,
+                _ -> new java.util.ArrayDeque<>());
+        synchronized (history) {
+            int seen = 0;
+            for (long[] entry : history) {
+                if (entry[1] == fingerprint && entry[0] >= pass - OSCILLATION_PASSES) ++seen;
+            }
+            history.addLast(new long[]{pass, fingerprint});
+            if (history.size() > OSCILLATION_HISTORY) history.removeFirst();
+            if (seen >= 2) oscillating.add(methodInfo);
+        }
+    }
+
+    /*
+     Which methods a pass catches coming back depends on thread timing: of guava's TypeResolver group, one run
+     caught 6 and another 10, other ones, and the oracle differed (noise 1792 against 1784). So what is settled is
+     not the method caught but its call cycle, all of it: a set the sources decide. A method caught that is in no
+     call cycle only relays what a cycle hands it, and settles by itself once that cycle is; it is settled alone
+     only when it is still coming back OSCILLATION_PASSES passes after it was first caught.
+     */
+    private final Map<MethodInfo, Integer> firstCaught = new ConcurrentHashMap<>();
+
+    private void settleOscillating() {
+        if (oscillating.isEmpty()) return;
+        int pass = churnPass.get();
+        Set<MethodInfo> toSettle = new HashSet<>();
+        Set<Integer> cycles = new HashSet<>();
+        for (MethodInfo methodInfo : oscillating) {
+            Integer cycle = callCycles.get(methodInfo);
+            if (cycle != null) {
+                cycles.add(cycle);
+            } else if (pass - firstCaught.computeIfAbsent(methodInfo, _ -> pass) >= OSCILLATION_PASSES) {
+                toSettle.add(methodInfo);
+            }
+        }
+        oscillating.clear();
+        if (!cycles.isEmpty()) {
+            callCycles.forEach((methodInfo, cycle) -> {
+                if (cycles.contains(cycle)) toSettle.add(methodInfo);
+            });
+        }
+        toSettle.removeIf(linkComputer::settledShallow);
+        if (toSettle.isEmpty()) return;
+        List<MethodInfo> methods = toSettle.stream()
+                .sorted(java.util.Comparator.comparing(MethodInfo::fullyQualifiedName)).toList();
+        for (MethodInfo methodInfo : methods) {
+            linkComputer.settleShallow(methodInfo);
+            linkRecordings.remove(methodInfo);
+            summaryHistory.remove(methodInfo);
+            firstCaught.remove(methodInfo);
+            changedInfos.add(methodInfo);
+            summaryChangedInfos.add(methodInfo);
+            propertiesChanged.incrementAndGet();
+        }
+        LOGGER.info("Oscillating summaries: {} method(s) settled at their shallow links in pass {}: {}",
+                methods.size(), pass, methods.stream().map(MethodInfo::fullyQualifiedName)
+                        .reduce((x, y) -> x + ", " + y).orElse(""));
+    }
 
     void setBudget(AnalysisBudget budget) {
         this.budget = budget;
@@ -354,7 +454,11 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
 
     private void goInternal(List<Info> analysisOrder, boolean activateCycleBreaking, boolean firstIteration,
                             List<List<List<Info>>> firstIterationWaves) {
-        if (firstIteration) churnPass.set(0);
+        if (firstIteration) {
+            churnPass.set(0);
+            summaryHistory.clear();
+            firstCaught.clear();
+        }
         churnPass.incrementAndGet();
         linkComputer.reset();
         elementsDoneInPass.set(0);
@@ -570,6 +674,7 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
             linkCacheMisses.clear();
         }
         unionInWriteTargets();
+        if (SETTLE_OSCILLATION) settleOscillating();
     }
 
     /*
@@ -822,15 +927,40 @@ public class SingleIterationAnalyzerImpl implements SingleIterationAnalyzer, Mod
                         // early value for good (EC O4, booleanIterator; dogfood: 29 methods stuck @Dependent).
                         // A library method's shallow links are a function of its annotations: ordinary retention.
                         boolean source = !methodInfo.typeInfo().compilationUnit().externalLibrary();
-                        boolean written = source
-                                ? TolerantWrite.setLatestWins(methodInfo.analysis(), METHOD_LINKS, mlv, methodInfo)
-                                : TolerantWrite.setAllowControlledOverwrite(methodInfo.analysis(), METHOD_LINKS, mlv,
-                                methodInfo);
+                        boolean written;
+                        if (SETTLE_OSCILLATION && linkComputer.settledShallow(methodInfo)) {
+                            // the settled value replaces whatever state the method stood on, whatever the rules
+                            // for an ordinary overwrite say (a modified set may only shrink)
+                            MethodLinkedVariables current = methodInfo.analysis().getOrNull(METHOD_LINKS,
+                                    io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl.class);
+                            written = current == null || !current.sameContent(mlv);
+                            if (written) {
+                                methodInfo.analysis().overwrite(METHOD_LINKS, mlv);
+                                TolerantWrite.count(METHOD_LINKS.key());
+                                summaryChangedInfos.add(methodInfo);
+                            }
+                        } else {
+                            written = source
+                                    ? TolerantWrite.setLatestWins(methodInfo.analysis(), METHOD_LINKS, mlv, methodInfo)
+                                    : TolerantWrite.setAllowControlledOverwrite(methodInfo.analysis(), METHOD_LINKS,
+                                    mlv, methodInfo);
+                            if (written && SETTLE_OSCILLATION && source && !firstIteration) {
+                                recordSummaryWrite(methodInfo, mlv);
+                            }
+                        }
                         if (written) propertiesChanged.incrementAndGet();
                         if (written && LINK_CHURN > 0 && churnPass.get() >= LINK_CHURN) {
                             System.out.println("LINKCHURN pass=" + churnPass.get() + ' '
                                                + Integer.toHexString(String.valueOf(mlv).hashCode()) + ' '
                                                + methodInfo.fullyQualifiedName());
+                            if (LINK_CHURN_FULL != null && methodInfo.fullyQualifiedName().contains(LINK_CHURN_FULL)
+                                && mlv instanceof io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl impl) {
+                                System.out.println("LINKCHURNFULL pass=" + churnPass.get() + ' '
+                                                   + methodInfo.fullyQualifiedName() + "\n  links=" + mlv
+                                                   + "\n  modified=" + impl.modified().stream().map(String::valueOf).sorted().toList()
+                                                   + "\n  assigned=" + impl.assigned().stream().map(String::valueOf).sorted().toList()
+                                                   + "\n  deepOnly=" + impl.deepOnlyModified().stream().map(String::valueOf).sorted().toList());
+                            }
                         }
                         // flatten-snapshot Phase 5: this method is fully linked (summary written), so flatten
                         // its last-statement VD and drop the intermediates RIGHT HERE — concurrently, inside
