@@ -7,7 +7,7 @@ import io.codelaser.maddi.graph.G;
 import io.codelaser.maddi.modification.analyzer.CommonTest;
 import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
 import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -18,7 +18,7 @@ import java.util.Set;
  and getDefaultAuthentication2. Two default methods call each other; one direction wraps the result in a new object
  (toSpring: a field deeper), the other unwraps it again (fromSpring: reads that field) or wraps it the other way.
  */
-@Disabled("CodeLaser/maddi-mod#158: a reproduction that prints; run it by name, with LATESTWINSCOUNTS=1 LINKCHURN=1")
+@EnabledIfEnvironmentVariable(named = "LINKCHURN", matches = ".+", disabledReason = "CodeLaser/maddi-mod#158: a reproduction that prints; run with LATESTWINSCOUNTS=1 LINKCHURN=1")
 public class TestWrapUnwrapRing extends CommonTest {
 
     @Language("java")

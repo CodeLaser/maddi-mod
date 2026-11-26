@@ -906,6 +906,14 @@ class WriteLinksAndModification {
         return 0;
     }
 
+    /*
+     EXPERIMENT (CodeLaser/maddi-mod#158), gate SUPPRESSSURVIVES (presence). The finer link 'rv.d.d.d <- S' makes the
+     coarser 'rv.d ≺ S', 'rv ≻ S' redundant, and they go. When the finer link has an end that goes round a field cycle,
+     the summary's export then drops it too, and nothing says anything about S any more: a richer input gave a poorer
+     summary (TestWrapUnwrapRing). With the gate such a link suppresses nothing.
+     */
+    private static final boolean SUPPRESS_SURVIVES = Gate.isSet("SUPPRESSSURVIVES");
+
     private void suppressRedundantScopeUps(Links.Builder builder) {
         List<Link> links = new ArrayList<>(builder.linkSet());
         /*
@@ -922,6 +930,9 @@ class WriteLinksAndModification {
         Map<VPair, Set<LinkNature>> toUp = new HashMap<>();
         Map<VPair, Set<LinkNature>> bothUp = new HashMap<>();
         for (Link fine : links) {
+            // CodeLaser/maddi-mod#158, gate SUPPRESSSURVIVES: a link the summary will drop cannot stand in for another
+            if (SUPPRESS_SURVIVES && (LinkComputerImpl.goesRoundAFieldCycle(fine.from())
+                                      || LinkComputerImpl.goesRoundAFieldCycle(fine.to()))) continue;
             Set<Variable> svFrom = Util.scopeVariables(fine.from());
             Set<Variable> svTo = Util.scopeVariables(fine.to());
             var rFrom = fine.linkNature().redundantFromUp();

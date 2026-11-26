@@ -7,7 +7,7 @@ import io.codelaser.maddi.graph.G;
 import io.codelaser.maddi.modification.analyzer.CommonTest;
 import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
 import org.intellij.lang.annotations.Language;
-import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -19,7 +19,7 @@ import java.util.Set;
  .paren). The last rule calls the first again. A summary read by the caller gets one field prefixed; the creation
  sites inside the Label operators keep their name in every method.
  */
-@Disabled("CodeLaser/maddi-mod#158: a reproduction that prints; run it by name, with LATESTWINSCOUNTS=1 LINKCHURN=1")
+@EnabledIfEnvironmentVariable(named = "LINKCHURN", matches = ".+", disabledReason = "CodeLaser/maddi-mod#158: a reproduction that prints; run with LATESTWINSCOUNTS=1 LINKCHURN=1")
 public class TestRuleRing extends CommonTest {
 
     @Language("java")
