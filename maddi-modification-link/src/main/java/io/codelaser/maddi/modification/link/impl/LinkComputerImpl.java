@@ -463,12 +463,21 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
             // LINKTRACE=<fqn substring>: full event trace (seeds, propagation, witness decisions) of this
             // method's fixpoint engine, for the bistability forensics (docs/design/eventual-info-hierarchy.md
             // §"The bistability investigation"). Off (null) => zero overhead.
+            // LINKTRACE=<fqn substring>@<first pass>-<last pass> limits it to those passes (#158)
             String linkTrace = System.getenv("LINKTRACE");
-            boolean trace = linkTrace != null && methodInfo.fullyQualifiedName().contains(linkTrace);
+            int traceAt = linkTrace == null ? -1 : linkTrace.indexOf('@');
+            boolean trace = linkTrace != null
+                    && methodInfo.fullyQualifiedName().contains(traceAt < 0 ? linkTrace : linkTrace.substring(0, traceAt));
+            if (trace && traceAt >= 0) {
+                String[] passes = linkTrace.substring(traceAt + 1).split("-");
+                int pass = diagPass.get();
+                trace = pass >= Integer.parseInt(passes[0])
+                        && (passes.length < 2 || pass <= Integer.parseInt(passes[1]));
+            }
             if (trace) {
                 IncrementalFixpointEngine.TRACE = true;
                 IncrementalFixpointEngine.traceOverlap(true);
-                System.out.println("LT >>> " + methodInfo.fullyQualifiedName());
+                System.out.println("LT >>> pass=" + diagPass.get() + " " + methodInfo.fullyQualifiedName());
             }
             SourceMethodComputer computer = new SourceMethodComputer(methodInfo);
             // this method's own attempt: callees computed inside it save and restore their own
