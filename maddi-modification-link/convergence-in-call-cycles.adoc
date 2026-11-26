@@ -1,0 +1,395 @@
+= Convergence of link summaries in call cycles
+:toc:
+:toclevels: 2
+:sectnums:
+
+Status: design reference, written 2026-11-26 from the investigation of CodeLaser/maddi-mod#158.
+The model and the design rules are meant to last.
+<<measurements>> and <<gates>> record the state of the code on that date and will age.
+
+== Summary
+
+A method's link summary is computed from the summaries of the methods it calls.
+When methods call each other in a cycle, the summaries are computed by iteration, and the iteration is expected to stop at a fixed point.
+On some code it does not: the summaries of a group of methods keep changing, with a period of two to thirty passes.
+
+This document gives a model in which that behaviour can be analysed.
+Its conclusions are:
+
+* Convergence is guaranteed exactly when every step is _monotone_: more input never gives less output.
+* Every non-converging group found so far passes through a rule of the engine that is not monotone.
+There are four such rules, listed in <<negative-edges>>.
+* Each of them can be made monotone by one of three design rules (<<design-rules>>).
+* Where a non-monotone rule is kept on purpose, for precision or for size, no proof of convergence is possible, and a backstop is required rather than optional (<<backstop>>).
+
+== The problem
+
+The symptoms, in the order they were found:
+
+. Two runs of the same analysis on the same code gave different verdicts (the Guava nullability oracle moved by ±25 between runs).
+. A run reported a certified fixed point while summaries were still changing.
+The cause was bookkeeping: replacing a summary by another one with the same key did not count as a change.
+With that corrected (gate `LATESTWINSCOUNTS`), the underlying behaviour became visible.
+. On Guava, Jenkins and Timefold, small groups of methods never settle.
+Their summaries return to an earlier value after 2, 3 or 30 passes, and continue until the iteration limit.
+. On ActiveMQ one part of a summary grew without bound instead.
+
+The groups are always methods in one call cycle.
+The rest of this document calls such a non-settling group a _ring_.
+
+== The model
+
+=== Facts and summaries
+
+A _fact_ is a link `(from, nature, to)` between two access paths.
+An access path is a root (the return value, a parameter, `this`, a static field, a creation marker `oc:N`) followed by field names.
+A _summary_ is a finite set of facts, together with the sets of modified and assigned variables.
+
+The engine bounds the length of access paths (<<negative-edges>>, the field-cycle bound).
+With that bound the set of all possible facts of a program is finite.
+Summaries, ordered by inclusion, therefore form a finite lattice, with the empty summary at the bottom.
+
+=== Steps
+
+For a method _m_, let _F~m~_ be the function that computes its summary from the summaries of its callees.
+_F~m~_ consists of:
+
+. _import_: each callee summary is rewritten onto the call site (the callee's `this` and parameters become the receiver and the arguments, so a callee path `rv.f` becomes `x.g.f`);
+. _closure_: the facts of the method body and the imported facts are closed under composition of link natures;
+. _export_: the facts that the callers of _m_ can name are kept, and the others are removed.
+
+A _state_ assigns a summary to every method of a call cycle.
+A _step_ replaces the summary of one method _m_ by _F~m~_ applied to the current state.
+A _schedule_ is the order in which methods are recomputed; in the analyzer it depends on the worklist and on thread timing.
+
+This is a finite discrete dynamical network.
+A certified run is a state that no step changes: a _fixed point_.
+A ring is a cycle of states.
+
+=== The interaction graph
+
+Draw an edge from fact _a_ to fact _b_ when the presence of _a_ in some summary influences the presence of _b_ in another.
+The edge is _positive_ when adding _a_ can only add _b_, and _negative_ when adding _a_ can remove _b_.
+A cycle in this graph is negative when it contains an odd number of negative edges.
+
+A step function is monotone exactly when all edges into its output are positive.
+
+== What is known about such networks
+
+[[t-monotone]]
+=== Monotone steps
+
+If every _F~m~_ is monotone and the iteration starts from the empty state, then:
+
+* a least fixed point exists (Knaster-Tarski);
+* the iteration reaches it, whatever the schedule, as long as no method is left out for ever (chaotic iteration, <<cousot77>>);
+* it does so in at most _(number of facts) × (number of methods)_ changing steps, because every changing step adds at least one fact.
+
+So monotone steps give existence, termination, a bound, and the same result under every thread timing.
+
+Starting from the empty state matters.
+A monotone function can cycle when it is started from a state that is neither below nor above its image: a rotation of an unordered set is monotone.
+
+[[t-thomas]]
+=== Signed cycles
+
+Two results on discrete networks, conjectured by R. Thomas for gene regulation and proved later:
+
+* If the interaction graph has no negative cycle, the network has no sustained oscillation (<<remy08>> for Boolean networks, <<richard10>> for asynchronous automata networks).
+* If it has no positive cycle, the network has at most one fixed point (<<remy08>>).
+
+Both are necessary conditions, stated on the interaction graph local to a state.
+They are used here in one direction only: a ring proves that a negative cycle exists, and several fixed points prove that a positive cycle exists.
+
+[[t-nonmonotone]]
+=== Steps that are not monotone
+
+Without monotonicity a fixed point need not exist.
+`TestWrapUnwrapRing` is an example with two methods and two states that map onto each other.
+Deciding whether an arbitrary finite network has a fixed point is NP-complete, as it is for Boolean networks, by reduction from satisfiability.
+An iteration can also fail to find a fixed point that exists.
+
+[[t-inflationary]]
+=== Accumulating steps
+
+If a step may only add to the stored summary (the new value is the union of the old one and _F~m~_), every step that changes anything adds a fact.
+The iteration then stops after at most _(number of facts) × (number of methods)_ changing steps, for any functions _F~m~_ and from any starting state.
+
+For monotone steps started from the empty state the result is the least fixed point.
+For other steps the result is a state that no step enlarges, and it can depend on the schedule.
+
+[[negative-edges]]
+== The negative edges in the engine
+
+Each ring found passes through one of these rules.
+In each, a larger input gives a smaller output.
+
+[cols="2,3,3,2"]
+|===
+| Rule | What it does | Why it is negative | Where it was seen
+
+| Return cap
+| Inside a self-recursive method, a source callee hands over its return links only, and none when there are more than 8 (`ExpressionVisitor.returnLinksOnly`).
+| A callee with 8 links is read in full; with 9 it is read as empty. In mutual recursion the callee's summary depends on the caller's, and the two alternate.
+| Guava, `TypeToken.canonicalizeWildcards…`: period 2.
+
+| Work ceiling
+| A method whose fixpoint engine exceeds its work budget gets the shallow summary, which for a method without contracts is empty.
+| A richer callee summary costs more work; over the budget the result is empty, the callers shrink, the work drops, and the result is rich again.
+| `TestRuleRing`: period 2. Not seen as the driver of a ring in the corpora.
+
+| Scope-up suppression
+| On a return variable, a coarser link is removed when a finer link stands in for it (`WriteLinksAndModification.suppressRedundantScopeUps`).
+| One more fact in the complete set changes which links count as finer, and so which coarser ones are removed. When the finer link is removed afterwards by the export, nothing is left of either.
+| Guava `TypeResolver`: period 2. Jenkins `QueueItemAuthenticator`: period 3.
+
+| Export by deletion
+| The export removes a fact with an end that goes round a field cycle (`goesRoundAFieldCycle`), and a fact with an end that is a face of an object created in the method (`oc:N.f`, CodeLaser/maddi#91).
+| A fact one field longer than the bound is deleted together with what was derived through it. A call that wraps its argument makes every path one field longer.
+| Jenkins `LabelExpressionParser`: period 30.
+|===
+
+A fifth case is the same bound, missing: the set of assigned variables of a summary had no field-cycle bound, and grew by one lap per round on two types whose fields point at each other (ActiveMQ).
+The lattice was not finite there.
+
+=== A worked example
+
+`TestWrapUnwrapRing` reduces Jenkins' `Queue.Task.getDefaultAuthentication` to two methods:
+
+[source,java]
+----
+default Spring getDefault2() {
+    if (overridden()) return getDefault().toSpring();   // wraps: new SpringImpl(this)
+    else return SYSTEM2;
+}
+default Acegi getDefault() {
+    return Acegi.fromSpring(getDefault2());             // unwraps a.delegate, or wraps the other way
+}
+----
+
+The summary of `fromSpring` is stable.
+`getDefault` is one application of it, and its result depends on what the argument carries:
+
+[cols="2,3"]
+|===
+| The summary of `getDefault2()` | The summary of `getDefault()`
+
+| `rv ← SYSTEM2`
+| `rv ≈ SYSTEM`, `rv.delegate ≺ SYSTEM`, `rv.delegate.delegate ≺ SYSTEM`, `rv.delegate.delegate ≺ rv.delegate`
+
+| `rv ← SYSTEM2`, `rv.delegate.delegate ≺ SYSTEM`
+| `rv.delegate.delegate ≺ rv.delegate`
+|===
+
+In the second row the complete set of facts still contains the three links to `SYSTEM`.
+It also contains the finer `rv.delegate.delegate.delegate ← SYSTEM`, built by the wrap.
+The scope-up suppression removes the three coarser links in favour of the finer one, and the export then deletes the finer one, because its path goes round the field cycle.
+The richer input gave the poorer output, and the two methods alternate between the rows for ever.
+
+== The second symptom: several fixed points
+
+Single verdicts that differ between two runs are a different phenomenon.
+There the iteration does stop, at one of several fixed points, and the schedule decides which.
+By <<t-thomas>> this needs a positive cycle, which any recursion provides.
+
+Two properties of the analyzer make the choice depend on timing:
+
+* The iteration does not start from the empty state.
+A method reached before its callee is computed reads a pessimistic or a shallow summary, and which methods that happens to depends on the order.
+* A verdict (independence, immutability, modification) is written once, at the first moment it can be decided, while the summary it rests on may still change.
+
+Starting every call cycle from the empty state would select the least fixed point, by <<t-monotone>>.
+The reachability pass and the eventual deferral already apply the second remedy locally: they derive verdicts after the summaries have settled.
+
+[[design-rules]]
+== Design rules
+
+Each rule turns a negative edge into a positive one.
+
+=== Limits saturate upward
+
+A cap or a budget that answers "nothing" is a negative edge.
+One that answers "everything" is monotone: beyond the limit, more input gives the same output.
+
+For the return cap and the work ceiling this means a summary that links the return value and the parameters to everything they could be linked to, and marks them modified.
+That is also the sound answer for an analysis that was not completed.
+
+=== Abstraction collapses, it does not delete
+
+Removing a fact whose path is too long, or whose root the caller cannot name, loses what the fact carried.
+Rewriting the path onto a coarser name that stays keeps the fact as an over-approximation:
+
+* a path beyond the field-cycle bound becomes its bounded prefix, with a weaker nature;
+* a face `oc:N.f` of a created object becomes the bare marker `oc:N`, with a weaker nature.
+
+The set of names stays as small as with deletion.
+This is the classical k-limiting of access paths (<<jones79>>).
+It has not been implemented or measured.
+
+=== Slimming is presentation, not state
+
+A reduced form of a set of links (a nearest hop, a finer link standing in for a coarser one) is not a monotone function of the set.
+It is safe as a way of printing, or of sending fewer facts to a consumer that completes them again.
+It is not safe as the stored summary that the next round reads.
+
+The stored summary is the complete set; a reduction is applied when the summary is read, or not at all.
+
+=== A call cycle starts from the empty state
+
+Inside a call cycle, every member starts with the empty summary, and the values the cycle goes through are not visible outside it until it has settled.
+A pessimistic default is needed only for code without a body.
+
+[[backstop]]
+== When a backstop is required
+
+These three cannot all hold:
+
+. a rule that pushes downward (a limit that answers "nothing", a deletion, a stored reduction) is active inside call cycles;
+. a recomputed summary replaces the stored one;
+. the iteration is guaranteed to stop.
+
+Giving up the first is the subject of <<design-rules>>.
+Giving up the second is <<t-inflationary>>.
+If both are kept, <<t-nonmonotone>> applies: a fixed point may not exist, and no amount of iteration establishes one.
+A backstop is then the third leg, not a patch over an unknown defect.
+
+The backstop that exists (gate `SETTLEOSCILLATION`) detects a summary that returns to a value it has left twice within 16 passes, and settles every method of that call cycle at its shallow links.
+It terminates: a settled method is never recomputed, so it can act at most once per method.
+The call cycle is taken from the static call graph, so the set of methods settled does not depend on timing.
+
+Its cost is precision: on Guava it settles 19 methods and changes 54 verdict rows, where the fix of the cause changes 12.
+Its window does not catch a ring with a period longer than 16 passes.
+
+== Monotonicity as a test
+
+The proof obligation of <<t-monotone>> is a property that can be tested on the code, without a corpus:
+
+[quote]
+For two inputs of a step where one contains the other, the output for the larger contains the output for the smaller.
+
+It applies to each part of a step separately: the import of one callee summary at one call site, the closure, the export.
+A violation names the rule that is not monotone.
+The return cap, the scope-up suppression and the export by deletion each fail it on an input of a few links.
+
+The same property gives an audit: every place in the link engine where a fact, a link or a whole summary is removed or replaced is a candidate negative edge, to be either made monotone or listed as covered by the backstop.
+
+[[measurements]]
+== Measurements, 2026-11-26
+
+All with `LATESTWINSCOUNTS` and `CALLCYCLEEMPTY` on.
+"Rows" are lines of the verdict dump (`FPDUMP`) that differ from a run of the same test with all gates off.
+
+[cols="2,2,3,2"]
+|===
+| Code | Configuration | Result | Rows
+
+| `TestWrapUnwrapRing`
+| none
+| never settles, period 2
+|
+
+| `TestWrapUnwrapRing`
+| `RVCOMPLETE` or `SUPPRESSSURVIVES`
+| certified in 8 passes
+|
+
+| Guava
+| `SETTLEOSCILLATION`
+| later phases certify; 19 methods settled
+| 54
+
+| Guava
+| `RVCOMPLETE`
+| later phases certify; nothing settled; two runs identical in every row; run time unchanged (330 s against 336 s)
+| 12
+
+| Jenkins
+| `RVCOMPLETE`
+| `QueueItemAuthenticator` settles only without object-creation tracking; the parser ring remains
+|
+
+| Jenkins
+| `RVCOMPLETE`, `KEEPOCFACES`
+| later phases certify; nothing settled; 173 s
+| 32
+
+| Timefold
+| `RVCOMPLETE`, `KEEPOCFACES`
+| stopped after 92 minutes without a certified phase (11 minutes with all gates off)
+|
+
+| ActiveMQ
+| `RVCOMPLETE`
+| certified
+| 0
+
+| Mifos
+| `LATESTWINSCOUNTS` only
+| certified; no ring; about 10% more passes
+| 0
+|===
+
+Keeping the faces of created objects (`KEEPOCFACES`) removes the last negative edge on Jenkins and is not affordable on Timefold.
+That is the case for collapsing them instead.
+
+Not measured: `RVCOMPLETE` on Timefold, Fernflower and LangChain4j; any of the gates on the module test suites.
+In all runs the first phase of Guava and of Jenkins still ends at the limit of 30 passes.
+
+[[gates]]
+== Gates
+
+All are environment variables read by presence, and all are off by default.
+
+[cols="2,5"]
+|===
+| Gate | Effect
+
+| `LATESTWINSCOUNTS`
+| A summary replaced by one with the same key and other content counts as a change, and wakes the dependents.
+
+| `CALLCYCLEEMPTY`
+| Inside a self-recursive method, a callee in the same call cycle is read as the empty summary: the return cap no longer switches.
+
+| `RVCOMPLETE`
+| No scope-up suppression on a return variable: the summary keeps the complete set.
+
+| `SUPPRESSSURVIVES`
+| A link with an end that goes round a field cycle suppresses no other link. Subsumed by `RVCOMPLETE`.
+
+| `SETTLEOSCILLATION`
+| The backstop of <<backstop>>.
+
+| `KEEPOCFACES`
+| The export keeps the faces of created objects (the behaviour before CodeLaser/maddi#91).
+
+| `IMPORTFIELDCYCLE`, `BRIDGEFIELDCYCLE`
+| Two attempts that settle `TestWrapUnwrapRing` and no corpus. To be removed.
+
+| `LINKCHURN=<pass>`, `LINKCHURNFULL=<substring>`
+| Diagnostics: from that pass on, print every method whose summary write changed; for matching methods, the whole value.
+|===
+
+The bound on the assigned set is on by default and shares the opt-out `NOFIELDCYCLE` with the bound on links.
+
+Reproductions:
+
+* `TestWrapUnwrapRing` and `TestRuleRing` (`maddi-modification-analyzer`, package `ring`) run when `LINKCHURN` is set.
+* `TestScratchSubset` (`maddi-run-analysis`) analyses the elements of a corpus whose names start with given prefixes.
+A ring can disappear when elements are left out, because a rule over all implementations of a method then stays undecided; a subset that settles proves nothing about the whole.
+
+== Open questions
+
+. Whether the collapse of created-object faces onto their marker settles the Jenkins parser ring at an acceptable cost on Timefold.
+. Whether the work ceiling can saturate upward without making every caller of an expensive method pessimistic.
+. Whether the first phase of Guava and Jenkins, which ends at the pass limit in every configuration, is one more ring or slow convergence.
+. The verdict differences of the fixes: `Types.newParameterizedType` becoming modifying on Guava with `RVCOMPLETE`, and 14 rows around `hudson.model.Label` becoming unmodified on Jenkins with the bound on the assigned set, have not been checked against the source.
+. An audit of the link engine for negative edges, as described under "Monotonicity as a test".
+. The memory cost of storing complete summaries.
+
+[bibliography]
+== References
+
+* [[[cousot77]]] P. Cousot, R. Cousot. Abstract interpretation: a unified lattice model for static analysis of programs by construction or approximation of fixpoints. POPL 1977. For chaotic iteration: P. Cousot, Asynchronous iterative methods for solving a fixed point system of monotone equations in a complete lattice, 1977.
+* [[[jones79]]] N. D. Jones, S. S. Muchnick. Flow analysis and optimization of Lisp-like structures. POPL 1979.
+* [[[remy08]]] É. Remy, P. Ruet, D. Thieffry. Graphic requirements for multistability and attractive cycles in a Boolean dynamical framework. Advances in Applied Mathematics 41(3), 2008, 335-350. doi:10.1016/j.aam.2007.11.003
+* [[[richard10]]] A. Richard. Negative circuits and sustained oscillations in asynchronous automata networks. Advances in Applied Mathematics, 2010. doi:10.1016/j.aam.2009.11.011, arXiv:0907.5096
