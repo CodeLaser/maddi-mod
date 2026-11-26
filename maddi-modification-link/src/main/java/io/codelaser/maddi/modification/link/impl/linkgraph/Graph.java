@@ -772,6 +772,15 @@ public class Graph {
                 }
             }
         });
+        // LINKTRACE (#158): the reconstructed links, and for each the group and the sources of its recipient
+        if (IncrementalFixpointEngine.TRACE) {
+            for (Link link : result) {
+                IncrementalFixpointEngine.lt("shared primary=" + primary + " " + link.from() + " " + link.linkNature()
+                        + " " + link.to() + " ; rep=" + sharedVariables.translateForward(link.from())
+                        + " group=" + sharedVariables.allShared(link.from())
+                        + " sources=" + sharedVariables.assignmentSources(link.from()));
+            }
+        }
         return result.stream();
     }
 
