@@ -13,10 +13,18 @@ public class LinkNatureImpl implements LinkNature {
     /*
      Experiment gate MONOTABLE (convergence-in-call-cycles.adoc, the audit of the closure): the cells of the table of
      compositions where a nature derives less than a nature it implies, filled in under the reading "can hold".
-     'sib': only '⊆ ∘ ⊇ = ~' (two subsets of one set can share elements). Any other value: all seven cells.
+     A comma-separated list of: 'sib' '⊆ ∘ ⊇ = ~' (two subsets of one set can share elements); 'sim' '⊆ ∘ ~ = ~' and
+     '~ ∘ ⊇ = ~'; 'mem' '⊆ ∘ ∋ = ∋?' and '∈ ∘ ⊇ = ∈?'; 'may' '∈? ∘ ∈ = ∈?' and '∋ ∘ ∋? = ∋?'; 'all' for the four.
      Declared first, the table below is computed in a static initializer.
      */
-    private static final String MONO_TABLE = Gate.get("MONOTABLE");
+    private static final Set<String> MONO_TABLE = monoTable(Gate.get("MONOTABLE"));
+
+    private static Set<String> monoTable(String value) {
+        if (value == null || value.isBlank()) return Set.of();
+        Set<String> set = new HashSet<>(Arrays.asList(value.split(",")));
+        if (set.contains("all")) set.addAll(List.of("sib", "sim", "mem", "may"));
+        return Set.copyOf(set);
+    }
 
     // rank is from least interesting to most interesting
 
@@ -274,13 +282,17 @@ public class LinkNatureImpl implements LinkNature {
         if (other == IS_IDENTICAL_TO) return this;
         if (this == IS_IDENTICAL_TO) return other;
 
-        if (MONO_TABLE != null) {
-            if (this == IS_SUBSET_OF && other == IS_SUPERSET_OF) return SHARES_ELEMENTS;
-            if (!"sib".equals(MONO_TABLE)) {
+        if (!MONO_TABLE.isEmpty()) {
+            if (MONO_TABLE.contains("sib") && this == IS_SUBSET_OF && other == IS_SUPERSET_OF) return SHARES_ELEMENTS;
+            if (MONO_TABLE.contains("sim")) {
                 if (this == IS_SUBSET_OF && other == SHARES_ELEMENTS) return SHARES_ELEMENTS;
                 if (this == SHARES_ELEMENTS && other == IS_SUPERSET_OF) return SHARES_ELEMENTS;
+            }
+            if (MONO_TABLE.contains("mem")) {
                 if (this == IS_SUBSET_OF && other == CONTAINS_AS_MEMBER) return COULD_CONTAIN_AS_MEMBER;
                 if (this == IS_ELEMENT_OF && other == IS_SUPERSET_OF) return COULD_BE_ELEMENT_OF;
+            }
+            if (MONO_TABLE.contains("may")) {
                 if (this == COULD_BE_ELEMENT_OF && other == IS_ELEMENT_OF) return COULD_BE_ELEMENT_OF;
                 if (this == CONTAINS_AS_MEMBER && other == COULD_CONTAIN_AS_MEMBER) return COULD_CONTAIN_AS_MEMBER;
             }
