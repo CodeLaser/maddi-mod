@@ -10,6 +10,14 @@ import io.codelaser.maddi.modification.prepwork.variable.LinkNature;
 //https://unicodemap.com/range/47/Mathematical_Operators/
 
 public class LinkNatureImpl implements LinkNature {
+    /*
+     Experiment gate MONOTABLE (convergence-in-call-cycles.adoc, the audit of the closure): the cells of the table of
+     compositions where a nature derives less than a nature it implies, filled in under the reading "can hold".
+     'sib': only '⊆ ∘ ⊇ = ~' (two subsets of one set can share elements). Any other value: all seven cells.
+     Declared first, the table below is computed in a static initializer.
+     */
+    private static final String MONO_TABLE = Gate.get("MONOTABLE");
+
     // rank is from least interesting to most interesting
 
 
@@ -265,6 +273,18 @@ public class LinkNatureImpl implements LinkNature {
         if (this == NONE || other == NONE) return NONE;
         if (other == IS_IDENTICAL_TO) return this;
         if (this == IS_IDENTICAL_TO) return other;
+
+        if (MONO_TABLE != null) {
+            if (this == IS_SUBSET_OF && other == IS_SUPERSET_OF) return SHARES_ELEMENTS;
+            if (!"sib".equals(MONO_TABLE)) {
+                if (this == IS_SUBSET_OF && other == SHARES_ELEMENTS) return SHARES_ELEMENTS;
+                if (this == SHARES_ELEMENTS && other == IS_SUPERSET_OF) return SHARES_ELEMENTS;
+                if (this == IS_SUBSET_OF && other == CONTAINS_AS_MEMBER) return COULD_CONTAIN_AS_MEMBER;
+                if (this == IS_ELEMENT_OF && other == IS_SUPERSET_OF) return COULD_BE_ELEMENT_OF;
+                if (this == COULD_BE_ELEMENT_OF && other == IS_ELEMENT_OF) return COULD_BE_ELEMENT_OF;
+                if (this == CONTAINS_AS_MEMBER && other == COULD_CONTAIN_AS_MEMBER) return COULD_CONTAIN_AS_MEMBER;
+            }
+        }
 
         if (other == IS_ASSIGNED_TO) {
             if (this == IS_ASSIGNED_FROM) return makeIdenticalTo(null);
