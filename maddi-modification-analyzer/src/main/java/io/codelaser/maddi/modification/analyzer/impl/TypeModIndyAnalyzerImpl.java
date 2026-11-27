@@ -697,7 +697,7 @@ normal methods: does a modification to the return value imply any modification i
 
     // An immutable declared type is independent whatever the overrides do (doIndependentMethod/-Parameter's own
     // shortcut); an override without a value (a setter's parameter is never written) falls back to that judgement of
-    // its own declared type, and counts as dependent only when that says nothing.
+    // its own declared type (independent, or hc), and counts as dependent only when that says so or says nothing.
     private Independent dispatchUnion(MethodInfo methodInfo, Independent own) {
         if (NO_DISPATCH_INDEPENDENCE || own == null || own.isDependent() || !Util.dispatchUnion(methodInfo)
             || methodInfo.noReturnValue() || immutable(methodInfo.returnType())) return own;
@@ -706,7 +706,7 @@ normal methods: does a modification to the return value imply any modification i
                 ValueImpl.SetOfMethodInfoImpl.EMPTY).methodInfoSet()) {
             Independent v = implementation.analysis().getOrNull(PropertyImpl.INDEPENDENT_METHOD,
                     ValueImpl.IndependentImpl.class);
-            result = result.min(v != null ? v : immutable(implementation.returnType()) ? INDEPENDENT : DEPENDENT);
+            result = result.min(v != null ? v : fromType(implementation.returnType()));
         }
         return result;
     }
@@ -721,9 +721,16 @@ normal methods: does a modification to the return value imply any modification i
             if (pi.index() >= implementation.parameters().size()) continue;
             ParameterInfo ip = implementation.parameters().get(pi.index());
             Independent v = ip.analysis().getOrNull(PropertyImpl.INDEPENDENT_PARAMETER, ValueImpl.IndependentImpl.class);
-            result = result.min(v != null ? v : immutable(ip.parameterizedType()) ? INDEPENDENT : DEPENDENT);
+            result = result.min(v != null ? v : fromType(ip.parameterizedType()));
         }
         return result;
+    }
+
+    // what the declared type alone says (immutable: independent, immutable with hidden content: independent hc), the
+    // judgement of a getter or setter; dependent when it says nothing
+    private Independent fromType(ParameterizedType type) {
+        Independent v = type == null ? null : analysisHelper.typeIndependentFromImmutableOrNull(type);
+        return v == null ? DEPENDENT : v;
     }
 
     private boolean immutable(ParameterizedType type) {
