@@ -186,11 +186,11 @@ public class TestFluent extends CommonTest {
         // one path returns a new W: links see only 'this'
         assertSame(FALSE, W.findUniqueMethod("solve", 1).analysis().getOrDefault(PropertyImpl.FLUENT_METHOD, FALSE));
         assertSame(FALSE, W.findUniqueMethod("fresh", 1).analysis().getOrDefault(PropertyImpl.FLUENT_METHOD, FALSE));
-        // a fluent call on this: still this
+        // a fluent call on this, on super: still this
         assertSame(TRUE, W.findUniqueMethod("setK", 1).analysis().getOrDefault(PropertyImpl.FLUENT_METHOD, FALSE));
         assertSame(TRUE, W.findUniqueMethod("chained", 0).analysis().getOrDefault(PropertyImpl.FLUENT_METHOD, FALSE));
-        // a non-virtual super call reads the dispatch union too (Util.dispatchUnion: a little pessimism, as for #116)
-        assertSame(FALSE, W.findUniqueMethod("viaSuper", 1).analysis().getOrDefault(PropertyImpl.FLUENT_METHOD, FALSE));
+        // a non-virtual super call reaches RT.solve's own body, not the union
+        assertSame(TRUE, W.findUniqueMethod("viaSuper", 1).analysis().getOrDefault(PropertyImpl.FLUENT_METHOD, FALSE));
         assertSame(FALSE, W.findUniqueMethod("flag", 0).analysis().getOrDefault(PropertyImpl.FLUENT_METHOD, FALSE));
     }
 }

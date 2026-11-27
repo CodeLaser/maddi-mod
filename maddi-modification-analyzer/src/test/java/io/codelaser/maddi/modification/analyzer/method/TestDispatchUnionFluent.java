@@ -42,7 +42,8 @@ import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
  * <p>
  * {@code solve}: the base (a default method) returns {@code this}, an override sometimes another object.
  * {@code id}: the base returns its argument, an override a new object. {@code self} and {@code same} are the
- * controls: every override agrees.
+ * controls: every override agrees. {@code setName} is javaparser's {@code CallableDeclaration.setName}, overridden by
+ * {@code return super.setName(name)}: the super call reaches the base's own body, or the two lock each other at false.
  */
 public class TestDispatchUnionFluent extends CommonTest {
 
@@ -69,6 +70,14 @@ public class TestDispatchUnionFluent extends CommonTest {
                     @Override Object id(Object o) { return new Object(); }
                     @Override Object same(Object o) { return o; }
                 }
+                @SuppressWarnings("unchecked")
+                static abstract class Cd<T extends Cd<?>> {
+                    String name;
+                    T setName(String n) { if (n == name) return (T) this; name = n; return (T) this; }
+                }
+                static class Md extends Cd<Md> {
+                    @Override Md setName(String n) { return super.setName(n); }
+                }
             }
             """;
 
@@ -83,7 +92,10 @@ public class TestDispatchUnionFluent extends CommonTest {
         TypeInfo w = x.findSubType("W");
         TypeInfo base = x.findSubType("Base");
         TypeInfo sub = x.findSubType("Sub");
-        assertEquals("solve=false self=true W.solve=false W.self=true | id=false same=true Sub.id=false Sub.same=true",
+        TypeInfo cd = x.findSubType("Cd");
+        TypeInfo md = x.findSubType("Md");
+        assertEquals("solve=false self=true W.solve=false W.self=true | id=false same=true Sub.id=false Sub.same=true"
+                     + " | setName=true Md.setName=true",
                 "solve=" + b(rt.findUniqueMethod("solve", 1), FLUENT_METHOD)
                 + " self=" + b(rt.findUniqueMethod("self", 1), FLUENT_METHOD)
                 + " W.solve=" + b(w.findUniqueMethod("solve", 1), FLUENT_METHOD)
@@ -91,7 +103,9 @@ public class TestDispatchUnionFluent extends CommonTest {
                 + " | id=" + b(base.findUniqueMethod("id", 1), IDENTITY_METHOD)
                 + " same=" + b(base.findUniqueMethod("same", 1), IDENTITY_METHOD)
                 + " Sub.id=" + b(sub.findUniqueMethod("id", 1), IDENTITY_METHOD)
-                + " Sub.same=" + b(sub.findUniqueMethod("same", 1), IDENTITY_METHOD));
+                + " Sub.same=" + b(sub.findUniqueMethod("same", 1), IDENTITY_METHOD)
+                + " | setName=" + b(cd.findUniqueMethod("setName", 1), FLUENT_METHOD)
+                + " Md.setName=" + b(md.findUniqueMethod("setName", 1), FLUENT_METHOD));
     }
 
     private static Object b(MethodInfo m, Property property) {
