@@ -695,29 +695,46 @@ normal methods: does a modification to the return value imply any modification i
      */
     private static final boolean NO_DISPATCH_INDEPENDENCE = Gate.isSet("NODISPATCHINDEPENDENCE");
 
-    private static Independent dispatchUnion(MethodInfo methodInfo, Independent own) {
-        if (NO_DISPATCH_INDEPENDENCE || own == null || own.isDependent() || !Util.dispatchUnion(methodInfo)) return own;
+    // An immutable declared type is independent whatever the overrides do (doIndependentMethod/-Parameter's own
+    // shortcut); an override without a value (a setter's parameter is never written) falls back to that judgement of
+    // its own declared type (independent, or hc), and counts as dependent only when that says so or says nothing.
+    private Independent dispatchUnion(MethodInfo methodInfo, Independent own) {
+        if (NO_DISPATCH_INDEPENDENCE || own == null || own.isDependent() || !Util.dispatchUnion(methodInfo)
+            || methodInfo.noReturnValue() || immutable(methodInfo.returnType())) return own;
         Independent result = own;
         for (MethodInfo implementation : methodInfo.analysis().getOrDefault(PropertyImpl.IMPLEMENTATIONS,
                 ValueImpl.SetOfMethodInfoImpl.EMPTY).methodInfoSet()) {
-            Independent v = implementation.analysis().getOrDefault(PropertyImpl.INDEPENDENT_METHOD, DEPENDENT);
-            result = result.min(v);
+            Independent v = implementation.analysis().getOrNull(PropertyImpl.INDEPENDENT_METHOD,
+                    ValueImpl.IndependentImpl.class);
+            result = result.min(v != null ? v : fromType(implementation.returnType()));
         }
         return result;
     }
 
-    private static Independent dispatchUnion(ParameterInfo pi, Independent own) {
+    private Independent dispatchUnion(ParameterInfo pi, Independent own) {
         MethodInfo methodInfo = pi.methodInfo();
-        if (NO_DISPATCH_INDEPENDENCE || own == null || own.isDependent() || !Util.dispatchUnion(methodInfo)) return own;
+        if (NO_DISPATCH_INDEPENDENCE || own == null || own.isDependent() || !Util.dispatchUnion(methodInfo)
+            || immutable(pi.parameterizedType())) return own;
         Independent result = own;
         for (MethodInfo implementation : methodInfo.analysis().getOrDefault(PropertyImpl.IMPLEMENTATIONS,
                 ValueImpl.SetOfMethodInfoImpl.EMPTY).methodInfoSet()) {
             if (pi.index() >= implementation.parameters().size()) continue;
-            Independent v = implementation.parameters().get(pi.index()).analysis()
-                    .getOrDefault(PropertyImpl.INDEPENDENT_PARAMETER, DEPENDENT);
-            result = result.min(v);
+            ParameterInfo ip = implementation.parameters().get(pi.index());
+            Independent v = ip.analysis().getOrNull(PropertyImpl.INDEPENDENT_PARAMETER, ValueImpl.IndependentImpl.class);
+            result = result.min(v != null ? v : fromType(ip.parameterizedType()));
         }
         return result;
+    }
+
+    // what the declared type alone says (immutable: independent, immutable with hidden content: independent hc), the
+    // judgement of a getter or setter; dependent when it says nothing
+    private Independent fromType(ParameterizedType type) {
+        Independent v = type == null ? null : analysisHelper.typeIndependentFromImmutableOrNull(type);
+        return v == null ? DEPENDENT : v;
+    }
+
+    private boolean immutable(ParameterizedType type) {
+        return type != null && analysisHelper.typeImmutable(type).isImmutable();
     }
 
     private Independent doIndependentParameter(ParameterInfo pi, MethodLinkedVariables mlv,
