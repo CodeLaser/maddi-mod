@@ -17,6 +17,7 @@
 
 package io.codelaser.maddi.modification.link.staticvalues;
 
+import io.codelaser.maddi.modification.link.impl.Gate;
 import static io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl.METHOD_LINKS;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -52,6 +53,10 @@ import io.codelaser.maddi.modification.prepwork.variable.VariableInfo;
 import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
 
 public class TestStaticValuesRecord extends CommonTest {
+
+    // CodeLaser/maddi-mod#158: an assignment between two members of one group is recorded, and two spellings of
+    // one slot read both ways; gate NORECORDSAMEGROUP restores the old behaviour
+    private static final boolean RECORD_SAME_GROUP = !Gate.isSet("NORECORDSAMEGROUP");
 
     @Language("java")
     private static final String INPUT1 = """
@@ -504,7 +509,8 @@ public class TestStaticValuesRecord extends CommonTest {
         // extras from the one-slot-one-group merge (gate NOSIBFACE)
         assertEquals("""
                         r.i←$_ce1,r.i←b.j,r.list←b.intList,r.list≻b.intList.§$s,r.set≡b.stringSet,r.set←b.stringSet,r.list.§$s∋$_ce3,r.list.§$s∋$_ce4,r.list.§$s≺b.intList,r.list.§$s≺b,r.list.§$s←b.intList.§$s,r.list.§m≡b.intList.§m,r.set.§m≡b.stringSet.§m,r.set.§m≡0:in.§m,r≈b,r≻b.intList.§$s\
-                        """,
+                        """.replace("r.set←b.stringSet,", RECORD_SAME_GROUP
+                        ? "r.set←b.stringSet,r.set→b.stringSet," : "r.set←b.stringSet,"),
                 rVi1.linkedVariables().toString());
 
         // switch to more correct method descriptors (openjdk)
@@ -619,7 +625,9 @@ public class TestStaticValuesRecord extends CommonTest {
                     r.variables→b.variables,r.variables∋b.variables[0],r.variables∋0:in,r.variables[0]≡b.variables[0],\
                     r.variables[0]←b.variables[0],r.variables[0]∈r.variables,r.variables.§m≡b.variables.§m,\
                     r.variables[0].§m≡r.variables.§m,r≈b\
-                    """, rVi1.linkedVariables().toString());
+                    """.replace("r.variables[0]←b.variables[0],", RECORD_SAME_GROUP
+                    ? "r.variables[0]←b.variables[0],r.variables[0]→b.variables[0]," : "r.variables[0]←b.variables[0],"),
+                    rVi1.linkedVariables().toString());
         }
         assertEquals("[-] --> method3∋0:in*,method3[0]←0:in*", mlvMethod3.toString());
 
@@ -660,7 +668,9 @@ public class TestStaticValuesRecord extends CommonTest {
                     r.variables→b.variables,r.variables∋b.variables[1],r.variables∋0:t,r.variables[1]≡b.variables[1],\
                     r.variables[1]←b.variables[1],r.variables[1]∈r.variables,r.variables.§m≡b.variables.§m,\
                     r.variables[1].§m≡r.variables.§m,r≈b\
-                    """, vi1r.linkedVariables().toString());
+                    """.replace("r.variables[1]←b.variables[1],", RECORD_SAME_GROUP
+                    ? "r.variables[1]←b.variables[1],r.variables[1]→b.variables[1]," : "r.variables[1]←b.variables[1],"),
+                    vi1r.linkedVariables().toString());
         }
         assertEquals("[-] --> -", mlvMethod4.toString());
 
@@ -758,7 +768,9 @@ public class TestStaticValuesRecord extends CommonTest {
                     r.variables←b.variables,r.variables∋b.variables[0],r.variables∋0:s,r.variables[0]∈b.variables,\
                     r.variables[0]←b.variables[0],r.variables[0]∈r.variables,r.variables.§m≡b.variables.§m,\
                     r.variables.§m≡0:s.§m,r≈b\
-                    """, rVi2.linkedVariables().toString());
+                    """.replace("r.variables[0]←b.variables[0],", RECORD_SAME_GROUP
+                    ? "r.variables[0]≡b.variables[0],r.variables[0]←b.variables[0]," : "r.variables[0]←b.variables[0],"),
+                    rVi2.linkedVariables().toString());
         }
         // example of the use of VariableTranslationAllowHierarchy
         assertEquals("[-] --> method←Λ$_fi1*", mlvMethod.toString());
@@ -789,7 +801,9 @@ public class TestStaticValuesRecord extends CommonTest {
                     r.variables→b.variables,r.variables∋b.variables[0],r.variables∋0:s,r.variables[0]≡b.variables[0],\
                     r.variables[0]←b.variables[0],r.variables[0]∈r.variables,r.variables.§m≡b.variables.§m,\
                     r.variables[0].§m≡r.variables.§m,r≈b\
-                    """, vi2Rv.linkedVariables().toString());
+                    """.replace("r.variables[0]←b.variables[0],", RECORD_SAME_GROUP
+                    ? "r.variables[0]←b.variables[0],r.variables[0]→b.variables[0]," : "r.variables[0]←b.variables[0],"),
+                    vi2Rv.linkedVariables().toString());
         }
         {
             Statement s2 = method2.methodBody().statements().get(2);

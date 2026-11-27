@@ -1,5 +1,6 @@
 package io.codelaser.maddi.modification.link.impl;
 
+import io.codelaser.maddi.modification.link.impl.Gate;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.util.HashMap;
@@ -279,7 +280,9 @@ public class TestLinkMethodCall extends CommonTest {
     @Test
     public void writeReturn() {
         assertEquals("[0:box*.t←1:x*, 1:x*→0:box*.t] -->"
-                     + " writeReturn.t←0:box*.t,writeReturn.t←1:x*,writeReturn←0:box*", link("writeReturn"));
+                     // CodeLaser/maddi-mod#158: two spellings of one slot read both ways (gate NORECORDSAMEGROUP)
+                     + " writeReturn.t←0:box*.t," + (Gate.isSet("NORECORDSAMEGROUP") ? "" : "writeReturn.t→0:box*.t,")
+                     + "writeReturn.t←1:x*,writeReturn←0:box*", link("writeReturn"));
         assertEquals("a.b.C.writeReturn(a.b.C.Box,Object):0:box, a.b.C.writeReturn(a.b.C.Box,Object):1:x",
                 modified("writeReturn"));
     }

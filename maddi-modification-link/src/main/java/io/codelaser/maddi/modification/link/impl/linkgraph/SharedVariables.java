@@ -118,6 +118,9 @@ public class SharedVariables {
      */
     private Map<Variable, Set<SharedVariable>> evictedFrom = new HashMap<>();
 
+    // CodeLaser/maddi-mod#158, see isAssignedFrom
+    private static final boolean NO_RECORD_SAME_GROUP = Gate.isSet("NORECORDSAMEGROUP");
+
     // CodeLaser/maddi-mod#77, see evictSource and Graph.mergeEdgeBi
     private static final boolean NO_SRC_EVICT = Gate.isSet("NOSRCEVICT");
 
@@ -148,6 +151,19 @@ public class SharedVariables {
                 // vertices onto the rep (the sv==null path asserts there are none).
                 sv1.addAssignment(from, to, statementIndex);
                 return sv1;
+            }
+            /*
+             Already in the same group: no change of membership, but the assignment is recorded all the same. The
+             reconstruction walks records, not memberships (assignmentEdgeStream). Without the record, of a
+             callee's 'rv ← oc', 'rv.f ← oc', 'rv.f.g ← oc' the first to arrive made oc a member and was recorded,
+             and the others, their ends now in one group, left no trace: which link the summary kept depended on
+             what else was in the group, and a larger group gave fewer links (CodeLaser/maddi-mod#158, guava's
+             TypeResolver alternating between two summaries with MONOTABLE=sim). Two spellings of one slot now read
+             both ways ('writeReturn.t ← 0:box.t' and '→'). Gate NORECORDSAMEGROUP restores the old behaviour.
+             */
+            if (!NO_RECORD_SAME_GROUP) {
+                SharedVariable.Assignment a = new SharedVariable.Assignment(from, to, statementIndex);
+                if (!sv1.assignments().contains(a)) sv1.addAssignment(from, to, statementIndex);
             }
             return null; // already in the same group
         }

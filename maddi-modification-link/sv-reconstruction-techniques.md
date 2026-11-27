@@ -230,6 +230,22 @@ Overlap note: derivedFaceKeyed/derivedFromPairs (§2/§3, NODF/NODFP) special-ca
 disconnection at extraction time; candidates for simplification now that the group layer fixes
 it at formation (A/B with the gates before touching).
 
+### 2c. Every assignment is recorded, also between two members (gate `NORECORDSAMEGROUP`)
+
+`SharedVariables.isAssignedFrom`: when both sides are already members of one group, membership
+does not change, but the `Assignment` is recorded all the same. Reconstruction walks records,
+not memberships (§2), so an assignment without a record is an assignment the summary cannot
+show. Before this rule, of a callee's `rv ← oc`, `rv.f ← oc`, `rv.f.g ← oc` the first to arrive
+made `oc` a member and was recorded; the others found both ends in the group and left no trace.
+Which link survived depended on what else was in the group, and a larger group gave FEWER
+links: a step that is not monotone, and in a call cycle a ring (guava's `TypeResolver`
+alternated between two summaries with `MONOTABLE=sim`, CodeLaser/maddi-mod#158; the group there
+holds a call result together with its own `ownerType`/`rawType` paths, about 65 members, and
+exactly one record named the created object, a different one in each phase). Visible
+consequence: two spellings of one slot read both ways (`writeReturn.t ← 0:box.t` and `→`).
+The caller still receives null ("no change of membership") and re-keys residual vertices as
+before.
+
 ### 4b. The ⊇→~ rewrite fires ONCE, at the modification statement (gate `NOFLIPSAME`)
 
 The old engine re-flipped ⊆/⊇→~ at every statement for `previouslyModified` variables; harmless
