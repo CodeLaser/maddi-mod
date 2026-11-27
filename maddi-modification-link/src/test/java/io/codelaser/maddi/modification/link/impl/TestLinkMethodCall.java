@@ -280,8 +280,8 @@ public class TestLinkMethodCall extends CommonTest {
     @Test
     public void writeReturn() {
         assertEquals("[0:box*.t←1:x*, 1:x*→0:box*.t] -->"
-                     // CodeLaser/maddi-mod#158, gate RECORDSAMEGROUP: two spellings of one slot read both ways
-                     + " writeReturn.t←0:box*.t," + (Gate.isSet("RECORDSAMEGROUP") ? "writeReturn.t→0:box*.t," : "")
+                     // CodeLaser/maddi-mod#158: two spellings of one slot read both ways (gate NORECORDSAMEGROUP)
+                     + " writeReturn.t←0:box*.t," + (Gate.isSet("NORECORDSAMEGROUP") ? "" : "writeReturn.t→0:box*.t,")
                      + "writeReturn.t←1:x*,writeReturn←0:box*", link("writeReturn"));
         assertEquals("a.b.C.writeReturn(a.b.C.Box,Object):0:box, a.b.C.writeReturn(a.b.C.Box,Object):1:x",
                 modified("writeReturn"));

@@ -54,9 +54,9 @@ import io.codelaser.maddi.modification.prepwork.variable.impl.VariableDataImpl;
 
 public class TestStaticValuesRecord extends CommonTest {
 
-    // CodeLaser/maddi-mod#158: with the gate, an assignment between two members of one group is recorded, and two
-    // spellings of one slot read both ways
-    private static final boolean RECORD_SAME_GROUP = Gate.isSet("RECORDSAMEGROUP");
+    // CodeLaser/maddi-mod#158: an assignment between two members of one group is recorded, and two spellings of
+    // one slot read both ways; gate NORECORDSAMEGROUP restores the old behaviour
+    private static final boolean RECORD_SAME_GROUP = !Gate.isSet("NORECORDSAMEGROUP");
 
     @Language("java")
     private static final String INPUT1 = """
