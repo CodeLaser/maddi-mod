@@ -684,6 +684,9 @@ public class Graph {
         virtualModificationIdenticals.remove(allToRemove2);
     }
 
+    private static final boolean NO_OG_REAL_VIRTUAL = Gate.isSet("NOOGRV");
+
+
     private boolean invalidEdge(Variable from, LinkNature label, Variable to) {
         if (Util.isVirtualModification(from) != Util.isVirtualModification(to)) return true;
         if (Util.virtual(from) == Util.virtual(to)) return false;
@@ -698,6 +701,16 @@ public class Graph {
             || label == LinkNatureImpl.IS_ASSIGNED_TO) return false;
         if (!Gate.isSet("NORVSUB")
             && (label == LinkNatureImpl.IS_SUBSET_OF || label == LinkNatureImpl.IS_SUPERSET_OF)) return false;
+        // and for a value inside a hidden content's object graph (≤ ≥): within a method this is derived ('0:e ∈
+        // rv.§$s', 'rv ∈ this.succ.§$$s[-2]'), but a callee's summary exports it composed ('0:e ≤ this.succ.§$$s',
+        // the list in between summarized away), and at the call site it is a seed. Refused, an argument stored
+        // through 'map.computeIfAbsent(k, ..).add(e)' or wrapped in a record in a list read independent of the
+        // receiver (fernflower's Statement.addSuccessor, AssignmentExprent.checkExprTypeBounds; the dynamic check's
+        // 2c). Gate NOOGRV.
+        if (!NO_OG_REAL_VIRTUAL
+            && (label == LinkNatureImpl.IS_IN_OBJECT_GRAPH || label == LinkNatureImpl.OBJECT_GRAPH_CONTAINS)) {
+            return false;
+        }
         // The owner ≻ own-virtual-field spine (the old engine's AddEdge.addField added it unconditionally): a
         // variable genuinely contains its own hidden content. These edges are load-bearing: the varargs fan-out
         // 'target.§is ~ collection.§is ≺ collection ∈ collections.§iss' closes to 'target.§is ∩ collections.§iss'
