@@ -396,16 +396,7 @@ public class ShadowModificationPass {
         // seeds: everything the converged analysis believes modified, projected onto nodes
         for (Variable v : mlv.modified()) {
             int before = seeds.size();
-            boolean deepOnlyV = mlv.deepOnlyModified().contains(v);
-            seedVariable(mi, v, skipReceiverRooted, !deepOnlyV);
-            // #159: a field of the receiver modified in its elements only, whose declared type wrote an element type
-            // the receiver holds as accessible content ('List<LV> lvs', 'lvs.stream().findFirst().ifPresent(lv ->
-            // lv.sig = s)'): the receiver is modified structurally. Gate NOELEMENTFUNCTIONREACH.
-            if (deepOnlyV && !NO_ELEMENT_FUNCTION_REACH && v instanceof FieldReference fr && fr.scopeIsRecursivelyThis()
-                && !fr.isIgnoreModifications()
-                && handedElements(v.parameterizedType()).stream().anyMatch(w -> accessibleReach(w, mi))) {
-                seedWithOrigin(mi, mi, "the elements of " + v + ", its accessible content, modified");
-            }
+            seedVariable(mi, v, skipReceiverRooted, !mlv.deepOnlyModified().contains(v));
             if (seeds.size() > before) {
                 seeds.stream().filter(sd -> !seedOrigin.containsKey(sd))
                         .forEach(sd -> {
@@ -1750,7 +1741,11 @@ public class ShadowModificationPass {
                 || !Util.virtual(l.to()) || Util.isVirtualModification(l.to())
                 || !(l.linkNature() == LinkNatureImpl.IS_SUBSET_OF || l.linkNature() == LinkNatureImpl.SHARES_ELEMENTS
                      || l.linkNature().isIdenticalToOrAssignedFromTo()
-                     || !NO_ELEMENT_SOURCES && l.linkNature() == LinkNatureImpl.IS_IN_OBJECT_GRAPH)) {
+                     || !NO_ELEMENT_SOURCES && l.linkNature() == LinkNatureImpl.IS_IN_OBJECT_GRAPH
+                     // 'findFirst()': the result's content is one of the receiver's elements ('rv.§$ ∈ this.§$s'), so
+                     // a function handed it ('.ifPresent(lv -> lv.sig = s)') is handed an element of the source (#159,
+                     // gate NOELEMENTFUNCTIONREACH)
+                     || !NO_ELEMENT_FUNCTION_REACH && l.linkNature() == LinkNatureImpl.IS_ELEMENT_OF)) {
                 continue;
             }
             Variable to = Util.firstRealVariable(l.to());
