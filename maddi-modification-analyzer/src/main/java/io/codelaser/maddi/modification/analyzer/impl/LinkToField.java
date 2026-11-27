@@ -128,6 +128,8 @@ class LinkToField {
 
     private static final boolean NO_OBJECT_GRAPH_INDEP = Gate.isSet("NOOBJECTGRAPHINDEP");
 
+    private static final boolean NO_OG_CONTAINS_FIELD = Gate.isSet("NOOGCONTAINSFIELD");
+
     /**
      * Whether {@code variable} (or the variable at the root of its field chain) is a parameter of a method that
      * encloses {@code methodInfo}: the enclosing method of {@code methodInfo}'s local or anonymous class, or of its
@@ -246,7 +248,15 @@ class LinkToField {
             // as before #134. A '∩' between variables stays unjudged, below.
             return link.from().parameterizedType().copyWithoutArrays();
         }
-        // deliberately NOT judged: ≥ (object graph, the other direction) and ∩ (overlap) other than the element-set
+        if (!NO_OG_CONTAINS_FIELD && link.linkNature().equals(LinkNatureImpl.OBJECT_GRAPH_CONTAINS)
+            && primaryTo == link.to() && !Util.virtual(link.to())) {
+            // 'r0.pairs.§$s ≥ this.left': the field's object itself sits inside the result's graph, here wrapped in a
+            // record in a list ('r.add(left, t)' with 'pairs.add(new Pair(e, t))'). Judged as the whole field, as
+            // '←' is: the field's own type. fernflower's AssignmentExprent.checkExprTypeBounds, whose result holds
+            // the receiver's subexpressions (the dynamic check's 2c). Gate NOOGCONTAINSFIELD.
+            return primaryTo.parameterizedType();
+        }
+        // deliberately NOT judged: ≥ (object graph, the other direction) other than a whole field above, and ∩ (overlap) other than the element-set
         // case above; ≤ only as above. ≤'s to() is the whole container,
         // so judging it reads a DIFFERENT type than the ~/⊆ face variants judge for the same pair, which
         // would re-open the variance fork from the other side; ∩ is a speculative overlap, present
