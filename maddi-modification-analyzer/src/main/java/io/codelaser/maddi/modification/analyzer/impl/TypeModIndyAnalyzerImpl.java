@@ -65,6 +65,7 @@ import io.codelaser.maddi.modification.common.util.Culprits;
 import io.codelaser.maddi.modification.common.util.TolerantWrite;
 import io.codelaser.maddi.modification.link.impl.LinkNatureImpl;
 import io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl;
+import io.codelaser.maddi.modification.link.impl.Gate;
 import io.codelaser.maddi.modification.prepwork.Util;
 import io.codelaser.maddi.modification.prepwork.variable.Link;
 import io.codelaser.maddi.modification.prepwork.variable.Links;
@@ -523,7 +524,7 @@ public class TypeModIndyAnalyzerImpl extends CommonAnalyzerImpl implements TypeM
             DECIDE.debug("MI: Decide non-modifying of method {} = {}", methodInfo, nonModifying);
             propertyChanges.incrementAndGet();
         }
-        if (TolerantWrite.setAllowControlledOverwrite(methodInfo.analysis(), PropertyImpl.INDEPENDENT_METHOD, INDEPENDENT, methodInfo)) {
+        if (TolerantWrite.setAllowControlledOverwrite(methodInfo.analysis(), PropertyImpl.INDEPENDENT_METHOD, dispatchUnion(methodInfo, INDEPENDENT), methodInfo)) {
             DECIDE.debug("MI: Decide independent of method {} = independent", methodInfo);
             propertyChanges.incrementAndGet();
         }
@@ -533,7 +534,7 @@ public class TypeModIndyAnalyzerImpl extends CommonAnalyzerImpl implements TypeM
                 DECIDE.debug("MI: Decide unmodified of parameter {} = {}", pi, unmodified);
                 propertyChanges.incrementAndGet();
             }
-            if (TolerantWrite.setAllowControlledOverwrite(pi.analysis(), PropertyImpl.INDEPENDENT_PARAMETER, INDEPENDENT, pi)) {
+            if (TolerantWrite.setAllowControlledOverwrite(pi.analysis(), PropertyImpl.INDEPENDENT_PARAMETER, dispatchUnion(pi, INDEPENDENT), pi)) {
                 DECIDE.debug("MI: Decide independent of parameter {} = independent", pi);
                 propertyChanges.incrementAndGet();
             }
@@ -550,7 +551,7 @@ public class TypeModIndyAnalyzerImpl extends CommonAnalyzerImpl implements TypeM
             propertyChanges.incrementAndGet();
         }
         if (fieldValue.setter()
-            && TolerantWrite.setAllowControlledOverwrite(methodInfo.analysis(), INDEPENDENT_METHOD, INDEPENDENT, methodInfo)) {
+            && TolerantWrite.setAllowControlledOverwrite(methodInfo.analysis(), INDEPENDENT_METHOD, dispatchUnion(methodInfo, INDEPENDENT), methodInfo)) {
             // a setter returns nothing or this (fluent): independent by definition, whatever the field holds, as
             // doIndependentMethod has it for every method. Setters never reached that, and had no verdict at all
             DECIDE.debug("MI: Decide independent of setter {} = independent", methodInfo);
@@ -584,7 +585,7 @@ public class TypeModIndyAnalyzerImpl extends CommonAnalyzerImpl implements TypeM
     }
 
     private void handleGetter(MethodInfo methodInfo, Independent independentFromType) {
-        if (TolerantWrite.setAllowControlledOverwrite(methodInfo.analysis(), INDEPENDENT_METHOD, independentFromType, methodInfo)) {
+        if (TolerantWrite.setAllowControlledOverwrite(methodInfo.analysis(), INDEPENDENT_METHOD, dispatchUnion(methodInfo, independentFromType), methodInfo)) {
             DECIDE.debug("MI: Decide independent of method {} = {}}", methodInfo, independentFromType);
             propertyChanges.incrementAndGet();
         }
@@ -593,7 +594,7 @@ public class TypeModIndyAnalyzerImpl extends CommonAnalyzerImpl implements TypeM
                 DECIDE.debug("MI: Decide unmodified of getter parameter: {} = true", pi);
                 propertyChanges.incrementAndGet();
             }
-            if (TolerantWrite.setAllowControlledOverwrite(pi.analysis(), INDEPENDENT_PARAMETER, INDEPENDENT, pi)) {
+            if (TolerantWrite.setAllowControlledOverwrite(pi.analysis(), INDEPENDENT_PARAMETER, dispatchUnion(pi, INDEPENDENT), pi)) {
                 DECIDE.debug("MI: Decide @Independent of getter parameter: {} = true", pi);
                 propertyChanges.incrementAndGet();
             }
@@ -646,7 +647,7 @@ normal methods: does a modification to the return value imply any modification i
 
         Independent independentMethod = doIndependentMethod(methodInfo, mlv, cycleBreakingActive);
         if (independentMethod != null) {
-            if (TolerantWrite.setAllowControlledOverwrite(methodInfo.analysis(), PropertyImpl.INDEPENDENT_METHOD, independentMethod, methodInfo)) {
+            if (TolerantWrite.setAllowControlledOverwrite(methodInfo.analysis(), PropertyImpl.INDEPENDENT_METHOD, dispatchUnion(methodInfo, independentMethod), methodInfo)) {
                 DECIDE.debug("MI: Decide independent of method {} = {}", methodInfo, independentMethod);
                 propertyChanges.incrementAndGet();
             }
@@ -657,7 +658,7 @@ normal methods: does a modification to the return value imply any modification i
             // only break a cycle for a value that never decided: an undecided RE-derivation (a link to a field
             // whose immutability was cleared and not yet re-decided) must not erase a stored honest verdict
             if (methodInfo.analysis().getOrNull(PropertyImpl.INDEPENDENT_METHOD, ValueImpl.IndependentImpl.class) == null
-                && TolerantWrite.setAllowControlledOverwrite(methodInfo.analysis(), PropertyImpl.INDEPENDENT_METHOD, INDEPENDENT, methodInfo)) {
+                && TolerantWrite.setAllowControlledOverwrite(methodInfo.analysis(), PropertyImpl.INDEPENDENT_METHOD, dispatchUnion(methodInfo, INDEPENDENT), methodInfo)) {
                 propertyChanges.incrementAndGet();
                 DECIDE.info("MI: Decide independent of method {} = INDEPENDENT by {}", methodInfo, CYCLE_BREAKING);
             }
@@ -667,7 +668,7 @@ normal methods: does a modification to the return value imply any modification i
         for (ParameterInfo pi : methodInfo.parameters()) {
             Independent independent = doIndependentParameter(pi, mlv, cycleBreakingActive);
             if (independent != null) {
-                if (TolerantWrite.setAllowControlledOverwrite(pi.analysis(), PropertyImpl.INDEPENDENT_PARAMETER, independent, pi)) {
+                if (TolerantWrite.setAllowControlledOverwrite(pi.analysis(), PropertyImpl.INDEPENDENT_PARAMETER, dispatchUnion(pi, independent), pi)) {
                     DECIDE.debug("MI: Decide independent of parameter {} = {}", pi, independent);
                     propertyChanges.incrementAndGet();
                 }
@@ -675,7 +676,7 @@ normal methods: does a modification to the return value imply any modification i
             } else if (cycleBreakingActive) {
                 // same rule as the method above: cycle breaking decides the never-decided, it does not overwrite
                 if (pi.analysis().getOrNull(PropertyImpl.INDEPENDENT_PARAMETER, ValueImpl.IndependentImpl.class) == null
-                    && TolerantWrite.setAllowControlledOverwrite(pi.analysis(), PropertyImpl.INDEPENDENT_PARAMETER, INDEPENDENT, pi)) {
+                    && TolerantWrite.setAllowControlledOverwrite(pi.analysis(), PropertyImpl.INDEPENDENT_PARAMETER, dispatchUnion(pi, INDEPENDENT), pi)) {
                     DECIDE.info("MI: Decide independent of parameter {} = INDEPENDENT by {}", pi, CYCLE_BREAKING);
                     propertyChanges.incrementAndGet();
                 }
@@ -683,6 +684,40 @@ normal methods: does a modification to the return value imply any modification i
                 UNDECIDED.debug("MI: Independent of parameter {} undecided", pi);
             }
         }
+    }
+
+    /*
+     CodeLaser/maddi-mod#167, #116's counterpart: under the dispatch union (Util.dispatchUnion) a call through a concrete,
+     overridable method may reach any of its source overrides, so its independence, and that of each parameter, is its
+     own body's AND theirs. An undecided override counts as dependent, as an undecided one counts as modifying in the
+     modification union: the first write is the weakest, a later iteration lifts it (TolerantWrite refuses the other
+     direction). fernflower's 'Exprent.checkExprTypeBounds() { return null; }'. Gate NODISPATCHINDEPENDENCE.
+     */
+    private static final boolean NO_DISPATCH_INDEPENDENCE = Gate.isSet("NODISPATCHINDEPENDENCE");
+
+    private static Independent dispatchUnion(MethodInfo methodInfo, Independent own) {
+        if (NO_DISPATCH_INDEPENDENCE || own == null || own.isDependent() || !Util.dispatchUnion(methodInfo)) return own;
+        Independent result = own;
+        for (MethodInfo implementation : methodInfo.analysis().getOrDefault(PropertyImpl.IMPLEMENTATIONS,
+                ValueImpl.SetOfMethodInfoImpl.EMPTY).methodInfoSet()) {
+            Independent v = implementation.analysis().getOrDefault(PropertyImpl.INDEPENDENT_METHOD, DEPENDENT);
+            result = result.min(v);
+        }
+        return result;
+    }
+
+    private static Independent dispatchUnion(ParameterInfo pi, Independent own) {
+        MethodInfo methodInfo = pi.methodInfo();
+        if (NO_DISPATCH_INDEPENDENCE || own == null || own.isDependent() || !Util.dispatchUnion(methodInfo)) return own;
+        Independent result = own;
+        for (MethodInfo implementation : methodInfo.analysis().getOrDefault(PropertyImpl.IMPLEMENTATIONS,
+                ValueImpl.SetOfMethodInfoImpl.EMPTY).methodInfoSet()) {
+            if (pi.index() >= implementation.parameters().size()) continue;
+            Independent v = implementation.parameters().get(pi.index()).analysis()
+                    .getOrDefault(PropertyImpl.INDEPENDENT_PARAMETER, DEPENDENT);
+            result = result.min(v);
+        }
+        return result;
     }
 
     private Independent doIndependentParameter(ParameterInfo pi, MethodLinkedVariables mlv,
