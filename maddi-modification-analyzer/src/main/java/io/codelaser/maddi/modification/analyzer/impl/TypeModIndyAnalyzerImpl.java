@@ -33,6 +33,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Predicate;
 
 import io.codelaser.maddi.cst.api.analysis.Message;
+import io.codelaser.maddi.cst.api.analysis.Property;
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.element.Element;
 import io.codelaser.maddi.cst.api.expression.Assignment;
@@ -197,6 +198,7 @@ public class TypeModIndyAnalyzerImpl extends CommonAnalyzerImpl implements TypeM
         } else {
             identityFluent = false;
         }
+        identityFluent = dispatchUnion(methodInfo, FLUENT_METHOD, identityFluent);
         if (TolerantWrite.setAllowControlledOverwrite(methodInfo.analysis(), FLUENT_METHOD, ValueImpl.BoolImpl.from(identityFluent), methodInfo)) {
             DECIDE.debug("MI: Decide @Fluent of {} = {}", methodInfo, identityFluent);
             propertyChanges.incrementAndGet();
@@ -362,6 +364,7 @@ public class TypeModIndyAnalyzerImpl extends CommonAnalyzerImpl implements TypeM
         } else {
             identity = false;
         }
+        identity = dispatchUnion(methodInfo, IDENTITY_METHOD, identity);
         if (TolerantWrite.setAllowControlledOverwrite(methodInfo.analysis(), IDENTITY_METHOD, ValueImpl.BoolImpl.from(identity), methodInfo)) {
             DECIDE.debug("MI: Decide @Identity of {} = {}", methodInfo, identity);
             propertyChanges.incrementAndGet();
@@ -731,6 +734,25 @@ normal methods: does a modification to the return value imply any modification i
     private Independent fromType(ParameterizedType type) {
         Independent v = type == null ? null : analysisHelper.typeIndependentFromImmutableOrNull(type);
         return v == null ? DEPENDENT : v;
+    }
+
+    /*
+     CodeLaser/maddi-mod#31, as #116 and #167: under the dispatch union a call through a concrete, overridable method may
+     reach any of its source overrides, so it is @Fluent (@Identity) only when its own body and every override's are.
+     A call site aliases the result to the receiver (the argument): 'interface RT { default RT solve(C c) { return
+     this; } }' overridden by one that sometimes returns another object is not fluent. An undecided override counts
+     as not, the weakest; a later iteration lifts it (Bool goes from false to true only). Gate NODISPATCHFLUENT.
+     A fluent setter keeps the value prep (GetSetHelper) wrote.
+     */
+    private static final boolean NO_DISPATCH_FLUENT = Gate.isSet("NODISPATCHFLUENT");
+
+    private static boolean dispatchUnion(MethodInfo methodInfo, Property property, boolean own) {
+        if (NO_DISPATCH_FLUENT || !own || !Util.dispatchUnion(methodInfo)) return own;
+        for (MethodInfo implementation : methodInfo.analysis().getOrDefault(PropertyImpl.IMPLEMENTATIONS,
+                ValueImpl.SetOfMethodInfoImpl.EMPTY).methodInfoSet()) {
+            if (!implementation.analysis().getOrDefault(property, ValueImpl.BoolImpl.FALSE).isTrue()) return false;
+        }
+        return true;
     }
 
     private boolean immutable(ParameterizedType type) {
