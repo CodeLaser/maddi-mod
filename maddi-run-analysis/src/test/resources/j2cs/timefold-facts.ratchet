@@ -271,11 +271,14 @@
 # function's fresh result is not its source), merged in 00b2a401: 154 -> 152 nullable warnings. Both were on
 # AffectedEntitiesUpdater line 129, where node.Entity was nullable and made the call's type argument object?
 # (CS8714, CS8620). Found by bisecting devel (the gate of 0.9.7-alpha.24); errors and files unchanged.
+# 2026-11-27, maddi 14fe5ddb9 (#190 a template's argument beside ?? parenthesized, #204 Optional.map to a value
+# type as MapValue, #186 an interface's member types qualified outside it, #187 erasure adapters equal to
+# their value): 1391 files compiling, 402 errors.
 types	1583
 printerCrashes	0
 syntaxErrors	0
 syntaxCleanFiles	1565
-compilingFiles	1390
+compilingFiles	1391
 unmappedJdkUses	91
 nullableWarnings	152
-errors	405
+errors	402
