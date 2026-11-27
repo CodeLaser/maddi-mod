@@ -772,13 +772,23 @@ public class Graph {
                 }
             }
         });
-        // LINKTRACE (#158): the reconstructed links, and for each the group and the sources of its recipient
+        // LINKTRACE (#158): the reconstructed links, and for each the group and the sources of its recipient;
+        // then, once per group, its recorded assignments (the reconstruction walks records, not memberships)
         if (IncrementalFixpointEngine.TRACE) {
+            Set<Variable> reps = new LinkedHashSet<>();
             for (Link link : result) {
+                Variable rep = sharedVariables.translateForward(link.from());
+                reps.add(rep);
                 IncrementalFixpointEngine.lt("shared primary=" + primary + " " + link.from() + " " + link.linkNature()
-                        + " " + link.to() + " ; rep=" + sharedVariables.translateForward(link.from())
-                        + " group=" + sharedVariables.allShared(link.from())
+                        + " " + link.to() + " ; rep=" + rep
                         + " sources=" + sharedVariables.assignmentSources(link.from()));
+            }
+            for (Variable rep : reps) {
+                if (rep instanceof SharedVariable sv) {
+                    IncrementalFixpointEngine.lt("records primary=" + primary + " rep=" + rep + " members="
+                            + sv.variables() + " records=" + sv.assignments().stream()
+                            .map(a -> a.from() + " ← " + a.to() + " @" + a.statementIndex()).toList());
+                }
             }
         }
         return result.stream();
