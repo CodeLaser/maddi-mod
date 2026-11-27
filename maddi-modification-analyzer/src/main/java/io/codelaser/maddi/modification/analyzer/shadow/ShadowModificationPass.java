@@ -1509,8 +1509,19 @@ public class ShadowModificationPass {
                                             // map filled with parts of x's values is no element of them (langchain4j's
                                             // JsonSchemaElementJsonUtils.toMap). Gate NOOVERLAPBYTYPE: the old,
                                             // type-blind overlap.
+                                            // In a deep-only walk v holds the modified object somewhere in its hidden
+                                            // content, and v's own type does not name it: the face is kept too when
+                                            // its element may hold one of v's mutable type arguments at any depth.
+                                            // fernflower's replaceSingleVar (#147): the Entry<Integer, FastSparseSet>
+                                            // whose value is written, an element of a list overlapping VarVersionNodes,
+                                            // which hold FastSparseSets in a private two-dimensional field. toMap's
+                                            // Map<String, Object> has none (String immutable, Object hidden). Gate
+                                            // NODEEPONLYHELDPARTS: v's own type only.
                                             if (!NO_OBJECT_GRAPH_MOD) overlappingContainers(vd, l.to(),
-                                                    OVERLAP_BY_TYPE ? v.parameterizedType() : null, containers);
+                                                    OVERLAP_BY_TYPE ? v.parameterizedType() : null,
+                                                    OVERLAP_BY_TYPE && deepOnly && !NO_DEEP_ONLY_HELD_PARTS
+                                                            ? mutableTypeArguments(v.parameterizedType()) : List.of(),
+                                                    containers);
                                         });
                                 // #62: 'tags ∩ this.map.§$$s[-2]', the whole object overlapping a container's
                                 // element content (a for-each over map.values()): its container, deep-only, as for ∈.
@@ -1589,6 +1600,40 @@ public class ShadowModificationPass {
     }
 
     private static final boolean OVERLAP_BY_TYPE = System.getenv("NOOVERLAPBYTYPE") == null;
+
+    private static final boolean NO_DEEP_ONLY_HELD_PARTS = Gate.isSet("NODEEPONLYHELDPARTS");
+
+    // the type arguments of 'type', at any depth, that may be modified objects: not a type parameter, a wildcard,
+    // Object, or an immutable type
+    private List<ParameterizedType> mutableTypeArguments(ParameterizedType type) {
+        if (type == null) return List.of();
+        List<ParameterizedType> out = new ArrayList<>();
+        collectMutableTypeArguments(type, out, 0);
+        return out;
+    }
+
+    private void collectMutableTypeArguments(ParameterizedType type, List<ParameterizedType> out, int depth) {
+        if (depth > 3) return;
+        for (ParameterizedType arg : type.parameters()) {
+            if (arg.isTypeParameter() || arg.wildcard() != null || arg.bestTypeInfo() == null
+                || arg.bestTypeInfo().isJavaLangObject()) continue;
+            if (!analysisHelper.typeImmutable(arg.copyWithoutArrays()).isAtLeastImmutableHC()) out.add(arg);
+            collectMutableTypeArguments(arg, out, depth + 1);
+        }
+    }
+
+    // whether an element of 'face' may hold an object of type 'part' at any depth, through its fields (#147)
+    private static boolean faceElementMayHold(Variable face, ParameterizedType part) {
+        ParameterizedType pt = face.parameterizedType();
+        if (pt == null) return true;
+        ParameterizedType e = pt.copyWithoutArrays();
+        if (e.isTypeParameter() || e.bestTypeInfo() == null) return true;
+        if (Util.mayBeSameObject(part, e)) return true;
+        for (ParameterizedType t : Util.accessibleTypes(e)) {
+            if (t.arrays() == part.arrays() && Util.mayBeSameObject(t, part)) return true;
+        }
+        return false;
+    }
 
     private static final String[] PROJECTTRACE = System.getenv("PROJECTTRACE") == null ? null
             : System.getenv("PROJECTTRACE").split(",");
@@ -1795,6 +1840,13 @@ public class ShadowModificationPass {
      */
     private void overlappingContainers(VariableData vd, Variable hiddenContent, ParameterizedType element,
                                        List<Variable> out) {
+        overlappingContainers(vd, hiddenContent, element, List.of(), out);
+    }
+
+    // 'heldParts': in a deep-only walk, the mutable types the modified element may hold; a face whose element may hold
+    // one of them at any depth is kept as well
+    private void overlappingContainers(VariableData vd, Variable hiddenContent, ParameterizedType element,
+                                       List<ParameterizedType> heldParts, List<Variable> out) {
         if (!Util.virtual(hiddenContent) || Util.isVirtualModification(hiddenContent)) return;
         String fqn = hiddenContent.fullyQualifiedName();
         Variable owner = Util.firstRealVariable(hiddenContent);
@@ -1814,7 +1866,10 @@ public class ShadowModificationPass {
                                               || !Util.elementsMayOverlap(other, hiddenContent))) {
                             other = null;
                         }
-                        if (other != null && element != null && !mayBeElementOf(element, other)) other = null;
+                        if (other != null && element != null && !mayBeElementOf(element, other)) {
+                            Variable face = other;
+                            if (heldParts.stream().noneMatch(part -> faceElementMayHold(face, part))) other = null;
+                        }
                         Variable container = other == null ? null : Util.firstRealVariable(other);
                         if (container != null && !container.equals(owner) && !out.contains(container)) {
                             out.add(container);
