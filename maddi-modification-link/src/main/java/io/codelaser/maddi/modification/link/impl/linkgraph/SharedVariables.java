@@ -118,6 +118,9 @@ public class SharedVariables {
      */
     private Map<Variable, Set<SharedVariable>> evictedFrom = new HashMap<>();
 
+    // CodeLaser/maddi-mod#158, see isAssignedFrom
+    private static final boolean RECORD_SAME_GROUP = Gate.isSet("RECORDSAMEGROUP");
+
     // CodeLaser/maddi-mod#77, see evictSource and Graph.mergeEdgeBi
     private static final boolean NO_SRC_EVICT = Gate.isSet("NOSRCEVICT");
 
@@ -148,6 +151,21 @@ public class SharedVariables {
                 // vertices onto the rep (the sv==null path asserts there are none).
                 sv1.addAssignment(from, to, statementIndex);
                 return sv1;
+            }
+            /*
+             Already in the same group. Nothing was recorded here, while the reconstruction walks records, not
+             memberships (assignmentEdgeStream): of a callee's 'rv ← oc', 'rv.f ← oc', 'rv.f.g ← oc', the first to
+             arrive makes oc a member and is recorded, and the others, their ends now in one group, leave no
+             trace. Which link the summary keeps then depends on what else is in the group
+             (CodeLaser/maddi-mod#158, guava's TypeResolver with MONOTABLE=sim). Experiment gate RECORDSAMEGROUP
+             records the assignment all the same; the caller still sees 'no change of membership'.
+             */
+            if (RECORD_SAME_GROUP) {
+                SharedVariable.Assignment a = new SharedVariable.Assignment(from, to, statementIndex);
+                if (!sv1.assignments().contains(a)) sv1.addAssignment(from, to, statementIndex);
+            } else if (io.codelaser.maddi.modification.link.impl.graph.IncrementalFixpointEngine.TRACE) {
+                io.codelaser.maddi.modification.link.impl.graph.IncrementalFixpointEngine.lt("norecord " + from
+                        + " ← " + to + " @" + statementIndex + " ; both in " + sv1);
             }
             return null; // already in the same group
         }
