@@ -1216,6 +1216,26 @@ final class MethodWalker {
 
     private static final Switches.Gate FAMILY_CONSUMERS_OFF = Switches.gate("NOFAMILYCONSUMERS");
 
+    /*
+     A library method that does not modify its receiver and does modify a parameter stores what it is given there:
+     a field updater's 'compareAndSet(T obj, V expect, V update)', 'lazySet(T obj, V value)' write the field of
+     'obj' (maddi#217 made them non-modifying, which they are). The value is still typed by the receiver's type
+     variable, so a null passed for it decides that type argument: guava's 'AtomicReferenceFieldUpdater<Waiter,
+     @Nullable Waiter>'. Without it the null went nowhere, a library parameter has no verdict, and guava's oracle
+     counted five updater fields as unsafe (224 -> 229, 2026-11-27). Library callees only: an analysed method's
+     own parameter takes the null. Gate NOSTORINGCONSUMERS.
+     */
+    private boolean storesInParameter(MethodInfo callee) {
+        if (STORING_CONSUMERS_OFF.get() || index.analysed.contains(callee)) return false;
+        for (ParameterInfo pi : callee.parameters()) {
+            if (pi.analysis().getOrDefault(PropertyImpl.UNMODIFIED_PARAMETER, ValueImpl.BoolImpl.FALSE).isFalse()
+                && pi.analysis().haveAnalyzedValueFor(PropertyImpl.UNMODIFIED_PARAMETER)) return true;
+        }
+        return false;
+    }
+
+    private static final Switches.Gate STORING_CONSUMERS_OFF = Switches.gate("NOSTORINGCONSUMERS");
+
     private Object slotReceiver(MethodInfo mi, Scope scope, Expression call, MethodInfo callee) {
         if (!(call instanceof MethodCall mc) || mc.object() == null || callee.isStatic()) return null;
         Expression object = NonNullFacts.unwrap(mc.object());
@@ -1241,7 +1261,7 @@ final class MethodWalker {
         // only a method that modifies its receiver stores what it is given: 'add', 'put', 'set'; not a consumer
         // such as 'Comparator.compare(T, T)', 'Equivalence.equivalent', 'Predicate.test'
         if (callee.analysis().getOrDefault(PropertyImpl.NON_MODIFYING_METHOD, ValueImpl.BoolImpl.FALSE).isTrue()
-            && !familyConsumer(callee)) {
+            && !familyConsumer(callee) && !storesInParameter(callee)) {
             return null;
         }
         ParameterizedType type = receiver == null ? null : graph.typeOf(receiver);
