@@ -1854,28 +1854,64 @@ public class ShadowModificationPass {
             Links links = vi.linkedVariables();
             if (links == null) return;
             links.stream().filter(l -> l.linkNature() == LinkNatureImpl.OBJECT_GRAPH_OVERLAPS
-                                       && Util.virtual(l.from()) && !Util.isVirtualModification(l.from())
-                                       && Util.virtual(l.to()) && !Util.isVirtualModification(l.to()))
+                                       && !Util.isVirtualModification(l.from()) && !Util.isVirtualModification(l.to()))
                     .forEach(l -> {
                         Variable other = fqn.equals(l.from().fullyQualifiedName()) ? l.to()
                                 : fqn.equals(l.to().fullyQualifiedName()) ? l.from() : null;
-                        // elements that can be modified at all (not a String[]'s, not an enum list's)
-                        // and elements that may be the same objects ('dtos.§$s ∩ kinds.§$s', Dto and Kind, may not)
-                        if (other != null && (!Util.isSlice(other) && analysisHelper.typeImmutable(other.parameterizedType().copyWithoutArrays())
-                                                      .isAtLeastImmutableHC()
-                                              || !Util.elementsMayOverlap(other, hiddenContent))) {
-                            other = null;
-                        }
-                        if (other != null && element != null && !mayBeElementOf(element, other)) {
-                            Variable face = other;
-                            if (heldParts.stream().noneMatch(part -> faceElementMayHold(face, part))) other = null;
-                        }
-                        Variable container = other == null ? null : Util.firstRealVariable(other);
-                        if (container != null && !container.equals(owner) && !out.contains(container)) {
-                            out.add(container);
+                        if (other == null) return;
+                        if (Util.virtual(other)) {
+                            overlappingContainer(hiddenContent, owner, other, element, heldParts, out);
+                        } else if (!NO_OVERLAP_THROUGH_REAL) {
+                            // the overlap goes through a real object: 'ent ∩ livemap.elements[1][key]' with
+                            // 'livemap.elements[1][key] ≤ 3:ssau.ssuversions.nodes.§$s'. The closure keeps the two
+                            // hops and drops the direct 'ent ∩ ..nodes.§$s' they imply (fernflower's replaceSingleVar,
+                            // once a callee's '≤' is seeded at the call). The faces the real object sits in, judged
+                            // as a direct overlap would be. Gate NOOVERLAPTHROUGHREAL.
+                            for (Variable face : facesHolding(vd, other)) {
+                                overlappingContainer(hiddenContent, owner, face, element, heldParts, out);
+                            }
                         }
                     });
         });
+    }
+
+    private static final boolean NO_OVERLAP_THROUGH_REAL = Gate.isSet("NOOVERLAPTHROUGHREAL");
+
+    // the hidden contents a real variable is an element of, or sits in the object graph of ('x ∈ m.§$s', 'x ≤ m.§$s');
+    // such a link is kept with the variable's primary ('livemap : livemap.elements[1][key] ≤ ..'), so all are scanned
+    private static List<Variable> facesHolding(VariableData vd, Variable real) {
+        String fqn = real.fullyQualifiedName();
+        List<Variable> faces = new ArrayList<>();
+        vd.variableInfoStream().forEach(vi -> {
+            Links links = vi.linkedVariables();
+            if (links == null) return;
+            links.stream().filter(l -> (l.linkNature() == LinkNatureImpl.IS_IN_OBJECT_GRAPH
+                                        || l.linkNature() == LinkNatureImpl.IS_ELEMENT_OF)
+                                       && l.from().fullyQualifiedName().equals(fqn)
+                                       && Util.virtual(l.to()) && !Util.isVirtualModification(l.to())
+                                       && !faces.contains(l.to()))
+                    .forEach(l -> faces.add(l.to()));
+        });
+        return faces;
+    }
+
+    private void overlappingContainer(Variable hiddenContent, Variable owner, Variable other, ParameterizedType element,
+                                      List<ParameterizedType> heldParts, List<Variable> out) {
+        // elements that can be modified at all (not a String[]'s, not an enum list's)
+        // and elements that may be the same objects ('dtos.§$s ∩ kinds.§$s', Dto and Kind, may not)
+        if (!Util.isSlice(other) && analysisHelper.typeImmutable(other.parameterizedType().copyWithoutArrays())
+                    .isAtLeastImmutableHC()
+            || !Util.elementsMayOverlap(other, hiddenContent)) {
+            return;
+        }
+        if (element != null && !mayBeElementOf(element, other)
+            && heldParts.stream().noneMatch(part -> faceElementMayHold(other, part))) {
+            return;
+        }
+        Variable container = Util.firstRealVariable(other);
+        if (container != null && !container.equals(owner) && !out.contains(container)) {
+            out.add(container);
+        }
     }
 
     private static void coElements(VariableData vd, Variable hiddenContent, List<Variable> out) {
