@@ -417,6 +417,64 @@ Found sound: the link cache for reads of analysis maps, `RecursionPrevention`, t
 . The `block` set is the cheapest experiment: it may explain the Jenkins parser ring without keeping created-object faces.
 . The variance in single verdicts has a cause separate from the rings: verdicts written once, early, on a summary that grows. Starting the cycle from empty does not remove it; deciding the verdicts of a call cycle after its summaries settle would.
 
+[[records]]
+== The table of compositions and the alias groups, 2026-11-27
+
+The audit named the table of compositions as the finding with a mechanical repair.
+That repair was tried, and it led to a rule outside the closure that the audit had missed.
+
+=== The table
+
+`TestLinkNatureAlgebra` lists the cells where a nature derives less than a nature it implies; `TestEffectiveTable` shows what the engine makes of two edges, because it keeps one nature per pair, the one of highest rank.
+The gate `MONOTABLE` fills the cells in under the reading "can hold", in four pairs that can be set separately: `sib` (`⊆ ∘ ⊇ = ~`), `sim` (`⊆ ∘ ~ = ~`, `~ ∘ ⊇ = ~`), `mem` (`⊆ ∘ ∋ = ∋?`, `∈ ∘ ⊇ = ∈?`) and `may` (`∈? ∘ ∈ = ∈?`, `∋ ∘ ∋? = ∋?`).
+
+`TestEffectiveTable.parallel` adds a finding of its own: with two natures on one pair, the nature read back, and the nature derived for a third variable, depend on the order in which the two arrived (`c ⊆ a`, `a ⊆ b`, `a ⊇ b` gives `c ⊆ b` or nothing).
+For six pairs of natures the two directions do not agree either.
+This is not shown to cause any ring; it is a rule that fails the property and has no repair yet.
+
+=== The ring it exposed
+
+With `MONOTABLE=sim`, Guava settles in about two runs of three and otherwise alternates with period 2 in `TypeResolver` (`resolveType`, `resolveParameterizedType`, `resolveGenericArrayType`, `TypeTable.resolveInternal`).
+What alternates is the set of paths `p` in `rv.p ← oc`, for the wildcard created in `Types.subtypeOf`.
+Layer by layer, on one ringing run:
+
+. The closure derives the same facts in both phases.
+. The extraction (`FollowGraph`) sees the same candidates in both phases.
+. The reconstruction of the collapsed alias group (`Graph.sharedAssignmentEdgeStream`) emits the links that alternate.
+
+The group in `resolveParameterizedType` holds the result of `resolveType(owner)` together with its own `ownerType` and `rawType` paths, about 65 members.
+It has 65 recorded assignments in both phases; 64 are the same, and exactly one names the created object, a different one in each phase.
+
+The cause: the reconstruction walks records, not memberships, and `SharedVariables.isAssignedFrom` recorded nothing when both ends were already in one group.
+Of the two or three links `rv.p ← oc` in the callee's summary, the first to arrive made the object a member and was recorded; the others left no trace.
+A larger group gave fewer links.
+This is the rule "abstraction collapses, it does not delete" of <<design-rules>>, broken in the collapse itself.
+
+`sim` is the trigger, not the cause: up to pass 3 the records are those of the baseline; at pass 5 `sim` adds `rv.rawType.ownerType ← oc`, the path goes round the cycle of the two fields, and the group grows from 11 members to 65.
+
+=== The repair
+
+Every assignment is recorded, also between two members of one group (opt-out `NORECORDSAMEGROUP`; `sv-reconstruction-techniques.md` §2c).
+
+[cols="3,4"]
+|===
+| Code | Result
+
+| Guava, `MONOTABLE=sim`
+| 8 runs of 8 settle (last pass 69 to 77); without the repair about 1 in 3 rings
+
+| Guava, Fernflower, Jenkins core, Timefold, no other gate
+| each ends at the same pass with and without (60, 27, 49, 65), all tests pass; Fernflower's output is identical
+
+| `maddi-modification-analyzer` tests
+| pass
+
+| `maddi-modification-link` tests
+| four expectations gain a link: two spellings of one slot read both ways (`writeReturn.t ← 0:box.t` and `→`)
+|===
+
+Not established: a reproduction without Guava (`TestResolverRing` has the shape and settles); the final verdicts with and without the repair have not been compared; whether `sib` is acceptable.
+
 [[measurements]]
 == Measurements, 2026-11-26
 
@@ -482,7 +540,7 @@ In all runs the first phase of Guava and of Jenkins still ends at the limit of 3
 [[gates]]
 == Gates
 
-All are environment variables read by presence, and all are off by default.
+All are environment variables; unless stated otherwise they are read by presence and are off by default.
 
 [cols="2,5"]
 |===
@@ -505,6 +563,18 @@ All are environment variables read by presence, and all are off by default.
 
 | `LINKCHURN=<pass>`, `LINKCHURNFULL=<substring>`
 | Diagnostics: from that pass on, print every method whose summary write changed; for matching methods, the whole value.
+
+| `MONOTABLE=<list>`
+| The cells of the table of compositions of <<records>>: a comma-separated list of `sib`, `sim`, `mem`, `may`, or `all`.
+
+| `NORECORDSAMEGROUP`
+| Opt-out: an assignment between two members of one alias group is not recorded (the behaviour before <<records>>).
+
+| `STMTLINKS=<substring>[@<pass>]`
+| Diagnostic: after every linking of a matching method, the links of every variable at every statement.
+
+| `LINKTRACE=<substring>[@<first>[-<last>]]`, `LINKTRACEONLY=<regex>`
+| Diagnostic: the events of the engine, the candidates of the extraction with their verdict, and the reconstructed links of each alias group with its records, for matching methods in those passes; only the events in which the regex is found.
 |===
 
 Three further gates were tried and removed again (their commits are in the history of #158):
@@ -516,6 +586,7 @@ The bound on the assigned set is on by default and shares the opt-out `NOFIELDCY
 Reproductions:
 
 * `TestWrapUnwrapRing` and `TestRuleRing` (`maddi-modification-analyzer`, package `ring`) run when `LINKCHURN` is set.
+* `TestResolverRing` (same package) has the shape of Guava's `TypeResolver`; it settles in two passes and is not a reproduction.
 * `TestScratchSubset` (`maddi-run-analysis`) analyses the elements of a corpus whose names start with given prefixes.
 A ring can disappear when elements are left out, because a rule over all implementations of a method then stays undecided; a subset that settles proves nothing about the whole.
 
@@ -527,6 +598,7 @@ A ring can disappear when elements are left out, because a rule over all impleme
 . The verdict differences of the fixes: `Types.newParameterizedType` becoming modifying on Guava with `RVCOMPLETE`, and 14 rows around `hudson.model.Label` becoming unmodified on Jenkins with the bound on the assigned set, have not been checked against the source.
 . The rows of the <<audit>> marked _reported_ have not been checked by hand, and none of its rows has been exercised on a corpus.
 . Whether the table of compositions can be completed along the implication order without a cost in precision.
+. How a pair of variables should hold two natures, so that the order of arrival does not decide (<<records>>).
 . The memory cost of storing complete summaries.
 
 [bibliography]
