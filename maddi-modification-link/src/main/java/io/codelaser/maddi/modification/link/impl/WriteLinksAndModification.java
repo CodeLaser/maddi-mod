@@ -1344,12 +1344,26 @@ class WriteLinksAndModification {
     private static boolean holdsElement(Variable primary, Link link, Variable toReal) {
         if (Util.NO_ELEMENTS_MAY_HOLD) return false;
         Variable from = link.from();
-        if (from.equals(primary) || Util.isVirtualModification(from) || !link.to().equals(toReal)) return false;
+        if (from.equals(primary) || Util.isVirtualModification(from)) return false;
+        Variable to = link.to();
+        boolean whole = to.equals(toReal);
+        // or one of toReal's hidden-content faces: '0:map.elements.§ts ∩ e.§$$.§$', the entry's value itself, once a
+        // callee's composed '≤' is seeded at the call (maddi-mod ba2afed3; before, the closure kept the coarser
+        // overlap of the whole entry). Judged on the face's own type: the value may be one of the face's elements, or
+        // hold one. Gate NOHOLDSELEMENTFACE.
+        boolean face = !whole && !NO_HOLDS_ELEMENT_FACE && Util.virtual(to) && !Util.isVirtualModification(to)
+                       && toReal.equals(Util.firstRealVariable(to));
+        if (!whole && !face) return false;
         Variable real = Util.firstRealVariable(from);
         if (!primary.equals(real) && !Util.isFieldOf(real, primary)) return false;
         ParameterizedType element = Util.elementTypeOfFace(from);
-        return element != null && Util.typeMayHold(toReal.parameterizedType(), element);
+        if (element == null) return false;
+        if (whole) return Util.typeMayHold(toReal.parameterizedType(), element);
+        ParameterizedType faceType = to.parameterizedType();
+        return faceType != null && (Util.mayBeSameObject(faceType, element) || Util.typeMayHold(faceType, element));
     }
+
+    private static final boolean NO_HOLDS_ELEMENT_FACE = Gate.isSet("NOHOLDSELEMENTFACE");
 
 
     private boolean sharesModificationGroup(Variable modified, Variable container) {

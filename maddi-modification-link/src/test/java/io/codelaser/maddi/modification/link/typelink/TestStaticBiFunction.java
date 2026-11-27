@@ -175,8 +175,10 @@ public class TestStaticBiFunction extends CommonTest {
         VariableData vd0 = VariableDataImpl.of(method.methodBody().statements().getFirst());
         VariableInfo viEntry0 = vd0.variableInfo("xx");
         Links tlvEntry = viEntry0.linkedVariablesOrEmpty();
-        // xx.§xss∋∋this.ix would be better
-        assertEquals("-", tlvEntry.toString());
+        // ix sits inside xx's elements: extract's composed 'extract.§$s≥0:x' is seeded at the call since maddi-mod
+        // ba2afed3 (Graph.invalidEdge refused '≥' between a real variable and a hidden content). xx.§xss∋∋this.ix
+        // would be more precise still.
+        assertEquals("xx.§$s≥this.ix", tlvEntry.toString());
     }
 
     @Language("java")
