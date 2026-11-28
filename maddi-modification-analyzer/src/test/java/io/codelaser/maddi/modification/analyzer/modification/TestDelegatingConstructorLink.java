@@ -17,7 +17,10 @@ import io.codelaser.maddi.modification.link.impl.MethodLinkedVariablesImpl;
 /**
  * CodeLaser/maddi-mod#150: a constructor that delegates with {@code this(..)} to the constructor storing an argument
  * in a field must link that argument to the field, as the storing constructor does; so must an explicit
- * {@code super(..)}. The reachability pass is on, as where the issue was found (the fixpoint engine misses mkV as well).
+ * {@code super(..)}. Both with the reachability pass, where the issue was found, and without: there the fixpoint
+ * missed even mkV, because a callee summary with a modified set and no links ({@code fix()}: this, this.p) was taken
+ * for empty and its modifications were not carried over to the receiver; and mkSub, because the inherited field's
+ * {@code this{Base}.p} was not translated onto the receiver with the callee's own {@code this}.
  */
 public class TestDelegatingConstructorLink extends CommonTest {
 
@@ -57,12 +60,21 @@ public class TestDelegatingConstructorLink extends CommonTest {
             """;
 
     @Test
-    public void test() {
+    public void reachability() {
+        test(true);
+    }
+
+    @Test
+    public void fixpoint() {
+        test(false);
+    }
+
+    private void test(boolean reachability) {
         TypeInfo X = javaInspector.parse("a.b.X", INPUT);
         List<Info> ao = prepWork(X);
         new IteratingAnalyzerImpl(javaInspector, new IteratingAnalyzerImpl.ConfigurationBuilder()
                 .setMaxIterations(10)
-                .setModificationViaReachability(true)
+                .setModificationViaReachability(reachability)
                 .build()).analyze(ao);
         // the delegating constructors carry the storing constructor's link; the argument is @Modified with it
         assertEquals("[-, 1:p*→this*.p] --> -", links(X.findSubType("W").findConstructor(2)));

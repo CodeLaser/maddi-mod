@@ -204,7 +204,12 @@ public record MethodModification(Runtime runtime, VariableData variableData, Sta
         }
         // the same reasoning for the callee's OWN propagated modifications: if none of this call's effects are
         // the author's, that includes the ones the callee's body performs on variables translated into our scope
-        if (!receiverDisclaimed && !methodLinkedVariables.isEmpty() && objectPrimary != null) {
+        // MethodLinkedVariables.isEmpty() looks at the links only: a summary with no links and a modified set (a void
+        // method without parameters modifying a field's object, 'fix() { p.set(i); }': this, this.p) is not empty
+        // here (CodeLaser/maddi-mod#150, the fixpoint's mkV). Gate NOMODIFIEDONLYSUMMARY (presence): skipped, as before.
+        boolean calleeHasEffects = NO_MODIFIED_ONLY_SUMMARY ? !methodLinkedVariables.isEmpty()
+                : !methodLinkedVariables.isEmpty() || !methodLinkedVariables.modified().isEmpty();
+        if (!receiverDisclaimed && calleeHasEffects && objectPrimary != null) {
             Variable methodThis = runtime.newThis(methodInfo.typeInfo().asParameterizedType());
             VariableTranslationMap vtm = new VariableTranslationMap(runtime).put(methodThis, objectPrimary);
             if (!NO_FOREIGN_MODIFIED) {
@@ -247,6 +252,7 @@ public record MethodModification(Runtime runtime, VariableData variableData, Sta
      Gate NOFOREIGNMODIFIED: a 'this' as well.
      */
     private static final boolean NO_FOREIGN_MODIFIED = Gate.isSet("NOFOREIGNMODIFIED");
+    private static final boolean NO_MODIFIED_ONLY_SUMMARY = Gate.isSet("NOMODIFIEDONLYSUMMARY");
 
     // the caller's own object, or the outer instance of an enclosing type, seen through any of their supertypes
     private boolean ownThis(This thisVar) {

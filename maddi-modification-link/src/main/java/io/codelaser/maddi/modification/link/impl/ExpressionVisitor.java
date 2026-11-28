@@ -70,6 +70,7 @@ public record ExpressionVisitor(Runtime runtime,
 
     // gate NOGETTERRECEIVER: an inlined getter drops its receiver expression's links and modifications
     private static final boolean NO_GETTER_RECEIVER = Gate.isSet("NOGETTERRECEIVER");
+    private static final boolean NO_SUPER_THIS = Gate.isSet("NOSUPERTHIS");
 
     /*
      The call modifies its receiver, and the receiver is an element of a variable this method does not know: a getter
@@ -980,7 +981,18 @@ public record ExpressionVisitor(Runtime runtime,
             This thisVar = runtime.newThis(mc.methodInfo().typeInfo().asParameterizedType());
             MethodLinkedVariables mlvTranslated1;
             if (!thisVar.equals(objectPrimary)) {
-                TranslationMap tm = new VariableTranslationMap(runtime).put(thisVar, objectPrimary);
+                VariableTranslationMap tm = new VariableTranslationMap(runtime).put(thisVar, objectPrimary);
+                if (!NO_SUPER_THIS) {
+                    // the callee's code reaches its supertypes' fields through their 'this' ('fix() { p.set(2); }' in
+                    // a subclass of the type declaring p: this{Base}.p): the same object, as LinkMethodCall's
+                    // addThisHierarchyToObjectPrimaryToTmBuilder and MethodModification (#126) already take it.
+                    // Left untranslated, MethodModification translated it itself, and dropped the result as unknown
+                    // in the caller: 's.fix()' did not modify what 's.p' holds (CodeLaser/maddi-mod#150, the
+                    // fixpoint's mkSub). Gate NOSUPERTHIS (presence): the callee's own type only, as before.
+                    for (TypeInfo superType : mc.methodInfo().typeInfo().superTypesExcludingJavaLangObject()) {
+                        tm.put(runtime.newThis(superType.asParameterizedType()), objectPrimary);
+                    }
+                }
                 mlvTranslated1 = mlv.translate(tm);
             } else {
                 mlvTranslated1 = mlv;
