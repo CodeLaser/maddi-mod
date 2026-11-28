@@ -226,6 +226,7 @@ class WriteLinksAndModification {
      */
     private static final boolean NO_CO_ELEMENT = Gate.isSet("NOCOELEMENT");
     private static final boolean NO_OBJECT_GRAPH_MOD = Gate.isSet("NOOBJECTGRAPHMOD");
+    private static final boolean NO_TENTATIVE_ELEMENT_MOD = Gate.isSet("NOTENTATIVEELEMENTMOD");
     private static final boolean NO_VIEW_ELEMENT_MOD = Gate.isSet("NOVIEWELEMENTMOD");
     private static final boolean NO_ITERATOR_STATE = Gate.isSet("NOITERATORSTATE");
     // gate NOMAPPEDELEMENT: an element mapped out of a container's elements does not lead back to it (#138)
@@ -1482,6 +1483,10 @@ class WriteLinksAndModification {
                 if (ln == CONTAINS_AS_FIELD
                     || ln == SHARES_FIELDS // see impl/TestInstanceOf,2
                     || ln == CONTAINS_AS_MEMBER && !structural
+                    // CodeLaser/maddi-mod#152: '∋?', a tentative element ('lst.§$s ∋? e', e an element of a copy of
+                    // lst's elements filled in a loop, 'ret.§$s ~ lst.§$s'): e may be one of lst's elements, so
+                    // modifying it modifies lst deeply, as '∋' does. Gate NOTENTATIVEELEMENTMOD
+                    || ln == COULD_CONTAIN_AS_MEMBER && !structural && !NO_TENTATIVE_ELEMENT_MOD
                     // #117: structurally too, when the element may be the object of an accessible field of the
                     // container's owner ('sequence.stats.§$s ∋ current', and St.first points to stats.get(0))
                     || ln == CONTAINS_AS_MEMBER && structural

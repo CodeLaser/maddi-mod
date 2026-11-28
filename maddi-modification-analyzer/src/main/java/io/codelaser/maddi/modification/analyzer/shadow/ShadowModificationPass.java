@@ -1552,6 +1552,19 @@ public class ShadowModificationPass {
                                                             ? mutableTypeArguments(v.parameterizedType()) : List.of(),
                                                     containers);
                                         });
+                                // CodeLaser/maddi-mod#152: 'e ∈? 0:lst.§$s', a tentative element (of a copy of
+                                // lst's elements filled in a loop): its container, deep-only, as for ∈. The engine's
+                                // WriteLinksAndModification, '∋?'. Gate NOTENTATIVEELEMENTMOD
+                                if (!NO_TENTATIVE_ELEMENT_MOD) {
+                                    links.stream().filter(l -> l.linkNature() == LinkNatureImpl.COULD_BE_ELEMENT_OF
+                                                               && Util.virtual(l.to())
+                                                               && !Util.isVirtualModification(l.to())
+                                                               && l.from().fullyQualifiedName()
+                                                                       .equals(v.fullyQualifiedName()))
+                                            .map(l -> Util.firstRealVariable(l.to()))
+                                            .filter(c -> c != null && !c.equals(v))
+                                            .forEach(containers::add);
+                                }
                                 // #62: 'tags ∩ this.map.§$$s[-2]', the whole object overlapping a container's
                                 // element content (a for-each over map.values()): its container, deep-only, as for ∈.
                                 // The engine's WriteLinksAndModification.overlapsAsElement
@@ -1909,6 +1922,7 @@ public class ShadowModificationPass {
     }
 
     private static final boolean NO_OVERLAP_THROUGH_REAL = Gate.isSet("NOOVERLAPTHROUGHREAL");
+    private static final boolean NO_TENTATIVE_ELEMENT_MOD = Gate.isSet("NOTENTATIVEELEMENTMOD");
 
     // the hidden contents a real variable is an element of, or sits in the object graph of ('x ∈ m.§$s', 'x ≤ m.§$s');
     // such a link is kept with the variable's primary ('livemap : livemap.elements[1][key] ≤ ..'), so all are scanned
