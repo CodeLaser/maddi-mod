@@ -41,7 +41,10 @@ import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
  * <p>
  * {@code check}: the base returns null, an override returns the receiver's field inside a new list. {@code put}: the
  * base ignores its argument, an override stores it. {@code fresh} is the control: every override returns a new object
- * of its own.
+ * of its own. {@code P}: throw-only placeholders, whose independence is their override's ({@code Exprent.copy}), and
+ * {@code Asg.copyLeft} calling one on its field ({@code AssignmentExprent.copy}); {@code PA} is the abstract control.
+ * Both bases have a mutable field of their own, as {@code Exprent}: without one the base is immutable and what an
+ * override returns is hidden content.
  */
 public class TestDispatchUnionIndependence extends CommonTest {
 
@@ -65,6 +68,32 @@ public class TestDispatchUnionIndependence extends CommonTest {
                 }
                 static class B extends Ex {
                 }
+                static abstract class P {
+                    int id;
+                    void setId(int id) { this.id = id; }
+                    List<E> copy() { throw new UnsupportedOperationException(); }
+                    void take(E e) { throw new UnsupportedOperationException(); }
+                }
+                static class Q extends P {
+                    private final List<E> es = new ArrayList<>();
+                    @Override List<E> copy() { return es; }
+                    @Override void take(E e) { es.add(e); }
+                }
+                static abstract class PA { int id; void setId(int id) { this.id = id; } abstract List<E> copy(); }
+                static class QA extends PA {
+                    private final List<E> es = new ArrayList<>();
+                    @Override List<E> copy() { return es; }
+                }
+                static class AsgA {
+                    private final PA left;
+                    AsgA(PA left) { this.left = left; }
+                    List<E> copyLeft() { return left.copy(); }
+                }
+                static class Asg {
+                    private final P left;
+                    Asg(P left) { this.left = left; }
+                    List<E> copyLeft() { return left.copy(); }
+                }
             }
             """;
 
@@ -76,7 +105,9 @@ public class TestDispatchUnionIndependence extends CommonTest {
         new IteratingAnalyzerImpl(javaInspector, new IteratingAnalyzerImpl.ConfigurationBuilder()
                 .setMaxIterations(10).build()).analyze(ao);
         assertEquals("check=@Dependent put.e=@Dependent fresh=@Independent | "
-                     + "A.check=@Dependent A.put.e=@Dependent A.fresh=@Independent", verdicts(x));
+                     + "A.check=@Dependent A.put.e=@Dependent A.fresh=@Independent"
+                     + " | P.copy=@Dependent P.take.e=@Dependent Asg.copyLeft=@Dependent"
+                     + " PA.copy=@Dependent AsgA.copyLeft=@Dependent", verdicts(x));
     }
 
     private static String verdicts(TypeInfo x) {
@@ -87,7 +118,12 @@ public class TestDispatchUnionIndependence extends CommonTest {
                + " fresh=" + ind(ex.findUniqueMethod("fresh", 0))
                + " | A.check=" + ind(a.findUniqueMethod("check", 0))
                + " A.put.e=" + indP(a.findUniqueMethod("put", 1))
-               + " A.fresh=" + ind(a.findUniqueMethod("fresh", 0));
+               + " A.fresh=" + ind(a.findUniqueMethod("fresh", 0))
+               + " | P.copy=" + ind(x.findSubType("P").findUniqueMethod("copy", 0))
+               + " P.take.e=" + indP(x.findSubType("P").findUniqueMethod("take", 1))
+               + " Asg.copyLeft=" + ind(x.findSubType("Asg").findUniqueMethod("copyLeft", 0))
+               + " PA.copy=" + ind(x.findSubType("PA").findUniqueMethod("copy", 0))
+               + " AsgA.copyLeft=" + ind(x.findSubType("AsgA").findUniqueMethod("copyLeft", 0));
     }
 
     private static Object ind(MethodInfo m) {

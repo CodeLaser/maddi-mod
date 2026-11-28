@@ -65,7 +65,7 @@ public record LinkMethodCall(JavaInspector javaInspector,
         // 'new Pair<>(a, b)' -> 'makePair.a←0:a, makePair.b←1:b'.
         Set<Variable> extraModified = new HashSet<>();
         Set<Variable> extraDeepOnly = new HashSet<>();
-        Links newObjectLinks = parametersToObject(methodInfo, object, params, mlv, extraModified, extraDeepOnly);
+        Links newObjectLinks = parametersToObject(methodInfo, object, params, mlv, extraModified, extraDeepOnly, true);
         if (linkComputerOptions.trackObjectCreations()) {
             // LEAF (option on) — additionally record that the temporary object primary was assigned a fresh object,
             // so later modification analysis can tell freshly-created (unaliased) objects apart.
@@ -179,7 +179,8 @@ public record LinkMethodCall(JavaInspector javaInspector,
         }
         // Independently: how do the ARGUMENTS relate to the OBJECT (or, for a static call, to each other)?
         if (objectPrimary != null) {
-            Links newObjectLinks = parametersToObject(methodInfo, object, params, mlv, extraModified, extraDeepOnly);
+            Links newObjectLinks = parametersToObject(methodInfo, object, params, mlv, extraModified, extraDeepOnly,
+                    NO_SINGLE_THIS);
             if (newObjectLinks.primary() instanceof This && !newObjectLinks.isEmpty()) {
                 // LEAF 4a — the receiver is the implicit 'this' (an unqualified own-method call): the object-side
                 // links come back rooted at 'this'; regroup them so each real field/variable becomes its own primary.
@@ -450,7 +451,8 @@ public record LinkMethodCall(JavaInspector javaInspector,
         Variable newPrimary = IntermediateVariable.returnValue(runtime, variableCounter.getAndIncrement(),
                 concreteReturnType);
         VariableTranslationMap tm = new VariableTranslationMap(runtime);
-        if (objectPrimary != null) {
+        if (objectPrimary != null && NO_SINGLE_THIS) {
+            // ExpressionVisitor translated the callee's 'this' (and its supertypes') already
             addThisHierarchyToObjectPrimaryToTmBuilder(methodInfo, tm, objectPrimary);
         }
         // the return value can also contain references to parameters... we should replace them by
@@ -697,12 +699,14 @@ public record LinkMethodCall(JavaInspector javaInspector,
                                               List<Result> params,
                                               MethodLinkedVariables mlv,
                                               Set<Variable> extraModified,
-                                              Set<Variable> extraDeepOnly) {
+                                              Set<Variable> extraDeepOnly,
+                                              boolean translateThis) {
         Variable objectPrimary = object.links().primary();
         int i = 0;
         Links.Builder builder = new LinksImpl.Builder(objectPrimary);
         VariableTranslationMap tm = new VariableTranslationMap(runtime);
-        addThisHierarchyToObjectPrimaryToTmBuilder(methodInfo, tm, objectPrimary);
+        // a constructor's summary still has the callee's 'this'; a method call's was translated by ExpressionVisitor
+        if (translateThis) addThisHierarchyToObjectPrimaryToTmBuilder(methodInfo, tm, objectPrimary);
         for (ParameterInfo pi : methodInfo.parameters()) {
             if (pi.index() < params.size()) {
                 Result result = params.get(pi.index());
@@ -793,9 +797,17 @@ public record LinkMethodCall(JavaInspector javaInspector,
         return builder.build();
     }
 
+    // gate NOSINGLETHIS: the callee's 'this' translated twice, in ExpressionVisitor and here (the old route)
+    static final boolean NO_SINGLE_THIS = Gate.isSet("NOSINGLETHIS");
+
     private void addThisHierarchyToObjectPrimaryToTmBuilder(MethodInfo methodInfo,
                                                             VariableTranslationMap tmBuilder,
                                                             Variable objectPrimary) {
+        addThisHierarchy(runtime, methodInfo, tmBuilder, objectPrimary);
+    }
+
+    static void addThisHierarchy(Runtime runtime, MethodInfo methodInfo, VariableTranslationMap tmBuilder,
+                                 Variable objectPrimary) {
         TypeInfo thisType = methodInfo.typeInfo();
         Stream<TypeInfo> stream = Stream.concat(Stream.of(thisType),
                 thisType.superTypesExcludingJavaLangObject().stream());

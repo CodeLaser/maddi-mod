@@ -950,6 +950,20 @@ public record ExpressionVisitor(Runtime runtime,
     }
 
 
+    /*
+     the callee's code reaches its supertypes' fields through their 'this' ('fix() { p.set(2); }' in a subclass of the
+     type declaring p: this{Base}.p): the same object, as LinkMethodCall's addThisHierarchyToObjectPrimaryToTmBuilder
+     and MethodModification (#126) already take it. Left untranslated, MethodModification translated it itself, and
+     dropped the result as unknown in the caller: 's.fix()' did not modify what 's.p' holds (CodeLaser/maddi-mod#150,
+     the fixpoint's mkSub). Gate NOSUPERTHIS (presence): the callee's own type only, as before.
+     */
+    private void putSuperThis(MethodCall mc, VariableTranslationMap tm, Variable objectPrimary) {
+        if (NO_SUPER_THIS) return;
+        for (TypeInfo superType : mc.methodInfo().typeInfo().superTypesExcludingJavaLangObject()) {
+            tm.put(runtime.newThis(superType.asParameterizedType()), objectPrimary);
+        }
+    }
+
     private Result methodCall(VariableData variableData, Stage stage, MethodCall mc) {
         // recursion, translation
         Result object = visit(mc.object(), variableData, stage);
@@ -980,19 +994,19 @@ public record ExpressionVisitor(Runtime runtime,
         } else if (objectPrimary != null) {
             This thisVar = runtime.newThis(mc.methodInfo().typeInfo().asParameterizedType());
             MethodLinkedVariables mlvTranslated1;
-            if (!thisVar.equals(objectPrimary)) {
+            if (!LinkMethodCall.NO_SINGLE_THIS) {
+                // the callee's 'this', of its own type and of each supertype, becomes the object, in ONE pass:
+                // LinkMethodCall used to map the hierarchy a second time, and when the object is a field of the
+                // caller's own type ('first.self()' in S, the object 'this.first'), it rewrote the caller's 'this'
+                // inside it: 'this.first.first' (fernflower's Statement.getBasichead, 2c). Gate NOSINGLETHIS
+                VariableTranslationMap tm = new VariableTranslationMap(runtime);
+                if (!thisVar.equals(objectPrimary)) tm.put(thisVar, objectPrimary);
+                LinkMethodCall.addThisHierarchy(runtime, mc.methodInfo(), tm, objectPrimary);
+                putSuperThis(mc, tm, objectPrimary);
+                mlvTranslated1 = tm.isEmpty() ? mlv : mlv.translate(tm);
+            } else if (!thisVar.equals(objectPrimary)) {
                 VariableTranslationMap tm = new VariableTranslationMap(runtime).put(thisVar, objectPrimary);
-                if (!NO_SUPER_THIS) {
-                    // the callee's code reaches its supertypes' fields through their 'this' ('fix() { p.set(2); }' in
-                    // a subclass of the type declaring p: this{Base}.p): the same object, as LinkMethodCall's
-                    // addThisHierarchyToObjectPrimaryToTmBuilder and MethodModification (#126) already take it.
-                    // Left untranslated, MethodModification translated it itself, and dropped the result as unknown
-                    // in the caller: 's.fix()' did not modify what 's.p' holds (CodeLaser/maddi-mod#150, the
-                    // fixpoint's mkSub). Gate NOSUPERTHIS (presence): the callee's own type only, as before.
-                    for (TypeInfo superType : mc.methodInfo().typeInfo().superTypesExcludingJavaLangObject()) {
-                        tm.put(runtime.newThis(superType.asParameterizedType()), objectPrimary);
-                    }
-                }
+                putSuperThis(mc, tm, objectPrimary);
                 mlvTranslated1 = mlv.translate(tm);
             } else {
                 mlvTranslated1 = mlv;

@@ -275,8 +275,11 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
         // (gate NOCALLEESCOPE: only here, as before)
         try (LinkEndInterner _ = CALLEE_SCOPE_OFF ? LinkEndInterner.open() : null) {
             TypeInfo typeInfo = method.typeInfo();
-            boolean shallow = options.forceShallow() || method.isAbstract() || typeInfo.compilationUnit().externalLibrary();
-            MethodLinkedVariables result = doMethod(method, shallow, false, true);
+            boolean placeholder = placeholderWithImplementations(method);
+            boolean shallow = options.forceShallow() || method.isAbstract() || typeInfo.compilationUnit().externalLibrary()
+                              || placeholder;
+            // a source placeholder's properties come from the analyzer, not from the shallow method analyzer's defaults
+            MethodLinkedVariables result = doMethod(method, shallow, false, !placeholder);
             if (MLV_DUMP != null && method.fullyQualifiedName().contains(MLV_DUMP)) {
                 System.out.println("MLVDUMP " + method.fullyQualifiedName() + " " + result + " modified="
                                    + result.modified());
@@ -286,6 +289,22 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
             LOGGER.error("Caught exception computing {}", method, e);
             throw e;
         }
+    }
+
+    /*
+     A throw-only placeholder with implementations (Util.unionOverImplementations) is summarised as an abstract method
+     is, from its properties: its modification and independence are its implementations' union, and its throwing body
+     links nothing, so a call through it ('left.copy()' in fernflower's AssignmentExprent.copy, Exprent.copy a
+     placeholder) linked its result to nothing. Gate NOPLACEHOLDERINDEPENDENCE (also in TypeModIndyAnalyzerImpl).
+     */
+    private static final boolean NO_PLACEHOLDER_INDEPENDENCE = Gate.isSet("NOPLACEHOLDERINDEPENDENCE");
+
+    private static boolean placeholderWithImplementations(MethodInfo method) {
+        return !NO_PLACEHOLDER_INDEPENDENCE && !method.isAbstract() && Util.unionOverImplementations(method)
+               // only for what it returns: a primitive result links nothing, and the body route keeps a parameter's
+               // @NotModified(contract = true) over the union (#125, TestParameterContractOnBody)
+               && method.hasReturnValue() && !method.returnType().isPrimitiveExcludingVoid()
+               && method.parameters().stream().noneMatch(Util::explicitNotModifiedContractOnBody);
     }
 
     /*
@@ -305,8 +324,9 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
         }
         try {
             TypeInfo typeInfo = method.typeInfo();
-            boolean shallow = options.forceShallow() || typeInfo.compilationUnit().externalLibrary();
-            if (NO_PROVISIONAL_DEMAND || shallow) return doMethod(method, shallow, true, true);
+            boolean placeholder = placeholderWithImplementations(method);
+            boolean shallow = options.forceShallow() || typeInfo.compilationUnit().externalLibrary() || placeholder;
+            if (NO_PROVISIONAL_DEMAND || shallow) return doMethod(method, shallow, true, !placeholder);
             int[] fallbacks = IN_PROGRESS_FALLBACKS.get();
             int before = fallbacks[0];
             MethodLinkedVariables mlv = doMethod(method, false, false, true);
