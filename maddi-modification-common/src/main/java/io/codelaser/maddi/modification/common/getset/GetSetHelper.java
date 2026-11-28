@@ -36,6 +36,7 @@ import io.codelaser.maddi.cst.api.statement.Statement;
 import io.codelaser.maddi.cst.api.statement.ThrowStatement;
 import io.codelaser.maddi.cst.api.statement.YieldStatement;
 import io.codelaser.maddi.cst.api.variable.DependentVariable;
+import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.cst.api.variable.This;
 import io.codelaser.maddi.cst.api.variable.Variable;
@@ -124,14 +125,14 @@ public class GetSetHelper {
                 }
                 if (rs.expression() instanceof VariableExpression ve
                     && ve.variable() instanceof FieldReference fr
-                    && fr.scopeIsRecursivelyThis()) {
+                    && ownField(methodInfo, fr)) {
                     // return this.field;
                     return new ValueImpl.GetSetValueImpl(fr.fieldInfo(), false, -1, false);
                 } else if (rs.expression() instanceof VariableExpression ve
                            && ve.variable() instanceof DependentVariable dv
                            && dv.arrayVariable() instanceof FieldReference fr
                            && dv.indexVariable() instanceof ParameterInfo
-                           && fr.scopeIsRecursivelyThis()) {
+                           && ownField(methodInfo, fr)) {
                     // return this.objects[param]
                     return new ValueImpl.GetSetValueImpl(fr.fieldInfo(), false, 0, false);
                 } else if (rs.expression() instanceof MethodCall mc
@@ -140,7 +141,7 @@ public class GetSetHelper {
                            && ve.variable() instanceof ParameterInfo
                            && mc.object() instanceof VariableExpression ve2
                            && ve2.variable() instanceof FieldReference fr
-                           && fr.scopeIsRecursivelyThis()) {
+                           && ownField(methodInfo, fr)) {
                     // return this.list.get(param);
                     return new ValueImpl.GetSetValueImpl(fr.fieldInfo(), false, 0, true);
                 } else {
@@ -148,13 +149,13 @@ public class GetSetHelper {
                 }
             } else if (checkSetMethodEnsureFluent(methodInfo, methodBody, guards) && s0 instanceof ExpressionAsStatement eas) {
                 if (eas.expression() instanceof Assignment a
-                    && a.variableTarget() instanceof FieldReference fr && fr.scopeIsRecursivelyThis()
+                    && a.variableTarget() instanceof FieldReference fr && ownField(methodInfo, fr)
                     && a.value() instanceof VariableExpression ve && ve.variable() instanceof ParameterInfo) {
                     // this.field = param
                     return new ValueImpl.GetSetValueImpl(fr.fieldInfo(), true, -1, false);
                 } else if (eas.expression() instanceof Assignment a
                            && a.variableTarget() instanceof DependentVariable dv
-                           && dv.arrayVariable() instanceof FieldReference fr && fr.scopeIsRecursivelyThis()
+                           && dv.arrayVariable() instanceof FieldReference fr && ownField(methodInfo, fr)
                            && dv.indexVariable() instanceof ParameterInfo
                            && a.value() instanceof VariableExpression ve && ve.variable() instanceof ParameterInfo) {
                     // this.objects[i] = param
@@ -164,7 +165,7 @@ public class GetSetHelper {
                            && mc.parameterExpressions().get(0) instanceof VariableExpression ve && ve.variable() instanceof ParameterInfo
                            && mc.parameterExpressions().get(1) instanceof VariableExpression ve2 && ve2.variable() instanceof ParameterInfo
                            && mc.object() instanceof VariableExpression ve3 && ve3.variable() instanceof FieldReference fr
-                           && fr.scopeIsRecursivelyThis()) {
+                           && ownField(methodInfo, fr)) {
                     // this.list.set(i, object)
                     return new ValueImpl.GetSetValueImpl(fr.fieldInfo(), true, 0, true);
                 } else {
@@ -174,6 +175,23 @@ public class GetSetHelper {
                 return null;
             }
         }) != null;
+    }
+
+    /*
+     CodeLaser/maddi-mod#86: a getter or setter reads or writes a field of 'this' itself, declared by its type or a
+     supertype. 'return this.parent.wrapper' is no getter of 'wrapper': every call site replaces 'x.m()' with 'x.field'
+     (ExpressionVisitor), so 'p.ofParent()' read 'p.wrapper', a level lost; a setter 'this.parent.wrapper = v' would
+     write the wrong object. Nor is an outer instance's field ('Outer.this.x' in an inner class). Gate NOGETSETOWNFIELD
+     (presence): any field whose scope chain ends in 'this', as before.
+     */
+    private static final boolean NO_GETSET_OWN_FIELD = System.getenv("NOGETSETOWNFIELD") != null;
+
+    private static boolean ownField(MethodInfo methodInfo, FieldReference fr) {
+        if (NO_GETSET_OWN_FIELD) return fr.scopeIsRecursivelyThis();
+        if (!fr.scopeIsThis()) return false;
+        TypeInfo owner = fr.fieldInfo().owner();
+        TypeInfo type = methodInfo.typeInfo();
+        return owner == type || type.superTypesExcludingJavaLangObject().contains(owner);
     }
 
     // {@code guards} is the number of leading inert-guard statements already peeled (see doGetSetAnalysis): the
