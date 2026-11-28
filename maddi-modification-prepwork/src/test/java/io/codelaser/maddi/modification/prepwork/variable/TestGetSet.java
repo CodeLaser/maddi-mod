@@ -128,17 +128,19 @@ public class TestGetSet extends CommonTest {
         MethodInfo mdd = X.findUniqueMethod("dd", 0);
         assertSame(d, mdd.getSetField().field());
 
+        // a field of another object is no accessor of this one: a call site would read 'x.i' for 'x.r.i' (or 'x.rr.i'),
+        // a level lost (CodeLaser/maddi-mod#86, gate NOGETSETOWNFIELD; was: getters of R.i, r and rr indistinguishable)
         MethodInfo mri = X.findUniqueMethod("ri", 0);
-        assertSame(ri, mri.getSetField().field());
+        assertNull(mri.getSetField().field());
         MethodInfo mRri = X.findUniqueMethod("rri", 0);
-        assertSame(ri, mRri.getSetField().field()); // IMPORTANT! we cannot yet tell the difference: are we accessing r or rr??
+        assertNull(mRri.getSetField().field());
         MethodInfo mRi2 = X.findUniqueMethod("ri2", 0);
         assertNull(mRi2.getSetField().field());
 
         MethodInfo setD = X.findUniqueMethod("setD", 1);
         assertSame(d, setD.getSetField().field());
         MethodInfo setRI = X.findUniqueMethod("setRI", 1);
-        assertSame(ri, setRI.getSetField().field());
+        assertNull(setRI.getSetField().field()); // writes r's field, not this one's (#86)
 
         {
             MethodInfo test1 = X.findUniqueMethod("callGetO", 0);
