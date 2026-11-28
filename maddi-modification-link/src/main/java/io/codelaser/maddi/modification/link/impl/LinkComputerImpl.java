@@ -423,6 +423,7 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
      the marker numbering onto a collision). Gate NOCALLEESCOPE (presence) restores the single scope.
      */
     static final boolean CALLEE_SCOPE_OFF = System.getenv("NOCALLEESCOPE") != null;
+    private static final boolean NO_ECI_LINKS = System.getenv("NOECILINKS") != null;
 
     private MethodLinkedVariables doMethod(MethodInfo methodInfo, boolean shallow, boolean write, boolean writeShallow) {
         if (CALLEE_SCOPE_OFF) return doMethodInScope(methodInfo, shallow, write, writeShallow);
@@ -1468,6 +1469,27 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
             return vd;
         }
 
+        /*
+         CodeLaser/maddi-mod#150: 'this(..)' and an explicit 'super(..)' were linked as nothing: the statement has no
+         expression of its own (prepwork reads its arguments), so a constructor delegating to the one that stores an
+         argument in a field lost the link from the argument to the field, and a method building the object and then
+         modifying the stored object through it read non-modifying. The invocation is the invoked constructor run on
+         this object: link it as the call 'this.<init>(args)', which brings the callee's summary (1:p→this*.p) over
+         to this constructor's arguments, as for any own-method call. Gate NOECILINKS (presence): no links, as before.
+         */
+        private MethodCall asCallOnThis(ExplicitConstructorInvocation eci) {
+            var runtime = javaInspector.runtime();
+            return runtime.newMethodCallBuilder()
+                    .setSource(eci.source())
+                    .setObject(runtime.newVariableExpression(runtime.newThis(
+                            methodInfo.typeInfo().asParameterizedType())))
+                    .setObjectIsImplicit(true)
+                    .setMethodInfo(eci.methodInfo())
+                    .setParameterExpressions(eci.parameterExpressions())
+                    .setConcreteReturnType(runtime.voidParameterizedType())
+                    .build();
+        }
+
         public VariableData doStatement(Statement statement,
                                         VariableData previousVd,
                                         boolean firstStatementOfBlock) {
@@ -1514,6 +1536,10 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
                 if (expression != null && !expression.isEmpty()) {
                     Expression e = javaInspector.runtime().sortAndSimplify(true, expression);
                     Result u = expressionVisitor.visit(e, previousVd, stageOfPrevious);
+                    r = r == null ? u : r.merge(u);
+                }
+                if (!NO_ECI_LINKS && statement instanceof ExplicitConstructorInvocation eci && !eci.isSynthetic()) {
+                    Result u = expressionVisitor.visit(asCallOnThis(eci), previousVd, stageOfPrevious);
                     r = r == null ? u : r.merge(u);
                 }
             }
