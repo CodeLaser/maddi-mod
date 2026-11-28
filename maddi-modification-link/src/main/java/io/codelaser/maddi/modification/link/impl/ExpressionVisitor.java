@@ -1090,15 +1090,62 @@ public record ExpressionVisitor(Runtime runtime,
         Set<Variable> innerReceiver = NO_CHAIN_STRUCTURAL ? Set.of() : innerReceiverModified(mc, object, objectModified);
         Set<Variable> lazyStageElements = MethodModification.lazyStageModifiedLambdaParameters(mc);
         if (!lazyStageElements.isEmpty()) r = withElementLinks(r, objectPrimary, lazyStageElements);
+        // #159: an owner of the modified elements is modified in its hidden content; a scope of it whose declared type
+        // holds the elements accessibly ('this' of 'this.lvs' in 'lvs.stream().findFirst().ifPresent(..)'),
+        // structurally (MethodModification.structuralHolders)
+        Set<Variable> ownerHolders = new HashSet<>();
+        List<ParameterizedType> elementTypes = objectPrimary == null || !modified.deepOnly().contains(objectPrimary)
+                ? List.of() : MethodModification.handedElementTypes(objectPrimary);
+        if (!elementTypes.isEmpty()) {
+            Set<Variable> owners = new HashSet<>(elementOwners);
+            // a call chain's temporaries ('lvs.stream().findFirst().ifPresent(..)'): '$rv1.§$ ∈ $rv0.§$s', and in the
+            // object's extras '$rv0.§$s ⊆ this.lvs.§$s'; the real containers at the end of the element links
+            owners.addAll(elementContainers(objectPrimary, object));
+            for (Variable owner : owners) {
+                ownerHolders.addAll(MethodModification.structuralHolders(owner, elementTypes));
+            }
+        }
         return r.addModified(modified.all(), modified.deepOnly(), mc.methodInfo())
                 .addModified(lazyStageElements, lazyStageElements, mc.methodInfo())
                 .addModified(elementOwners, elementOwners, mc.methodInfo())
+                .addModified(ownerHolders, Set.of(), mc.methodInfo())
                 .addModified(extraModified, deepOnlyAmong(params, extraModified), null)
                 .addModified(objectModified, object.deepOnlyAmong(objectModified), null)
                 .addModified(innerReceiver, Set.of(), null)
                 .add(new WriteMethodCall(mc, object.links()))
                 .addVariablesRepresentingConstant(params)
                 .addVariablesRepresentingConstant(object);
+    }
+
+    /*
+     #159 (MethodModification.structuralHolders): the real variables whose hidden content holds the object's elements,
+     following element links ('∈', '⊆', '~' between hidden contents) from the object through the call chain's
+     temporaries, whose links the object's extras keep. Bounded.
+     */
+    private static Set<Variable> elementContainers(Variable objectPrimary, Result object) {
+        Set<Variable> out = new HashSet<>();
+        if (MethodModification.NO_ELEMENT_FUNCTION_REACH) return out;
+        Map<Variable, Links> extra = object.extra().map();
+        Deque<Links> todo = new ArrayDeque<>();
+        Set<Variable> seen = new HashSet<>();
+        if (object.links() != null) todo.add(object.links());
+        while (!todo.isEmpty() && seen.size() < 16) {
+            for (Link link : todo.poll()) {
+                LinkNature ln = link.linkNature();
+                if (ln != LinkNatureImpl.IS_ELEMENT_OF && ln != LinkNatureImpl.IS_SUBSET_OF
+                    && ln != LinkNatureImpl.SHARES_ELEMENTS) continue;
+                if (!Util.virtual(link.to()) || Util.isVirtualModification(link.to())) continue;
+                Variable container = Util.firstRealVariable(link.to());
+                if (container == null || container.equals(objectPrimary) || !seen.add(container)) continue;
+                Links next = extra.get(container);
+                if (container instanceof IntermediateVariable || container instanceof ReturnVariable) {
+                    if (next != null) todo.add(next);
+                } else {
+                    out.add(container);
+                }
+            }
+        }
+        return out;
     }
 
     /*

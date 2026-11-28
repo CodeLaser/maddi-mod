@@ -874,15 +874,21 @@ public class ShadowModificationPass {
                     // ('hs.forEach(h -> h.touch())'): the receiver's hidden content is modified, deep-only
                     if (!disclaimed && mc.object() != null && !MethodModification.NO_ELEMENT_FUNCTION
                         && MethodModification.handsElementsToModifyingFunction(mc)) {
+                        // deep-only, unless an element may be the node's accessible content (#130, and #159's holder's
+                        // view: 'this.lvs.forEach(lv -> lv.sig = s)' writes an LV, accessible content of the type
+                        // that declared 'List<LV> lvs'), as the loop form's projection judges it. Gate
+                        // NOELEMENTFUNCTIONREACH.
+                        List<Written> elements = NO_ELEMENT_FUNCTION_REACH ? List.of()
+                                : handedElements(mc.object().parameterizedType());
                         for (Object node : projectReceiverChain(mi, vd, mc.object(), null)) {
-                            seedWithOrigin(deepOnly(node), mi, "elements handed to a modifying function by "
-                                                               + mc.methodInfo().fullyQualifiedName());
+                            seedWithOrigin(elementNode(elements, node), mi, "elements handed to a modifying function by "
+                                                  + mc.methodInfo().fullyQualifiedName());
                         }
                         // ... and the variables those elements come from (#138: 'extract(parts).forEach(p -> p.bump())',
                         // a fresh list of parts' elements)
                         if (!NO_ELEMENT_SOURCES) {
                             for (Object node : elementSources(mi, vd, mc.object(), 0)) {
-                                seedWithOrigin(deepOnly(node), mi, "elements handed to a modifying function by "
+                                seedWithOrigin(elementNode(elements, node), mi, "elements handed to a modifying function by "
                                                                    + mc.methodInfo().fullyQualifiedName());
                             }
                         }
@@ -890,8 +896,10 @@ public class ShadowModificationPass {
                     // ... and a lazy stream stage's ('helpers.stream().filter(h -> ..)', CodeLaser/maddi-mod#115)
                     if (!disclaimed && mc.object() != null
                         && !MethodModification.lazyStageModifiedLambdaParameters(mc).isEmpty()) {
+                        List<Written> elements = NO_ELEMENT_FUNCTION_REACH ? List.of()
+                                : handedElements(mc.object().parameterizedType());
                         for (Object node : elementSources(mi, vd, mc.object(), 0)) {
-                            seedWithOrigin(deepOnly(node), mi, "elements handed to a modifying function by "
+                            seedWithOrigin(elementNode(elements, node), mi, "elements handed to a modifying function by "
                                                                + mc.methodInfo().fullyQualifiedName());
                         }
                     }
@@ -1379,6 +1387,27 @@ public class ShadowModificationPass {
         return out;
     }
 
+    private static final boolean NO_ELEMENT_FUNCTION_REACH = Gate.isSet("NOELEMENTFUNCTIONREACH");
+
+    // the elements a library callee hands to a function: the receiver's concrete type arguments (List<LV>: LV; a map's
+    // keys and values), what the function writes in when it modifies its argument
+    private static List<Written> handedElements(ParameterizedType receiver) {
+        if (receiver == null) return List.of();
+        List<Written> out = new ArrayList<>();
+        for (ParameterizedType arg : receiver.parameters()) {
+            if (arg.isTypeParameter() || arg.wildcard() != null || arg.bestTypeInfo() == null
+                || arg.bestTypeInfo().isJavaLangObject()) continue;
+            out.add(new Written(arg, false));
+        }
+        return out;
+    }
+
+    // a node whose elements a function modified: structural when one of them may be its accessible content
+    private Object elementNode(List<Written> elements, Object node) {
+        if (node instanceof DeepOnly) return node;
+        return elements.stream().anyMatch(w -> accessibleReach(w, node)) ? node : deepOnly(node);
+    }
+
     /** The object a projection starts from, the one written: its declared type, and whether its own fields are. */
     private record Written(ParameterizedType type, boolean exact) {
     }
@@ -1712,7 +1741,11 @@ public class ShadowModificationPass {
                 || !Util.virtual(l.to()) || Util.isVirtualModification(l.to())
                 || !(l.linkNature() == LinkNatureImpl.IS_SUBSET_OF || l.linkNature() == LinkNatureImpl.SHARES_ELEMENTS
                      || l.linkNature().isIdenticalToOrAssignedFromTo()
-                     || !NO_ELEMENT_SOURCES && l.linkNature() == LinkNatureImpl.IS_IN_OBJECT_GRAPH)) {
+                     || !NO_ELEMENT_SOURCES && l.linkNature() == LinkNatureImpl.IS_IN_OBJECT_GRAPH
+                     // 'findFirst()': the result's content is one of the receiver's elements ('rv.§$ ∈ this.§$s'), so
+                     // a function handed it ('.ifPresent(lv -> lv.sig = s)') is handed an element of the source (#159,
+                     // gate NOELEMENTFUNCTIONREACH)
+                     || !NO_ELEMENT_FUNCTION_REACH && l.linkNature() == LinkNatureImpl.IS_ELEMENT_OF)) {
                 continue;
             }
             Variable to = Util.firstRealVariable(l.to());

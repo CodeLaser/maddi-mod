@@ -29,10 +29,12 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Predicate;
 
 import io.codelaser.maddi.cst.api.analysis.Message;
+import io.codelaser.maddi.cst.api.analysis.Property;
 import io.codelaser.maddi.cst.api.analysis.Value;
 import io.codelaser.maddi.cst.api.element.Element;
 import io.codelaser.maddi.cst.api.expression.Assignment;
@@ -197,6 +199,8 @@ public class TypeModIndyAnalyzerImpl extends CommonAnalyzerImpl implements TypeM
         } else {
             identityFluent = false;
         }
+        ownFluent.put(methodInfo, identityFluent);
+        identityFluent = dispatchUnion(methodInfo, FLUENT_METHOD, identityFluent);
         if (TolerantWrite.setAllowControlledOverwrite(methodInfo.analysis(), FLUENT_METHOD, ValueImpl.BoolImpl.from(identityFluent), methodInfo)) {
             DECIDE.debug("MI: Decide @Fluent of {} = {}", methodInfo, identityFluent);
             propertyChanges.incrementAndGet();
@@ -362,6 +366,8 @@ public class TypeModIndyAnalyzerImpl extends CommonAnalyzerImpl implements TypeM
         } else {
             identity = false;
         }
+        ownIdentity.put(methodInfo, identity);
+        identity = dispatchUnion(methodInfo, IDENTITY_METHOD, identity);
         if (TolerantWrite.setAllowControlledOverwrite(methodInfo.analysis(), IDENTITY_METHOD, ValueImpl.BoolImpl.from(identity), methodInfo)) {
             DECIDE.debug("MI: Decide @Identity of {} = {}", methodInfo, identity);
             propertyChanges.incrementAndGet();
@@ -380,7 +386,7 @@ public class TypeModIndyAnalyzerImpl extends CommonAnalyzerImpl implements TypeM
     : this' links only to this. A call of a @Fluent method on something that yields the target yields it too
     ('return setComment(null)', 'return super.solve(c)').
      */
-    private static boolean everyReturnYields(MethodInfo methodInfo, Predicate<Variable> target) {
+    private boolean everyReturnYields(MethodInfo methodInfo, Predicate<Variable> target) {
         if (methodInfo.methodBody() == null || methodInfo.methodBody().isEmpty()) return true;
         List<Expression> returned = new ArrayList<>();
         Map<LocalVariable, List<Expression>> assigned = new java.util.HashMap<>();
@@ -407,7 +413,7 @@ public class TypeModIndyAnalyzerImpl extends CommonAnalyzerImpl implements TypeM
         return returned.stream().allMatch(r -> yields(r, target, assigned, new HashSet<>()));
     }
 
-    private static boolean yields(Expression expression, Predicate<Variable> target,
+    private boolean yields(Expression expression, Predicate<Variable> target,
                                   Map<LocalVariable, List<Expression>> assigned,
                                   Set<LocalVariable> seen) {
         if (expression instanceof Cast cast) return yields(cast.expression(), target, assigned, seen);
@@ -428,11 +434,11 @@ public class TypeModIndyAnalyzerImpl extends CommonAnalyzerImpl implements TypeM
             return false;
         }
         if (expression instanceof MethodCall mc && mc.methodInfo() != null) {
-            if (mc.methodInfo().isIdentity() && !mc.parameterExpressions().isEmpty()
+            if (isIdentity(mc) && !mc.parameterExpressions().isEmpty()
                 && yields(mc.parameterExpressions().getFirst(), target, assigned, seen)) {
                 return true;
             }
-            return mc.methodInfo().isFluent() && mc.object() != null && !mc.object().isEmpty()
+            return isFluent(mc) && mc.object() != null && !mc.object().isEmpty()
                    && yields(mc.object(), target, assigned, seen);
         }
         return false;
@@ -731,6 +737,48 @@ normal methods: does a modification to the return value imply any modification i
     private Independent fromType(ParameterizedType type) {
         Independent v = type == null ? null : analysisHelper.typeIndependentFromImmutableOrNull(type);
         return v == null ? DEPENDENT : v;
+    }
+
+    /*
+     CodeLaser/maddi-mod#31, as #116 and #167: under the dispatch union a call through a concrete, overridable method may
+     reach any of its source overrides, so it is @Fluent (@Identity) only when its own body and every override's are.
+     A call site aliases the result to the receiver (the argument): 'interface RT { default RT solve(C c) { return
+     this; } }' overridden by one that sometimes returns another object is not fluent. An undecided override counts
+     as not, the weakest; a later iteration lifts it (Bool goes from false to true only). Gate NODISPATCHFLUENT.
+     A fluent setter keeps the value prep (GetSetHelper) wrote.
+     */
+    private static final boolean NO_DISPATCH_FLUENT = Gate.isSet("NODISPATCHFLUENT");
+
+    /*
+     The own body's value before the fold. A non-virtual call ('super.m(..)', 'I.super.m(..)') reaches only that body;
+     reading the union there closes a cycle that stays false: javaparser's 'MethodDeclaration.setName' is
+     'return super.setName(name)', an override of 'CallableDeclaration.setName', which returns this. A method not seen
+     yet in this analysis (a seeded run) falls back to the stored value, the union: never more optimistic.
+     */
+    private final Map<MethodInfo, Boolean> ownFluent = new ConcurrentHashMap<>();
+    private final Map<MethodInfo, Boolean> ownIdentity = new ConcurrentHashMap<>();
+
+    private boolean isFluent(MethodCall mc) {
+        Boolean own = nonVirtual(mc) ? ownFluent.get(mc.methodInfo()) : null;
+        return own != null ? own : mc.methodInfo().isFluent();
+    }
+
+    private boolean isIdentity(MethodCall mc) {
+        Boolean own = nonVirtual(mc) ? ownIdentity.get(mc.methodInfo()) : null;
+        return own != null ? own : mc.methodInfo().isIdentity();
+    }
+
+    private static boolean nonVirtual(MethodCall mc) {
+        return mc.object() instanceof VariableExpression ve && ve.variable() instanceof This t && t.writeSuper();
+    }
+
+    private static boolean dispatchUnion(MethodInfo methodInfo, Property property, boolean own) {
+        if (NO_DISPATCH_FLUENT || !own || !Util.dispatchUnion(methodInfo)) return own;
+        for (MethodInfo implementation : methodInfo.analysis().getOrDefault(PropertyImpl.IMPLEMENTATIONS,
+                ValueImpl.SetOfMethodInfoImpl.EMPTY).methodInfoSet()) {
+            if (!implementation.analysis().getOrDefault(property, ValueImpl.BoolImpl.FALSE).isTrue()) return false;
+        }
+        return true;
     }
 
     private boolean immutable(ParameterizedType type) {

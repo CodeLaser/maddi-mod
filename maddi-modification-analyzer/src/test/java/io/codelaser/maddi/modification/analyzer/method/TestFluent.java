@@ -181,13 +181,15 @@ public class TestFluent extends CommonTest {
         analyzer.go(ao);
         TypeInfo W = X.findSubType("W");
         TypeInfo RT = X.findSubType("RT");
-        assertSame(TRUE, RT.findUniqueMethod("solve", 1).analysis().getOrDefault(PropertyImpl.FLUENT_METHOD, FALSE));
+        // its own body returns this, but a call through it may reach W.solve: the dispatch union (gate NODISPATCHFLUENT)
+        assertSame(FALSE, RT.findUniqueMethod("solve", 1).analysis().getOrDefault(PropertyImpl.FLUENT_METHOD, FALSE));
         // one path returns a new W: links see only 'this'
         assertSame(FALSE, W.findUniqueMethod("solve", 1).analysis().getOrDefault(PropertyImpl.FLUENT_METHOD, FALSE));
         assertSame(FALSE, W.findUniqueMethod("fresh", 1).analysis().getOrDefault(PropertyImpl.FLUENT_METHOD, FALSE));
         // a fluent call on this, on super: still this
         assertSame(TRUE, W.findUniqueMethod("setK", 1).analysis().getOrDefault(PropertyImpl.FLUENT_METHOD, FALSE));
         assertSame(TRUE, W.findUniqueMethod("chained", 0).analysis().getOrDefault(PropertyImpl.FLUENT_METHOD, FALSE));
+        // a non-virtual super call reaches RT.solve's own body, not the union
         assertSame(TRUE, W.findUniqueMethod("viaSuper", 1).analysis().getOrDefault(PropertyImpl.FLUENT_METHOD, FALSE));
         assertSame(FALSE, W.findUniqueMethod("flag", 0).analysis().getOrDefault(PropertyImpl.FLUENT_METHOD, FALSE));
     }

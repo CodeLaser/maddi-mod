@@ -1,6 +1,7 @@
 package io.codelaser.maddi.modification.link.impl;
 
 import java.util.HashSet;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.function.BiConsumer;
@@ -21,6 +22,7 @@ import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.info.TypeInfo;
 import io.codelaser.maddi.cst.api.runtime.Runtime;
 import io.codelaser.maddi.cst.api.translate.TranslationMap;
+import io.codelaser.maddi.modification.common.AnalysisHelper;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.api.variable.DependentVariable;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
@@ -196,6 +198,9 @@ public record MethodModification(Runtime runtime, VariableData variableData, Sta
             // the receiver's elements are modified by the function they are handed to: its hidden content, deep-only
             LOGGER.debug("Elements of {} modified by the function passed to {}", objectPrimary, methodInfo);
             modified.addWithScopes(objectPrimary, false);
+            for (Variable holder : structuralHolders(objectPrimary, handedElementTypes(objectPrimary))) {
+                modified.add(holder, true);
+            }
         }
         // the same reasoning for the callee's OWN propagated modifications: if none of this call's effects are
         // the author's, that includes the ones the callee's body performs on variables translated into our scope
@@ -352,6 +357,42 @@ public record MethodModification(Runtime runtime, VariableData variableData, Sta
      */
     private static boolean ownerTypeParameter(ParameterizedType typeArgument) {
         return typeArgument.typeParameter() != null && !typeArgument.typeParameter().isMethodTypeParameter();
+    }
+
+    /*
+     #159, the holder's view, for elements modified by a function they are handed to ('this.lvs.forEach(lv -> lv.sig =
+     s)', 'lvs.stream().findFirst().ifPresent(..)'): the container itself is modified in its hidden content, deep-only,
+     but a scope whose declared type wrote the element type on its field ('List<LV> lvs' in Z) holds the elements as
+     accessible content: modified structurally, as the loop form's holderElementModified has it. fernflower's
+     StructLocalVariableTableAttribute.mergeSignatures (the dynamic check's 2a). Gate NOELEMENTFUNCTIONREACH.
+     */
+    public static final boolean NO_ELEMENT_FUNCTION_REACH = Gate.isSet("NOELEMENTFUNCTIONREACH");
+
+    /** The concrete, mutable type arguments of the variable's type: the elements a function is handed. */
+    public static List<ParameterizedType> handedElementTypes(Variable container) {
+        if (NO_ELEMENT_FUNCTION_REACH || container == null || container.parameterizedType() == null) return List.of();
+        List<ParameterizedType> out = new ArrayList<>();
+        for (ParameterizedType arg : container.parameterizedType().parameters()) {
+            if (arg.isTypeParameter() || arg.wildcard() != null || arg.bestTypeInfo() == null
+                || arg.bestTypeInfo().isJavaLangObject()) continue;
+            if (new AnalysisHelper().typeImmutable(arg).isAtLeastImmutableHC()) continue;
+            out.add(arg);
+        }
+        return out;
+    }
+
+    /** The scopes of {@code container} (not itself) whose declared type may hold one of the elements accessibly. */
+    public static List<Variable> structuralHolders(Variable container, List<ParameterizedType> elementTypes) {
+        if (elementTypes.isEmpty()) return List.of();
+        List<Variable> out = new ArrayList<>();
+        Util.variableAndScopes(container).filter(x -> x != container && !x.isIgnoreModifications()).forEach(x -> {
+            ParameterizedType owner = x.parameterizedType();
+            if (owner != null && elementTypes.stream().anyMatch(e -> Util.mayBeAccessibleContent(e, owner, false,
+                    pt -> new AnalysisHelper().typeImmutable(pt).isAtLeastImmutableHC()))) {
+                out.add(x);
+            }
+        });
+        return out;
     }
 
     public static boolean handsElementsToModifyingFunction(MethodCall mc) {
