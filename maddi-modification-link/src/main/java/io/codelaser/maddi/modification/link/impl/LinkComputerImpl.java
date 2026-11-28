@@ -300,7 +300,11 @@ public class LinkComputerImpl implements LinkComputer, LinkComputerRecursion {
     private static final boolean NO_PLACEHOLDER_INDEPENDENCE = Gate.isSet("NOPLACEHOLDERINDEPENDENCE");
 
     private static boolean placeholderWithImplementations(MethodInfo method) {
-        return !NO_PLACEHOLDER_INDEPENDENCE && !method.isAbstract() && Util.unionOverImplementations(method);
+        return !NO_PLACEHOLDER_INDEPENDENCE && !method.isAbstract() && Util.unionOverImplementations(method)
+               // only for what it returns: a primitive result links nothing, and the body route keeps a parameter's
+               // @NotModified(contract = true) over the union (#125, TestParameterContractOnBody)
+               && method.hasReturnValue() && !method.returnType().isPrimitiveExcludingVoid()
+               && method.parameters().stream().noneMatch(Util::explicitNotModifiedContractOnBody);
     }
 
     /*
