@@ -979,7 +979,16 @@ public record ExpressionVisitor(Runtime runtime,
         } else if (objectPrimary != null) {
             This thisVar = runtime.newThis(mc.methodInfo().typeInfo().asParameterizedType());
             MethodLinkedVariables mlvTranslated1;
-            if (!thisVar.equals(objectPrimary)) {
+            if (!LinkMethodCall.NO_SINGLE_THIS) {
+                // the callee's 'this', of its own type and of each supertype, becomes the object, in ONE pass:
+                // LinkMethodCall used to map the hierarchy a second time, and when the object is a field of the
+                // caller's own type ('first.self()' in S, the object 'this.first'), it rewrote the caller's 'this'
+                // inside it: 'this.first.first' (fernflower's Statement.getBasichead, 2c). Gate NOSINGLETHIS
+                VariableTranslationMap tm = new VariableTranslationMap(runtime);
+                if (!thisVar.equals(objectPrimary)) tm.put(thisVar, objectPrimary);
+                LinkMethodCall.addThisHierarchy(runtime, mc.methodInfo(), tm, objectPrimary);
+                mlvTranslated1 = tm.isEmpty() ? mlv : mlv.translate(tm);
+            } else if (!thisVar.equals(objectPrimary)) {
                 TranslationMap tm = new VariableTranslationMap(runtime).put(thisVar, objectPrimary);
                 mlvTranslated1 = mlv.translate(tm);
             } else {
