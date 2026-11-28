@@ -557,10 +557,21 @@ public class ShallowMethodAnalyzer extends AnnotationToProperty {
         return UNSPECIFIED_DEFAULT;
     }
 
+    /*
+     CodeLaser/maddi-mod#161: an ignored parameter is "modified, but ignored". That FALSE is derived from the parameter's
+     IGNORE_MODIFICATIONS_PARAMETER, not annotated, so it stays a default and is not written (analyzeClaimed writes a
+     default only when its origin is ANNOTATED). It took the ignore flag's origin: an explicit @IgnoreModifications
+     wrote UNMODIFIED_PARAMETER = FALSE, the inferred one (a function type) did not. On a jar method both read FALSE
+     anyway; on a bodiless source method the write pre-empted AbstractMethodAnalyzerImpl, which decides the parameter
+     from the implementations, and cost the interface its @Container. Gate NOIGNOREDPARAMDERIVED (presence): the flag's
+     origin, as before.
+     */
+    private static final boolean NO_IGNORED_PARAM_DERIVED = System.getenv("NOIGNOREDPARAMDERIVED") != null;
+
     private ValueOrigin computeParameterUnmodified(ParameterInfo parameterInfo, ValueOrigin ign) {
         MethodInfo methodInfo = parameterInfo.methodInfo();
         if (((Value.Bool) ign.value()).isTrue()) {
-            return new ValueOrigin(FALSE, ign.origin());
+            return new ValueOrigin(FALSE, NO_IGNORED_PARAM_DERIVED ? ign.origin() : FROM_PARAMETER);
         }
         Value.Bool typeContainer = methodInfo.typeInfo().analysis().getOrDefault(CONTAINER_TYPE, FALSE);
         if (typeContainer.isTrue()) {
