@@ -1309,6 +1309,19 @@ public class ShadowModificationPass {
                                         out.add(accessibleReach(written, unwrap(node)) ? unwrap(node) : deepOnly(node)));
                             }
                         }
+                        /*
+                         CodeLaser/maddi-mod#154: the result may be any element the container was given ('l.§$s ∋ 0:b',
+                         'Arrays.asList(a, b)' or 'l.add(b)'): that object itself, in the result's own mode, as the ∈
+                         path of project takes the co-elements of an element held in a local (#113, #130). Gate
+                         NOCALLRESULTCOELEMENT.
+                         */
+                        if (!NO_CALL_RESULT_CO_ELEMENT && !NO_CO_ELEMENT && container instanceof VariableExpression cve) {
+                            List<Variable> co = new ArrayList<>();
+                            coElementsOfOwner(vd, cve.variable(), faceSlice(link.to()), co);
+                            for (Variable c : co) {
+                                project(mi, vd, c).forEach(node -> out.add(NO_STRUCTURAL_CO_ELEMENT ? deepOnly(node) : node));
+                            }
+                        }
                     }
                 }
                 return out;
@@ -1852,6 +1865,23 @@ public class ShadowModificationPass {
         return b >= 0 && rest.endsWith("]") && rest.startsWith("[-", b) ? rest.substring(b) : "";
     }
 
+    private static final boolean NO_CALL_RESULT_CO_ELEMENT = Gate.isSet("NOCALLRESULTCOELEMENT");
+
+    // the real objects the owner's element faces with this slice were given as elements ('l.§$s ∋ 0:b')
+    private static void coElementsOfOwner(VariableData vd, Variable owner, String suffix, List<Variable> out) {
+        if (suffix == null) return;
+        VariableInfoContainer vic = vd.variableInfoContainerOrNull(owner.fullyQualifiedName());
+        if (vic == null) return;
+        Links links = vic.best().linkedVariables();
+        if (links == null) return;
+        links.stream().filter(l -> l.linkNature() == LinkNatureImpl.CONTAINS_AS_MEMBER
+                                   && Util.virtual(l.from()) && !Util.isVirtualModification(l.from())
+                                   && owner.equals(Util.firstRealVariable(l.from()))
+                                   && suffix.equals(faceSlice(l.from()))
+                                   && !Util.virtual(l.to()) && !l.to().equals(owner) && !out.contains(l.to()))
+                .forEach(l -> out.add(l.to()));
+    }
+
     private void overlappingOwners(VariableData vd, Variable owner, String suffix, ParameterizedType element,
                                    List<Variable> out) {
         if (suffix == null) return;
@@ -2017,11 +2047,28 @@ public class ShadowModificationPass {
             if (!link.linkNature().isIdenticalTo() || !link.linkNature().pass().isEmpty()
                 || !resultModificationFace(link.from(), resultFqn) || !Util.isVirtualModification(link.to())) continue;
             if (Util.firstRealVariable(link.to()) instanceof ParameterInfo pi && pi.methodInfo() == callee
-                && pi.index() < mc.parameterExpressions().size()) {
+                && pi.index() < mc.parameterExpressions().size()
+                && (NO_VARARGS_VIEW || !separateVarargs(mc, pi))) {
                 out.addAll(projectReceiverChain(mi, vd, mc.parameterExpressions().get(pi.index()), null));
             }
         }
         return out;
+    }
+
+    /*
+     CodeLaser/maddi-mod#154: a varargs parameter given its arguments one by one ('Arrays.asList(a, b)') is a fresh array
+     holding them: a view of it is a view of no argument. The engine links each argument as an element of the result
+     ('l.§$s ∋ 0:a', LinkMethodCall), and a modified element reaches them that way. Only an array passed as the varargs
+     array itself ('Arrays.asList(bs)') is viewed. Gate NOVARARGSVIEW: the first argument, as before.
+     */
+    private static final boolean NO_VARARGS_VIEW = Gate.isSet("NOVARARGSVIEW");
+
+    static boolean separateVarargs(MethodCall mc, ParameterInfo pi) {
+        if (!pi.isVarArgs()) return false;
+        List<Expression> args = mc.parameterExpressions();
+        if (args.size() != pi.methodInfo().parameters().size()) return true;
+        ParameterizedType last = args.getLast().parameterizedType();
+        return last == null || last.arrays() != pi.parameterizedType().arrays();
     }
 
     private Set<Object> projectModificationIdenticals(MethodInfo mi, VariableData vd,

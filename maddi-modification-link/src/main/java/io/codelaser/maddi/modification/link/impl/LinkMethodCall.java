@@ -51,6 +51,7 @@ public record LinkMethodCall(JavaInspector javaInspector,
                              Stage stage) {
 
     private static final boolean NO_CONCRETE_COLLECT = Gate.isSet("NOCONCRETECOLLECT");
+    private static final boolean NO_VARARGS_ARRAY_FACE = Gate.isSet("NOVARARGSARRAYFACE");
 
     public Result constructorCall(ConstructorCall cc,
                                   Result object,
@@ -524,6 +525,10 @@ public record LinkMethodCall(JavaInspector javaInspector,
                                              ParameterInfo varargs, List<Variable> elements, Links.Builder builder) {
         if (!(link.to() instanceof FieldReference fr) || !(fr.scope() instanceof VariableExpression ve)
             || !varargs.equals(ve.variable()) || varargs.parameterizedType().arrays() != 1) return false;
+        // CodeLaser/maddi-mod#154: the array's own modification face ('asList.§m ≡ 0:a.§mT', a view of the array): the
+        // array of an expanded call is fresh, so the result is a view of no argument. Translated, it became the last
+        // argument's face ('l.§m ≡ 1:b.§mT'): replacing a slot of the view modified b. Gate NOVARARGSARRAYFACE.
+        if (!NO_VARARGS_ARRAY_FACE && Util.isVirtualModificationField(fr.fieldInfo())) return true;
         LinkNature nature = link.linkNature();
         if (nature != LinkNatureImpl.IS_SUBSET_OF && nature != LinkNatureImpl.IS_SUPERSET_OF) return false;
         Variable from = link.from().equals(rvPrimary) ? newPrimary : tm.translateVariableRecursively(link.from());
