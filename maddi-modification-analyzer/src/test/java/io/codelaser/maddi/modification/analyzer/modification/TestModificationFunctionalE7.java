@@ -59,7 +59,9 @@ public class TestModificationFunctionalE7 extends CommonTest {
         // the captured-field write inside the lambda implicates go's receiver, at the site where
         // the lambda is created and passed (creation-site attribution)
         assertTrue(go.isModifying());
-        assertEquals("$_fi0, this", mlv(go).sortedModifiedString());
+        // run's summary has no links, and its modified set enters go's like any callee's: its own parameter
+        // repeats what run's summary claims (MethodModification, #126; CodeLaser/maddi-mod#150)
+        assertEquals("$_fi0, a.b.X.run(String,a.b.X.Op):1:op, this", mlv(go).sortedModifiedString());
         assertFalse(X.getFieldByName("j", true).isUnmodified());
     }
 
@@ -91,7 +93,8 @@ public class TestModificationFunctionalE7 extends CommonTest {
         MethodInfo go = X.findUniqueMethod("go", 2);
 
         assertTrue(run.isNonModifying());
-        assertEquals("$_fi0, a.b.X.go(java.util.Set,String):0:out", mlv(go).sortedModifiedString());
+        assertEquals("$_fi0, a.b.X.go(java.util.Set,String):0:out, a.b.X.run(String,a.b.X.Op):1:op",
+                mlv(go).sortedModifiedString());
         // the receiver of go is untouched; the captured parameter carries the modification
         assertTrue(go.isNonModifying());
         assertTrue(go.parameters().getFirst().isModified(), "go:0:out must be modified");
@@ -129,8 +132,9 @@ public class TestModificationFunctionalE7 extends CommonTest {
         MethodInfo go = X.findUniqueMethod("go", 1);
 
         assertTrue(run.isNonModifying());
-        // only the fiv itself is marked; the captured local does not escape
-        assertEquals("$_fi1", mlv(go).sortedModifiedString());
+        // only the fiv itself is marked (and run's own parameter, from run's summary); the captured local does not
+        // escape
+        assertEquals("$_fi1, a.b.X.run(String,a.b.X.Op):1:op", mlv(go).sortedModifiedString());
         // the modified object is method-local: no false positive on go or its parameter
         assertTrue(go.isNonModifying());
         assertTrue(go.parameters().getFirst().isUnmodified());

@@ -65,25 +65,13 @@ public class TestShadowModificationPass extends CommonTest {
 
         assertEquals(List.of(), report.reverseDivergences(), "reverse divergences are shadow-pass bugs");
         assertEquals(0, report.callSitesWithoutArgumentLinks());
-        // the frozen saturation boundary under trackObjectCreations: only FC5 (adjacent to the
-        // sink) is decided correctly; FC1..FC4 freeze TRUE — one level shallower than the depth-2
-        // saturation measured under the default configuration (the PLAN §1 repro). The shadow must
-        // flag each frozen level's constructor parameter, field, and pass(), and nothing else.
-        // Every cause chain traces back to the single true seed, FC5.pass() modifying this.f.
-        assertEquals(List.of(
-                "nonModifyingMethod a.b.X.FC1.pass()",
-                "nonModifyingMethod a.b.X.FC2.pass()",
-                "nonModifyingMethod a.b.X.FC3.pass()",
-                "nonModifyingMethod a.b.X.FC4.pass()",
-                "unmodifiedField a.b.X.FC1.f",
-                "unmodifiedField a.b.X.FC2.f",
-                "unmodifiedField a.b.X.FC3.f",
-                "unmodifiedField a.b.X.FC4.f",
-                "unmodifiedParameter a.b.X.FC1.<init>(java.util.List):0:in",
-                "unmodifiedParameter a.b.X.FC2.<init>(java.util.List):0:in",
-                "unmodifiedParameter a.b.X.FC3.<init>(java.util.List):0:in",
-                "unmodifiedParameter a.b.X.FC4.<init>(java.util.List):0:in"
-        ), report.sortedDivergenceStrings());
+        // the frozen saturation boundary under trackObjectCreations used to sit here: only FC5 (adjacent to the
+        // sink) was decided, FC1..FC4 froze TRUE, and the shadow flagged each level's constructor parameter, field and
+        // pass(). The cause was a summary bug: pass() has no parameters and returns void, so its summary (no links,
+        // modified: this, this.f) counted as empty, and its modifications never reached the caller's receiver.
+        // Carried over (CodeLaser/maddi-mod#150, gate NOMODIFIEDONLYSUMMARY), the fixpoint decides every level
+        // modified itself, and the shadow agrees in both directions.
+        assertEquals(List.of(), report.sortedDivergenceStrings());
     }
 
     @Language("java")

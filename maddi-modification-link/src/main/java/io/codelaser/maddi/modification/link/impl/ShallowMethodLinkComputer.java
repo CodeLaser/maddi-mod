@@ -56,6 +56,7 @@ Their natural application is a stream, where e.g. the filter input is part of th
 the filter output again part of the input, etc. Many streams reduce the amount of hidden content from a source.
  */
 public record ShallowMethodLinkComputer(Runtime runtime, VirtualFieldComputer virtualFieldComputer) {
+    private static final boolean NO_SHALLOW_DEEP_ONLY = Gate.isSet("NOSHALLOWDEEPONLY");
     private static final Logger LOGGER = LoggerFactory.getLogger(ShallowMethodLinkComputer.class);
 
     public MethodLinkedVariables go(MethodInfo methodInfo) {
@@ -293,8 +294,19 @@ public record ShallowMethodLinkComputer(Runtime runtime, VirtualFieldComputer vi
             ofReturnValue.add(IS_ASSIGNED_FROM, methodInfo.parameters().getFirst());
         }
 
+        // #25: what is modified in its hidden content only (@Modified(hc=true)) says so in the summary, as a computed
+        // summary does: a caller carrying the summary's modified set over (MethodModification) read it structural.
+        // Hidden while a summary without links was skipped there (CodeLaser/maddi-mod#150). Gate NOSHALLOWDEEPONLY.
+        Set<Variable> deepOnly = new HashSet<>();
+        if (!NO_SHALLOW_DEEP_ONLY) {
+            for (Variable v : modified) {
+                if (v instanceof ParameterInfo pi ? pi.isStructurallyUnmodified() : methodInfo.isStructurallyNonModifying()) {
+                    deepOnly.add(v);
+                }
+            }
+        }
         MethodLinkedVariables shallowResult = new MethodLinkedVariablesImpl(ofReturnValue.build(), ofParameters,
-                Set.copyOf(modified));
+                Set.copyOf(modified), Set.of(), Set.copyOf(deepOnly));
         if (Gate.isSet("BTRACE") && methodInfo.fullyQualifiedName().contains(Gate.get("BTRACE"))) {
             System.out.println("BTRACE shallow " + methodInfo.fullyQualifiedName() + " mlv=" + shallowResult);
         }
