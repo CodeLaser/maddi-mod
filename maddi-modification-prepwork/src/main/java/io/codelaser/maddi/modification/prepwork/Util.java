@@ -56,7 +56,8 @@ public class Util {
      * through it does: every call that completes reaches an override. So, like an abstract method, it collects its
      * implementations (prepwork) and its RECEIVER and PARAMETER MODIFICATION is their union (engine work list O2).
      * Every other default or concrete method keeps its own body's verdict (the engine does not compute a dispatch
-     * union; see ShadowModificationPass E6), and a placeholder keeps its body's verdict on everything else.
+     * union; see ShadowModificationPass E6), and a placeholder keeps its body's verdict on everything else but
+     * independence, which is its implementations' too (TypeModIndyAnalyzerImpl, gate NOPLACEHOLDERINDEPENDENCE).
      */
     public static boolean isThrowOnlyPlaceholder(MethodInfo methodInfo) {
         if (methodInfo.isAbstract() || methodInfo.isStatic() || methodInfo.isConstructor() || methodInfo.isFinal()

@@ -701,11 +701,26 @@ normal methods: does a modification to the return value imply any modification i
      */
     private static final boolean NO_DISPATCH_INDEPENDENCE = Gate.isSet("NODISPATCHINDEPENDENCE");
 
+    /*
+     A throw-only placeholder (Util.isThrowOnlyPlaceholder) with implementations: every call that completes reaches an
+     override, so its independence is theirs, as its modification already is (AbstractMethodAnalyzerImpl). Its own body
+     returns nothing and said independent: fernflower's 'Exprent.copy() { throw ... }', whose overrides share a
+     list or a MethodDescriptor with the receiver, and 'AssignmentExprent.copy' calling it on 'left' and 'right'
+     came out independent too (2c). Gate NOPLACEHOLDERINDEPENDENCE.
+     */
+    private static final boolean NO_PLACEHOLDER_INDEPENDENCE = Gate.isSet("NOPLACEHOLDERINDEPENDENCE");
+
+    private static boolean foldsIndependence(MethodInfo methodInfo) {
+        return Util.dispatchUnion(methodInfo)
+               || !NO_PLACEHOLDER_INDEPENDENCE && Util.isThrowOnlyPlaceholder(methodInfo)
+                  && Util.unionOverImplementations(methodInfo);
+    }
+
     // An immutable declared type is independent whatever the overrides do (doIndependentMethod/-Parameter's own
     // shortcut); an override without a value (a setter's parameter is never written) falls back to that judgement of
     // its own declared type (independent, or hc), and counts as dependent only when that says so or says nothing.
     private Independent dispatchUnion(MethodInfo methodInfo, Independent own) {
-        if (NO_DISPATCH_INDEPENDENCE || own == null || own.isDependent() || !Util.dispatchUnion(methodInfo)
+        if (NO_DISPATCH_INDEPENDENCE || own == null || own.isDependent() || !foldsIndependence(methodInfo)
             || methodInfo.noReturnValue() || immutable(methodInfo.returnType())) return own;
         Independent result = own;
         for (MethodInfo implementation : methodInfo.analysis().getOrDefault(PropertyImpl.IMPLEMENTATIONS,
@@ -719,7 +734,7 @@ normal methods: does a modification to the return value imply any modification i
 
     private Independent dispatchUnion(ParameterInfo pi, Independent own) {
         MethodInfo methodInfo = pi.methodInfo();
-        if (NO_DISPATCH_INDEPENDENCE || own == null || own.isDependent() || !Util.dispatchUnion(methodInfo)
+        if (NO_DISPATCH_INDEPENDENCE || own == null || own.isDependent() || !foldsIndependence(methodInfo)
             || immutable(pi.parameterizedType())) return own;
         Independent result = own;
         for (MethodInfo implementation : methodInfo.analysis().getOrDefault(PropertyImpl.IMPLEMENTATIONS,
