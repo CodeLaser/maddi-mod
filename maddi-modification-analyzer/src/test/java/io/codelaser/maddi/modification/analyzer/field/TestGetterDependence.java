@@ -43,6 +43,10 @@ import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
  * {@code self} and {@code maybeSelf} return this: independent by definition. {@code viaSelf} and {@code viaMaybe}
  * return the receiver's field through them, on the same type; {@code U.via} is the control on another type, where the
  * second pass found nothing to rewrite.
+ * <p>
+ * {@code head}: {@code SwitchStatement.getHeadExprentList}, a singleton list of a field. The JDK hints had
+ * {@code Collections.singletonList}'s argument {@code @Independent}, not {@code @Independent(hc = true)} as
+ * {@code List.of}'s (maddi's JavaUtil hints).
  */
 public class TestGetterDependence extends CommonTest {
 
@@ -60,6 +64,7 @@ public class TestGetterDependence extends CommonTest {
                     S viaSelf() { return first.self(); }
                     S viaMaybe() { return first.maybeSelf(); }
                     S getFirst() { return first; }
+                    List<S> head() { return Collections.singletonList(first); }
                 }
                 static class U {
                     S s;
@@ -78,12 +83,13 @@ public class TestGetterDependence extends CommonTest {
         TypeInfo s = x.findSubType("S");
         TypeInfo u = x.findSubType("U");
         assertEquals("self=@Independent maybeSelf=@Independent viaSelf=@Dependent viaMaybe=@Dependent"
-                     + " getFirst=@Dependent U.via=@Dependent",
+                     + " getFirst=@Dependent head=@Dependent U.via=@Dependent",
                 "self=" + ind(s.findUniqueMethod("self", 0))
                 + " maybeSelf=" + ind(s.findUniqueMethod("maybeSelf", 0))
                 + " viaSelf=" + ind(s.findUniqueMethod("viaSelf", 0))
                 + " viaMaybe=" + ind(s.findUniqueMethod("viaMaybe", 0))
                 + " getFirst=" + ind(s.findUniqueMethod("getFirst", 0))
+                + " head=" + ind(s.findUniqueMethod("head", 0))
                 + " U.via=" + ind(u.findUniqueMethod("via", 0)));
     }
 
