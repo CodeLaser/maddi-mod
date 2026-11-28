@@ -23,6 +23,7 @@ import io.codelaser.maddi.cst.api.info.ParameterInfo;
 import io.codelaser.maddi.cst.api.type.ParameterizedType;
 import io.codelaser.maddi.cst.api.expression.MethodCall;
 import io.codelaser.maddi.cst.api.expression.VariableExpression;
+import io.codelaser.maddi.cst.api.variable.DependentVariable;
 import io.codelaser.maddi.cst.api.variable.FieldReference;
 import io.codelaser.maddi.cst.api.variable.This;
 import io.codelaser.maddi.cst.api.variable.Variable;
@@ -109,6 +110,7 @@ class LinkToField {
 
     private static boolean reachesInstance(Variable primaryTo, MethodInfo methodInfo) {
         if (primaryTo instanceof FieldReference fr && fr.scopeIsRecursivelyThis()) return true;
+        if (!NO_ARRAY_ELEMENT_INDEP && primaryTo instanceof FieldReference fr && throughArrayElementOfThis(fr)) return true;
         if (!NO_STATIC_INDEP && OwnStaticState.staticRoot(primaryTo) instanceof FieldReference root
             && OwnStaticState.owns(methodInfo, root.fieldInfo().owner())) {
             return true;
@@ -124,6 +126,29 @@ class LinkToField {
     }
 
     private static final boolean NO_THROUGH_CALL = Gate.isSet("NOTHROUGHCALL");
+
+    /*
+     'this.elements[0].factory': a field of an element of the instance's array field. scopeIsRecursivelyThis follows
+     field scopes only, so 'return elements[0].copy()', whose copy shares the element's factory
+     ('first.factory ← this.elements[0].factory'), came out independent; fernflower's SFormsFastMapDirect.getCopy,
+     whose sets share their factory with the receiver's (the dynamic check's 2c). Gate NOARRAYELEMENTINDEP.
+     */
+    private static final boolean NO_ARRAY_ELEMENT_INDEP = Gate.isSet("NOARRAYELEMENTINDEP");
+
+    private static boolean throughArrayElementOfThis(FieldReference fr) {
+        Variable scope = fr.scopeVariable();
+        while (true) {
+            if (scope instanceof DependentVariable dv) {
+                scope = dv.arrayVariable();
+            } else if (scope instanceof FieldReference sfr) {
+                // fr itself is not recursively this (the caller checked), so the walk passed an array element
+                if (sfr.scopeIsRecursivelyThis()) return true;
+                scope = sfr.scopeVariable();
+            } else {
+                return false;
+            }
+        }
+    }
 
     /*
      'getWrapper ≺ this': the value is one of the instance's fields, the links do not say which. fernflower's
