@@ -102,6 +102,7 @@ class LinkToField {
      */
     private static boolean reaches(Link link, Variable primaryTo, MethodInfo methodInfo) {
         if (reachesInstance(primaryTo, methodInfo)) return true;
+        if (fieldOfThis(link, primaryTo, methodInfo)) return true;
         return !NO_THIS_CONTENT_INDEP && primaryTo instanceof This thisVar && link.to() != primaryTo
                && Util.virtual(link.to()) && methodInfo.typeInfo().isEqualToOrInnerClassOf(thisVar.typeInfo());
     }
@@ -123,6 +124,20 @@ class LinkToField {
     }
 
     private static final boolean NO_THROUGH_CALL = Gate.isSet("NOTHROUGHCALL");
+
+    /*
+     'getWrapper ≺ this': the value is one of the instance's fields, the links do not say which. fernflower's
+     'ClassNode node = this; while (node.type == LAMBDA) node = node.parent; return node.wrapper;' summarises as
+     'getWrapper ≺ this.parent, getWrapper ≺ this', and both were left unjudged (only a virtual target was, #107): the
+     getter came out independent (the dynamic check's 2c). Judged by the value's own type, as the real-target '≺'
+     below. Gate NOFIELDOFINDEP.
+     */
+    private static final boolean NO_FIELD_OF_INDEP = Gate.isSet("NOFIELDOFINDEP");
+
+    private static boolean fieldOfThis(Link link, Variable primaryTo, MethodInfo methodInfo) {
+        return !NO_FIELD_OF_INDEP && link.linkNature().equals(LinkNatureImpl.IS_FIELD_OF) && link.to() == primaryTo
+               && primaryTo instanceof This thisVar && methodInfo.typeInfo().isEqualToOrInnerClassOf(thisVar.typeInfo());
+    }
 
     private static final boolean NO_STATIC_INDEP = Gate.isSet("NOSTATICINDEP");
 
@@ -212,6 +227,12 @@ class LinkToField {
         }
         if (link.linkNature().equals(LinkNatureImpl.IS_ELEMENT_OF)) {
             //getFile∈this._mruFileList.§es
+            return link.from().parameterizedType();
+        }
+        if (!NO_FIELD_OF_INDEP && link.linkNature().equals(LinkNatureImpl.IS_FIELD_OF) && !Util.virtual(link.to())
+            && !Util.virtual(link.from())) {
+            // 'getWrapper ≺ this.parent', 'getWrapper ≺ this' (fieldOfThis): the value is a field of an object in the
+            // instance's graph, or of the instance itself; judged by the value's type. Gate NOFIELDOFINDEP
             return link.from().parameterizedType();
         }
         if (!NO_THROUGH_CALL && link.linkNature().equals(LinkNatureImpl.IS_FIELD_OF) && Util.virtual(link.to())) {

@@ -47,6 +47,10 @@ import io.codelaser.maddi.modification.analyzer.impl.IteratingAnalyzerImpl;
  * {@code head}: {@code SwitchStatement.getHeadExprentList}, a singleton list of a field. The JDK hints had
  * {@code Collections.singletonList}'s argument {@code @Independent}, not {@code @Independent(hc = true)} as
  * {@code List.of}'s (maddi's JavaUtil hints).
+ * <p>
+ * {@code wrapper}, {@code loopNoThis}, {@code kidsOf}: {@code ClassesProcessor.ClassNode.getWrapper}, a loop up a
+ * same-type field before returning a field. The summary says {@code wrapper ≺ this.parent, wrapper ≺ this}, which
+ * LinkToField did not judge (gate NOFIELDOFINDEP).
  */
 public class TestGetterDependence extends CommonTest {
 
@@ -65,6 +69,11 @@ public class TestGetterDependence extends CommonTest {
                     S viaMaybe() { return first.maybeSelf(); }
                     S getFirst() { return first; }
                     List<S> head() { return Collections.singletonList(first); }
+                    S parent;
+                    List<S> kids = new ArrayList<>();
+                    S wrapper() { S node = this; while (node.type == 1) { node = node.parent; } return node.first; }
+                    S loopNoThis() { S node = parent; while (node.type == 1) { node = node.parent; } return node.first; }
+                    List<S> kidsOf() { S node = this; while (node.type == 1) { node = node.parent; } return node.kids; }
                 }
                 static class U {
                     S s;
@@ -83,13 +92,17 @@ public class TestGetterDependence extends CommonTest {
         TypeInfo s = x.findSubType("S");
         TypeInfo u = x.findSubType("U");
         assertEquals("self=@Independent maybeSelf=@Independent viaSelf=@Dependent viaMaybe=@Dependent"
-                     + " getFirst=@Dependent head=@Dependent U.via=@Dependent",
+                     + " getFirst=@Dependent head=@Dependent wrapper=@Dependent loopNoThis=@Dependent kidsOf=@Dependent"
+                     + " U.via=@Dependent",
                 "self=" + ind(s.findUniqueMethod("self", 0))
                 + " maybeSelf=" + ind(s.findUniqueMethod("maybeSelf", 0))
                 + " viaSelf=" + ind(s.findUniqueMethod("viaSelf", 0))
                 + " viaMaybe=" + ind(s.findUniqueMethod("viaMaybe", 0))
                 + " getFirst=" + ind(s.findUniqueMethod("getFirst", 0))
                 + " head=" + ind(s.findUniqueMethod("head", 0))
+                + " wrapper=" + ind(s.findUniqueMethod("wrapper", 0))
+                + " loopNoThis=" + ind(s.findUniqueMethod("loopNoThis", 0))
+                + " kidsOf=" + ind(s.findUniqueMethod("kidsOf", 0))
                 + " U.via=" + ind(u.findUniqueMethod("via", 0)));
     }
 
